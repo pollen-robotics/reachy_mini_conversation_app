@@ -914,7 +914,7 @@ def main():
         )
         reachy_mini.set_target(
             head=head_pose,
-            body_yaw=0 if not is_head_tracking else -current_yaw,
+            body_yaw=0,
             is_relative=True,
         )
         if (
