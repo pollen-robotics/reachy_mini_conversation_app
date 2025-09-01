@@ -868,6 +868,9 @@ def main():
     reachy_mini.goto_target(
         create_head_pose(0, 0, 0, 0, 0, 0, degrees=True), antennas=(0, 0), duration=1.0
     )
+
+    yaw_tracking_kp = 0.1
+
     t0 = time.time()
     while True:
         # current_head_pose = reachy_mini.get_current_head_pose()
@@ -876,13 +879,16 @@ def main():
             if success:
                 eye_center, _ = head_tracker.get_head_position(im)
                 if eye_center is not None:
-                    h, w, _ = im.shape
-                    eye_center = (eye_center + 1) / 2
-                    eye_center[0] *= w
-                    eye_center[1] *= h
-                    current_head_pose = reachy_mini.look_at_image(
-                        *eye_center, duration=0.0, apply=False
+                    x_error = -eye_center[0]
+                    current_euler = R.from_matrix(current_head_pose[:3, :3]).as_euler(
+                        "xyz", degrees=False
                     )
+
+                    current_euler[2] += yaw_tracking_kp * x_error
+
+                    current_head_pose[:3, :3] = R.from_euler(
+                        "xyz", current_euler
+                    ).as_matrix()
 
         current_x, current_y, current_z = current_head_pose[:3, 3]
         current_roll, current_pitch, current_yaw = R.from_matrix(
@@ -908,6 +914,7 @@ def main():
         )
         reachy_mini.set_target(
             head=head_pose,
+            body_yaw=0 if not is_head_tracking else -current_yaw,
             is_relative=True,
         )
         if (
