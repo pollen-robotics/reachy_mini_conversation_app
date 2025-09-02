@@ -21,6 +21,7 @@ from reachy_mini.motion.dance.collection.dance import AVAILABLE_MOVES
 from reachy_mini.motion.recorded import RecordedMoves
 from reachy_mini.utils import create_head_pose
 from reachy_mini.utils.camera import find_camera
+from reachy_mini.utils.interpolation import linear_pose_interpolation
 from reachy_mini_toolbox.vision import HeadTracker
 from scipy.spatial.transform import Rotation as R
 
@@ -38,12 +39,15 @@ def init_globals():
     global recorded_moves, client, chatbot, latest_message, stream
     global \
         latest_frame, \
-        relative_yaw, \
+        face_tracking_offsets, \
         camera_thread_running, \
         frame_lock, \
-        yaw_lock, \
+        face_tracking_lock, \
         current_dance_move, \
-        current_emotion
+        current_emotion, \
+        last_face_detected_time, \
+        interpolation_start_time, \
+        interpolation_start_pose
 
     load_dotenv()
 
@@ -70,10 +74,17 @@ def init_globals():
 
     # Initialize camera thread variables
     latest_frame = None
+    face_tracking_offsets = [0, 0, 0, 0, 0, 0]
     camera_thread_running = False
+    
+    # Initialize face tracking timing variables
+    last_face_detected_time = None
+    interpolation_start_time = None
+    interpolation_start_pose = None
 
     # Initialize thread locks
     frame_lock = threading.Lock()
+    face_tracking_lock = threading.Lock()
     
     recorded_moves = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
 
@@ -103,20 +114,32 @@ def format_timestamp():
 # Global variables for camera thread
 latest_frame = None
 camera_thread_running = False
+face_tracking_offsets = [0, 0, 0, 0, 0, 0]  # x, y, z, roll, pitch, yaw
+
+# Face tracking timing variables
+last_face_detected_time = None
+interpolation_start_time = None
+interpolation_start_pose = None
+face_lost_delay = 2.0  # seconds to wait before starting interpolation
+interpolation_duration = 1.0  # seconds to interpolate back to neutral
 
 # Thread safety locks
 frame_lock = threading.Lock()
+face_tracking_lock = threading.Lock()
 
 
 def camera_worker():
     """Camera thread that continuously captures frames and handles face tracking."""
-    global latest_frame, camera_thread_running, is_head_tracking
+    global latest_frame, camera_thread_running, is_head_tracking, face_tracking_offsets
+    global last_face_detected_time, interpolation_start_time, interpolation_start_pose
     
     camera_thread_running = True
     head_tracker = HeadTracker()
+    neutral_pose = np.eye(4)  # Neutral pose (identity matrix)
     
     while camera_thread_running:
         try:
+            current_time = time.time()
             success, frame = cap.read()
             if success:
                 # Thread-safe frame storage
@@ -126,20 +149,82 @@ def camera_worker():
                 # Handle face tracking if enabled
                 if is_head_tracking:
                     eye_center, _ = head_tracker.get_head_position(frame)
+                    
                     if eye_center is not None:
+                        # Face detected - immediately switch to tracking
+                        last_face_detected_time = current_time
+                        interpolation_start_time = None  # Stop any interpolation
+                        
                         # Convert normalized coordinates to pixel coordinates
                         h, w, _ = frame.shape
                         eye_center_norm = (eye_center + 1) / 2
                         eye_center_pixels = [eye_center_norm[0] * w, eye_center_norm[1] * h]
                         
-                        # Use the better look_at_image API with is_relative=True
-                        reachy_mini.look_at_image(
+                        # Get the head pose needed to look at the target, but don't perform movement
+                        target_pose = reachy_mini.look_at_image(
                             eye_center_pixels[0], 
                             eye_center_pixels[1], 
                             duration=0.0, 
-                            # is_relative=False
+                            perform_movement=False
                         )
-                    # If no face detected, reachy_mini keeps current position
+                        
+                        # Extract translation and rotation from the target pose directly
+                        translation = target_pose[:3, 3]
+                        rotation = R.from_matrix(target_pose[:3, :3]).as_euler('xyz', degrees=False)
+                        
+                        # Thread-safe update of face tracking offsets (use pose as-is)
+                        with face_tracking_lock:
+                            face_tracking_offsets = [
+                                translation[0], translation[1], translation[2],  # x, y, z
+                                rotation[0], rotation[1], rotation[2]  # roll, pitch, yaw
+                            ]
+                    
+                    else:
+                        # No face detected - handle smooth interpolation
+                        if last_face_detected_time is not None:
+                            time_since_face_lost = current_time - last_face_detected_time
+                            
+                            if time_since_face_lost >= face_lost_delay:
+                                # Start interpolation if not already started
+                                if interpolation_start_time is None:
+                                    interpolation_start_time = current_time
+                                    # Capture current pose as start of interpolation
+                                    with face_tracking_lock:
+                                        current_translation = face_tracking_offsets[:3]
+                                        current_rotation_euler = face_tracking_offsets[3:]
+                                        # Convert to 4x4 pose matrix
+                                        interpolation_start_pose = np.eye(4)
+                                        interpolation_start_pose[:3, 3] = current_translation
+                                        interpolation_start_pose[:3, :3] = R.from_euler('xyz', current_rotation_euler).as_matrix()
+                                
+                                # Calculate interpolation progress (t from 0 to 1)
+                                elapsed_interpolation = current_time - interpolation_start_time
+                                t = min(1.0, elapsed_interpolation / interpolation_duration)
+                                
+                                # Interpolate between current pose and neutral pose
+                                interpolated_pose = linear_pose_interpolation(
+                                    interpolation_start_pose, 
+                                    neutral_pose, 
+                                    t
+                                )
+                                
+                                # Extract translation and rotation from interpolated pose
+                                translation = interpolated_pose[:3, 3]
+                                rotation = R.from_matrix(interpolated_pose[:3, :3]).as_euler('xyz', degrees=False)
+                                
+                                # Thread-safe update of face tracking offsets
+                                with face_tracking_lock:
+                                    face_tracking_offsets = [
+                                        translation[0], translation[1], translation[2],  # x, y, z
+                                        rotation[0], rotation[1], rotation[2]  # roll, pitch, yaw
+                                    ]
+                                
+                                # If interpolation is complete, reset timing
+                                if t >= 1.0:
+                                    last_face_detected_time = None
+                                    interpolation_start_time = None
+                                    interpolation_start_pose = None
+                            # else: Keep current offsets (within 2s delay period)
             
             time.sleep(0.001)  # Small sleep to prevent excessive CPU usage
 
@@ -977,7 +1062,8 @@ def main():
         is_head_tracking, \
         is_dancing, \
         is_emoting, \
-        is_moving
+        is_moving, \
+        face_tracking_offsets
 
     Thread(target=stream.ui.launch, kwargs={"server_port": 7860}).start()
 
@@ -1006,14 +1092,28 @@ def main():
             (time.time() - moving_start < moving_for) or is_dancing or is_emoting
         )
 
-        # Always apply speech offsets (with is_relative=True)
+        # Combine speech sway offsets + face tracking offsets (with is_relative=True)
+        # Thread-safe access to face tracking offsets
+        with face_tracking_lock:
+            face_offsets = face_tracking_offsets.copy()
+        
+        # Combine both offset types
+        combined_offsets = [
+            speech_head_offsets[0] + face_offsets[0],  # x
+            speech_head_offsets[1] + face_offsets[1],  # y  
+            speech_head_offsets[2] + face_offsets[2],  # z
+            speech_head_offsets[3] + face_offsets[3],  # roll
+            speech_head_offsets[4] + face_offsets[4],  # pitch
+            speech_head_offsets[5] + face_offsets[5],  # yaw
+        ]
+        
         head_pose = create_head_pose(
-            x=speech_head_offsets[0],
-            y=speech_head_offsets[1],
-            z=speech_head_offsets[2],
-            roll=speech_head_offsets[3],
-            pitch=speech_head_offsets[4],
-            yaw=speech_head_offsets[5],
+            x=combined_offsets[0],
+            y=combined_offsets[1],
+            z=combined_offsets[2],
+            roll=combined_offsets[3],
+            pitch=combined_offsets[4],
+            yaw=combined_offsets[5],
             degrees=False,
             mm=False,
         )
