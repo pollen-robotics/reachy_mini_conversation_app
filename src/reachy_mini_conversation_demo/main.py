@@ -36,7 +36,7 @@ def init_globals():
     global script_start_time, reachy_mini, cap, speech_head_offsets
     global moving_start, moving_for, is_head_tracking, is_dancing, is_emoting, is_moving
     global recorded_moves, client, chatbot, latest_message, stream
-    global latest_frame, relative_yaw, camera_thread_running, frame_lock, yaw_lock
+    global latest_frame, camera_thread_running, frame_lock
     
     load_dotenv()
     
@@ -61,12 +61,10 @@ def init_globals():
     
     # Initialize camera thread variables
     latest_frame = None
-    relative_yaw = 0.0
     camera_thread_running = False
     
     # Initialize thread locks
     frame_lock = threading.Lock()
-    yaw_lock = threading.Lock()
     
     recorded_moves = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
     
@@ -95,21 +93,18 @@ def format_timestamp():
 
 # Global variables for camera thread
 latest_frame = None
-relative_yaw = 0.0
 camera_thread_running = False
 
 # Thread safety locks
 frame_lock = threading.Lock()
-yaw_lock = threading.Lock()
 
 
 def camera_worker():
     """Camera thread that continuously captures frames and handles face tracking."""
-    global latest_frame, relative_yaw, camera_thread_running, is_head_tracking
+    global latest_frame, camera_thread_running, is_head_tracking
     
     camera_thread_running = True
     head_tracker = HeadTracker()
-    yaw_tracking_kp = 0.5
     
     while camera_thread_running:
         try:
@@ -123,13 +118,19 @@ def camera_worker():
                 if is_head_tracking:
                     eye_center, _ = head_tracker.get_head_position(frame)
                     if eye_center is not None:
-                        x_error = -eye_center[0]
-                        new_yaw = yaw_tracking_kp * x_error
+                        # Convert normalized coordinates to pixel coordinates
+                        h, w, _ = frame.shape
+                        eye_center_norm = (eye_center + 1) / 2
+                        eye_center_pixels = [eye_center_norm[0] * w, eye_center_norm[1] * h]
                         
-                        # Thread-safe yaw update
-                        with yaw_lock:
-                            relative_yaw = new_yaw
-                    # If no face detected, keep the last relative_yaw value
+                        # Use the better look_at_image API with is_relative=True
+                        reachy_mini.look_at_image(
+                            eye_center_pixels[0], 
+                            eye_center_pixels[1], 
+                            duration=0.0, 
+                            is_relative=False
+                        )
+                    # If no face detected, reachy_mini keeps current position
             
             time.sleep(0.001)  # Small sleep to prevent excessive CPU usage
             
@@ -898,8 +899,7 @@ def main():
         is_head_tracking, \
         is_dancing, \
         is_emoting, \
-        is_moving, \
-        relative_yaw
+        is_moving
 
     Thread(target=stream.ui.launch, kwargs={"server_port": 7860}).start()
     
@@ -929,17 +929,13 @@ def main():
         )
 
         # Always apply speech offsets (with is_relative=True)
-        # Thread-safe yaw access
-        with yaw_lock:
-            current_yaw = relative_yaw
-            
         head_pose = create_head_pose(
             x=speech_head_offsets[0],
             y=speech_head_offsets[1],
             z=speech_head_offsets[2],
             roll=speech_head_offsets[3],
             pitch=speech_head_offsets[4],
-            yaw=speech_head_offsets[5]+current_yaw,
+            yaw=speech_head_offsets[5],
             degrees=False,
             mm=False,
         )
