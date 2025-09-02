@@ -1,8 +1,8 @@
 import asyncio
 import base64
 import json
-import time
 import threading
+import time
 from asyncio import QueueEmpty
 from datetime import datetime
 from threading import Thread
@@ -42,7 +42,8 @@ def init_globals():
         camera_thread_running, \
         frame_lock, \
         yaw_lock, \
-        current_dance_move
+        current_dance_move, \
+        current_emotion
 
     load_dotenv()
 
@@ -65,6 +66,7 @@ def init_globals():
     is_emoting = False
     is_moving = False
     current_dance_move = None
+    current_emotion = None
 
     # Initialize camera thread variables
     latest_frame = None
@@ -179,24 +181,17 @@ async def head_tracking(params: dict) -> dict:
     return {"status": "head tracking " + ("started" if is_head_tracking else "stopped")}
 
 
-def _dance_worker(move_name: str, repeat: int):
-    global is_dancing
-    try:
-        move = DanceMove(move_name)
-        move.play_on(reachy_mini, repeat=repeat)
-    except Exception as e:
-        print(f"[dance worker] error: {e}")
-    finally:
-        is_dancing = False  # always clear
-
-
 async def dance(params: dict) -> dict:
     """Run one dance move without blocking hearing."""
     global is_dancing, current_dance_move
+
     if is_dancing:
         return {"status": "busy", "detail": "already dancing"}
+
     move_name = params.get("move", None)
     repeat = int(params.get("repeat", 1))
+
+    print(f"[TOOL CALL] dance started with {move_name}, repeat={repeat}")
 
     if not move_name or move_name == "random":
         move_name = np.random.choice(list(AVAILABLE_MOVES.keys()))
@@ -204,26 +199,24 @@ async def dance(params: dict) -> dict:
     if move_name not in AVAILABLE_MOVES:
         return {"error": f"unknown move '{move_name}'"}
 
-    print(f"[TOOL CALL] dance started with {move_name}, repeat={repeat}")
-
     is_dancing = True
 
     current_dance_move = asyncio.create_task(
         DanceMove(move_name).async_play_on(reachy_mini, repeat=repeat)
     )
 
-    def set_globals(_):
+    def set_dance_globals(_):
         global current_dance_move, is_dancing
         current_dance_move = None
         is_dancing = False
 
-    current_dance_move.add_done_callback(set_globals)
+    current_dance_move.add_done_callback(set_dance_globals)
 
-    # Thread(target=_dance_worker, args=(move_name, repeat), daemon=True).start()
     return {"status": "started", "move": move_name, "repeat": repeat}
 
 
 async def stop_dance(params: dict) -> dict:
+    """Stop the current dance move."""
     global is_dancing, current_dance_move
 
     print("[TOOL CALL] stop_dance")
@@ -236,31 +229,49 @@ async def stop_dance(params: dict) -> dict:
     return {"status": "stopped dance move"}
 
 
-def _play_emotion_worker(emotion_name: str):
-    global is_emoting
-    try:
-        recorded_moves.get(emotion_name).play_on(
-            reachy_mini, repeat=1, start_goto=True, no_audio=True
-        )
-    except Exception as e:
-        print(f"[play emotion worker] error: {e}")
-    finally:
-        is_emoting = False
-
-
 async def play_emotion(params: dict) -> dict:
     """Play a pre-recorded emotion."""
-    global is_emoting
+    global is_emoting, current_emotion
+
+    if is_emoting:
+        return {"status": "busy", "detail": "already emoting"}
+
     emotion_name = params.get("emotion", None)
     if emotion_name is None:
         return {"error": "Requested emotion does not exist"}
 
-    is_emoting = True
     print(f"[TOOL CALL] play_emotion with {emotion_name}")
 
-    Thread(target=_play_emotion_worker, args=(emotion_name,), daemon=True).start()
+    is_emoting = True
+
+    current_emotion = asyncio.create_task(
+        recorded_moves.get(emotion_name).async_play_on(
+            reachy_mini, repeat=1, start_goto=True
+        )
+    )
+
+    def set_emotions_globals(_):
+        global current_emotion, is_emoting
+        current_emotion = None
+        is_emoting = False
+
+    current_emotion.add_done_callback(set_emotions_globals)
 
     return {"status": "started", "emotion": emotion_name}
+
+
+async def stop_emotion(params: dict) -> dict:
+    """Stop the current emotion."""
+    global is_emoting, current_emotion
+
+    print("[TOOL CALL] stop_emotion")
+
+    if current_emotion is not None:
+        current_emotion.cancel()
+
+    is_emoting = False
+
+    return {"status": "stopped emotion"}
 
 
 async def do_nothing(params: dict) -> dict:
@@ -365,6 +376,7 @@ class OpenAIHandler(AsyncStreamHandler):
             "dance": dance,
             "stop_dance": stop_dance,
             "play_emotion": play_emotion,
+            "stop_emotion": stop_emotion,
             "do_nothing": do_nothing,
         }
 
@@ -711,6 +723,21 @@ class OpenAIHandler(AsyncStreamHandler):
                                     },
                                 },
                                 "required": ["emotion"],
+                            },
+                        },
+                        {
+                            "type": "function",
+                            "name": "stop_emotion",
+                            "description": "Stop the current emotion",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "dummy": {
+                                        "type": "boolean",
+                                        "description": "dummy boolean, set it to true",
+                                    }
+                                },
+                                "required": ["dummy"],
                             },
                         },
                         {
