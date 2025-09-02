@@ -25,12 +25,54 @@ from scipy.spatial.transform import Rotation as R
 
 from reachy_mini_conversation_demo.speech_tapper import HOP_MS, SwayRollRT
 
-load_dotenv()
+# Constants
 SAMPLE_RATE = 24000
 SIM = False
 
-# Timestamp tracking
-script_start_time = time.time()
+
+def init_globals():
+    """Initialize all global variables and components."""
+    global script_start_time, reachy_mini, cap, speech_head_offsets, current_head_pose
+    global moving_start, moving_for, is_head_tracking, is_dancing, is_emoting, is_moving
+    global recorded_moves, client, chatbot, latest_message, stream
+    
+    load_dotenv()
+    
+    # Timestamp tracking
+    script_start_time = time.time()
+    
+    reachy_mini = ReachyMini()
+
+    if not SIM:
+        cap = find_camera()
+    else:
+        cap = cv2.VideoCapture(0)
+
+    # Initialize global state variables
+    speech_head_offsets = [0, 0, 0, 0, 0, 0]
+    current_head_pose = np.eye(4)
+    moving_start = time.time()
+    moving_for = 0.0
+    is_head_tracking = False
+    is_dancing = False
+    is_emoting = False
+    is_moving = False
+    
+    recorded_moves = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
+    
+    client = OpenAI()
+    
+    # Gradio components
+    chatbot = gr.Chatbot(type="messages")
+    latest_message = gr.Textbox(type="text", visible=False)
+    stream = Stream(
+        OpenAIHandler(),
+        mode="send-receive",
+        modality="audio",
+        additional_inputs=[chatbot],
+        additional_outputs=[chatbot],
+        additional_outputs_handler=update_chatbot,
+    )
 
 
 def format_timestamp():
@@ -39,24 +81,6 @@ def format_timestamp():
     elapsed_seconds = current_time - script_start_time
     dt = datetime.fromtimestamp(current_time)
     return f"[{dt.strftime('%Y-%m-%d %H:%M:%S')} | +{elapsed_seconds:.1f}s]"
-
-
-reachy_mini = ReachyMini()
-
-if not SIM:
-    cap = find_camera()
-else:
-    cap = cv2.VideoCapture(0)
-
-# Globals. TODO Find a way to it better ?
-speech_head_offsets = [0, 0, 0, 0, 0, 0]
-current_head_pose = np.eye(4)
-moving_start = time.time()
-moving_for = 0.0
-is_head_tracking = False
-is_dancing = False
-is_emoting = False
-is_moving = False
 
 
 async def move_head(params: dict) -> dict:
@@ -125,10 +149,6 @@ async def dance(params: dict) -> dict:
     Thread(target=_dance_worker, args=(move_name, repeat), daemon=True).start()
     return {"status": "started", "move": move_name, "repeat": repeat}
 
-
-recorded_moves = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
-
-
 def _play_emotion_worker(emotion_name: str):
     global is_emoting
     try:
@@ -176,10 +196,6 @@ def get_available_emotions_and_descriptions():
         ret += f" - {name}: {description}\n"
 
     return ret
-
-
-client = OpenAI()
-
 
 def get_b64_encoded_im(im):
     cv2.imwrite("/tmp/tmp_image.jpg", im)
@@ -818,19 +834,10 @@ def update_chatbot(chatbot: list[dict], response: dict):
     return chatbot
 
 
-chatbot = gr.Chatbot(type="messages")
-latest_message = gr.Textbox(type="text", visible=False)
-stream = Stream(
-    OpenAIHandler(),
-    mode="send-receive",
-    modality="audio",
-    additional_inputs=[chatbot],
-    additional_outputs=[chatbot],
-    additional_outputs_handler=update_chatbot,
-)
-
-
 def main():
+    # Initialize all globals first
+    init_globals()
+    
     global \
         current_head_pose, \
         speech_head_offsets, \
