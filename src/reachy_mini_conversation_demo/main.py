@@ -47,7 +47,7 @@ def init_globals():
         current_emotion, \
         last_face_detected_time, \
         interpolation_start_time, \
-        interpolation_start_pose
+        interpolation_start_pose, \
         is_idle_function_call
 
     load_dotenv()
