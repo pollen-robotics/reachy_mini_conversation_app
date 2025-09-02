@@ -43,7 +43,8 @@ def init_globals():
         frame_lock, \
         yaw_lock, \
         current_dance_move, \
-        current_emotion
+        current_emotion, \
+        is_idle_function_call
 
     load_dotenv()
 
@@ -67,6 +68,7 @@ def init_globals():
     is_moving = False
     current_dance_move = None
     current_emotion = None
+    is_idle_function_call = False
 
     # Initialize camera thread variables
     latest_frame = None
@@ -74,7 +76,7 @@ def init_globals():
 
     # Initialize thread locks
     frame_lock = threading.Lock()
-    
+
     recorded_moves = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
 
     client = OpenAI()
@@ -111,10 +113,10 @@ frame_lock = threading.Lock()
 def camera_worker():
     """Camera thread that continuously captures frames and handles face tracking."""
     global latest_frame, camera_thread_running, is_head_tracking
-    
+
     camera_thread_running = True
     head_tracker = HeadTracker()
-    
+
     while camera_thread_running:
         try:
             success, frame = cap.read()
@@ -130,17 +132,20 @@ def camera_worker():
                         # Convert normalized coordinates to pixel coordinates
                         h, w, _ = frame.shape
                         eye_center_norm = (eye_center + 1) / 2
-                        eye_center_pixels = [eye_center_norm[0] * w, eye_center_norm[1] * h]
-                        
+                        eye_center_pixels = [
+                            eye_center_norm[0] * w,
+                            eye_center_norm[1] * h,
+                        ]
+
                         # Use the better look_at_image API with is_relative=True
                         reachy_mini.look_at_image(
-                            eye_center_pixels[0], 
-                            eye_center_pixels[1], 
-                            duration=0.0, 
+                            eye_center_pixels[0],
+                            eye_center_pixels[1],
+                            duration=0.0,
                             # is_relative=False
                         )
                     # If no face detected, reachy_mini keeps current position
-            
+
             time.sleep(0.001)  # Small sleep to prevent excessive CPU usage
 
         except Exception as e:
@@ -449,6 +454,7 @@ class OpenAIHandler(AsyncStreamHandler):
 
     async def _idle_checker(self):
         """Check for inactivity and send timestamps every 15s when idle."""
+        global is_idle_function_call
         while True:
             await asyncio.sleep(5)  # Check every 5 seconds
 
@@ -497,6 +503,7 @@ class OpenAIHandler(AsyncStreamHandler):
                 # 3. Strong prompt instructions - Assistant ignores "no speech" instructions
                 # 4. Considered interrupting audio streams but would still incur OpenAI costs
                 # CONCLUSION: Current OpenAI Realtime API doesn't support silent function-only responses reliably
+                is_idle_function_call = True
                 await self.connection.response.create(
                     response={
                         "modalities": ["text"],
@@ -767,7 +774,7 @@ class OpenAIHandler(AsyncStreamHandler):
             # the OpenAI Realtime API still generates audio/speech during idle function calls.
             # This results in the assistant talking when it should be silent, and incurs unnecessary costs.
             # Re-enable when OpenAI fixes silent function-only response capability.
-            # asyncio.create_task(self._idle_checker())
+            asyncio.create_task(self._idle_checker())
 
             async for event in self.connection:
                 et = getattr(event, "type", None)
@@ -921,12 +928,17 @@ class OpenAIHandler(AsyncStreamHandler):
                             }
                         )
 
-                    # ask the model to continue and speak about the result
-                    await self.connection.response.create(
-                        response={
-                            "instructions": "Use the tool result just returned and answer concisely in speech."
-                        }
-                    )
+                    global is_idle_function_call
+                    if not is_idle_function_call:
+                        # ask the model to continue and speak about the result
+                        await self.connection.response.create(
+                            response={
+                                "instructions": "Use the tool result just returned and answer concisely in speech."
+                            }
+                        )
+                    else:
+                        is_idle_function_call = False
+
                     # cleanup
                     self._pending_calls.pop(call_id, None)
 
