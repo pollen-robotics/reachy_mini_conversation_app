@@ -313,10 +313,10 @@ async def head_tracking(params: dict) -> dict:
 
 async def dance(params: dict) -> dict:
     """Run one dance move without blocking hearing."""
-    global is_dancing, current_dance_move, last_activity_time
+    global is_dancing, is_emoting, current_dance_move, last_activity_time
 
-    if is_dancing:
-        return {"status": "busy", "detail": "already dancing"}
+    if is_dancing or is_emoting:
+        return {"status": "busy", "detail": "already dancing or emoting"}
 
     move_name = params.get("move", None)
     repeat = int(params.get("repeat", 1))
@@ -362,10 +362,10 @@ async def stop_dance(params: dict) -> dict:
 
 async def play_emotion(params: dict) -> dict:
     """Play a pre-recorded emotion."""
-    global is_emoting, current_emotion, last_activity_time
+    global is_dancing, is_emoting, current_emotion, last_activity_time
 
-    if is_emoting:
-        return {"status": "busy", "detail": "already emoting"}
+    if is_emoting or is_dancing:
+        return {"status": "busy", "detail": "already emoting or dancing"}
 
     emotion_name = params.get("emotion", None)
     if emotion_name is None:
