@@ -1,8 +1,8 @@
 import asyncio
 import base64
 import json
-import time
 import threading
+import time
 from asyncio import QueueEmpty
 from datetime import datetime
 from threading import Thread
@@ -36,13 +36,20 @@ def init_globals():
     global script_start_time, reachy_mini, cap, speech_head_offsets
     global moving_start, moving_for, is_head_tracking, is_dancing, is_emoting, is_moving
     global recorded_moves, client, chatbot, latest_message, stream
-    global latest_frame, camera_thread_running, frame_lock
-    
+    global \
+        latest_frame, \
+        relative_yaw, \
+        camera_thread_running, \
+        frame_lock, \
+        yaw_lock, \
+        current_dance_move, \
+        current_emotion
+
     load_dotenv()
-    
+
     # Timestamp tracking
     script_start_time = time.time()
-    
+
     reachy_mini = ReachyMini()
 
     if not SIM:
@@ -58,18 +65,20 @@ def init_globals():
     is_dancing = False
     is_emoting = False
     is_moving = False
-    
+    current_dance_move = None
+    current_emotion = None
+
     # Initialize camera thread variables
     latest_frame = None
     camera_thread_running = False
-    
+
     # Initialize thread locks
     frame_lock = threading.Lock()
     
     recorded_moves = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
-    
+
     client = OpenAI()
-    
+
     # Gradio components
     chatbot = gr.Chatbot(type="messages")
     latest_message = gr.Textbox(type="text", visible=False)
@@ -113,7 +122,7 @@ def camera_worker():
                 # Thread-safe frame storage
                 with frame_lock:
                     latest_frame = frame.copy()
-                
+
                 # Handle face tracking if enabled
                 if is_head_tracking:
                     eye_center, _ = head_tracker.get_head_position(frame)
@@ -128,12 +137,12 @@ def camera_worker():
                             eye_center_pixels[0], 
                             eye_center_pixels[1], 
                             duration=0.0, 
-                            is_relative=False
+                            # is_relative=False
                         )
                     # If no face detected, reachy_mini keeps current position
             
             time.sleep(0.001)  # Small sleep to prevent excessive CPU usage
-            
+
         except Exception as e:
             print(f"[Camera thread error]: {e}")
             time.sleep(0.1)  # Longer sleep on error
@@ -173,24 +182,17 @@ async def head_tracking(params: dict) -> dict:
     return {"status": "head tracking " + ("started" if is_head_tracking else "stopped")}
 
 
-def _dance_worker(move_name: str, repeat: int):
-    global is_dancing
-    try:
-        move = DanceMove(move_name)
-        move.play_on(reachy_mini, repeat=repeat)
-    except Exception as e:
-        print(f"[dance worker] error: {e}")
-    finally:
-        is_dancing = False  # always clear
-
-
 async def dance(params: dict) -> dict:
     """Run one dance move without blocking hearing."""
-    global is_dancing
+    global is_dancing, current_dance_move
+
     if is_dancing:
         return {"status": "busy", "detail": "already dancing"}
+
     move_name = params.get("move", None)
     repeat = int(params.get("repeat", 1))
+
+    print(f"[TOOL CALL] dance started with {move_name}, repeat={repeat}")
 
     if not move_name or move_name == "random":
         move_name = np.random.choice(list(AVAILABLE_MOVES.keys()))
@@ -198,37 +200,79 @@ async def dance(params: dict) -> dict:
     if move_name not in AVAILABLE_MOVES:
         return {"error": f"unknown move '{move_name}'"}
 
-    print(f"[TOOL CALL] dance started with {move_name}, repeat={repeat}")
-
     is_dancing = True
-    Thread(target=_dance_worker, args=(move_name, repeat), daemon=True).start()
+
+    current_dance_move = asyncio.create_task(
+        DanceMove(move_name).async_play_on(reachy_mini, repeat=repeat)
+    )
+
+    def set_dance_globals(_):
+        global current_dance_move, is_dancing
+        current_dance_move = None
+        is_dancing = False
+
+    current_dance_move.add_done_callback(set_dance_globals)
+
     return {"status": "started", "move": move_name, "repeat": repeat}
 
-def _play_emotion_worker(emotion_name: str):
-    global is_emoting
-    try:
-        recorded_moves.get(emotion_name).play_on(
-            reachy_mini, repeat=1, start_goto=True, no_audio=True
-        )
-    except Exception as e:
-        print(f"[play emotion worker] error: {e}")
-    finally:
-        is_emoting = False
+
+async def stop_dance(params: dict) -> dict:
+    """Stop the current dance move."""
+    global is_dancing, current_dance_move
+
+    print("[TOOL CALL] stop_dance")
+
+    if current_dance_move is not None:
+        current_dance_move.cancel()
+
+    is_dancing = False
+
+    return {"status": "stopped dance move"}
 
 
 async def play_emotion(params: dict) -> dict:
     """Play a pre-recorded emotion."""
-    global is_emoting
+    global is_emoting, current_emotion
+
+    if is_emoting:
+        return {"status": "busy", "detail": "already emoting"}
+
     emotion_name = params.get("emotion", None)
     if emotion_name is None:
         return {"error": "Requested emotion does not exist"}
 
-    is_emoting = True
     print(f"[TOOL CALL] play_emotion with {emotion_name}")
 
-    Thread(target=_play_emotion_worker, args=(emotion_name,), daemon=True).start()
+    is_emoting = True
+
+    current_emotion = asyncio.create_task(
+        recorded_moves.get(emotion_name).async_play_on(
+            reachy_mini, repeat=1, start_goto=True
+        )
+    )
+
+    def set_emotions_globals(_):
+        global current_emotion, is_emoting
+        current_emotion = None
+        is_emoting = False
+
+    current_emotion.add_done_callback(set_emotions_globals)
 
     return {"status": "started", "emotion": emotion_name}
+
+
+async def stop_emotion(params: dict) -> dict:
+    """Stop the current emotion."""
+    global is_emoting, current_emotion
+
+    print("[TOOL CALL] stop_emotion")
+
+    if current_emotion is not None:
+        current_emotion.cancel()
+
+    is_emoting = False
+
+    return {"status": "stopped emotion"}
 
 
 async def do_nothing(params: dict) -> dict:
@@ -252,6 +296,7 @@ def get_available_emotions_and_descriptions():
 
     return ret
 
+
 def get_b64_encoded_im(im):
     cv2.imwrite("/tmp/tmp_image.jpg", im)
     image_file = open("/tmp/tmp_image.jpg", "rb")
@@ -261,7 +306,7 @@ def get_b64_encoded_im(im):
 
 async def camera(params: dict) -> dict:
     print("[TOOL CALL] camera with params", params)
-    
+
     # Thread-safe frame access
     with frame_lock:
         if latest_frame is None:
@@ -274,14 +319,14 @@ async def camera(params: dict) -> dict:
 
 async def face_recognition(params: dict) -> dict:
     print("[TOOL CALL] face_recognition with params", params)
-    
+
     # Thread-safe frame access
     with frame_lock:
         if latest_frame is None:
             print("ERROR: No frame available from camera thread")
             return {"error": "No frame available"}
         frame_to_use = latest_frame.copy()
-        
+
     cv2.imwrite("/tmp/im.jpg", frame_to_use)
     try:
         results = DeepFace.find(img_path="/tmp/im.jpg", db_path="./pollen_faces")
@@ -330,7 +375,9 @@ class OpenAIHandler(AsyncStreamHandler):
             "head_tracking": head_tracking,
             "get_person_name": face_recognition,
             "dance": dance,
+            "stop_dance": stop_dance,
             "play_emotion": play_emotion,
+            "stop_emotion": stop_emotion,
             "do_nothing": do_nothing,
         }
 
@@ -649,6 +696,22 @@ class OpenAIHandler(AsyncStreamHandler):
                             },
                         },
                         {
+                            # add dummy input
+                            "type": "function",
+                            "name": "stop_dance",
+                            "description": "Stop the current dance move",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "dummy": {
+                                        "type": "boolean",
+                                        "description": "dummy boolean, set it to true",
+                                    }
+                                },
+                                "required": ["dummy"],
+                            },
+                        },
+                        {
                             "type": "function",
                             "name": "play_emotion",
                             "description": "Play a pre-recorded emotion",
@@ -661,6 +724,21 @@ class OpenAIHandler(AsyncStreamHandler):
                                     },
                                 },
                                 "required": ["emotion"],
+                            },
+                        },
+                        {
+                            "type": "function",
+                            "name": "stop_emotion",
+                            "description": "Stop the current emotion",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "dummy": {
+                                        "type": "boolean",
+                                        "description": "dummy boolean, set it to true",
+                                    }
+                                },
+                                "required": ["dummy"],
                             },
                         },
                         {
@@ -891,7 +969,7 @@ def update_chatbot(chatbot: list[dict], response: dict):
 def main():
     # Initialize all globals first
     init_globals()
-    
+
     global \
         speech_head_offsets, \
         moving_start, \
@@ -902,22 +980,22 @@ def main():
         is_moving
 
     Thread(target=stream.ui.launch, kwargs={"server_port": 7860}).start()
-    
+
     # Start camera thread
     camera_thread = Thread(target=camera_worker, daemon=True)
     camera_thread.start()
-    
+
     # going to center at start
     reachy_mini.goto_target(
         create_head_pose(0, 0, 0, 0, 0, 0, degrees=True), antennas=(0, 0), duration=1.0
-    ) 
+    )
 
     # Frequency monitoring variables
     target_frequency = 50.0  # Hz
     target_period = 1.0 / target_frequency  # 0.02 seconds
     loop_count = 0
     last_print_time = time.time()
-    
+
     while True:
         loop_start_time = time.time()
         loop_count += 1
@@ -955,21 +1033,26 @@ def main():
         #         antennas=np.array([antenna_target, -antenna_target]),
         #         is_relative=False,
         #     )
-        
+
         # Calculate computation time and adjust sleep for 50Hz
         computation_time = time.time() - loop_start_time
         sleep_time = max(0, target_period - computation_time)
-        
+
         # Print frequency info every 100 loops (~2 seconds)
         current_time = time.time()
         if loop_count % 100 == 0:
             elapsed = current_time - last_print_time
             actual_freq = 100.0 / elapsed if elapsed > 0 else 0
-            potential_freq = 1.0 / computation_time if computation_time > 0 else float('inf')
-            print(f"Loop freq - Actual: {actual_freq:.1f}Hz, Potential: {potential_freq:.1f}Hz, Target: {target_frequency:.1f}Hz")
+            potential_freq = (
+                1.0 / computation_time if computation_time > 0 else float("inf")
+            )
+            print(
+                f"Loop freq - Actual: {actual_freq:.1f}Hz, Potential: {potential_freq:.1f}Hz, Target: {target_frequency:.1f}Hz"
+            )
             last_print_time = current_time
-        
+
         time.sleep(sleep_time)
+
 
 if __name__ == "__main__":
     main()
