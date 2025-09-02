@@ -35,12 +35,12 @@ def init_globals():
     global script_start_time, reachy_mini, cap, speech_head_offsets, current_head_pose
     global moving_start, moving_for, is_head_tracking, is_dancing, is_emoting, is_moving
     global recorded_moves, client, chatbot, latest_message, stream
-    
+
     load_dotenv()
-    
+
     # Timestamp tracking
     script_start_time = time.time()
-    
+
     reachy_mini = ReachyMini()
 
     if not SIM:
@@ -57,11 +57,11 @@ def init_globals():
     is_dancing = False
     is_emoting = False
     is_moving = False
-    
+
     recorded_moves = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
-    
+
     client = OpenAI()
-    
+
     # Gradio components
     chatbot = gr.Chatbot(type="messages")
     latest_message = gr.Textbox(type="text", visible=False)
@@ -129,9 +129,12 @@ def _dance_worker(move_name: str, repeat: int):
         is_dancing = False  # always clear
 
 
+current_dance_move = None
+
+
 async def dance(params: dict) -> dict:
     """Run one dance move without blocking hearing."""
-    global is_dancing
+    global is_dancing, current_dance_move
     if is_dancing:
         return {"status": "busy", "detail": "already dancing"}
     move_name = params.get("move", None)
@@ -146,8 +149,34 @@ async def dance(params: dict) -> dict:
     print(f"[TOOL CALL] dance started with {move_name}, repeat={repeat}")
 
     is_dancing = True
-    Thread(target=_dance_worker, args=(move_name, repeat), daemon=True).start()
+
+    current_dance_move = asyncio.create_task(
+        DanceMove(move_name).async_play_on(reachy_mini, repeat=repeat)
+    )
+
+    def set_globals(_):
+        global current_dance_move, is_dancing
+        current_dance_move = None
+        is_dancing = False
+
+    current_dance_move.add_done_callback(set_globals)
+
+    # Thread(target=_dance_worker, args=(move_name, repeat), daemon=True).start()
     return {"status": "started", "move": move_name, "repeat": repeat}
+
+
+async def stop_dance(params: dict) -> dict:
+    global is_dancing, current_dance_move
+
+    print("[TOOL CALL] stop_dance")
+
+    if current_dance_move is not None:
+        current_dance_move.cancel()
+
+    is_dancing = False
+
+    return {"status": "stopped dance move"}
+
 
 def _play_emotion_worker(emotion_name: str):
     global is_emoting
@@ -196,6 +225,7 @@ def get_available_emotions_and_descriptions():
         ret += f" - {name}: {description}\n"
 
     return ret
+
 
 def get_b64_encoded_im(im):
     cv2.imwrite("/tmp/tmp_image.jpg", im)
@@ -276,6 +306,7 @@ class OpenAIHandler(AsyncStreamHandler):
             "head_tracking": head_tracking,
             "get_person_name": face_recognition,
             "dance": dance,
+            "stop_dance": stop_dance,
             "play_emotion": play_emotion,
             "do_nothing": do_nothing,
         }
@@ -595,6 +626,22 @@ class OpenAIHandler(AsyncStreamHandler):
                             },
                         },
                         {
+                            # add dummy input
+                            "type": "function",
+                            "name": "stop_dance",
+                            "description": "Stop the current dance move",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "dummy": {
+                                        "type": "boolean",
+                                        "description": "dummy boolean, set it to true",
+                                    }
+                                },
+                                "required": ["dummy"],
+                            },
+                        },
+                        {
                             "type": "function",
                             "name": "play_emotion",
                             "description": "Play a pre-recorded emotion",
@@ -837,7 +884,7 @@ def update_chatbot(chatbot: list[dict], response: dict):
 def main():
     # Initialize all globals first
     init_globals()
-    
+
     global \
         current_head_pose, \
         speech_head_offsets, \
@@ -915,6 +962,7 @@ def main():
                 is_relative=False,
             )
         time.sleep(0.02)
+
 
 if __name__ == "__main__":
     main()
