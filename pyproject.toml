@@ -11,11 +11,11 @@ readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
     # "reachy_mini@git+ssh://git@github.com/pollen-robotics/reachy_mini@develop",
-    "reachy_mini_toolbox@git+ssh://git@github.com/pollen-robotics/reachy_mini_toolbox@develop",
+    "reachy_mini_toolbox@git+ssh://git@github.com/pollen-robotics/reachy_mini_toolbox@main",
     "gradio==5.44.1",
     "openai==1.102.0",
     "deepface==0.0.95",
-    "tf-keras==3.11.3",
+    "tf-keras", # ==3.11.3
     "fastrtc==0.0.30",
 
 ]
