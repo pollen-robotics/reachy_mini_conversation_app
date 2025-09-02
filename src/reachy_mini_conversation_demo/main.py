@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import time
+import threading
 from asyncio import QueueEmpty
 from datetime import datetime
 from threading import Thread
@@ -32,9 +33,10 @@ SIM = False
 
 def init_globals():
     """Initialize all global variables and components."""
-    global script_start_time, reachy_mini, cap, speech_head_offsets, current_head_pose
+    global script_start_time, reachy_mini, cap, speech_head_offsets
     global moving_start, moving_for, is_head_tracking, is_dancing, is_emoting, is_moving
     global recorded_moves, client, chatbot, latest_message, stream
+    global latest_frame, relative_yaw, camera_thread_running, frame_lock, yaw_lock
     
     load_dotenv()
     
@@ -50,13 +52,21 @@ def init_globals():
 
     # Initialize global state variables
     speech_head_offsets = [0, 0, 0, 0, 0, 0]
-    current_head_pose = np.eye(4)
     moving_start = time.time()
     moving_for = 0.0
-    is_head_tracking = False
+    is_head_tracking = True  # ON by default
     is_dancing = False
     is_emoting = False
     is_moving = False
+    
+    # Initialize camera thread variables
+    latest_frame = None
+    relative_yaw = 0.0
+    camera_thread_running = False
+    
+    # Initialize thread locks
+    frame_lock = threading.Lock()
+    yaw_lock = threading.Lock()
     
     recorded_moves = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
     
@@ -83,8 +93,53 @@ def format_timestamp():
     return f"[{dt.strftime('%Y-%m-%d %H:%M:%S')} | +{elapsed_seconds:.1f}s]"
 
 
+# Global variables for camera thread
+latest_frame = None
+relative_yaw = 0.0
+camera_thread_running = False
+
+# Thread safety locks
+frame_lock = threading.Lock()
+yaw_lock = threading.Lock()
+
+
+def camera_worker():
+    """Camera thread that continuously captures frames and handles face tracking."""
+    global latest_frame, relative_yaw, camera_thread_running, is_head_tracking
+    
+    camera_thread_running = True
+    head_tracker = HeadTracker()
+    yaw_tracking_kp = 0.5
+    
+    while camera_thread_running:
+        try:
+            success, frame = cap.read()
+            if success:
+                # Thread-safe frame storage
+                with frame_lock:
+                    latest_frame = frame.copy()
+                
+                # Handle face tracking if enabled
+                if is_head_tracking:
+                    eye_center, _ = head_tracker.get_head_position(frame)
+                    if eye_center is not None:
+                        x_error = -eye_center[0]
+                        new_yaw = yaw_tracking_kp * x_error
+                        
+                        # Thread-safe yaw update
+                        with yaw_lock:
+                            relative_yaw = new_yaw
+                    # If no face detected, keep the last relative_yaw value
+            
+            time.sleep(0.001)  # Small sleep to prevent excessive CPU usage
+            
+        except Exception as e:
+            print(f"[Camera thread error]: {e}")
+            time.sleep(0.1)  # Longer sleep on error
+
+
 async def move_head(params: dict) -> dict:
-    global current_head_pose, moving_start, moving_for
+    global moving_start, moving_for
     # look left, right up, down or front
     print("[TOOL CALL] move_head", params)
     direction = params.get("direction", "front")
@@ -103,7 +158,6 @@ async def move_head(params: dict) -> dict:
     moving_start = time.time()
     moving_for = 1.0
     reachy_mini.goto_target(target_pose, duration=moving_for)
-    current_head_pose = target_pose
     return {"status": "looking " + direction}
 
 
@@ -206,29 +260,28 @@ def get_b64_encoded_im(im):
 
 async def camera(params: dict) -> dict:
     print("[TOOL CALL] camera with params", params)
-    trials = 0
-    ret = False
-    while not ret or trials < 5:
-        ret, frame = cap.read()
-        trials += 1
-    if not ret:
-        print("ERROR: failed to capture image")
-        return {"error": "Failed to capture image"}
+    
+    # Thread-safe frame access
+    with frame_lock:
+        if latest_frame is None:
+            print("ERROR: No frame available from camera thread")
+            return {"error": "No frame available"}
+        frame_to_use = latest_frame.copy()
 
-    return {"b64_im": get_b64_encoded_im(frame)}
+    return {"b64_im": get_b64_encoded_im(frame_to_use)}
 
 
 async def face_recognition(params: dict) -> dict:
     print("[TOOL CALL] face_recognition with params", params)
-    trials = 0
-    ret = False
-    while not ret or trials < 5:
-        ret, frame = cap.read()
-        trials += 1
-    if not ret:
-        print("ERROR: failed to capture image")
-        return {"error": "Failed to capture image"}
-    cv2.imwrite("/tmp/im.jpg", frame)
+    
+    # Thread-safe frame access
+    with frame_lock:
+        if latest_frame is None:
+            print("ERROR: No frame available from camera thread")
+            return {"error": "No frame available"}
+        frame_to_use = latest_frame.copy()
+        
+    cv2.imwrite("/tmp/im.jpg", frame_to_use)
     try:
         results = DeepFace.find(img_path="/tmp/im.jpg", db_path="./pollen_faces")
     except Exception as e:
@@ -839,47 +892,36 @@ def main():
     init_globals()
     
     global \
-        current_head_pose, \
         speech_head_offsets, \
         moving_start, \
         moving_for, \
         is_head_tracking, \
         is_dancing, \
         is_emoting, \
-        is_moving
+        is_moving, \
+        relative_yaw
 
     Thread(target=stream.ui.launch, kwargs={"server_port": 7860}).start()
-    head_tracker = HeadTracker()
+    
+    # Start camera thread
+    camera_thread = Thread(target=camera_worker, daemon=True)
+    camera_thread.start()
+    
     # going to center at start
     reachy_mini.goto_target(
         create_head_pose(0, 0, 0, 0, 0, 0, degrees=True), antennas=(0, 0), duration=1.0
-    )
+    ) 
 
-    yaw_tracking_kp = 0.1
-
-    t0 = time.time()
+    # Frequency monitoring variables
+    target_frequency = 50.0  # Hz
+    target_period = 1.0 / target_frequency  # 0.02 seconds
+    loop_count = 0
+    last_print_time = time.time()
+    
     while True:
-        # current_head_pose = reachy_mini.get_current_head_pose()
-        if is_head_tracking:
-            success, im = cap.read()
-            if success:
-                eye_center, _ = head_tracker.get_head_position(im)
-                if eye_center is not None:
-                    x_error = -eye_center[0]
-                    current_euler = R.from_matrix(current_head_pose[:3, :3]).as_euler(
-                        "xyz", degrees=False
-                    )
-
-                    current_euler[2] += yaw_tracking_kp * x_error
-
-                    current_head_pose[:3, :3] = R.from_euler(
-                        "xyz", current_euler
-                    ).as_matrix()
-
-        current_x, current_y, current_z = current_head_pose[:3, 3]
-        current_roll, current_pitch, current_yaw = R.from_matrix(
-            current_head_pose[:3, :3]
-        ).as_euler("xyz", degrees=False)
+        loop_start_time = time.time()
+        loop_count += 1
+        # Face tracking is now handled by the camera thread
 
         # moving = time.time() - moving_start < moving_for
         is_moving = (
@@ -887,14 +929,17 @@ def main():
         )
 
         # Always apply speech offsets (with is_relative=True)
-        t = time.time() - t0
+        # Thread-safe yaw access
+        with yaw_lock:
+            current_yaw = relative_yaw
+            
         head_pose = create_head_pose(
-            x=current_x + speech_head_offsets[0],
-            y=current_y + speech_head_offsets[1],
-            z=current_z + speech_head_offsets[2],
-            roll=current_roll + speech_head_offsets[3],
-            pitch=current_pitch + speech_head_offsets[4],
-            yaw=current_yaw + speech_head_offsets[5],
+            x=speech_head_offsets[0],
+            y=speech_head_offsets[1],
+            z=speech_head_offsets[2],
+            roll=speech_head_offsets[3],
+            pitch=speech_head_offsets[4],
+            yaw=speech_head_offsets[5]+current_yaw,
             degrees=False,
             mm=False,
         )
@@ -903,18 +948,32 @@ def main():
             body_yaw=0,
             is_relative=True,
         )
-        if (
-            not is_moving
-        ):  # Going from moving to not moving creates a discontinuity, to be fixed
-            t = time.time() - t0
-            head_pose = create_head_pose(z=0.01 * np.sin(2 * np.pi * 0.1 * t))  # idle
-            antenna_target = np.deg2rad(15) * np.sin(2 * np.pi * 0.5 * t)
-            reachy_mini.set_target(
-                head=head_pose,
-                antennas=np.array([antenna_target, -antenna_target]),
-                is_relative=False,
-            )
-        time.sleep(0.02)
+        # if (
+        #     not is_moving
+        # ):  # Going from moving to not moving creates a discontinuity, to be fixed
+        #     t = time.time() - t0
+        #     head_pose = create_head_pose(z=0.01 * np.sin(2 * np.pi * 0.1 * t))  # idle
+        #     antenna_target = np.deg2rad(15) * np.sin(2 * np.pi * 0.5 * t)
+        #     reachy_mini.set_target(
+        #         head=head_pose,
+        #         antennas=np.array([antenna_target, -antenna_target]),
+        #         is_relative=False,
+        #     )
+        
+        # Calculate computation time and adjust sleep for 50Hz
+        computation_time = time.time() - loop_start_time
+        sleep_time = max(0, target_period - computation_time)
+        
+        # Print frequency info every 100 loops (~2 seconds)
+        current_time = time.time()
+        if loop_count % 100 == 0:
+            elapsed = current_time - last_print_time
+            actual_freq = 100.0 / elapsed if elapsed > 0 else 0
+            potential_freq = 1.0 / computation_time if computation_time > 0 else float('inf')
+            print(f"Loop freq - Actual: {actual_freq:.1f}Hz, Potential: {potential_freq:.1f}Hz, Target: {target_frequency:.1f}Hz")
+            last_print_time = current_time
+        
+        time.sleep(sleep_time)
 
 if __name__ == "__main__":
     main()
