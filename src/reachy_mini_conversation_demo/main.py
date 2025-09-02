@@ -929,3 +929,6 @@ def main():
                 is_relative=False,
             )
         time.sleep(0.02)
+
+if __name__ == "__main__":
+    main()
