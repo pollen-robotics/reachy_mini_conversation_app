@@ -34,7 +34,7 @@ SIM = False
 
 def init_globals():
     """Initialize all global variables and components."""
-    global script_start_time, reachy_mini, cap, speech_head_offsets
+    global script_start_time, reachy_mini, cap, speech_head_offsets, camera_available
     global moving_start, moving_for, is_head_tracking, is_dancing, is_emoting, is_moving
     global recorded_moves, client, chatbot, latest_message, stream
     global \
@@ -67,6 +67,29 @@ def init_globals():
         cap = find_camera()
     else:
         cap = cv2.VideoCapture(0)
+    
+    # Check camera availability
+    camera_available = False
+    if cap is not None:
+        try:
+            if cap.isOpened():
+                # Test if we can actually read a frame
+                ret, _ = cap.read()
+                if ret:
+                    camera_available = True
+                    print(f"{format_timestamp()} Camera initialized successfully")
+                else:
+                    print(f"{format_timestamp()} WARNING: Camera opened but cannot read frames")
+            else:
+                print(f"{format_timestamp()} WARNING: Camera failed to open")
+        except Exception as e:
+            print(f"{format_timestamp()} WARNING: Camera test failed: {e}")
+    else:
+        print(f"{format_timestamp()} WARNING: No camera found")
+    
+    if not camera_available:
+        print(f"{format_timestamp()} Face tracking will be disabled - no camera available")
+        cap = None  # Ensure cap is None if camera not available
 
     # Initialize global state variables
     speech_head_offsets = [0, 0, 0, 0, 0, 0]
@@ -130,6 +153,7 @@ def format_timestamp():
 # Global variables for camera thread
 latest_frame = None
 camera_thread_running = False
+camera_available = False
 face_tracking_offsets = [0, 0, 0, 0, 0, 0]  # x, y, z, roll, pitch, yaw
 
 # Face tracking timing variables
@@ -158,8 +182,16 @@ def camera_worker():
     """Camera thread that continuously captures frames and handles face tracking."""
     global latest_frame, camera_thread_running, is_head_tracking, face_tracking_offsets
     global last_face_detected_time, interpolation_start_time, interpolation_start_pose
+    global camera_available
     
     camera_thread_running = True
+    
+    # Early exit if no camera available
+    if not camera_available or cap is None:
+        print(f"{format_timestamp()} Camera worker: No camera available, exiting gracefully")
+        camera_thread_running = False
+        return
+    
     head_tracker = HeadTracker()
     neutral_pose = np.eye(4)  # Neutral pose (identity matrix)
     previous_head_tracking_state = is_head_tracking  # Track state changes
@@ -1125,13 +1157,18 @@ def main():
         breathing_interpolation_start_time, \
         breathing_interpolation_start_pose, \
         breathing_start_time, \
-        breathing_interpolation_start_antennas
+        breathing_interpolation_start_antennas, \
+        camera_available
 
     Thread(target=stream.ui.launch, kwargs={"server_port": 7860}).start()
 
-    # Start camera thread
-    camera_thread = Thread(target=camera_worker, daemon=True)
-    camera_thread.start()
+    # Start camera thread only if camera is available
+    if camera_available:
+        camera_thread = Thread(target=camera_worker, daemon=True)
+        camera_thread.start()
+        print(f"{format_timestamp()} Camera thread started successfully")
+    else:
+        print(f"{format_timestamp()} Skipping camera thread - no camera available")
 
     # going to center at start
     reachy_mini.goto_target(
