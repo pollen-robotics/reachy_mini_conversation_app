@@ -59,10 +59,6 @@ is_emoting = False
 is_moving = False
 
 
-# camera_tool = Camera(reachy_mini, cap)
-# face_recognition_tool = FaceRecognition(cap)
-
-
 async def move_head(params: dict) -> dict:
     global current_head_pose, moving_start, moving_for
     # look left, right up, down or front
@@ -185,41 +181,11 @@ def get_available_emotions_and_descriptions():
 client = OpenAI()
 
 
-class OpenAIImageHandler:
-    def __init__(self):
-        self.client = OpenAI()
-        pass
-
-    def ask_about_image(self, im: np.ndarray, question: str) -> str:
-        try:
-            reachy_mini.play_sound(f"hmm{np.random.randint(1, 6)}.wav")
-        except Exception as e:
-            print(e)
-
-        cv2.imwrite("/tmp/tmp_image.jpg", im)
-        image_file = open("/tmp/tmp_image.jpg", "rb")
-        b64_encoded_im = base64.b64encode(image_file.read()).decode("utf-8")
-        url = "data:image/jpeg;base64," + b64_encoded_im
-
-        messages = [
-            {
-                "role": "system",
-                "content": question,
-            },
-            {
-                "role": "user",
-                "content": [{"type": "input_image", "image_url": url}],
-            },
-        ]
-
-        response = self.client.responses.create(
-            model="gpt-4o-mini",
-            input=messages,
-        )
-        return response.output[0].content[0].text
-
-
-image_handler = OpenAIImageHandler()
+def get_b64_encoded_im(im):
+    cv2.imwrite("/tmp/tmp_image.jpg", im)
+    image_file = open("/tmp/tmp_image.jpg", "rb")
+    b64_encoded_im = base64.b64encode(image_file.read()).decode("utf-8")
+    return b64_encoded_im
 
 
 async def camera(params: dict) -> dict:
@@ -233,10 +199,7 @@ async def camera(params: dict) -> dict:
         print("ERROR: failed to capture image")
         return {"error": "Failed to capture image"}
 
-    image_description = image_handler.ask_about_image(frame, params.get("question"))
-    print("Image description", image_description)
-
-    return {"image_description": image_description}
+    return {"b64_im": get_b64_encoded_im(frame)}
 
 
 async def face_recognition(params: dict) -> dict:
@@ -795,6 +758,21 @@ class OpenAIHandler(AsyncStreamHandler):
                             "output": json.dumps(result),
                         }
                     )
+                    if name == "camera":
+                        b64_im = json.dumps(result["b64_im"])
+                        await self.connection.conversation.item.create(
+                            item={
+                                "type": "message",
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "input_image",
+                                        "image_url": f"data:image/jpeg;base64,{b64_im}",
+                                    }
+                                ],
+                            }
+                        )
+
                     # ask the model to continue and speak about the result
                     await self.connection.response.create(
                         response={
@@ -806,6 +784,7 @@ class OpenAIHandler(AsyncStreamHandler):
 
                 # log tool errors from server if any
                 if et == "error":
+                    print(event.error)
                     # optional: surface to chat UI
                     await self.output_queue.put(
                         AdditionalOutputs(
