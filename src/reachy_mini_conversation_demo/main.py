@@ -48,6 +48,7 @@ def init_globals():
         last_face_detected_time, \
         interpolation_start_time, \
         interpolation_start_pose
+        is_idle_function_call
 
     load_dotenv()
 
@@ -71,6 +72,7 @@ def init_globals():
     is_moving = False
     current_dance_move = None
     current_emotion = None
+    is_idle_function_call = False
 
     # Initialize camera thread variables
     latest_frame = None
@@ -534,6 +536,7 @@ class OpenAIHandler(AsyncStreamHandler):
 
     async def _idle_checker(self):
         """Check for inactivity and send timestamps every 15s when idle."""
+        global is_idle_function_call
         while True:
             await asyncio.sleep(5)  # Check every 5 seconds
 
@@ -582,6 +585,7 @@ class OpenAIHandler(AsyncStreamHandler):
                 # 3. Strong prompt instructions - Assistant ignores "no speech" instructions
                 # 4. Considered interrupting audio streams but would still incur OpenAI costs
                 # CONCLUSION: Current OpenAI Realtime API doesn't support silent function-only responses reliably
+                is_idle_function_call = True
                 await self.connection.response.create(
                     response={
                         "modalities": ["text"],
@@ -852,7 +856,7 @@ class OpenAIHandler(AsyncStreamHandler):
             # the OpenAI Realtime API still generates audio/speech during idle function calls.
             # This results in the assistant talking when it should be silent, and incurs unnecessary costs.
             # Re-enable when OpenAI fixes silent function-only response capability.
-            # asyncio.create_task(self._idle_checker())
+            asyncio.create_task(self._idle_checker())
 
             async for event in self.connection:
                 et = getattr(event, "type", None)
@@ -1006,12 +1010,17 @@ class OpenAIHandler(AsyncStreamHandler):
                             }
                         )
 
-                    # ask the model to continue and speak about the result
-                    await self.connection.response.create(
-                        response={
-                            "instructions": "Use the tool result just returned and answer concisely in speech."
-                        }
-                    )
+                    global is_idle_function_call
+                    if not is_idle_function_call:
+                        # ask the model to continue and speak about the result
+                        await self.connection.response.create(
+                            response={
+                                "instructions": "Use the tool result just returned and answer concisely in speech."
+                            }
+                        )
+                    else:
+                        is_idle_function_call = False
+
                     # cleanup
                     self._pending_calls.pop(call_id, None)
 
