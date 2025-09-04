@@ -70,7 +70,7 @@ class VisionProcessor:
             else:
                 dtype = torch.float32
 
-            model_kwargs = {"torch_dtype": dtype}
+            model_kwargs = {"dtype": dtype}
 
             # flash_attention_2 is CUDA-only; skip on MPS/CPU
             if self.device == "cuda":
