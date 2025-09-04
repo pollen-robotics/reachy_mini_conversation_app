@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import queue
 import threading
 import time
 from asyncio import QueueEmpty
@@ -35,7 +36,7 @@ SIM = False
 def init_globals():
     """Initialize all global variables and components."""
     global script_start_time, reachy_mini, cap, speech_head_offsets, camera_available
-    global moving_start, moving_for, is_head_tracking, is_dancing, is_emoting, is_moving
+    global moving_start, moving_for, is_head_tracking, is_playing_move, is_moving
     global recorded_moves, client, chatbot, latest_message, stream
     global \
         latest_frame, \
@@ -43,8 +44,6 @@ def init_globals():
         camera_thread_running, \
         frame_lock, \
         face_tracking_lock, \
-        current_dance_move, \
-        current_emotion, \
         last_face_detected_time, \
         interpolation_start_time, \
         interpolation_start_pose, \
@@ -54,7 +53,11 @@ def init_globals():
         breathing_interpolation_start_time, \
         breathing_interpolation_start_pose, \
         breathing_start_time, \
-        breathing_interpolation_start_antennas
+        breathing_interpolation_start_antennas, \
+        move_queue, \
+        current_move, \
+        move_start_time, \
+        global_full_body_pose
 
     load_dotenv()
 
@@ -96,11 +99,8 @@ def init_globals():
     moving_start = time.time()
     moving_for = 0.0
     is_head_tracking = True  # ON by default
-    is_dancing = False
-    is_emoting = False
+    is_playing_move = False
     is_moving = False
-    current_dance_move = None
-    current_emotion = None
     is_idle_function_call = False
 
     # Initialize camera thread variables
@@ -120,6 +120,12 @@ def init_globals():
     breathing_interpolation_start_pose = None
     breathing_start_time = None
     breathing_interpolation_start_antennas = None
+    
+    # Initialize move system
+    move_queue = queue.Queue()
+    current_move = None
+    move_start_time = None
+    global_full_body_pose = (create_head_pose(0, 0, 0, 0, 0, 0, degrees=True), (0, 0), 0)
 
     # Initialize thread locks
     frame_lock = threading.Lock()
@@ -148,6 +154,11 @@ def format_timestamp():
     elapsed_seconds = current_time - script_start_time
     dt = datetime.fromtimestamp(current_time)
     return f"[{dt.strftime('%Y-%m-%d %H:%M:%S')} | +{elapsed_seconds:.1f}s]"
+
+
+def combine_full_body(full_body_pose1, full_body_pose2):
+    """Stub function to combine two full body poses. Just returns the first pose for now."""
+    return full_body_pose1
 
 
 # Global variables for camera thread
@@ -344,11 +355,8 @@ async def head_tracking(params: dict) -> dict:
 
 
 async def dance(params: dict) -> dict:
-    """Run one dance move without blocking hearing."""
-    global is_dancing, is_emoting, current_dance_move, last_activity_time
-
-    if is_dancing or is_emoting:
-        return {"status": "busy", "detail": "already dancing or emoting"}
+    """Queue a dance move to be played."""
+    global last_activity_time, move_queue
 
     move_name = params.get("move", None)
     repeat = int(params.get("repeat", 1))
@@ -361,43 +369,40 @@ async def dance(params: dict) -> dict:
     if move_name not in AVAILABLE_MOVES:
         return {"error": f"unknown move '{move_name}'"}
 
-    is_dancing = True
     last_activity_time = time.time()  # Update activity time for breathing system
 
-    current_dance_move = asyncio.create_task(
-        DanceMove(move_name).async_play_on(reachy_mini, repeat=repeat)
-    )
+    # Add dance move to queue multiple times for repeat
+    for _ in range(repeat):
+        dance_move = DanceMove(move_name)
+        move_queue.put(dance_move)
 
-    def set_dance_globals(_):
-        global current_dance_move, is_dancing
-        current_dance_move = None
-        is_dancing = False
-
-    current_dance_move.add_done_callback(set_dance_globals)
-
-    return {"status": "started", "move": move_name, "repeat": repeat}
+    return {"status": "queued", "move": move_name, "repeat": repeat}
 
 
 async def stop_dance(params: dict) -> dict:
-    """Stop the current dance move."""
-    global is_dancing, current_dance_move
+    """Stop the current move and clear queue."""
+    global current_move, move_queue, move_start_time, is_playing_move
 
     print("[TOOL CALL] stop_dance")
 
-    if current_dance_move is not None:
-        current_dance_move.cancel()
+    # Immediately stop current move and clear queue
+    current_move = None
+    move_start_time = None
+    is_playing_move = False
+    
+    # Clear entire queue
+    while not move_queue.empty():
+        try:
+            move_queue.get_nowait()
+        except queue.Empty:
+            break
 
-    is_dancing = False
-
-    return {"status": "stopped dance move"}
+    return {"status": "stopped move and cleared queue"}
 
 
 async def play_emotion(params: dict) -> dict:
-    """Play a pre-recorded emotion."""
-    global is_dancing, is_emoting, current_emotion, last_activity_time
-
-    if is_emoting or is_dancing:
-        return {"status": "busy", "detail": "already emoting or dancing"}
+    """Queue an emotion to be played."""
+    global last_activity_time, move_queue
 
     emotion_name = params.get("emotion", None)
     if emotion_name is None:
@@ -405,37 +410,34 @@ async def play_emotion(params: dict) -> dict:
 
     print(f"[TOOL CALL] play_emotion with {emotion_name}")
 
-    is_emoting = True
     last_activity_time = time.time()  # Update activity time for breathing system
 
-    current_emotion = asyncio.create_task(
-        recorded_moves.get(emotion_name).async_play_on(
-            reachy_mini, repeat=1, start_goto=True
-        )
-    )
+    # Add emotion move to queue
+    emotion_move = recorded_moves.get(emotion_name)
+    move_queue.put(emotion_move)
 
-    def set_emotions_globals(_):
-        global current_emotion, is_emoting
-        current_emotion = None
-        is_emoting = False
-
-    current_emotion.add_done_callback(set_emotions_globals)
-
-    return {"status": "started", "emotion": emotion_name}
+    return {"status": "queued", "emotion": emotion_name}
 
 
 async def stop_emotion(params: dict) -> dict:
-    """Stop the current emotion."""
-    global is_emoting, current_emotion
+    """Stop the current move and clear queue."""
+    global current_move, move_queue, move_start_time, is_playing_move
 
     print("[TOOL CALL] stop_emotion")
 
-    if current_emotion is not None:
-        current_emotion.cancel()
+    # Immediately stop current move and clear queue
+    current_move = None
+    move_start_time = None
+    is_playing_move = False
+    
+    # Clear entire queue
+    while not move_queue.empty():
+        try:
+            move_queue.get_nowait()
+        except queue.Empty:
+            break
 
-    is_emoting = False
-
-    return {"status": "stopped emotion"}
+    return {"status": "stopped move and cleared queue"}
 
 
 async def do_nothing(params: dict) -> dict:
@@ -626,11 +628,11 @@ class OpenAIHandler(AsyncStreamHandler):
             idle_duration = current_time - self._last_activity_time
 
             # Check if truly idle: no user activity, assistant not speaking, robot in idle mode
-            global is_moving, is_dancing, is_emoting
-            is_robot_idle = not (is_moving or is_dancing or is_emoting)
+            global is_moving, is_playing_move
+            is_robot_idle = not (is_moving or is_playing_move)
 
             print(
-                f"[DEBUG] Idle check: duration={idle_duration:.1f}s, assistant_speaking={self._is_assistant_speaking}, robot_idle={is_robot_idle} (moving={is_moving}, dancing={is_dancing}, emoting={is_emoting})"
+                f"[DEBUG] Idle check: duration={idle_duration:.1f}s, assistant_speaking={self._is_assistant_speaking}, robot_idle={is_robot_idle} (moving={is_moving}, playing_move={is_playing_move})"
             )
 
             if (
@@ -1148,8 +1150,7 @@ def main():
         moving_start, \
         moving_for, \
         is_head_tracking, \
-        is_dancing, \
-        is_emoting, \
+        is_playing_move, \
         is_moving, \
         face_tracking_offsets, \
         is_breathing, \
@@ -1158,7 +1159,11 @@ def main():
         breathing_interpolation_start_pose, \
         breathing_start_time, \
         breathing_interpolation_start_antennas, \
-        camera_available
+        camera_available, \
+        move_queue, \
+        current_move, \
+        move_start_time, \
+        global_full_body_pose
 
     Thread(target=stream.ui.launch, kwargs={"server_port": 7860}).start()
 
@@ -1184,118 +1189,74 @@ def main():
     while True:
         loop_start_time = time.time()
         loop_count += 1
-        # Face tracking is now handled by the camera thread
-
-        # moving = time.time() - moving_start < moving_for
-        is_moving = (
-            (time.time() - moving_start < moving_for) or is_dancing or is_emoting
-        )
-        
-        # Breathing system - activate when not moving and not speaking
         current_time = time.time()
-        should_breathe = not is_moving # Maybe also add condition to not breathe when speaking?
         
-        if should_breathe and last_activity_time is not None:
-            time_since_activity = current_time - last_activity_time
-            
-            if time_since_activity >= breathing_inactivity_delay:
-                # Start breathing sequence
-                if not is_breathing:
-                    is_breathing = True
-                    breathing_interpolation_start_time = current_time
-                    # Get current absolute head position for interpolation start
-                    breathing_interpolation_start_pose = reachy_mini.get_current_head_pose()
-                    # Get current antenna positions for interpolation start
-                    breathing_interpolation_start_antennas = reachy_mini.get_present_antenna_joint_positions()
-                    breathing_start_time = None  # Will be set after interpolation
+        # Move queue management
+        if current_move is None or (move_start_time is not None and current_time - move_start_time >= current_move.duration):
+            # Current move finished or no current move, get next from queue
+            current_move = None
+            move_start_time = None
+            if not move_queue.empty():
+                try:
+                    current_move = move_queue.get_nowait()
+                    move_start_time = current_time
+                    print(f"[MOVE] Starting new move, duration: {current_move.duration}s")
+                except queue.Empty:
+                    pass
+        
+        # Evaluate current move to get target full_body_pose
+        if current_move is not None and move_start_time is not None:
+            move_time = current_time - move_start_time
+            global_full_body_pose = current_move.evaluate(move_time)
+            is_playing_move = True
+            is_moving = True
         else:
-            # Stop breathing if activity detected
-            if is_breathing:
-                is_breathing = False
-                breathing_interpolation_start_time = None
-                breathing_interpolation_start_pose = None
-                breathing_interpolation_start_antennas = None
-                breathing_start_time = None
-
-        # Combine speech sway offsets + face tracking offsets (with is_relative=True)
-        # Thread-safe access to face tracking offsets
-        with face_tracking_lock:
-            face_offsets = face_tracking_offsets.copy()
+            # Default pose when no move is playing
+            is_playing_move = False
+            is_moving = (time.time() - moving_start < moving_for)
+            
+            # Create speech/face tracking pose
+            with face_tracking_lock:
+                face_offsets = face_tracking_offsets.copy()
+            
+            # Combine speech sway offsets + face tracking offsets
+            combined_offsets = [
+                speech_head_offsets[0] + face_offsets[0],  # x
+                speech_head_offsets[1] + face_offsets[1],  # y  
+                speech_head_offsets[2] + face_offsets[2],  # z
+                speech_head_offsets[3] + face_offsets[3],  # roll
+                speech_head_offsets[4] + face_offsets[4],  # pitch
+                speech_head_offsets[5] + face_offsets[5],  # yaw
+            ]
+            
+            head_pose = create_head_pose(
+                x=combined_offsets[0],
+                y=combined_offsets[1],
+                z=combined_offsets[2],
+                roll=combined_offsets[3],
+                pitch=combined_offsets[4],
+                yaw=combined_offsets[5],
+                degrees=False,
+                mm=False,
+            )
+            
+            global_full_body_pose = (head_pose, (0, 0), 0)
         
-        # Combine both offset types
-        combined_offsets = [
-            speech_head_offsets[0] + face_offsets[0],  # x
-            speech_head_offsets[1] + face_offsets[1],  # y  
-            speech_head_offsets[2] + face_offsets[2],  # z
-            speech_head_offsets[3] + face_offsets[3],  # roll
-            speech_head_offsets[4] + face_offsets[4],  # pitch
-            speech_head_offsets[5] + face_offsets[5],  # yaw
-        ]
+        # Extract pose components
+        head, antennas, body_yaw = global_full_body_pose
         
-        head_pose = create_head_pose(
-            x=combined_offsets[0],
-            y=combined_offsets[1],
-            z=combined_offsets[2],
-            roll=combined_offsets[3],
-            pitch=combined_offsets[4],
-            yaw=combined_offsets[5],
-            degrees=False,
-            mm=False,
-        )
-        # Always apply relative offsets for speech and face tracking
+        # Single set_target call - the one and only place we control the robot
         reachy_mini.set_target(
-            head=head_pose,
-            body_yaw=0,
-            is_relative=True,
+            head=head,
+            antennas=antennas,
+            body_yaw=body_yaw
         )
-        
-        # Breathing system - separate absolute movement when idle
-        if should_breathe and is_breathing:
-            if breathing_interpolation_start_time is not None:
-                # Phase 1: Interpolate to base position (1 second)
-                elapsed_interpolation = current_time - breathing_interpolation_start_time
-                if elapsed_interpolation < breathing_interpolation_duration:
-                    # Smooth interpolation to neutral base position
-                    t = elapsed_interpolation / breathing_interpolation_duration
-                    neutral_pose = create_head_pose(0, 0, 0, 0, 0, 0)  # Base position
-                    interpolated_pose = linear_pose_interpolation(
-                        breathing_interpolation_start_pose, 
-                        neutral_pose, 
-                        t
-                    )
-                    
-                    # Interpolate antennas to neutral position (0, 0)
-                    neutral_antennas = np.array([0.0, 0.0])
-                    start_antennas = np.array(breathing_interpolation_start_antennas)
-                    interpolated_antennas = (1 - t) * start_antennas + t * neutral_antennas
-                    
-                    reachy_mini.set_target(
-                        head=interpolated_pose,
-                        antennas=interpolated_antennas,
-                        is_relative=False,  # Absolute positioning
-                    )
-                else:
-                    # Phase 2: Start breathing sine waves
-                    if breathing_start_time is None:
-                        breathing_start_time = current_time
-                    
-                    breathing_elapsed = current_time - breathing_start_time
-                    breathing_head_pose = create_head_pose(z=0.01 * np.sin(2 * np.pi * 0.1 * breathing_elapsed))  # Gentle Z breathing
-                    antenna_sway = np.deg2rad(15) * np.sin(2 * np.pi * 0.5 * breathing_elapsed)
-                    breathing_antennas = np.array([antenna_sway, -antenna_sway])
-                    
-                    reachy_mini.set_target(
-                        head=breathing_head_pose,
-                        antennas=breathing_antennas,
-                        is_relative=False,  # Absolute positioning for breathing
-                    )
 
         # Calculate computation time and adjust sleep for 50Hz
         computation_time = time.time() - loop_start_time
         sleep_time = max(0, target_period - computation_time)
 
         # Print frequency info every 100 loops (~2 seconds)
-        current_time = time.time()
         if loop_count % 100 == 0:
             elapsed = current_time - last_print_time
             actual_freq = 100.0 / elapsed if elapsed > 0 else 0
