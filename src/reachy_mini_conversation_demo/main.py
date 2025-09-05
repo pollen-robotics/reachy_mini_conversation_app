@@ -19,6 +19,7 @@ from openai import OpenAI
 from reachy_mini import ReachyMini
 from reachy_mini.motion.dance import DanceMove
 from reachy_mini.motion.dance.collection.dance import AVAILABLE_MOVES
+from reachy_mini.motion.goto import GotoMove
 from reachy_mini.motion.recorded import RecordedMoves
 from reachy_mini.utils import create_head_pose
 from reachy_mini.utils.camera import find_camera
@@ -320,7 +321,7 @@ def camera_worker():
 
 
 async def move_head(params: dict) -> dict:
-    global moving_start, moving_for, last_activity_time
+    global moving_start, moving_for, last_activity_time, move_queue
     # look left, right up, down or front
     print("[TOOL CALL] move_head", params)
     direction = params.get("direction", "front")
@@ -339,8 +340,21 @@ async def move_head(params: dict) -> dict:
     moving_start = time.time()
     moving_for = 1.0
     last_activity_time = time.time()  # Update activity time for breathing system
-    reachy_mini.goto_target(target_pose, duration=moving_for)
-    return {"status": "looking " + direction}
+    
+    # Create GotoMove and add to queue
+    goto_move = GotoMove(
+        start_head_pose=reachy_mini.get_present_head_pose(),
+        target_head_pose=target_pose,
+        start_body_yaw=reachy_mini.get_present_body_yaw(),
+        target_body_yaw=0,  # Reset body yaw to 0 (same as before)
+        start_antennas=np.array(reachy_mini.get_present_antenna_joint_positions()),
+        target_antennas=np.array((0, 0)),  # Reset antennas to default position
+        duration=moving_for,
+        method="linear"
+    )
+    move_queue.put(goto_move)
+    
+    return {"status": "queued head movement " + direction}
 
 
 async def head_tracking(params: dict) -> dict:
@@ -1175,10 +1189,18 @@ def main():
     else:
         print(f"{format_timestamp()} Skipping camera thread - no camera available")
 
-    # going to center at start
-    reachy_mini.goto_target(
-        create_head_pose(0, 0, 0, 0, 0, 0, degrees=True), antennas=(0, 0), duration=1.0
+    # going to center at start using GotoMove
+    center_move = GotoMove(
+        start_head_pose=reachy_mini.get_present_head_pose(),
+        target_head_pose=create_head_pose(0, 0, 0, 0, 0, 0, degrees=True),
+        start_body_yaw=reachy_mini.get_present_body_yaw(),
+        target_body_yaw=0,
+        start_antennas=np.array(reachy_mini.get_present_antenna_joint_positions()),
+        target_antennas=np.array((0, 0)),
+        duration=1.0,
+        method="linear"
     )
+    move_queue.put(center_move)
 
     # Frequency monitoring variables
     target_frequency = 50.0  # Hz
