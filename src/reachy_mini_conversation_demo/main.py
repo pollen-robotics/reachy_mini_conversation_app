@@ -17,10 +17,10 @@ from dotenv import load_dotenv
 from fastrtc import AdditionalOutputs, AsyncStreamHandler, Stream, wait_for_item
 from openai import OpenAI
 from reachy_mini import ReachyMini
-from reachy_mini.motion.dance import DanceMove
-from reachy_mini.motion.dance.collection.dance import AVAILABLE_MOVES
+from reachy_mini_dances_library.dance_move import DanceMove
+from reachy_mini_dances_library.collection.dance import AVAILABLE_MOVES
 from reachy_mini.motion.goto import GotoMove
-from reachy_mini.motion.recorded import RecordedMoves
+from reachy_mini.motion.recorded_move import RecordedMoves
 from reachy_mini.utils import create_head_pose
 from reachy_mini.utils.camera import find_camera
 from reachy_mini.utils.interpolation import linear_pose_interpolation
@@ -342,12 +342,16 @@ async def move_head(params: dict) -> dict:
     last_activity_time = time.time()  # Update activity time for breathing system
     
     # Create GotoMove and add to queue
+    
+    cur_head_joints, cur_antennas = reachy_mini.get_current_joint_positions()
+    current_body_yaw = cur_head_joints[0]
+
     goto_move = GotoMove(
-        start_head_pose=reachy_mini.get_present_head_pose(),
+        start_head_pose=reachy_mini.get_current_head_pose(),
         target_head_pose=target_pose,
-        start_body_yaw=reachy_mini.get_present_body_yaw(),
+        start_body_yaw=current_body_yaw,
         target_body_yaw=0,  # Reset body yaw to 0 (same as before)
-        start_antennas=np.array(reachy_mini.get_present_antenna_joint_positions()),
+        start_antennas=np.array(cur_antennas),
         target_antennas=np.array((0, 0)),  # Reset antennas to default position
         duration=moving_for,
         method="linear"
@@ -1190,12 +1194,14 @@ def main():
         print(f"{format_timestamp()} Skipping camera thread - no camera available")
 
     # going to center at start using GotoMove
+    cur_head_joints, cur_antennas = reachy_mini.get_current_joint_positions()
+    current_body_yaw = cur_head_joints[0]
     center_move = GotoMove(
-        start_head_pose=reachy_mini.get_present_head_pose(),
+        start_head_pose=reachy_mini.get_current_head_pose(),
         target_head_pose=create_head_pose(0, 0, 0, 0, 0, 0, degrees=True),
-        start_body_yaw=reachy_mini.get_present_body_yaw(),
+        start_body_yaw=current_body_yaw,
         target_body_yaw=0,
-        start_antennas=np.array(reachy_mini.get_present_antenna_joint_positions()),
+        start_antennas=np.array(cur_antennas),
         target_antennas=np.array((0, 0)),
         duration=1.0,
         method="linear"
