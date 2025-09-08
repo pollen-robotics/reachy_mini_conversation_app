@@ -34,6 +34,64 @@ SAMPLE_RATE = 24000
 SIM = False
 
 
+class BreathingMove:
+    """Breathing move with interpolation to neutral and then continuous breathing patterns."""
+    
+    def __init__(self, interpolation_start_pose, interpolation_start_antennas, interpolation_duration=1.0):
+        """Initialize breathing move.
+        
+        Args:
+            interpolation_start_pose: 4x4 matrix of current head pose to interpolate from
+            interpolation_start_antennas: Current antenna positions to interpolate from  
+            interpolation_duration: Duration of interpolation to neutral (seconds)
+        """
+        self.interpolation_start_pose = interpolation_start_pose
+        self.interpolation_start_antennas = np.array(interpolation_start_antennas)
+        self.interpolation_duration = interpolation_duration
+        self.duration = float('inf')  # Continuous breathing (never ends naturally)
+        
+        # Neutral positions for breathing base
+        self.neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
+        self.neutral_antennas = np.array([0.0, 0.0])
+        
+        # Breathing parameters
+        self.breathing_z_amplitude = 0.01  # 1cm gentle breathing
+        self.breathing_frequency = 0.1  # Hz (6 breaths per minute)
+        self.antenna_sway_amplitude = np.deg2rad(15)  # 15 degrees
+        self.antenna_frequency = 0.5  # Hz (faster antenna sway)
+    
+    def evaluate(self, t):
+        """Evaluate breathing move at time t."""
+        if t < self.interpolation_duration:
+            # Phase 1: Interpolate to neutral base position
+            interpolation_t = t / self.interpolation_duration
+            
+            # Interpolate head pose
+            head_pose = linear_pose_interpolation(
+                self.interpolation_start_pose,
+                self.neutral_head_pose, 
+                interpolation_t
+            )
+            
+            # Interpolate antennas
+            antennas = (1 - interpolation_t) * self.interpolation_start_antennas + interpolation_t * self.neutral_antennas
+            
+        else:
+            # Phase 2: Breathing patterns from neutral base
+            breathing_time = t - self.interpolation_duration
+            
+            # Gentle z-axis breathing
+            z_offset = self.breathing_z_amplitude * np.sin(2 * np.pi * self.breathing_frequency * breathing_time)
+            head_pose = create_head_pose(x=0, y=0, z=z_offset, roll=0, pitch=0, yaw=0, degrees=True, mm=False)
+            
+            # Antenna sway (opposite directions)
+            antenna_sway = self.antenna_sway_amplitude * np.sin(2 * np.pi * self.antenna_frequency * breathing_time)
+            antennas = np.array([antenna_sway, -antenna_sway])
+        
+        # Return full body pose: (head_pose, antennas, body_yaw)
+        return (head_pose, antennas, 0)
+
+
 def init_globals():
     """Initialize all global variables and components."""
     global script_start_time, reachy_mini, cap, speech_head_offsets, camera_available
@@ -1253,6 +1311,31 @@ def main():
                     print(f"[MOVE] Starting new move, duration: {current_move.duration}s")
                 except queue.Empty:
                     pass
+        
+        # Breathing logic: start breathing after inactivity delay if no moves in queue
+        breathing_inactivity_delay = 5.0  # seconds
+        if current_move is None and move_queue.empty():
+            time_since_activity = current_time - last_activity_time
+            if time_since_activity >= breathing_inactivity_delay:
+                # Start breathing move
+                _, current_antennas = reachy_mini.get_current_joint_positions()
+                current_head_pose = reachy_mini.get_current_head_pose()
+                
+                breathing_move = BreathingMove(
+                    interpolation_start_pose=current_head_pose,
+                    interpolation_start_antennas=current_antennas,
+                    interpolation_duration=1.0
+                )
+                move_queue.put(breathing_move)
+                print(f"[BREATHING] Started breathing after {time_since_activity:.1f}s of inactivity")
+        
+        # Stop breathing if new activity detected (queue has non-breathing moves)
+        if current_move is not None and isinstance(current_move, BreathingMove):
+            if not move_queue.empty():
+                # There are new moves waiting, stop breathing immediately
+                current_move = None
+                move_start_time = None
+                print("[BREATHING] Stopping breathing due to new move activity")
         
         # Get primary pose from current move or default neutral pose
         if current_move is not None and move_start_time is not None:
