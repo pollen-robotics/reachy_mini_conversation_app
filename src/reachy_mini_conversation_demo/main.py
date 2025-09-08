@@ -23,7 +23,7 @@ from reachy_mini.motion.goto import GotoMove
 from reachy_mini.motion.recorded_move import RecordedMoves
 from reachy_mini.utils import create_head_pose
 from reachy_mini.utils.camera import find_camera
-from reachy_mini.utils.interpolation import linear_pose_interpolation
+from reachy_mini.utils.interpolation import linear_pose_interpolation, compose_world_offset
 from reachy_mini_toolbox.vision import HeadTracker
 from scipy.spatial.transform import Rotation as R
 
@@ -157,9 +157,31 @@ def format_timestamp():
     return f"[{dt.strftime('%Y-%m-%d %H:%M:%S')} | +{elapsed_seconds:.1f}s]"
 
 
-def combine_full_body(full_body_pose1, full_body_pose2):
-    """Stub function to combine two full body poses. Just returns the first pose for now."""
-    return full_body_pose1
+def combine_full_body(primary_pose, secondary_pose):
+    """Combine primary and secondary full body poses.
+    
+    Args:
+        primary_pose: (head_pose, antennas, body_yaw) - primary move
+        secondary_pose: (head_pose, antennas, body_yaw) - secondary offsets
+        
+    Returns:
+        Combined full body pose (head_pose, antennas, body_yaw)
+    """
+    primary_head, primary_antennas, primary_body_yaw = primary_pose
+    secondary_head, secondary_antennas, secondary_body_yaw = secondary_pose
+    
+    # Combine head poses using compose_world_offset
+    # primary_head is T_abs, secondary_head is T_off_world
+    combined_head = compose_world_offset(primary_head, secondary_head, reorthonormalize=True)
+    
+    # Sum antennas and body_yaw
+    combined_antennas = (
+        primary_antennas[0] + secondary_antennas[0],
+        primary_antennas[1] + secondary_antennas[1]
+    )
+    combined_body_yaw = primary_body_yaw + secondary_body_yaw
+    
+    return (combined_head, combined_antennas, combined_body_yaw)
 
 
 # Global variables for camera thread
@@ -1232,43 +1254,48 @@ def main():
                 except queue.Empty:
                     pass
         
-        # Evaluate current move to get target full_body_pose
+        # Get primary pose from current move or default neutral pose
         if current_move is not None and move_start_time is not None:
             move_time = current_time - move_start_time
-            global_full_body_pose = current_move.evaluate(move_time)
+            primary_full_body_pose = current_move.evaluate(move_time)
             is_playing_move = True
             is_moving = True
         else:
-            # Default pose when no move is playing
+            # Default neutral pose when no move is playing
             is_playing_move = False
             is_moving = (time.time() - moving_start < moving_for)
-            
-            # Create speech/face tracking pose
-            with face_tracking_lock:
-                face_offsets = face_tracking_offsets.copy()
-            
-            # Combine speech sway offsets + face tracking offsets
-            combined_offsets = [
-                speech_head_offsets[0] + face_offsets[0],  # x
-                speech_head_offsets[1] + face_offsets[1],  # y  
-                speech_head_offsets[2] + face_offsets[2],  # z
-                speech_head_offsets[3] + face_offsets[3],  # roll
-                speech_head_offsets[4] + face_offsets[4],  # pitch
-                speech_head_offsets[5] + face_offsets[5],  # yaw
-            ]
-            
-            head_pose = create_head_pose(
-                x=combined_offsets[0],
-                y=combined_offsets[1],
-                z=combined_offsets[2],
-                roll=combined_offsets[3],
-                pitch=combined_offsets[4],
-                yaw=combined_offsets[5],
-                degrees=False,
-                mm=False,
-            )
-            
-            global_full_body_pose = (head_pose, (0, 0), 0)
+            # Neutral primary pose
+            neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
+            primary_full_body_pose = (neutral_head_pose, (0, 0), 0)
+        
+        # Create secondary pose from speech and face tracking offsets
+        with face_tracking_lock:
+            face_offsets = face_tracking_offsets.copy()
+        
+        # Combine speech sway offsets + face tracking offsets for secondary pose
+        secondary_offsets = [
+            speech_head_offsets[0] + face_offsets[0],  # x
+            speech_head_offsets[1] + face_offsets[1],  # y  
+            speech_head_offsets[2] + face_offsets[2],  # z
+            speech_head_offsets[3] + face_offsets[3],  # roll
+            speech_head_offsets[4] + face_offsets[4],  # pitch
+            speech_head_offsets[5] + face_offsets[5],  # yaw
+        ]
+        
+        secondary_head_pose = create_head_pose(
+            x=secondary_offsets[0],
+            y=secondary_offsets[1],
+            z=secondary_offsets[2],
+            roll=secondary_offsets[3],
+            pitch=secondary_offsets[4],
+            yaw=secondary_offsets[5],
+            degrees=False,
+            mm=False,
+        )
+        secondary_full_body_pose = (secondary_head_pose, (0, 0), 0)
+        
+        # Combine primary and secondary poses
+        global_full_body_pose = combine_full_body(primary_full_body_pose, secondary_full_body_pose)
         
         # Extract pose components
         head, antennas, body_yaw = global_full_body_pose
