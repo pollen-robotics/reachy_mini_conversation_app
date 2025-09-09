@@ -11,7 +11,10 @@ from reachy_mini import ReachyMini
 from reachy_mini.utils import create_head_pose
 
 from reachy_mini_conversation_demo.config import config
-from reachy_mini_conversation_demo.vision.yolo_head_tracker import HeadTracker
+from reachy_mini_conversation_demo.vision.yolo_head_tracker import (
+    HeadTracker as YoloHeadTracker,
+)
+from reachy_mini_toolbox.vision import HeadTracker as MediapipeHeadTracker
 from reachy_mini_conversation_demo.openai_realtime import OpenAIRealtimeHandler
 from reachy_mini_conversation_demo.prompts import SESSION_INSTRUCTIONS
 from reachy_mini_conversation_demo.tools import (
@@ -30,7 +33,13 @@ from reachy_mini_conversation_demo.vision.processors import (
 parser = argparse.ArgumentParser(description="Reachy Mini Conversation Demo")
 parser.add_argument("--sim", action="store_true", help="Run in simulation mode")
 parser.add_argument("--vision", action="store_true", help="Enable vision")
-parser.add_argument("--head-tracking", action="store_true", help="Enable head tracking")
+# parser.add_argument("--head-tracking", action="store_true", help="Enable head tracking")
+parser.add_argument(
+    "--head-tracker",
+    choices=["yolo", "mediapipe", None],
+    default=None,
+    help="Choose head tracker (default: None)",
+)
 parser.add_argument(
     "--vision-provider",
     choices=["openai", "local"],
@@ -54,7 +63,7 @@ API_KEY = config.OPENAI_API_KEY
 # Defaults are all False unless CLI flags are passed
 SIM = args.sim
 VISION_ENABLED = args.vision
-HEAD_TRACKING = args.head_tracking
+HEAD_TRACKING_ENABLED = args.head_tracker is not None
 LOG_LEVEL = "DEBUG" if args.debug else "INFO"
 NO_INTERRUPUTIONS = args.no_interruptions
 
@@ -68,7 +77,7 @@ logger.info(
     "Runtime toggles: SIM=%s VISION_ENABLED=%s HEAD_TRACKING=%s LOG_LEVEL=%s",
     SIM,
     VISION_ENABLED,
-    HEAD_TRACKING,
+    HEAD_TRACKING_ENABLED,
     LOG_LEVEL,
 )
 
@@ -158,11 +167,15 @@ async def loop():
 
     current_robot = ReachyMini()
 
-    head_tracker: HeadTracker | None = None
-    if HEAD_TRACKING and not SIM:
-        head_tracker = HeadTracker()
-        logger.info("Head tracking enabled")
-    elif HEAD_TRACKING and SIM:
+    head_tracker = None
+    if HEAD_TRACKING_ENABLED and not SIM:
+        if args.head_tracker == "mediapipe":
+            head_tracker = MediapipeHeadTracker()
+            logger.info("Head tracking enabled with Mediapipe")
+        elif args.head_tracker == "yolo":
+            head_tracker = YoloHeadTracker()
+            logger.info("Head tracking enabled with YOLO")
+    elif HEAD_TRACKING_ENABLED and SIM:
         logger.warning("Head tracking disabled while in Simulation")
     else:
         logger.warning("Head tracking disabled")

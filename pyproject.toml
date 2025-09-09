@@ -21,6 +21,7 @@ dependencies = [
     "dotenv",
     "ultralytics",
     "supervision",
+    "reachy_mini_toolbox@git+ssh://git@github.com/pollen-robotics/reachy_mini_toolbox@main"
 ]
 
 

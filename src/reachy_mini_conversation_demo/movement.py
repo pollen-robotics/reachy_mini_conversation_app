@@ -9,7 +9,6 @@ import cv2
 from reachy_mini import ReachyMini
 from reachy_mini.reachy_mini import IMAGE_SIZE
 from reachy_mini.utils import create_head_pose
-from reachy_mini_conversation_demo.vision.yolo_head_tracker import HeadTracker
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +17,7 @@ class MovementManager:
     def __init__(
         self,
         current_robot: ReachyMini,
-        head_tracker: HeadTracker | None,
+        head_tracker,
         camera: cv2.VideoCapture | None,
     ):
         self.current_robot = current_robot
