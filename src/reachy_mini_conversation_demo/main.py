@@ -160,13 +160,14 @@ async def loop():
     # Initialize camera using same approach as main_works.py
     camera = None
     camera_available = False
-    
+
     if not SIM:
         camera = find_camera()
     else:
         import cv2
+
         camera = cv2.VideoCapture(0)
-    
+
     # Check camera availability (same logic as main_works.py)
     if camera is not None:
         try:
@@ -184,7 +185,7 @@ async def loop():
             logger.warning(f"Camera test failed: {e}")
     else:
         logger.warning("No camera found")
-    
+
     if not camera_available:
         logger.warning("Face tracking will be disabled - no camera available")
         camera = None  # Ensure camera is None if not available
@@ -214,13 +215,14 @@ async def loop():
     camera_worker = None
     if camera_available and camera is not None:
         camera_worker = CameraWorker(camera, current_robot, head_tracker)
-        camera_worker.start()
-        logger.info("Camera worker started successfully")
     else:
         logger.info("Skipping camera worker - no camera available")
 
     movement_manager = MovementManager(
-        current_robot=current_robot, head_tracker=head_tracker, camera=camera, camera_worker=camera_worker
+        current_robot=current_robot,
+        head_tracker=head_tracker,
+        camera=camera,
+        camera_worker=camera_worker,
     )
 
     robot_is_speaking = asyncio.Event()
@@ -264,9 +266,8 @@ async def loop():
             control_mic_loop(stop_event, robot_is_speaking, speaking_queue, audio_sync),
             name="mic-mute",
         ),
-        asyncio.create_task(
-            movement_manager.enable(stop_event), name="move"
-        ),
+        asyncio.create_task(movement_manager.enable(stop_event), name="move"),
+        asyncio.create_task(camera_worker.enable(stop_event), name="camera-worker"),
     ]
     if vision_manager:
         tasks.append(
@@ -284,7 +285,7 @@ async def loop():
     # Stop camera worker
     if camera_worker:
         camera_worker.stop()
-    
+
     if camera:
         camera.release()
 
