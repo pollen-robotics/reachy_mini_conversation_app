@@ -2,18 +2,17 @@ from __future__ import annotations
 
 import abc
 import asyncio
+import inspect
 import json
 import logging
 import time
-import inspect
-
-from reachy_mini import ReachyMini
-from reachy_mini.utils import create_head_pose
 from dataclasses import dataclass
 from typing import Any, Dict, Literal, Optional
 
 import cv2
 import numpy as np
+from reachy_mini import ReachyMini
+from reachy_mini.utils import create_head_pose
 
 from reachy_mini_conversation_demo.vision.processors import VisionManager
 
@@ -21,10 +20,15 @@ logger = logging.getLogger(__name__)
 
 # Initialize dance and emotion libraries
 try:
-    from reachy_mini_dances_library.collection.dance import AVAILABLE_MOVES
     from reachy_mini.motion.recorded_move import RecordedMoves
-    from reachy_mini_conversation_demo.dance_emotion_moves import DanceQueueMove, EmotionQueueMove, GotoQueueMove
-    
+    from reachy_mini_dances_library.collection.dance import AVAILABLE_MOVES
+
+    from reachy_mini_conversation_demo.dance_emotion_moves import (
+        DanceQueueMove,
+        EmotionQueueMove,
+        GotoQueueMove,
+    )
+
     # Initialize recorded moves for emotions
     RECORDED_MOVES = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
     DANCE_AVAILABLE = True
@@ -39,6 +43,7 @@ except ImportError as e:
 # Initialize face recognition
 try:
     from deepface import DeepFace
+
     FACE_RECOGNITION_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"DeepFace not available: {e}")
@@ -64,12 +69,12 @@ class ToolDependencies:
     """External dependencies injected into tools"""
 
     reachy_mini: ReachyMini
-    create_head_pose: Any
     movement_manager: Any  # MovementManager from moves.py
     # Optional deps
     camera: Optional[cv2.VideoCapture] = None
     camera_worker: Optional[Any] = None  # CameraWorker for frame buffering
     vision_manager: Optional[VisionManager] = None
+    head_wobbler: Optional[Any] = None  # HeadWobbler for audio-reactive motion
     camera_retry_attempts: int = 5
     camera_retry_delay_s: float = 0.10
     vision_timeout_s: float = 8.0
@@ -160,27 +165,32 @@ class MoveHead(Tool):
         # Use new movement manager
         try:
             movement_manager = deps.movement_manager
-            
+
             # Get current state for interpolation
             current_head_pose = deps.reachy_mini.get_current_head_pose()
             _, current_antennas = deps.reachy_mini.get_current_joint_positions()
-            
+
             # Create goto move
             goto_move = GotoQueueMove(
                 target_head_pose=target,
                 start_head_pose=current_head_pose,
                 target_antennas=(0, 0),  # Reset antennas to default
-                start_antennas=(current_antennas[0], current_antennas[1]),  # Skip body_yaw
-                target_body_yaw=0,  # Reset body yaw  
-                start_body_yaw=current_antennas[0],  # body_yaw is first in joint positions
-                duration=deps.motion_duration_s
+                start_antennas=(
+                    current_antennas[0],
+                    current_antennas[1],
+                ),  # Skip body_yaw
+                target_body_yaw=0,  # Reset body yaw
+                start_body_yaw=current_antennas[
+                    0
+                ],  # body_yaw is first in joint positions
+                duration=deps.motion_duration_s,
             )
-            
+
             movement_manager.queue_move(goto_move)
             movement_manager.set_moving_state(deps.motion_duration_s)
-            
+
             return {"status": f"looking {direction}"}
-            
+
         except Exception as e:
             logger.exception("move_head failed")
             return {"error": f"move_head failed: {type(e).__name__}: {e}"}
@@ -232,8 +242,10 @@ class Camera(Tool):
             )
         else:
             # Return base64 encoded image like main_works.py camera tool
-            import cv2
             import base64
+
+            import cv2
+
             temp_path = "/tmp/camera_frame.jpg"
             cv2.imwrite(temp_path, frame)
             with open(temp_path, "rb") as f:
@@ -252,109 +264,109 @@ class HeadTracking(Tool):
 
     async def __call__(self, deps: ToolDependencies, **kwargs) -> Dict[str, Any]:
         enable = bool(kwargs.get("start"))
-        
+
         # Update camera worker head tracking state
         if deps.camera_worker is not None:
             deps.camera_worker.set_head_tracking_enabled(enable)
-        
+
         status = "started" if enable else "stopped"
         logger.info("Tool call: head_tracking %s", status)
         return {"status": f"head tracking {status}"}
 
 
-class DescribeCurrentScene(Tool):
-    name = "describe_current_scene"
-    description = "Get a detailed description of the current scene."
-    parameters_schema = {"type": "object", "properties": {}, "required": []}
+# class DescribeCurrentScene(Tool):
+#     name = "describe_current_scene"
+#     description = "Get a detailed description of the current scene."
+#     parameters_schema = {"type": "object", "properties": {}, "required": []}
 
-    async def __call__(self, deps: ToolDependencies, **kwargs) -> Dict[str, Any]:
-        logger.info("Tool call: describe_current_scene")
+#     async def __call__(self, deps: ToolDependencies, **kwargs) -> Dict[str, Any]:
+#         logger.info("Tool call: describe_current_scene")
 
-        result = await deps.vision_manager.process_current_frame(
-            "Describe what you currently see in detail, focusing on people, objects, and activities."
-        )
+#         result = await deps.vision_manager.process_current_frame(
+#             "Describe what you currently see in detail, focusing on people, objects, and activities."
+#         )
 
-        if isinstance(result, dict) and "error" in result:
-            return result
-        return result
-
-
-class GetSceneContext(Tool):
-    name = "get_scene_context"
-    description = (
-        "Get the most recent automatic scene description for conversational context."
-    )
-    parameters_schema = {"type": "object", "properties": {}, "required": []}
-
-    async def __call__(self, deps: ToolDependencies, **kwargs) -> Dict[str, Any]:
-        logger.info("Tool call: get_scene_context")
-        vision_manager = deps.vision_manager
-        if not vision_manager:
-            return {"error": "Vision processing not available"}
-
-        try:
-            description = await deps.vision_manager.get_current_description()
-
-            if not description:
-                return {
-                    "context": "No scene description available yet",
-                    "note": "Vision processing may still be initializing",
-                }
-            return {
-                "context": description,
-                "note": "This comes from periodic automatic analysis",
-            }
-        except Exception as e:
-            logger.exception("Failed to get scene context")
-            return {"error": f"Scene context failed: {type(e).__name__}: {e}"}
+#         if isinstance(result, dict) and "error" in result:
+#             return result
+#         return result
 
 
-class AnalyzeSceneFor(Tool):
-    name = "analyze_scene_for"
-    description = "Analyze the current scene for a specific purpose."
-    parameters_schema = {
-        "type": "object",
-        "properties": {
-            "purpose": {
-                "type": "string",
-                "enum": [
-                    "safety",
-                    "people",
-                    "objects",
-                    "activity",
-                    "navigation",
-                    "general",
-                ],
-                "default": "general",
-            }
-        },
-        "required": [],
-    }
+# class GetSceneContext(Tool):
+#     name = "get_scene_context"
+#     description = (
+#         "Get the most recent automatic scene description for conversational context."
+#     )
+#     parameters_schema = {"type": "object", "properties": {}, "required": []}
 
-    async def __call__(self, deps: ToolDependencies, **kwargs) -> Dict[str, Any]:
-        purpose = (kwargs.get("purpose") or "general").lower()
-        logger.info("Tool call: analyze_scene_for purpose=%s", purpose)
+#     async def __call__(self, deps: ToolDependencies, **kwargs) -> Dict[str, Any]:
+#         logger.info("Tool call: get_scene_context")
+#         vision_manager = deps.vision_manager
+#         if not vision_manager:
+#             return {"error": "Vision processing not available"}
 
-        prompts = {
-            "safety": "Look for safety concerns, obstacles, or hazards.",
-            "people": "Describe people, their positions and actions.",
-            "objects": "Identify and describe main visible objects.",
-            "activity": "Describe ongoing activities or actions.",
-            "navigation": "Describe the space for navigation: obstacles, pathways, layout.",
-            "general": "Give a general description of the scene including people, objects, and activities.",
-        }
-        prompt = prompts.get(purpose, prompts["general"])
+#         try:
+#             description = await deps.vision_manager.get_current_description()
 
-        result = await deps.vision_manager.process_current_frame(prompt)
+#             if not description:
+#                 return {
+#                     "context": "No scene description available yet",
+#                     "note": "Vision processing may still be initializing",
+#                 }
+#             return {
+#                 "context": description,
+#                 "note": "This comes from periodic automatic analysis",
+#             }
+#         except Exception as e:
+#             logger.exception("Failed to get scene context")
+#             return {"error": f"Scene context failed: {type(e).__name__}: {e}"}
 
-        if isinstance(result, dict) and "error" in result:
-            return result
 
-        if not isinstance(result, dict):
-            return {"error": "vision returned non-dict"}
+# class AnalyzeSceneFor(Tool):
+#     name = "analyze_scene_for"
+#     description = "Analyze the current scene for a specific purpose."
+#     parameters_schema = {
+#         "type": "object",
+#         "properties": {
+#             "purpose": {
+#                 "type": "string",
+#                 "enum": [
+#                     "safety",
+#                     "people",
+#                     "objects",
+#                     "activity",
+#                     "navigation",
+#                     "general",
+#                 ],
+#                 "default": "general",
+#             }
+#         },
+#         "required": [],
+#     }
 
-        result["analysis_purpose"] = purpose
-        return result
+#     async def __call__(self, deps: ToolDependencies, **kwargs) -> Dict[str, Any]:
+#         purpose = (kwargs.get("purpose") or "general").lower()
+#         logger.info("Tool call: analyze_scene_for purpose=%s", purpose)
+
+#         prompts = {
+#             "safety": "Look for safety concerns, obstacles, or hazards.",
+#             "people": "Describe people, their positions and actions.",
+#             "objects": "Identify and describe main visible objects.",
+#             "activity": "Describe ongoing activities or actions.",
+#             "navigation": "Describe the space for navigation: obstacles, pathways, layout.",
+#             "general": "Give a general description of the scene including people, objects, and activities.",
+#         }
+#         prompt = prompts.get(purpose, prompts["general"])
+
+#         result = await deps.vision_manager.process_current_frame(prompt)
+
+#         if isinstance(result, dict) and "error" in result:
+#             return result
+
+#         if not isinstance(result, dict):
+#             return {"error": "vision returned non-dict"}
+
+#         result["analysis_purpose"] = purpose
+#         return result
 
 
 class Dance(Tool):
@@ -364,7 +376,7 @@ class Dance(Tool):
         "type": "object",
         "properties": {
             "move": {
-                "type": "string", 
+                "type": "string",
                 "description": "Name of the move; use 'random' or omit for random.",
             },
             "repeat": {
@@ -386,10 +398,13 @@ class Dance(Tool):
 
         if not move_name or move_name == "random":
             import random
+
             move_name = random.choice(list(AVAILABLE_MOVES.keys()))
 
         if move_name not in AVAILABLE_MOVES:
-            return {"error": f"Unknown dance move '{move_name}'. Available: {list(AVAILABLE_MOVES.keys())}"}
+            return {
+                "error": f"Unknown dance move '{move_name}'. Available: {list(AVAILABLE_MOVES.keys())}"
+            }
 
         # Add dance moves to queue
         movement_manager = deps.movement_manager
@@ -449,7 +464,9 @@ class PlayEmotion(Tool):
         try:
             emotion_names = RECORDED_MOVES.list_moves()
             if emotion_name not in emotion_names:
-                return {"error": f"Unknown emotion '{emotion_name}'. Available: {emotion_names}"}
+                return {
+                    "error": f"Unknown emotion '{emotion_name}'. Available: {emotion_names}"
+                }
 
             # Add emotion to queue
             movement_manager = deps.movement_manager
@@ -514,17 +531,16 @@ class FaceRecognition(Tool):
             else:
                 logger.error("Camera worker not available")
                 return {"error": "Camera worker not available"}
-            
+
             # Save frame temporarily (same as main_works.py pattern)
             temp_path = "/tmp/face_recognition.jpg"
             import cv2
+
             cv2.imwrite(temp_path, frame)
 
             # Use DeepFace to find face
             results = await asyncio.to_thread(
-                DeepFace.find, 
-                img_path=temp_path, 
-                db_path="./pollen_faces"
+                DeepFace.find, img_path=temp_path, db_path="./pollen_faces"
             )
 
             if len(results) == 0:
@@ -568,7 +584,7 @@ def get_available_emotions_and_descriptions() -> str:
     """Get formatted list of available emotions with descriptions"""
     if not EMOTION_AVAILABLE:
         return "Emotions not available"
-    
+
     try:
         names = RECORDED_MOVES.list_moves()
         ret = "Available emotions:\n"

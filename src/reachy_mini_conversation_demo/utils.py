@@ -21,11 +21,12 @@ def parse_args():
     return parser.parse_args()
 
 
-def handle_camera_stuff(args, current_robot):
+def handle_vision_stuff(args, current_robot):
     """Initialize camera, head tracker and camera worker."""
     camera = None
     camera_worker = None
     head_tracker = None
+    vision_manager = None
     if not args.no_camera:
         if not args.sim:
             camera = find_camera()
@@ -52,4 +53,4 @@ def handle_camera_stuff(args, current_robot):
 
         camera_worker = CameraWorker(camera, current_robot, head_tracker)
 
-    return camera, camera_worker, head_tracker
+    return camera, camera_worker, head_tracker, vision_manager

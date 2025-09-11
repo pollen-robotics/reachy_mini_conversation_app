@@ -6,10 +6,9 @@ from reachy_mini import ReachyMini
 
 from reachy_mini_conversation_demo.audio.head_wobbler import HeadWobbler
 from reachy_mini_conversation_demo.moves import MovementManager
-from reachy_mini_conversation_demo.openai_realtime_test import (
-    MinimalOpenaiRealtimeHandler,
-)
-from reachy_mini_conversation_demo.utils import handle_camera_stuff, parse_args
+from reachy_mini_conversation_demo.openai_realtime_test import OpenaiRealtimeHandler
+from reachy_mini_conversation_demo.tools import ToolDependencies
+from reachy_mini_conversation_demo.utils import handle_vision_stuff, parse_args
 
 
 async def main():
@@ -17,7 +16,9 @@ async def main():
     args = parse_args()
     current_robot = ReachyMini()
 
-    camera, camera_worker, head_tracker = handle_camera_stuff(args, current_robot)
+    camera, camera_worker, head_tracker, vision_manager = handle_vision_stuff(
+        args, current_robot
+    )
 
     stop_event = asyncio.Event()
     movement_manager = MovementManager(
@@ -28,8 +29,17 @@ async def main():
     )
 
     head_wobbler = HeadWobbler(set_offsets=movement_manager.set_offsets)
-    handler = MinimalOpenaiRealtimeHandler(head_wobbler=head_wobbler)
 
+    deps = ToolDependencies(
+        reachy_mini=current_robot,
+        movement_manager=movement_manager,
+        camera=camera,
+        camera_worker=camera_worker,
+        vision_manager=vision_manager,
+        head_wobbler=head_wobbler,
+    )
+
+    handler = OpenaiRealtimeHandler(deps)
     stream = Stream(
         handler=handler,
         mode="send-receive",

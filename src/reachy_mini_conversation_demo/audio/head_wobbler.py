@@ -1,9 +1,10 @@
 import asyncio
 import base64
+
 import numpy as np
 from pyparsing import Optional
-from reachy_mini_conversation_demo.audio.speech_tapper import SwayRollRT, HOP_MS
 
+from reachy_mini_conversation_demo.audio.speech_tapper import HOP_MS, SwayRollRT
 
 SAMPLE_RATE = 24000
 MOVEMENT_LATENCY_S = 0.08  # seconds between audio and robot movement
