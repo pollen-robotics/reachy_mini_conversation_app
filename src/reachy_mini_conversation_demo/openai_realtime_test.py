@@ -43,10 +43,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     "turn_detection": {
                         "type": "server_vad",
                     },
-                    "input_audio_transcription": {
-                        "model": "whisper-1",
-                        "language": "en",
-                    },
+                    # "input_audio_transcription": {
+                    #     "model": "whisper-1",
+                    #     "language": "en",
+                    # },
                     "voice": "ballad",
                     "instructions": "You are a helpful assistant.",
                     "tools": ALL_TOOL_SPECS,
@@ -58,23 +58,38 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             # Manage event received from the openai server
             self.connection = conn
             async for event in self.connection:
+                # print(f"[DEBUG] OpenAI event: {event.type}")
                 if event.type == "input_audio_buffer.speech_started":
                     self.clear_queue()
+                    self.deps.head_wobbler.reset()
+                    print("[DEBUG] user speech started")
 
-                if (
-                    event.type
-                    == "conversation.item.input_audio_transcription.completed"
-                ):
-                    await self.output_queue.put(
-                        AdditionalOutputs({"role": "user", "content": event.transcript})
-                    )
+                if event.type == "input_audio_buffer.speech_stopped":
+                    print("[DEBUG] user speech stopped")
+                    pass
 
-                if event.type == "response.audio_transcript.done":
-                    await self.output_queue.put(
-                        AdditionalOutputs(
-                            {"role": "assistant", "content": event.transcript}
-                        )
-                    )
+                if event.type == "response.created":
+                    print("[DEBUG] response created")
+                    pass
+
+                if event.type == "response.done":
+                    print("[DEBUG] response done")
+                    # self.deps.head_wobbler.reset()
+
+                # if (
+                #     event.type
+                #     == "conversation.item.input_audio_transcription.completed"
+                # ):
+                #     await self.output_queue.put(
+                #         AdditionalOutputs({"role": "user", "content": event.transcript})
+                #     )
+
+                # if event.type == "response.audio_transcript.done":
+                #     await self.output_queue.put(
+                #         AdditionalOutputs(
+                #             {"role": "assistant", "content": event.transcript}
+                #         )
+                #     )
 
                 if event.type == "response.audio.delta":
                     self.deps.head_wobbler.feed(event.delta)
@@ -126,24 +141,6 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         print("Tool %s failed", tool_name)
                         tool_result = {"error": str(e)}
 
-                    ## parse args
-                    # try:
-                    #     args = json.loads(args_json)
-                    # except Exception:
-                    #     args = {}
-
-                    # # dispatch
-                    # func = self._tools.get(name)
-                    # try:
-                    #     result = (
-                    #         await func(args)
-                    #         if func
-                    #         else {"error": f"unknown tool: {name}"}
-                    #     )
-                    # except Exception as e:
-                    #     result = {"error": f"{type(e).__name__}: {str(e)}"}
-                    #     print(result)
-
                     # send the tool result back
                     await self.connection.conversation.item.create(
                         item={
@@ -167,16 +164,11 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                             }
                         )
 
-                    # global is_idle_function_call
-                    # if not is_idle_function_call:
-                    # ask the model to continue and speak about the result
                     await self.connection.response.create(
                         response={
                             "instructions": "Use the tool result just returned and answer concisely in speech."
                         }
                     )
-                    # else:
-                    #     is_idle_function_call = False
 
                     # cleanup
                     self._pending_calls.pop(call_id, None)

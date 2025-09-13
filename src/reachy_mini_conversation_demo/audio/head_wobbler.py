@@ -1,5 +1,6 @@
 import asyncio
 import base64
+from asyncio.queues import QueueEmpty
 
 import numpy as np
 from pyparsing import Optional
@@ -18,7 +19,6 @@ class HeadWobbler:
 
         self.audio_queue = asyncio.Queue()
         self.sway = SwayRollRT()
-        self._update_event = asyncio.Event()  # signals new offsets
         self.task = asyncio.create_task(self.consumer())
 
     def feed(self, delta_b64):
@@ -31,6 +31,9 @@ class HeadWobbler:
         loop = asyncio.get_running_loop()
 
         while True:
+            # print len of audio queue
+            print("Audio queue length:", self.audio_queue.qsize())
+
             sr, chunk = await self.audio_queue.get()  # (1,N), int16
             pcm = np.asarray(chunk).squeeze(0)
             results = self.sway.feed(pcm, sr)  # list of dicts with keys x_mm..yaw_rad
@@ -76,4 +79,16 @@ class HeadWobbler:
                 self.set_offsets(offsets)
                 self._hops_done += 1
                 i += 1
-                self._update_event.set()  # notify waiters of a fresh value
+
+    def drain_audio_queue(self):
+        try:
+            while True:
+                self.audio_queue.get_nowait()
+        except QueueEmpty:
+            pass
+
+    def reset(self):
+        self.drain_audio_queue()
+        self._base_ts = None
+        self._hops_done = 0
+        self.sway.reset()
