@@ -89,6 +89,11 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     pass
                     # self.deps.head_wobbler.reset()
 
+                if event.type == "response.started":
+                    logger.debug("assistant response started; resetting head wobble state")
+                    self.last_activity_time = asyncio.get_event_loop().time()
+                    self.deps.head_wobbler.reset()
+
                 # if (
                 #     event.type
                 #     == "conversation.item.input_audio_transcription.completed"
