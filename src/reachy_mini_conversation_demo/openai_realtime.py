@@ -56,7 +56,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     #     "language": "en",
                     # },
                     "voice": "ballad",
-                    "instructions": "On parle en francais",
+                    "instructions": "Speak in English by default and adapt only when the user explicitly switches language.",
                     "tools": ALL_TOOL_SPECS,
                     "tool_choice": "auto",
                     "temperature": 0.7,
