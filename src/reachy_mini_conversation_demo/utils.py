@@ -8,6 +8,8 @@ from reachy_mini.utils.camera import find_camera
 
 from reachy_mini_conversation_demo.camera_worker import CameraWorker
 
+logger = logging.getLogger(__name__)
+
 
 def parse_args():
     """Parse command line arguments."""
@@ -45,20 +47,60 @@ def handle_vision_stuff(args, current_robot):
 
             camera = cv2.VideoCapture(0)
 
-        if args.head_tracker is not None:
-            if args.head_tracker == "yolo":
-                from reachy_mini_conversation_demo.vision.yolo_head_tracker import (
-                    HeadTracker,
-                )
+        camera_ready = False
 
-                head_tracker = HeadTracker()
+        if camera is None:
+            msg = "[Vision] No camera detected (find_camera returned None); vision features disabled."
+            print(msg)
+            logger.warning(msg)
+        else:
+            camera_ready = True
+            try:
+                if hasattr(camera, "isOpened") and not camera.isOpened():
+                    camera_ready = False
+                    msg = (
+                        "[Vision] Camera handle is closed or unavailable; vision features disabled."
+                    )
+                    print(msg)
+                    logger.warning(msg)
+                else:
+                    ret, _ = camera.read()
+                    if not ret:
+                        msg = (
+                            "[Vision] Camera opened but initial frame read failed; will retry in worker."
+                        )
+                        print(msg)
+                        logger.warning(msg)
+            except Exception as exc:
+                camera_ready = False
+                msg = f"[Vision] Camera test failed ({exc}); vision features disabled."
+                print(msg)
+                logger.warning(msg)
 
-            elif args.head_tracker == "mediapipe":
-                from reachy_mini_toolbox.vision import HeadTracker
+            if not camera_ready and hasattr(camera, "release"):
+                try:
+                    camera.release()
+                except Exception:
+                    pass
+                camera = None
 
-                head_tracker = HeadTracker()
+        if camera_ready:
+            if args.head_tracker is not None:
+                if args.head_tracker == "yolo":
+                    from reachy_mini_conversation_demo.vision.yolo_head_tracker import (
+                        HeadTracker,
+                    )
 
-        camera_worker = CameraWorker(camera, current_robot, head_tracker)
+                    head_tracker = HeadTracker()
+
+                elif args.head_tracker == "mediapipe":
+                    from reachy_mini_toolbox.vision import HeadTracker
+
+                    head_tracker = HeadTracker()
+
+            camera_worker = CameraWorker(camera, current_robot, head_tracker)
+        else:
+            camera = None
 
     return camera, camera_worker, head_tracker, vision_manager
 
