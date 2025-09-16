@@ -215,6 +215,10 @@ class MovementManager:
         self.target_frequency = 50.0  # Hz
         self.target_period = 1.0 / self.target_frequency
 
+        # Listening pose state
+        self.listening_active = False
+        self._listening_pose: Optional[FullBodyPose] = None
+
     def queue_move(self, move: Move) -> None:
         """Add a move to the primary move queue."""
         self.move_queue.append(move)
@@ -235,6 +239,10 @@ class MovementManager:
         self, offsets: Tuple[float, float, float, float, float, float]
     ) -> None:
         """Set speech head offsets (secondary move)."""
+        if self.listening_active:
+            self.state.speech_offsets = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+            return
+
         self.state.speech_offsets = offsets
         has_activity = any(abs(val) > 1e-6 for val in offsets)
         if has_activity:
@@ -259,6 +267,9 @@ class MovementManager:
         self, offsets: Tuple[float, float, float, float, float, float]
     ) -> None:
         """Set face tracking offsets (secondary move)."""
+        if self.listening_active:
+            return
+
         self.state.face_tracking_offsets = offsets
 
     def set_moving_state(self, duration: float) -> None:
@@ -275,6 +286,9 @@ class MovementManager:
 
     def _manage_move_queue(self, current_time: float) -> None:
         """Manage the primary move queue (sequential execution)."""
+        if self.listening_active:
+            return
+
         # Check if current move is finished
         if self.state.current_move is None or (
             self.state.move_start_time is not None
@@ -294,29 +308,13 @@ class MovementManager:
 
     def _manage_breathing(self, current_time: float) -> None:
         """Manage automatic breathing when idle."""
+        if self.listening_active:
+            return
+
         # Start breathing after inactivity delay if no moves in queue
         if self.state.current_move is None and not self.move_queue:
-            time_since_activity = current_time - self.state.last_activity_time
-
             if self.is_idle():
-                # Start breathing move
-                try:
-                    _, current_antennas = (
-                        self.current_robot.get_current_joint_positions()
-                    )
-                    current_head_pose = self.current_robot.get_current_head_pose()
-
-                    breathing_move = BreathingMove(
-                        interpolation_start_pose=current_head_pose,
-                        interpolation_start_antennas=current_antennas,
-                        interpolation_duration=1.0,
-                    )
-                    self.queue_move(breathing_move)
-                    logger.info(
-                        f"Started breathing after {time_since_activity:.1f}s of inactivity"
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to start breathing: {e}")
+                self._queue_breathing_move()
 
         # Stop breathing if new activity detected (queue has non-breathing moves)
         if (
@@ -367,6 +365,13 @@ class MovementManager:
 
     def _get_secondary_pose(self) -> FullBodyPose:
         """Get the secondary full body pose from speech and face tracking offsets."""
+        if self.listening_active:
+            return (
+                create_head_pose(0, 0, 0, 0, 0, 0, degrees=True),
+                (0.0, 0.0),
+                0.0,
+            )
+
         # Combine speech sway offsets + face tracking offsets for secondary pose
         secondary_offsets = [
             self.state.speech_offsets[0] + self.state.face_tracking_offsets[0],  # x
@@ -391,6 +396,10 @@ class MovementManager:
 
     def _update_face_tracking(self, current_time: float) -> None:
         """Get face tracking offsets from camera worker thread."""
+        if self.listening_active:
+            self.state.face_tracking_offsets = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+            return
+
         if self.camera_worker is not None:
             # Get face tracking offsets from camera worker thread
             self.state.face_tracking_offsets = (
@@ -421,6 +430,18 @@ class MovementManager:
             loop_start_time = time.time()
             loop_count += 1
             current_time = time.time()
+
+            if self.listening_active and self._listening_pose is not None:
+                head, antennas, body_yaw = self._listening_pose
+                try:
+                    self.current_robot.set_target(
+                        head=head, antennas=antennas, body_yaw=body_yaw
+                    )
+                except Exception as exc:
+                    logger.error(f"Failed to set listening pose: {exc}")
+
+                await asyncio.sleep(self.target_period)
+                continue
 
             # 1. Manage move queue (sequential primary moves)
             self._manage_move_queue(current_time)
@@ -472,3 +493,77 @@ class MovementManager:
             await asyncio.sleep(sleep_time)
 
         logger.info("Movement control loop stopped")
+
+    def _queue_breathing_move(self) -> None:
+        """Queue a breathing move when appropriate."""
+        if self.listening_active:
+            return
+
+        if isinstance(self.state.current_move, BreathingMove):
+            return
+
+        if any(isinstance(move, BreathingMove) for move in self.move_queue):
+            return
+
+        try:
+            head_joints, current_antennas = (
+                self.current_robot.get_current_joint_positions()
+            )
+            current_head_pose = self.current_robot.get_current_head_pose()
+            breathing_move = BreathingMove(
+                interpolation_start_pose=current_head_pose,
+                interpolation_start_antennas=current_antennas,
+                interpolation_duration=1.0,
+            )
+            self.queue_move(breathing_move)
+            logger.info("Queued breathing move")
+        except Exception as exc:
+            logger.error(f"Failed to queue breathing move: {exc}")
+
+    def begin_listening_pose(self) -> None:
+        """Freeze motion and apply a quick listening roll."""
+        if self.listening_active:
+            return
+
+        try:
+            head_joints, current_antennas = (
+                self.current_robot.get_current_joint_positions()
+            )
+            current_head_pose = self.current_robot.get_current_head_pose()
+            current_body_yaw = head_joints[0]
+
+            self.clear_queue()
+            self.state.current_move = None
+            self.state.move_start_time = None
+            self.state.is_playing_move = False
+            self.state.is_moving = False
+            self.state.speech_offsets = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+            self.state.face_tracking_offsets = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+            listen_offset = create_head_pose(0, 0, 0, 12, 0, 0, degrees=True)
+            listening_head = compose_world_offset(
+                current_head_pose, listen_offset, reorthonormalize=True
+            )
+
+            self._listening_pose = (
+                listening_head,
+                (float(current_antennas[0]), float(current_antennas[1])),
+                float(current_body_yaw),
+            )
+            self.listening_active = True
+            self.state.update_activity()
+            # TODO: test adding a gentle audio cue alongside the listening pose.
+        except Exception as exc:
+            logger.error(f"Failed to enter listening pose: {exc}")
+            self.listening_active = False
+            self._listening_pose = None
+
+    def end_listening_pose(self) -> None:
+        """Release listening pose and restart breathing."""
+        if not self.listening_active:
+            return
+
+        self.listening_active = False
+        self._listening_pose = None
+        self.state.update_activity()
+        self._queue_breathing_move()
