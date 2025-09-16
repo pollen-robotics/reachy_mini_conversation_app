@@ -8,7 +8,6 @@ from reachy_mini.utils.camera import find_camera
 
 from reachy_mini_conversation_demo.camera_worker import CameraWorker
 
-
 logger = logging.getLogger(__name__)
 
 def parse_args():
