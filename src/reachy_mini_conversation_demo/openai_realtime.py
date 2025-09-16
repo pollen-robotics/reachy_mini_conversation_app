@@ -229,7 +229,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
         # Handle idle
         idle_duration = asyncio.get_event_loop().time() - self.last_activity_time
-        if idle_duration > 15.0 and self.deps.movement_manager.is_idle():
+        if idle_duration > 20.0 and self.deps.movement_manager.is_idle():
             await self.send_idle_signal(idle_duration)
 
             self.last_activity_time = (
@@ -255,7 +255,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         """Send an idle signal to the openai server."""
         logger.debug("Sending idle signal")
         self.is_idle_tool_call = True
-        timestamp_msg = f"[Idle time update: {self.format_timestamp()} - No activity for {idle_duration:.1f}s] You've been idle for a while. Feel free to get creative - dance, show an emotion, look around, do nothing, or just be yourself!"
+        timestamp_msg = (
+            f"[Idle time update: {self.format_timestamp()} - No activity for {idle_duration:.1f}s] You've been idle for a while. Keep things mellow: choose gentle actions, light dances, or subtle emotions."
+        )
         if not self.connection:
             logger.debug("No connection, cannot send idle signal")
             return
@@ -269,7 +271,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         await self.connection.response.create(
             response={
                 "modalities": ["text"],
-                "instructions": "You MUST respond with function calls only - no speech or text. Choose appropriate actions for idle behavior.",
+                "instructions": "You MUST respond with function calls only — no speech or text. Favour calm gestures and avoid strong emotions or intense dances when you are idle.",
                 "tool_choice": "required",
             }
         )
