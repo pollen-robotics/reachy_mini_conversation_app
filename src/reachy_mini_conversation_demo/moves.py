@@ -236,6 +236,18 @@ class MovementManager:
     ) -> None:
         """Set speech head offsets (secondary move)."""
         self.state.speech_offsets = offsets
+        has_activity = any(abs(val) > 1e-6 for val in offsets)
+        if has_activity:
+            self.state.update_activity()
+            if isinstance(self.state.current_move, BreathingMove):
+                self.state.current_move = None
+                self.state.move_start_time = None
+            if self.move_queue:
+                self.move_queue = deque(
+                    move
+                    for move in self.move_queue
+                    if not isinstance(move, BreathingMove)
+                )
 
     def set_offsets(
         self, offsets: Tuple[float, float, float, float, float, float]
