@@ -17,7 +17,7 @@ from reachy_mini.utils import create_head_pose
 
 logger = logging.getLogger(__name__)
 
-ENABLE_FACE_RECOGNITION = False
+ENABLE_FACE_RECOGNITION = True
 
 # Initialize dance and emotion libraries
 try:
