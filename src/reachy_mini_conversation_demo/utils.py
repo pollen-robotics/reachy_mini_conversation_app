@@ -53,28 +53,28 @@ def handle_vision_stuff(args, current_robot):
             print(msg)
             logger.warning(msg)
         else:
+            camera_ready = True
             try:
-                if hasattr(camera, "isOpened") and camera.isOpened():
-                    ret, _ = camera.read()
-                    if ret:
-                        camera_ready = True
-                    else:
-                        msg = (
-                            "[Vision] Camera opened but failed to provide frames; vision features disabled."
-                        )
-                        print(msg)
-                        logger.warning(msg)
-                else:
+                if hasattr(camera, "isOpened") and not camera.isOpened():
+                    camera_ready = False
                     msg = (
                         "[Vision] Camera handle is closed or unavailable; vision features disabled."
                     )
                     print(msg)
                     logger.warning(msg)
+                else:
+                    ret, _ = camera.read()
+                    if not ret:
+                        msg = (
+                            "[Vision] Camera opened but initial frame read failed; will retry in worker."
+                        )
+                        print(msg)
+                        logger.warning(msg)
             except Exception as exc:
+                camera_ready = False
                 msg = f"[Vision] Camera test failed ({exc}); vision features disabled."
                 print(msg)
                 logger.warning(msg)
-                camera_ready = False
 
             if not camera_ready and hasattr(camera, "release"):
                 try:
