@@ -66,7 +66,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             # Manage event received from the openai server
             self.connection = conn
             async for event in self.connection:
-                logger.debug(f"OpenAI event: {event.type}")
+                # logger.debug(f"OpenAI event: {event.type}")
                 if event.type == "input_audio_buffer.speech_started":
                     self.clear_queue()
                     self.deps.head_wobbler.reset()
@@ -109,9 +109,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 if event.type == "response.audio.delta":
                     self.deps.head_wobbler.feed(event.delta)
                     self.last_activity_time = asyncio.get_event_loop().time()
-                    logger.debug(
-                        "last activity time updated to %s", self.last_activity_time
-                    )
+                    # logger.debug(
+                    #     "last activity time updated to %s", self.last_activity_time
+                    # )
                     await self.output_queue.put(
                         (
                             self.output_sample_rate,

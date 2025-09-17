@@ -11,6 +11,16 @@ from reachy_mini_conversation_demo.camera_worker import CameraWorker
 logger = logging.getLogger(__name__)
 
 
+def print_registered_loggers():
+    """Print registered logger namespaces to stdout for troubleshooting."""
+    manager = logging.root.manager
+    registered = sorted(name for name in manager.loggerDict if name)
+    if registered:
+        print("[Logging] Registered loggers: " + ", ".join(registered))
+    else:
+        print("[Logging] Registered loggers: (none detected)")
+
+
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser("Reachy Mini Conversation Demo")
@@ -145,32 +155,40 @@ class AioTaskThread:
 
 
 def setup_logger(debug):
-    """Setups the logger."""
-    log_level = "DEBUG" if debug else "INFO"
+    """Configure logging for the demo."""
     logging.basicConfig(
-        level=getattr(logging, log_level, logging.INFO),
+        level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s:%(lineno)d | %(message)s",
     )
     logger = logging.getLogger(__name__)
+
+    # print_registered_loggers()
+
+    app_logger = logging.getLogger("reachy_mini_conversation_demo")
+    app_logger.setLevel(logging.DEBUG if debug else logging.INFO)
+    app_handler = logging.StreamHandler()
+    app_handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s %(levelname)s %(name)s:%(lineno)d | %(message)s"
+        )
+    )
+    app_handler.setLevel(logging.DEBUG if debug else logging.INFO)
+    app_logger.handlers.clear()
+    app_logger.addHandler(app_handler)
+    app_logger.propagate = False
 
     # Suppress WebRTC warnings
     warnings.filterwarnings("ignore", message=".*AVCaptureDeviceTypeExternal.*")
     warnings.filterwarnings("ignore", category=UserWarning, module="aiortc")
 
-    # Tame third-party noise (looser in DEBUG)
-    if log_level == "DEBUG":
-        logging.getLogger("aiortc").setLevel(logging.CRITICAL)
-        logging.getLogger("fastrtc").setLevel(logging.CRITICAL)
-        logging.getLogger("aioice").setLevel(logging.CRITICAL)
-        logging.getLogger("websockets").setLevel(logging.CRITICAL)
-        logging.getLogger("openai").setLevel(logging.CRITICAL)
-        logging.getLogger("httpcore").setLevel(logging.CRITICAL)
-        
-    else:
-        logging.getLogger("aiortc").setLevel(logging.CRITICAL)
-        logging.getLogger("fastrtc").setLevel(logging.CRITICAL)
-        logging.getLogger("aioice").setLevel(logging.CRITICAL)
-        logging.getLogger("websockets").setLevel(logging.CRITICAL)
-        logging.getLogger("openai").setLevel(logging.CRITICAL)
-        logging.getLogger("httpcore").setLevel(logging.CRITICAL)
+    third_party_levels = {
+        "aiortc": logging.INFO,
+        "fastrtc": logging.INFO,
+        "aioice": logging.INFO,
+        "websockets": logging.INFO,
+        "openai": logging.INFO,
+        "httpcore": logging.INFO,
+    }
+    for name, level in third_party_levels.items():
+        logging.getLogger(name).setLevel(level)
     return logger
