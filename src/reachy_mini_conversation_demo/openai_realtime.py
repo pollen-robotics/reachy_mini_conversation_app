@@ -155,7 +155,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                             tool_name, args_json_str, self.deps
                         )
                         logger.debug("[Tool %s executed]", tool_name)
-                        logger.debug("Tool result: %s", tool_result)
+                        if tool_name != "camera":
+                            logger.debug("Tool result: %s", tool_result)
                     except Exception as e:
                         logger.error("Tool %s failed", tool_name)
                         tool_result = {"error": str(e)}
