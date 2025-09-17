@@ -77,11 +77,6 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     self.deps.movement_manager.end_listening_pose()
                     logger.debug("user speech stopped")
 
-                if event.type in ("response.audio.completed", "response.completed"):
-                    # Doesn't seem to be called
-                    logger.debug("response completed")
-                    self.deps.head_wobbler.reset()
-
                 if event.type == "response.created":
                     logger.debug("response created")
 
@@ -198,7 +193,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         self.is_idle_tool_call = False
 
                     # re synchronize the head wobble after a tool call that may have taken some time
-                    self.deps.head_wobbler.reset()
+                    # self.deps.head_wobbler.reset()
                     # cleanup
                     self._pending_calls.pop(call_id, None)
 

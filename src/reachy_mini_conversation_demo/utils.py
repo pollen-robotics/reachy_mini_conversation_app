@@ -159,11 +159,18 @@ def setup_logger(debug):
 
     # Tame third-party noise (looser in DEBUG)
     if log_level == "DEBUG":
-        logging.getLogger("aiortc").setLevel(logging.INFO)
-        logging.getLogger("fastrtc").setLevel(logging.INFO)
-        logging.getLogger("aioice").setLevel(logging.INFO)
+        logging.getLogger("aiortc").setLevel(logging.CRITICAL)
+        logging.getLogger("fastrtc").setLevel(logging.CRITICAL)
+        logging.getLogger("aioice").setLevel(logging.CRITICAL)
+        logging.getLogger("websockets").setLevel(logging.CRITICAL)
+        logging.getLogger("openai").setLevel(logging.CRITICAL)
+        logging.getLogger("httpcore").setLevel(logging.CRITICAL)
+        
     else:
-        logging.getLogger("aiortc").setLevel(logging.ERROR)
-        logging.getLogger("fastrtc").setLevel(logging.ERROR)
-        logging.getLogger("aioice").setLevel(logging.WARNING)
+        logging.getLogger("aiortc").setLevel(logging.CRITICAL)
+        logging.getLogger("fastrtc").setLevel(logging.CRITICAL)
+        logging.getLogger("aioice").setLevel(logging.CRITICAL)
+        logging.getLogger("websockets").setLevel(logging.CRITICAL)
+        logging.getLogger("openai").setLevel(logging.CRITICAL)
+        logging.getLogger("httpcore").setLevel(logging.CRITICAL)
     return logger

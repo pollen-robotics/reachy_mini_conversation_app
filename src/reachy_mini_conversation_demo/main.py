@@ -11,7 +11,7 @@ from reachy_mini_conversation_demo.utils import (
     AioTaskThread,
     handle_vision_stuff,
     parse_args,
-    # setup_logger,
+    setup_logger,
 )
 
 
@@ -19,7 +19,7 @@ def main():
     """Entrypoint for the Reachy Mini conversation demo."""
     args = parse_args()
 
-    # logger = setup_logger(args.debug)
+    setup_logger(args.debug)
     
     robot = ReachyMini()
 

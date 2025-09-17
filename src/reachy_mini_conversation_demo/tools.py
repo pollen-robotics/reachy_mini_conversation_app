@@ -251,7 +251,6 @@ class Camera(Tool):
             import base64
 
             import cv2
-
             temp_path = "/tmp/camera_frame.jpg"
             cv2.imwrite(temp_path, frame)
             with open(temp_path, "rb") as f:
