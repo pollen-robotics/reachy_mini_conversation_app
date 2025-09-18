@@ -38,6 +38,11 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.last_activity_time = asyncio.get_event_loop().time()
         self.start_time = asyncio.get_event_loop().time()
         self.is_idle_tool_call = False
+        # Track last processed text to avoid duplicates on UI refresh
+        self._last_text_sent: str | None = None
+        # Track current response id and whether we should suppress audio playback
+        self._current_response_id: str | None = None
+        self._suppress_audio: bool = False
 
     def copy(self):
         """Create a copy of the handler."""
@@ -68,6 +73,18 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             self.connection = conn
             async for event in self.connection:
                 logger.debug(f"OpenAI event: {event.type}")
+                # Attempt to capture current response id
+                if event.type == "response.created":
+                    rid = None
+                    resp = getattr(event, "response", None)
+                    # try common shapes: event.response.id or event.id
+                    if resp is not None:
+                        rid = getattr(resp, "id", None)
+                    if rid is None:
+                        rid = getattr(event, "id", None)
+                    if isinstance(rid, str):
+                        self._current_response_id = rid
+                        logger.debug("captured response id: %s", rid)
                 if event.type == "input_audio_buffer.speech_started":
                     self.clear_queue()
                     self.deps.head_wobbler.reset()
@@ -87,7 +104,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 if event.type == "response.done":
                     # Doesn't mean the audio is done playing
                     logger.debug("response done")
-                    pass
+                    self._current_response_id = None
+                    self._suppress_audio = False
                     # self.deps.head_wobbler.reset()
 
                 if (
@@ -108,19 +126,28 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     )
 
                 if event.type == "response.audio.delta":
-                    self.deps.head_wobbler.feed(event.delta)
-                    self.last_activity_time = asyncio.get_event_loop().time()
-                    logger.debug(
-                        "last activity time updated to %s", self.last_activity_time
-                    )
-                    await self.output_queue.put(
-                        (
-                            self.output_sample_rate,
-                            np.frombuffer(
-                                base64.b64decode(event.delta), dtype=np.int16
-                            ).reshape(1, -1),
-                        ),
-                    )
+                    if not self._suppress_audio:
+                        self.deps.head_wobbler.feed(event.delta)
+                        self.last_activity_time = asyncio.get_event_loop().time()
+                        logger.debug(
+                            "last activity time updated to %s", self.last_activity_time
+                        )
+                        await self.output_queue.put(
+                            (
+                                self.output_sample_rate,
+                                np.frombuffer(
+                                    base64.b64decode(event.delta), dtype=np.int16
+                                ).reshape(1, -1),
+                            ),
+                        )
+                    else:
+                        # Drop audio frames while suppressed
+                        logger.debug("audio suppressed; dropping delta chunk")
+
+                # When the server confirms the audio buffer is cleared, allow future audio
+                if event.type in ("output_audio_buffer.cleared", "output_audio_buffer.stopped"):
+                    logger.debug("server output audio buffer cleared/stopped")
+                    self._suppress_audio = False
 
                 # ---- tool-calling plumbing ----
                 # 1) model announces a function call item; capture name + call_id
@@ -259,6 +286,84 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             self.last_activity_time = (
                 asyncio.get_event_loop().time()
             )  # avoid repeated resets
+
+        # Handle text input coming from the WebRTC textbox variant or additional inputs
+        # Stream wires input values via latest_args; when using the built-in textbox variant,
+        # latest_args[0] is a WebRTCData-like object (or dict) with a 'textbox' field.
+        try:
+            if self.args_set.is_set():
+                args = list(self.latest_args)
+                # reset ready flag for next inputs
+                self.reset()
+                if args:
+                    text_value = None
+                    first = args[0]
+                    # Case 1: direct string (from a plain Textbox additional input)
+                    if isinstance(first, str):
+                        text_value = first
+                    # Case 2: WebRTCData model/dict with .textbox or ['textbox']
+                    else:
+                        # try attribute access chain
+                        for candidate in [
+                            getattr(first, "textbox", None),
+                            getattr(getattr(first, "root", None), "textbox", None)
+                            if hasattr(first, "root")
+                            else None,
+                        ]:
+                            if isinstance(candidate, str) and candidate:
+                                text_value = candidate
+                                break
+                        # try dict-style
+                        if text_value is None and isinstance(first, dict):
+                            root = first.get("root", first)
+                            if isinstance(root, dict):
+                                tv = root.get("textbox")
+                                if isinstance(tv, str):
+                                    text_value = tv
+
+                    text = (text_value or "").strip()
+                    if text and text != self._last_text_sent:
+                        # Any incoming text interrupts current speech like a voice barge-in
+                        self._suppress_audio = True
+                        self.clear_queue()
+                        self.deps.head_wobbler.reset()
+                        # Best-effort server-side cancel and clear of audio buffer
+                        try:
+                            if self.connection:
+                                if self._current_response_id:
+                                    await self.connection.response.cancel(
+                                        response_id=self._current_response_id
+                                    )
+                                await self.connection.output_audio_buffer.clear()
+                        except Exception:
+                            pass
+                        # push to chatbot as a user message (non-blocking UI update)
+                        await self.output_queue.put(
+                            AdditionalOutputs({"role": "user", "content": text})
+                        )
+                        # send to the realtime conversation
+                        if self.connection:
+                            await self.connection.conversation.item.create(
+                                item={
+                                    "type": "message",
+                                    "role": "user",
+                                    "content": [
+                                        {"type": "input_text", "text": text}
+                                    ],
+                                }
+                            )
+                            # Ask the assistant to respond (defaults to speaking)
+                            await self.connection.response.create(response={})
+                            self._last_text_sent = text
+                            # refresh activity timestamp so idle logic pauses
+                            self.last_activity_time = asyncio.get_event_loop().time()
+        except Exception as e:
+            logger.error("Failed handling text input: %s", e)
+            await self.output_queue.put(
+                AdditionalOutputs(
+                    {"role": "assistant", "content": f"[error] {str(e)}"}
+                )
+            )
 
         return await wait_for_item(self.output_queue)
 

@@ -68,15 +68,23 @@ def main():
     )
     logger.info(f"Chatbot avatar images: {chatbot.avatar_images}")
 
+
     handler = OpenaiRealtimeHandler(deps)
     stream = Stream(
         handler=handler,
         mode="send-receive",
         modality="audio",
-        additional_inputs=[chatbot],
+        # Use the built-in textbox variant; no extra inputs passed here
+        additional_inputs=None,
         additional_outputs=[chatbot],
         additional_outputs_handler=update_chatbot,
-        ui_args={"title": "Talk with Reachy Mini"},
+        # Use the "textbox" variant to place inputs in a row above the stream
+        # and send input only on submit (Enter)
+        ui_args={
+            "title": "Talk with Reachy Mini",
+            "variant": "textbox",
+            "send_input_on": "submit",
+        },
     )
 
     app = FastAPI()
