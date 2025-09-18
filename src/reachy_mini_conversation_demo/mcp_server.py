@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """MCP Server for Reachy Mini robot tools using OpenAI MCP server implementation.
+
 Provides head movement and camera vision capabilities.
 """
 
@@ -9,11 +10,9 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
-import cv2
-import mcp.types as types
-import numpy as np
+from mcp import types
 from mcp.server import NotificationOptions, Server
 
 # MCP Server imports
@@ -25,31 +24,36 @@ from mcp.types import (
 from reachy_mini import ReachyMini
 from reachy_mini.utils import create_head_pose
 
-from reachy_mini_conversation_demo.movement import MovementManager
+from reachy_mini_conversation_demo.moves import MovementManager
 from reachy_mini_conversation_demo.vision.processors import (
     VisionManager,
     init_camera,
     init_vision,
 )
 
+if TYPE_CHECKING:
+    import cv2
+    import numpy as np
+
 logger = logging.getLogger(__name__)
 
 
 # Configuration and Dependencies
 class ReachyMCPConfig:
-    """Configuration for the Reachy MCP Server"""
+    """Configuration for the Reachy MCP Server."""
 
     def __init__(
         self,
         reachy_mini: ReachyMini,
         movement_manager: MovementManager,
-        camera: Optional[cv2.VideoCapture] = None,
-        vision_manager: Optional[VisionManager] = None,
+        camera: cv2.VideoCapture | None = None,
+        vision_manager: VisionManager | None = None,
         camera_retry_attempts: int = 5,
         camera_retry_delay_s: float = 0.10,
         vision_timeout_s: float = 8.0,
         motion_duration_s: float = 1.0,
-    ):
+    ) -> None:
+        """Configure for the Reachy MCP Server."""
         self.reachy_mini = reachy_mini
         self.movement_manager = movement_manager
         self.camera = camera
@@ -62,7 +66,9 @@ class ReachyMCPConfig:
 
 # Helper functions
 def _read_frame(
-    cap: cv2.VideoCapture, attempts: int = 5, delay_s: float = 0.1
+    cap: cv2.VideoCapture,
+    attempts: int = 5,
+    delay_s: float = 0.1,
 ) -> np.ndarray:
     """Read a frame from the camera with retries."""
     trials, frame, ret = 0, None, False
@@ -73,11 +79,12 @@ def _read_frame(
             time.sleep(delay_s)
     if not ret or frame is None:
         logger.error("Failed to capture image from camera after %d attempts", attempts)
-        raise RuntimeError("Failed to capture image from camera.")
+        msg = "Failed to capture image from camera."
+        raise RuntimeError(msg)
     return frame
 
 
-def _execute_motion(config: ReachyMCPConfig, target: Any) -> Dict[str, Any]:
+def _execute_motion(config: ReachyMCPConfig, target: Any) -> dict[str, Any]:
     """Apply motion to reachy_mini and update movement_manager state."""
     movement_manager = config.movement_manager
     movement_manager.moving_start = time.monotonic()
@@ -93,7 +100,10 @@ def _execute_motion(config: ReachyMCPConfig, target: Any) -> Dict[str, Any]:
 
 # MCP Server Implementation
 class ReachyMCPServer:
-    def __init__(self, config: ReachyMCPConfig):
+    """MCP Server for Reachy Mini robot tools."""
+
+    def __init__(self, config: ReachyMCPConfig) -> None:
+        """Initialize the Reachy MCP Server."""
         self.config = config
         self.server = Server("reachy-mini-tools")
         self._setup_handlers()
@@ -107,12 +117,12 @@ class ReachyMCPServer:
             "front": (0, 0, 0, 0, 0, 0),
         }
 
-    def _setup_handlers(self):
-        """Set up MCP server handlers"""
+    def _setup_handlers(self) -> None:
+        """Set up MCP server handlers."""
 
         @self.server.list_tools()
-        async def handle_list_tools() -> List[Tool]:
-            """List available tools"""
+        async def handle_list_tools() -> list[Tool]:
+            """List available tools."""
             return [
                 Tool(
                     name="move_head",
@@ -124,7 +134,7 @@ class ReachyMCPServer:
                                 "type": "string",
                                 "enum": ["left", "right", "up", "down", "front"],
                                 "description": "Direction to move the head",
-                            }
+                            },
                         },
                         "required": ["direction"],
                     },
@@ -138,7 +148,7 @@ class ReachyMCPServer:
                             "question": {
                                 "type": "string",
                                 "description": "Question to ask about the captured image",
-                            }
+                            },
                         },
                         "required": ["question"],
                     },
@@ -147,65 +157,69 @@ class ReachyMCPServer:
 
         @self.server.call_tool()
         async def handle_call_tool(
-            name: str, arguments: dict
-        ) -> List[types.TextContent | types.ImageContent | types.EmbeddedResource]:
-            """Handle tool calls"""
+            name: str,
+            arguments: dict,
+        ) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
+            """Handle tool calls."""
             if name == "move_head":
                 return await self._handle_move_head(arguments)
-            elif name == "camera":
+            if name == "camera":
                 return await self._handle_camera(arguments)
-            else:
-                raise ValueError(f"Unknown tool: {name}")
+            msg = f"Unknown tool: {name}"
+            raise ValueError(msg)
 
         @self.server.list_resources()
-        async def handle_list_resources() -> List[Resource]:
-            """List available resources"""
+        async def handle_list_resources() -> list[Resource]:
+            """List available resources."""
             return [
                 Resource(
                     uri="reachy://status",
                     name="Robot Status",
                     description="Current status of the Reachy Mini robot",
                     mimeType="application/json",
-                )
+                ),
             ]
 
         @self.server.read_resource()
         async def handle_read_resource(uri: str) -> str:
-            """Read resource content"""
+            """Read resource content."""
             if uri == "reachy://status":
                 status = {
                     "robot_connected": self.config.reachy_mini is not None,
                     "camera_available": self.config.camera is not None,
                     "vision_available": self.config.vision_manager is not None,
                     "current_head_pose": getattr(
-                        self.config.movement_manager, "current_head_pose", None
+                        self.config.movement_manager,
+                        "current_head_pose",
+                        None,
                     ),
                     "is_moving": self._is_robot_moving(),
                 }
                 return json.dumps(status, indent=2)
-            else:
-                raise ValueError(f"Unknown resource: {uri}")
+            msg = f"Unknown resource: {uri}"
+            raise ValueError(msg)
 
     def _is_robot_moving(self) -> bool:
-        """Check if robot is currently moving"""
+        """Check if robot is currently moving."""
         movement_manager = self.config.movement_manager
         if not hasattr(movement_manager, "moving_start") or not hasattr(
-            movement_manager, "moving_for"
+            movement_manager,
+            "moving_for",
         ):
             return False
 
         elapsed = time.monotonic() - movement_manager.moving_start
         return elapsed < movement_manager.moving_for
 
-    async def _handle_move_head(self, arguments: dict) -> List[types.TextContent]:
-        """Handle head movement tool call"""
+    async def _handle_move_head(self, arguments: dict) -> list[types.TextContent]:
+        """Handle head movement tool call."""
         direction = arguments.get("direction")
         if not direction:
             return [
                 types.TextContent(
                     type="text",
                     text=json.dumps({"error": "direction parameter is required"}),
-                )
+                ),
             ]
 
         logger.info("MCP Tool call: move_head direction=%s", direction)
@@ -220,8 +234,9 @@ class ReachyMCPServer:
 
             return [
                 types.TextContent(
-                    type="text", text=json.dumps({"status": f"Now looking {direction}"})
-                )
+                    type="text",
+                    text=json.dumps({"status": f"Now looking {direction}"}),
+                ),
             ]
 
         except Exception as e:
@@ -230,27 +245,28 @@ class ReachyMCPServer:
                 types.TextContent(
                     type="text",
                     text=json.dumps(
-                        {"error": f"Head movement failed: {type(e).__name__}: {e}"}
+                        {"error": f"Head movement failed: {type(e).__name__}: {e}"},
                     ),
-                )
+                ),
             ]
 
-    async def _handle_camera(self, arguments: dict) -> List[types.TextContent]:
-        """Handle camera tool call"""
+    async def _handle_camera(self, arguments: dict) -> list[types.TextContent]:
+        """Handle camera tool call."""
         question = arguments.get("question", "").strip()
         if not question:
             return [
                 types.TextContent(
                     type="text",
                     text=json.dumps({"error": "question must be a non-empty string"}),
-                )
+                ),
             ]
 
         if not self.config.camera:
             return [
                 types.TextContent(
-                    type="text", text=json.dumps({"error": "Camera not available"})
-                )
+                    type="text",
+                    text=json.dumps({"error": "Camera not available"}),
+                ),
             ]
 
         if not self.config.vision_manager:
@@ -258,7 +274,7 @@ class ReachyMCPServer:
                 types.TextContent(
                     type="text",
                     text=json.dumps({"error": "Vision manager not available"}),
-                )
+                ),
             ]
 
         logger.info("MCP Tool call: camera question=%s", question[:120])
@@ -274,7 +290,9 @@ class ReachyMCPServer:
 
             # Process with vision manager
             result = await asyncio.to_thread(
-                self.config.vision_manager.processor.process_image, frame, question
+                self.config.vision_manager.processor.process_image,
+                frame,
+                question,
             )
 
             if isinstance(result, dict) and "error" in result:
@@ -287,10 +305,10 @@ class ReachyMCPServer:
                         {
                             "image_description": result
                             if isinstance(result, str)
-                            else str(result)
-                        }
+                            else str(result),
+                        },
                     ),
-                )
+                ),
             ]
 
         except Exception as e:
@@ -299,13 +317,13 @@ class ReachyMCPServer:
                 types.TextContent(
                     type="text",
                     text=json.dumps(
-                        {"error": f"Camera capture failed: {type(e).__name__}: {e}"}
+                        {"error": f"Camera capture failed: {type(e).__name__}: {e}"},
                     ),
-                )
+                ),
             ]
 
-    async def run(self, transport_type: str = "stdio"):
-        """Run the MCP server"""
+    async def run(self, transport_type: str = "stdio") -> None:
+        """Run the MCP server."""
         if transport_type == "stdio":
             from mcp.server.stdio import stdio_server
 
@@ -323,18 +341,19 @@ class ReachyMCPServer:
                     ),
                 )
         else:
-            raise ValueError(f"Unsupported transport type: {transport_type}")
+            msg = f"Unsupported transport type: {transport_type}"
+            raise ValueError(msg)
 
 
 # Factory function for easy setup
 def create_reachy_mcp_server(
     reachy_mini: ReachyMini,
     movement_manager: MovementManager,
-    camera: Optional[cv2.VideoCapture] = None,
-    vision_manager: Optional[VisionManager] = None,
+    camera: cv2.VideoCapture | None = None,
+    vision_manager: VisionManager | None = None,
     **config_kwargs,
 ) -> ReachyMCPServer:
-    """Factory function to create a configured Reachy MCP Server"""
+    """Create a configured Reachy MCP Server."""
     config = ReachyMCPConfig(
         reachy_mini=reachy_mini,
         movement_manager=movement_manager,
@@ -346,8 +365,8 @@ def create_reachy_mcp_server(
 
 
 # CLI entry point
-async def async_main():
-    """Main entry point for running the server"""
+async def async_main() -> None:
+    """Entry point for running the server."""
     import argparse
 
     # Command-line arguments (matching your standard format)
@@ -380,7 +399,10 @@ async def async_main():
         help="Transport method (default: stdio)",
     )
     parser.add_argument(
-        "--camera-index", type=int, default=0, help="Camera index (default: 0)"
+        "--camera-index",
+        type=int,
+        default=0,
+        help="Camera index (default: 0)",
     )
 
     args = parser.parse_args()
@@ -439,7 +461,9 @@ async def async_main():
         # Initialize movement manager
         logger.info("Initializing movement manager...")
         movement_manager = MovementManager(
-            current_robot=current_robot, head_tracker=head_tracker, camera=camera
+            current_robot=current_robot,
+            head_tracker=head_tracker,
+            camera=camera,
         )
 
         # Create MCP server
@@ -462,7 +486,8 @@ async def async_main():
 
 
 # main function
-def main():
+def main() -> None:
+    """Entry point to run the MCP server."""
     asyncio.run(async_main())
 
 
