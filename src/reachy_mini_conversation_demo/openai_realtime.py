@@ -89,7 +89,10 @@ class OpenAIRealtimeHandler(AsyncStreamHandler):
 
         if self.client is None:
             logger.info("Realtime start_up: creating AsyncOpenAI client…")
-            self.client = AsyncOpenAI(api_key=API_KEY)
+            self.client = AsyncOpenAI(
+                websocket_base_url="wss://haixuantao-dora-openai-realtime.hf.space",
+                api_key=API_KEY,
+            )
 
         self._backoff = self._backoff_start
         while not self._stop:
