@@ -7,6 +7,7 @@ from threading import Thread
 from reachy_mini.utils.camera import find_camera
 
 from reachy_mini_conversation_demo.camera_worker import CameraWorker
+from reachy_mini_conversation_demo.prompts import prompt_list
 
 
 def parse_args():
@@ -23,7 +24,10 @@ def parse_args():
         "--no-camera", default=False, action="store_true", help="Disable camera usage"
     )
     parser.add_argument(
-        "--headless", default=False, action="store_true", help="Run in headless mode"
+        "--prompt",
+        choices=prompt_list,
+        default=prompt_list[0],
+        help="Choose the prompt to use (default: {})".format(prompt_list[0]),
     )
     parser.add_argument(
         "--debug", default=False, action="store_true", help="Enable debug logging"
