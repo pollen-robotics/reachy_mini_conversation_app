@@ -9,6 +9,7 @@ import numpy as np
 from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item
 from openai import AsyncOpenAI
 
+from reachy_mini_conversation_demo.prompts import SESSION_INSTRUCTIONS
 from reachy_mini_conversation_demo.tools import (
     ALL_TOOL_SPECS,
     ToolDependencies,
@@ -56,8 +57,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         "model": "whisper-1",
                         "language": "en",
                     },
-                    "voice": "ballad",
-                    "instructions": "We speak in English",
+                    "voice": "echo",
+                    "instructions": SESSION_INSTRUCTIONS,
                     "tools": ALL_TOOL_SPECS,
                     "tool_choice": "auto",
                     "temperature": 0.7,
@@ -196,7 +197,6 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                 ],
                             }
                         )
-                        logger.info("additional input camera")
 
                         np_img = self.deps.camera_worker.get_latest_frame()
                         img = gr.Image(value=np_img)
