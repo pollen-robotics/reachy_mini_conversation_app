@@ -70,11 +70,11 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 if event.type == "input_audio_buffer.speech_started":
                     self.clear_queue()
                     self.deps.head_wobbler.reset()
-                    self.deps.movement_manager.begin_listening_pose()
+                    # self.deps.movement_manager.begin_listening_pose()
                     logger.debug("user speech started")
 
                 if event.type == "input_audio_buffer.speech_stopped":
-                    self.deps.movement_manager.end_listening_pose()
+                    # self.deps.movement_manager.end_listening_pose()
                     logger.debug("user speech stopped")
 
                 if event.type == "response.created":
@@ -227,7 +227,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
         # Handle idle
         idle_duration = asyncio.get_event_loop().time() - self.last_activity_time
-        if idle_duration > 20.0 and self.deps.movement_manager.is_idle():
+        if idle_duration > 30.0 and self.deps.movement_manager.is_idle():
             await self.send_idle_signal(idle_duration)
 
             self.last_activity_time = (
@@ -254,7 +254,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         logger.debug("Sending idle signal")
         self.is_idle_tool_call = True
         timestamp_msg = (
-            f"[Idle time update: {self.format_timestamp()} - No activity for {idle_duration:.1f}s] You've been idle for a while. Keep things mellow: choose gentle actions, light dances, or subtle emotions."
+            f"[Idle time update: {self.format_timestamp()} - No activity for {idle_duration:.1f}s] "
+            "You've been idle for a while. Favour an emotion that fits the recent context; every now and then mix in a small gesture or dance."
         )
         if not self.connection:
             logger.debug("No connection, cannot send idle signal")
@@ -269,7 +270,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         await self.connection.response.create(
             response={
                 "modalities": ["text"],
-                "instructions": "You MUST respond with function calls only — no speech or text. Favour calm gestures and avoid strong emotions or intense dances when you are idle.",
+                "instructions": (
+                    "Respond with function calls only — no speech or text. Aim for an emotion move about four times out of five; reserve dances for the rest."
+                ),
                 "tool_choice": "required",
             }
         )

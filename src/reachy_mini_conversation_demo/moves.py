@@ -211,7 +211,7 @@ class MovementManager:
         self.move_queue = deque()
 
         # Configuration
-        self.idle_inactivity_delay = 5.0  # seconds
+        self.idle_inactivity_delay = 0.0  # seconds
         self.target_frequency = 50.0  # Hz
         self.target_period = 1.0 / self.target_frequency
 
