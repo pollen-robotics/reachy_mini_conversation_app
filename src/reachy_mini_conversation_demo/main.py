@@ -1,7 +1,6 @@
 """Entrypoint for the Reachy Mini conversation demo."""
 
 import os
-from threading import Thread
 
 import gradio as gr
 from fastapi import FastAPI
@@ -81,9 +80,6 @@ def main():
 
     app = FastAPI()
     app = gr.mount_gradio_app(app, stream.ui, path="/")
-    # UI is blocking → run in a standard thread
-    ui_thread = Thread(target=stream.ui.launch, daemon=True)
-    ui_thread.start()
 
     # Each async service → its own thread/loop
     move_thread = AioTaskThread(movement_manager.enable)  # loop A
@@ -102,9 +98,10 @@ def main():
     )
 
     try:
-        ui_thread.join()
+        stream.ui.launch()
     except KeyboardInterrupt:
-        pass
+        logger.info("Exiting...")
+
     finally:
         move_thread.request_stop()
         wobbler_thread.request_stop()
@@ -115,6 +112,9 @@ def main():
         wobbler_thread.join()
         if cam_thread:
             cam_thread.join()
+
+        # prevent connection to keep alive some threads
+        robot.client.disconnect()
 
 
 if __name__ == "__main__":
