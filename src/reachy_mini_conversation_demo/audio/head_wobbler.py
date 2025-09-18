@@ -7,6 +7,7 @@ from typing import Optional
 import numpy as np
 
 from reachy_mini_conversation_demo.audio.speech_tapper import HOP_MS, SwayRollRT
+from reachy_mini_conversation_demo.debug_audio_sync import record_wobble
 
 SAMPLE_RATE = 24000
 MOVEMENT_LATENCY_S = 0.08  # seconds between audio and robot movement
@@ -37,13 +38,13 @@ class HeadWobbler:
         self._consumer_loop = consumer_loop
         self._movement_loop = movement_loop
 
-    def feed(self, delta_b64: str) -> None:
+    def feed(self, delta_b64: str, packet_id: Optional[int] = None) -> None:
         """Thread-safe: push audio into the consumer queue."""
         buf = np.frombuffer(base64.b64decode(delta_b64), dtype=np.int16).reshape(1, -1)
         if self._consumer_loop is None:
             return
         asyncio.run_coroutine_threadsafe(
-            self.audio_queue.put((SAMPLE_RATE, buf)),
+            self.audio_queue.put((SAMPLE_RATE, buf, packet_id)),
             self._consumer_loop,
         )
 
@@ -54,7 +55,16 @@ class HeadWobbler:
         self._consumer_loop = loop
 
         while not stop_event.is_set():
-            sr, chunk = await self.audio_queue.get()  # (1,N) int16
+            item = await self.audio_queue.get()
+            if len(item) == 3:
+                sr, chunk, packet_id = item
+            else:
+                sr, chunk = item
+                packet_id = None
+
+            if packet_id is not None:
+                record_wobble(packet_id)
+
             pcm = np.asarray(chunk).squeeze(0)
             results = self.sway.feed(pcm, sr)
 

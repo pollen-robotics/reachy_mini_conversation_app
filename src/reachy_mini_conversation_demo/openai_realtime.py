@@ -2,7 +2,9 @@ import asyncio  # noqa: D100
 import base64
 import json
 import logging
+from collections import deque
 from datetime import datetime
+from typing import Deque
 
 import numpy as np
 from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item
@@ -12,6 +14,10 @@ from reachy_mini_conversation_demo.tools import (
     ALL_TOOL_SPECS,
     ToolDependencies,
     dispatch_tool_call,
+)
+from reachy_mini_conversation_demo.debug_audio_sync import (
+    force_flush,
+    record_playback,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,6 +43,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.last_activity_time = asyncio.get_event_loop().time()
         self.start_time = asyncio.get_event_loop().time()
         self.is_idle_tool_call = False
+
+        self._packet_counter: int = 0
+        self._pending_packet_ids: Deque[int] = deque()
 
     def copy(self):
         """Create a copy of the handler."""
@@ -69,6 +78,13 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 # logger.debug(f"OpenAI event: {event.type}")
                 if event.type == "input_audio_buffer.speech_started":
                     self.clear_queue()
+                    if self._pending_packet_ids:
+                        logger.debug(
+                            "Dropping %d pending packet ids on user speech",
+                            len(self._pending_packet_ids),
+                        )
+                        self._pending_packet_ids.clear()
+                    force_flush(reason="speech_interrupt")
                     self.deps.head_wobbler.reset()
                     self.deps.movement_manager.begin_listening_pose()
                     logger.debug("user speech started")
@@ -83,8 +99,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 if event.type == "response.done":
                     # Doesn't mean the audio is done playing
                     logger.debug("response done")
-                    pass
                     # self.deps.head_wobbler.reset()
+                    force_flush(reason="response_done")
 
                 if event.type == "response.started":
                     logger.debug("assistant response started; resetting head wobble state")
@@ -107,19 +123,23 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 #     )
 
                 if event.type == "response.audio.delta":
-                    self.deps.head_wobbler.feed(event.delta)
+                    packet_id = self._packet_counter
+                    self._packet_counter += 1
+
+                    self.deps.head_wobbler.feed(event.delta, packet_id)
                     self.last_activity_time = asyncio.get_event_loop().time()
-                    # logger.debug(
-                    #     "last activity time updated to %s", self.last_activity_time
-                    # )
+
+                    audio_chunk = np.frombuffer(
+                        base64.b64decode(event.delta), dtype=np.int16
+                    ).reshape(1, -1)
+
                     await self.output_queue.put(
                         (
                             self.output_sample_rate,
-                            np.frombuffer(
-                                base64.b64decode(event.delta), dtype=np.int16
-                            ).reshape(1, -1),
+                            audio_chunk,
                         ),
                     )
+                    self._pending_packet_ids.append(packet_id)
 
                 # ---- tool-calling plumbing ----
                 # 1) model announces a function call item; capture name + call_id
@@ -234,13 +254,29 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 asyncio.get_event_loop().time()
             )  # avoid repeated resets
 
-        return await wait_for_item(self.output_queue)
+        item = await wait_for_item(self.output_queue)
+
+        if (
+            isinstance(item, tuple)
+            and len(item) >= 2
+            and isinstance(item[1], np.ndarray)
+        ):
+            if not self._pending_packet_ids:
+                logger.warning(
+                    "Audio packet emitted without matching identifier"
+                )
+            else:
+                packet_id = self._pending_packet_ids.popleft()
+                record_playback(packet_id)
+
+        return item
 
     async def shutdown(self) -> None:
         """Shutdown the handler."""
         if self.connection:
             await self.connection.close()
             self.connection = None
+        force_flush(reason="shutdown")
 
     def format_timestamp(self):
         """Format current timestamp with date, time and elapsed seconds."""
