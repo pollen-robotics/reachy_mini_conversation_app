@@ -2,21 +2,20 @@ from __future__ import annotations
 
 import abc
 import asyncio
+import inspect
 import json
 import logging
 import time
-import inspect
-
-from reachy_mini import ReachyMini
-from reachy_mini.utils import create_head_pose
 from dataclasses import dataclass
 from typing import Any, Dict, Literal, Optional
 
 import cv2
 import numpy as np
+from reachy_mini import ReachyMini
+from reachy_mini.utils import create_head_pose
 
-from reachy_mini_conversation_demo.vision.processors import VisionManager
 from reachy_mini_conversation_demo.movement import MovementManager
+from reachy_mini_conversation_demo.vision.processors import VisionManager
 
 logger = logging.getLogger(__name__)
 
@@ -85,8 +84,7 @@ def _execute_motion(deps: ToolDependencies, target: Any) -> Dict[str, Any]:
 
 # Tool base class
 class Tool(abc.ABC):
-    """
-    Base abstraction for tools used in function-calling.
+    """Base abstraction for tools used in function-calling.
 
     Each tool must define:
       - name: str
@@ -118,9 +116,8 @@ class Tool(abc.ABC):
 
 class MoveHead(Tool):
     name = "move_head"
-    description = "Move your head in a given direction: left, right, up, down or front."
+    description = "Move my head in a given direction."
     parameters_schema = {
-        "type": "object",
         "properties": {
             "direction": {
                 "type": "string",
@@ -150,18 +147,16 @@ class MoveHead(Tool):
         if "error" in result:
             return result
 
-        return {"status": f"looking {direction}"}
+        return {"status": f"Now looking {direction}"}
 
 
 class Camera(Tool):
     name = "camera"
-    description = "Take a picture with the camera and ask a question about it."
+    description = "Take a picture and ask a question about it."
     parameters_schema = {
-        "type": "object",
         "properties": {
             "question": {
                 "type": "string",
-                "description": "The question to ask about the picture",
             },
         },
         "required": ["question"],
@@ -192,119 +187,6 @@ class Camera(Tool):
             if isinstance(result, str)
             else {"error": "vision returned non-string"}
         )
-
-
-class HeadTracking(Tool):
-    name = "head_tracking"
-    description = "Toggle head tracking state."
-    parameters_schema = {
-        "type": "object",
-        "properties": {"start": {"type": "boolean"}},
-        "required": ["start"],
-    }
-
-    async def __call__(self, deps: ToolDependencies, **kwargs) -> Dict[str, Any]:
-        enable = bool(kwargs.get("start"))
-        movement_manager = deps.movement_manager
-        movement_manager.is_head_tracking_on = enable
-        status = "started" if enable else "stopped"
-        logger.info("Tool call: head_tracking %s", status)
-        return {"status": f"head tracking {status}"}
-
-
-class DescribeCurrentScene(Tool):
-    name = "describe_current_scene"
-    description = "Get a detailed description of the current scene."
-    parameters_schema = {"type": "object", "properties": {}, "required": []}
-
-    async def __call__(self, deps: ToolDependencies, **kwargs) -> Dict[str, Any]:
-        logger.info("Tool call: describe_current_scene")
-
-        result = await deps.vision_manager.process_current_frame(
-            "Describe what you currently see in detail, focusing on people, objects, and activities."
-        )
-
-        if isinstance(result, dict) and "error" in result:
-            return result
-        return result
-
-
-class GetSceneContext(Tool):
-    name = "get_scene_context"
-    description = (
-        "Get the most recent automatic scene description for conversational context."
-    )
-    parameters_schema = {"type": "object", "properties": {}, "required": []}
-
-    async def __call__(self, deps: ToolDependencies, **kwargs) -> Dict[str, Any]:
-        logger.info("Tool call: get_scene_context")
-        vision_manager = deps.vision_manager
-        if not vision_manager:
-            return {"error": "Vision processing not available"}
-
-        try:
-            description = await deps.vision_manager.get_current_description()
-
-            if not description:
-                return {
-                    "context": "No scene description available yet",
-                    "note": "Vision processing may still be initializing",
-                }
-            return {
-                "context": description,
-                "note": "This comes from periodic automatic analysis",
-            }
-        except Exception as e:
-            logger.exception("Failed to get scene context")
-            return {"error": f"Scene context failed: {type(e).__name__}: {e}"}
-
-
-class AnalyzeSceneFor(Tool):
-    name = "analyze_scene_for"
-    description = "Analyze the current scene for a specific purpose."
-    parameters_schema = {
-        "type": "object",
-        "properties": {
-            "purpose": {
-                "type": "string",
-                "enum": [
-                    "safety",
-                    "people",
-                    "objects",
-                    "activity",
-                    "navigation",
-                    "general",
-                ],
-                "default": "general",
-            }
-        },
-        "required": [],
-    }
-
-    async def __call__(self, deps: ToolDependencies, **kwargs) -> Dict[str, Any]:
-        purpose = (kwargs.get("purpose") or "general").lower()
-        logger.info("Tool call: analyze_scene_for purpose=%s", purpose)
-
-        prompts = {
-            "safety": "Look for safety concerns, obstacles, or hazards.",
-            "people": "Describe people, their positions and actions.",
-            "objects": "Identify and describe main visible objects.",
-            "activity": "Describe ongoing activities or actions.",
-            "navigation": "Describe the space for navigation: obstacles, pathways, layout.",
-            "general": "Give a general description of the scene including people, objects, and activities.",
-        }
-        prompt = prompts.get(purpose, prompts["general"])
-
-        result = await deps.vision_manager.process_current_frame(prompt)
-
-        if isinstance(result, dict) and "error" in result:
-            return result
-
-        if not isinstance(result, dict):
-            return {"error": "vision returned non-dict"}
-
-        result["analysis_purpose"] = purpose
-        return result
 
 
 # Registry & specs (dynamic)
