@@ -25,40 +25,45 @@ class HeadWobbler:
         self.audio_queue: asyncio.Queue = asyncio.Queue()
         self.sway = SwayRollRT()
 
-        self._consumer_loop: Optional[asyncio.AbstractEventLoop] = None
-        self._movement_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._stop_event = asyncio.Event()
+        self._task: asyncio.Task = None
 
-    def bind_loops(
-        self,
-        consumer_loop: asyncio.AbstractEventLoop,
-        movement_loop: asyncio.AbstractEventLoop,
-    ) -> None:
-        """Bind the event loops for thread-safe communication."""
-        self._consumer_loop = consumer_loop
-        self._movement_loop = movement_loop
-
-    def feed(self, delta_b64: str) -> None:
+    async def feed(self, delta_b64: str) -> None:
         """Thread-safe: push audio into the consumer queue."""
         buf = np.frombuffer(base64.b64decode(delta_b64), dtype=np.int16).reshape(1, -1)
-        if self._consumer_loop is None:
-            return
-        asyncio.run_coroutine_threadsafe(
-            self.audio_queue.put((SAMPLE_RATE, buf)),
-            self._consumer_loop,
-        )
 
-    async def enable(self, stop_event: asyncio.Event) -> None:
+        await self.audio_queue.put((SAMPLE_RATE, buf))
+
+    def start(self) -> asyncio.Task:
+        """Start the head wobbler control loop."""
+        logger.info("Starting head wobbler control loop...")
+        self._task = asyncio.create_task(self.working_loop())
+        return self._task
+
+    def stop(self) -> None:
+        """Stop the head wobbler control loop."""
+        logger.info("Stopping head wobbler control loop...")
+        if self._task:
+            self._stop_event.set()
+            self._task.cancel()
+
+    async def working_loop(self) -> None:
         """Convert audio deltas into head movement offsets."""
         hop_dt = HOP_MS / 1000.0
         loop = asyncio.get_running_loop()
         self._consumer_loop = loop
 
-        while not stop_event.is_set():
+        while not self._stop_event.is_set():
+            logger.debug("Head wobbler loop iteration")
             try:
                 sr, chunk = self.audio_queue.get_nowait()  # (1,N) int16
             except QueueEmpty:
                 # avoid while to never exit
-                await asyncio.sleep(0.02)
+                try:
+                    await asyncio.sleep(0.02)
+                except asyncio.exceptions.CancelledError:
+                    logger.debug("Head wobbler loop cancelled")
+                    break
                 continue
 
             pcm = np.asarray(chunk).squeeze(0)
@@ -97,19 +102,11 @@ class HeadWobbler:
                     r["yaw_rad"],
                 )
 
-                if self._movement_loop:
-                    try:
-                        self._movement_loop.call_soon_threadsafe(
-                            self._apply_offsets, offsets
-                        )
-                    except RuntimeError as e:
-                        logger.warning(f"Error applying offsets: {e}")
-                else:
-                    self._apply_offsets(offsets)
+                self._apply_offsets(offsets)
 
                 self._hops_done += 1
                 i += 1
-        logger.info("Head wobbler thread exited")
+        logger.debug("Head wobbler task exited")
 
     def drain_audio_queue(self) -> None:
         """Empty the audio queue."""

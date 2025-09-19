@@ -108,7 +108,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     )
 
                 if event.type == "response.audio.delta":
-                    self.deps.head_wobbler.feed(event.delta)
+                    await self.deps.head_wobbler.feed(event.delta)
                     self.last_activity_time = asyncio.get_event_loop().time()
                     logger.debug(
                         "last activity time updated to %s", self.last_activity_time
@@ -198,7 +198,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         )
                         logger.info("additional input camera")
 
-                        np_img = self.deps.camera_worker.get_latest_frame()
+                        np_img = await self.deps.camera_worker.get_latest_frame()
                         img = gr.Image(value=np_img)
 
                         await self.output_queue.put(

@@ -1,8 +1,6 @@
 import argparse  # noqa: D100
-import asyncio
 import logging
 import warnings
-from threading import Thread
 
 from reachy_mini.utils.camera import find_camera
 
@@ -63,45 +61,6 @@ def handle_vision_stuff(args, current_robot):
         camera_worker = CameraWorker(camera, current_robot, head_tracker)
 
     return camera, camera_worker, head_tracker, vision_manager
-
-
-class AioTaskThread:
-    """Runs a single coroutine in its own thread and event loop."""
-
-    def __init__(self, coro_fn, *args, **kwargs):
-        """Coro_fn will be called as: await coro_fn(*args, _stop_async, **kwargs)."""
-        self.coro_fn = coro_fn
-        self.args = args
-        self.kwargs = kwargs
-        self.loop = asyncio.new_event_loop()
-        self.thread = Thread(target=self._run, daemon=True)
-        self._stop_async: asyncio.Event | None = None
-
-    def _run(self):
-        asyncio.set_event_loop(self.loop)
-        self._stop_async = asyncio.Event()
-
-        async def runner():
-            await self.coro_fn(*self.args, self._stop_async, **self.kwargs)
-
-        try:
-            self.loop.run_until_complete(runner())
-        finally:
-            self.loop.run_until_complete(self.loop.shutdown_asyncgens())
-            self.loop.close()
-
-    def start(self):
-        """Start the thread and its event loop."""
-        self.thread.start()
-
-    def request_stop(self):
-        """Request the coroutine to stop by setting the _stop_async event."""
-        if self._stop_async is not None:
-            self.loop.call_soon_threadsafe(self._stop_async.set)
-
-    def join(self):
-        """Wait for the thread to finish."""
-        self.thread.join()
 
 
 def setup_logger(debug):

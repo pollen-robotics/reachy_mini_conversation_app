@@ -8,7 +8,6 @@ Ported from main_works.py camera_worker() function to provide:
 
 import asyncio
 import logging
-import threading
 import time
 from typing import Optional, Tuple
 
@@ -34,7 +33,9 @@ class CameraWorker:
 
         # Thread-safe frame storage
         self.latest_frame: Optional[np.ndarray] = None
-        self.frame_lock = threading.Lock()
+        self.frame_lock = asyncio.Lock()
+        self._stop_event = asyncio.Event()
+        self._task: asyncio.Task = None
 
         # Face tracking state
         self.is_head_tracking_enabled = True
@@ -46,7 +47,7 @@ class CameraWorker:
             0.0,
             0.0,
         ]  # x, y, z, roll, pitch, yaw
-        self.face_tracking_lock = threading.Lock()
+        self.face_tracking_lock = asyncio.Lock()
 
         # Face tracking timing variables (same as main_works.py)
         self.last_face_detected_time: Optional[float] = None
@@ -58,9 +59,9 @@ class CameraWorker:
         # Track state changes
         self.previous_head_tracking_state = self.is_head_tracking_enabled
 
-    def get_latest_frame(self) -> Optional[np.ndarray]:
+    async def get_latest_frame(self) -> Optional[np.ndarray]:
         """Get the latest frame (thread-safe)."""
-        with self.frame_lock:
+        async with self.frame_lock:
             if self.latest_frame is None:
                 return None
             else:
@@ -68,11 +69,11 @@ class CameraWorker:
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 return frame
 
-    def get_face_tracking_offsets(
+    async def get_face_tracking_offsets(
         self,
     ) -> Tuple[float, float, float, float, float, float]:
         """Get current face tracking offsets (thread-safe)."""
-        with self.face_tracking_lock:
+        async with self.face_tracking_lock:
             return tuple(self.face_tracking_offsets)
 
     def set_head_tracking_enabled(self, enabled: bool) -> None:
@@ -80,25 +81,38 @@ class CameraWorker:
         self.is_head_tracking_enabled = enabled
         logger.info(f"Head tracking {'enabled' if enabled else 'disabled'}")
 
-    async def enable(self, stop_event: asyncio.Event) -> None:
+    def start(self) -> asyncio.Task:
+        """Start the camera worker control loop."""
+        logger.info("Starting camera worker control loop...")
+        self._task = asyncio.create_task(self.working_loop())
+        return self._task
+
+    def stop(self) -> None:
+        """Stop the camera worker control loop."""
+        logger.info("Stopping camera worker control loop...")
+        if self._task:
+            self._stop_event.set()
+            self._task.cancel()
+
+    async def working_loop(self) -> None:
         """Enable the camera worker loop.
 
         Ported from main_works.py camera_worker() with same logic.
         """
-        logger.info("Starting camera worker")
+        logger.debug("Starting camera worker")
 
         # Initialize head tracker if available
         neutral_pose = np.eye(4)  # Neutral pose (identity matrix)
         self.previous_head_tracking_state = self.is_head_tracking_enabled
 
-        while not stop_event.is_set():
+        while not self._stop_event.is_set():
             try:
                 current_time = time.time()
                 success, frame = self.camera.read()
 
                 if success:
                     # Thread-safe frame storage
-                    with self.frame_lock:
+                    async with self.frame_lock:
                         self.latest_frame = frame.copy()
 
                     # Check if face tracking was just disabled
@@ -152,7 +166,7 @@ class CameraWorker:
                             )
 
                             # Thread-safe update of face tracking offsets (use pose as-is)
-                            with self.face_tracking_lock:
+                            async with self.face_tracking_lock:
                                 self.face_tracking_offsets = [
                                     translation[0],
                                     translation[1],
@@ -183,7 +197,7 @@ class CameraWorker:
                             if self.interpolation_start_time is None:
                                 self.interpolation_start_time = current_time
                                 # Capture current pose as start of interpolation
-                                with self.face_tracking_lock:
+                                async with self.face_tracking_lock:
                                     current_translation = self.face_tracking_offsets[:3]
                                     current_rotation_euler = self.face_tracking_offsets[
                                         3:
@@ -219,7 +233,7 @@ class CameraWorker:
                             ).as_euler("xyz", degrees=False)
 
                             # Thread-safe update of face tracking offsets
-                            with self.face_tracking_lock:
+                            async with self.face_tracking_lock:
                                 self.face_tracking_offsets = [
                                     translation[0],
                                     translation[1],
@@ -237,11 +251,14 @@ class CameraWorker:
                         # else: Keep current offsets (within 2s delay period)
 
                 # Small sleep to prevent excessive CPU usage (same as main_works.py)
-                await asyncio.sleep(0.001)
-                # time.sleep(0.001)
+                try:
+                    await asyncio.sleep(0.001)
+                except asyncio.exceptions.CancelledError:
+                    logger.debug("Camera worker loop cancelled")
+                    break
 
             except Exception as e:
                 logger.error(f"Camera worker error: {e}")
-                time.sleep(0.1)  # Longer sleep on error
+                await asyncio.sleep(0.1)  # Longer sleep on error
 
-        logger.info("Camera worker thread exited")
+        logger.debug("Camera worker task exited")

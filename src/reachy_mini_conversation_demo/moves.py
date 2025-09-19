@@ -215,6 +215,9 @@ class MovementManager:
         self.target_frequency = 50.0  # Hz
         self.target_period = 1.0 / self.target_frequency
 
+        self._stop_event = asyncio.Event()
+        self._task: asyncio.Task = None
+
     def queue_move(self, move: Move) -> None:
         """Add a move to the primary move queue."""
         self.move_queue.append(move)
@@ -377,12 +380,12 @@ class MovementManager:
         )
         return (secondary_head_pose, (0, 0), 0)
 
-    def _update_face_tracking(self, current_time: float) -> None:
+    async def _update_face_tracking(self, current_time: float) -> None:
         """Get face tracking offsets from camera worker thread."""
         if self.camera_worker is not None:
             # Get face tracking offsets from camera worker thread
             self.state.face_tracking_offsets = (
-                self.camera_worker.get_face_tracking_offsets()
+                await self.camera_worker.get_face_tracking_offsets()
             )
         else:
             # No camera worker, use neutral offsets
@@ -395,17 +398,31 @@ class MovementManager:
         neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
         self.current_robot.set_target(head=neutral_head_pose, antennas=(0.0, 0.0))
 
-    async def enable(self, stop_event: asyncio.Event) -> None:
+    def start(self) -> asyncio.Task:
+        """Start the movement control loop."""
+        logger.info("Starting movement control loop...")
+        self._task = asyncio.create_task(self.working_loop())
+        return self._task
+
+    def stop(self) -> None:
+        """Stop the movement control loop."""
+        logger.info("Stopping movement control loop...")
+        if self._task:
+            self._stop_event.set()
+            self._task.cancel()
+
+    async def working_loop(self) -> None:
         """Control loop main movements - reproduces main_works.py control architecture.
 
         Single set_target() call with pose fusion.
         """
-        logger.info("Starting enhanced movement control loop (50Hz)")
+        logger.debug("Starting enhanced movement control loop (50Hz)")
 
         loop_count = 0
         last_print_time = time.time()
 
-        while not stop_event.is_set():
+        while not self._stop_event.is_set():
+            logger.debug("Movement control loop iteration")
             loop_start_time = time.time()
             loop_count += 1
             current_time = time.time()
@@ -417,7 +434,7 @@ class MovementManager:
             self._manage_breathing(current_time)
 
             # 3. Update face tracking offsets
-            self._update_face_tracking(current_time)
+            await self._update_face_tracking(current_time)
 
             # 4. Get primary pose from current move or neutral
             primary_full_body_pose = self._get_primary_pose(current_time)
@@ -457,6 +474,10 @@ class MovementManager:
                 )
                 last_print_time = current_time
 
-            await asyncio.sleep(sleep_time)
+            try:
+                await asyncio.sleep(sleep_time)
+            except asyncio.exceptions.CancelledError as e:
+                logger.warning(f"Movement control loop cancelled: {e}")
+                break
 
-        logger.info("Movement control loop stopped")
+        logger.debug("Movement control loop stopped")

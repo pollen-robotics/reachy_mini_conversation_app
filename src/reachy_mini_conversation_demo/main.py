@@ -1,5 +1,6 @@
 """Entrypoint for the Reachy Mini conversation demo."""
 
+import asyncio
 import os
 
 import gradio as gr
@@ -12,7 +13,6 @@ from reachy_mini_conversation_demo.moves import MovementManager
 from reachy_mini_conversation_demo.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_demo.tools import ToolDependencies
 from reachy_mini_conversation_demo.utils import (
-    AioTaskThread,
     handle_vision_stuff,
     parse_args,
     setup_logger,
@@ -27,6 +27,11 @@ def update_chatbot(chatbot: list[dict], response: dict):
 
 def main():
     """Entrypoint for the Reachy Mini conversation demo."""
+    asyncio.run(main_loop())
+
+
+async def main_loop():
+    """Asyncio Main loop."""
     args = parse_args()
 
     logger = setup_logger(args.debug)
@@ -65,7 +70,7 @@ def main():
             os.path.join(current_file_path, "images", "reachymini_avatar.png"),
         ),
     )
-    logger.info(f"Chatbot avatar images: {chatbot.avatar_images}")
+    logger.debug(f"Chatbot avatar images: {chatbot.avatar_images}")
 
     handler = OpenaiRealtimeHandler(deps)
     stream = Stream(
@@ -81,37 +86,31 @@ def main():
     app = FastAPI()
     app = gr.mount_gradio_app(app, stream.ui, path="/")
 
-    # Each async service → its own thread/loop
-    move_thread = AioTaskThread(movement_manager.enable)  # loop A
-    wobbler_thread = AioTaskThread(head_wobbler.enable)  # loop B
-    cam_thread = AioTaskThread(camera_worker.enable) if camera_worker else None
+    # Start the Gradio UI in a background task
+    stream.ui.launch(prevent_thread_lock=True)
 
-    move_thread.start()
-    wobbler_thread.start()
-    if cam_thread:
-        cam_thread.start()
-
-    # Link the loops for thread-safe communication
-    head_wobbler.bind_loops(
-        consumer_loop=wobbler_thread.loop,
-        movement_loop=move_thread.loop,
-    )
+    # Each async service is a task
+    movement_manager_task = movement_manager.start()
+    head_wobbler_task = head_wobbler.start()
+    camera_task = None
+    if camera_worker:
+        camera_task = camera_worker.start()
 
     try:
-        stream.ui.launch()
+        await asyncio.gather(
+            movement_manager_task,
+            head_wobbler_task,
+            camera_task,
+        )
     except KeyboardInterrupt:
         logger.info("Exiting...")
+    except asyncio.exceptions.CancelledError:
+        logger.info("Main loop cancelled")
 
     finally:
-        move_thread.request_stop()
-        wobbler_thread.request_stop()
-        if cam_thread:
-            cam_thread.request_stop()
-
-        move_thread.join()
-        wobbler_thread.join()
-        if cam_thread:
-            cam_thread.join()
+        movement_manager.stop()
+        head_wobbler.stop()
+        camera_worker.stop()
 
         # prevent connection to keep alive some threads
         robot.client.disconnect()

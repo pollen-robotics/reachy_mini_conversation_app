@@ -228,7 +228,7 @@ class Camera(Tool):
 
         # Get frame from camera worker buffer (like main_works.py)
         if deps.camera_worker is not None:
-            frame = deps.camera_worker.get_latest_frame()
+            frame = await deps.camera_worker.get_latest_frame()
             if frame is None:
                 logger.error("No frame available from camera worker")
                 return {"error": "No frame available"}
@@ -591,7 +591,7 @@ class FaceRecognition(Tool):
         try:
             # Get frame from camera worker buffer (like main_works.py)
             if deps.camera_worker is not None:
-                frame = deps.camera_worker.get_latest_frame()
+                frame = await deps.camera_worker.get_latest_frame()
                 if frame is None:
                     logger.error("No frame available from camera worker")
                     return {"error": "No frame available"}
