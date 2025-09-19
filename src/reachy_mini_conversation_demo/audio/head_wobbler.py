@@ -54,7 +54,13 @@ class HeadWobbler:
         self._consumer_loop = loop
 
         while not stop_event.is_set():
-            sr, chunk = await self.audio_queue.get()  # (1,N) int16
+            try:
+                sr, chunk = self.audio_queue.get_nowait()  # (1,N) int16
+            except QueueEmpty:
+                # avoid while to never exit
+                await asyncio.sleep(0.02)
+                continue
+
             pcm = np.asarray(chunk).squeeze(0)
             results = self.sway.feed(pcm, sr)
 
@@ -92,14 +98,18 @@ class HeadWobbler:
                 )
 
                 if self._movement_loop:
-                    self._movement_loop.call_soon_threadsafe(
-                        self._apply_offsets, offsets
-                    )
+                    try:
+                        self._movement_loop.call_soon_threadsafe(
+                            self._apply_offsets, offsets
+                        )
+                    except RuntimeError as e:
+                        logger.warning(f"Error applying offsets: {e}")
                 else:
                     self._apply_offsets(offsets)
 
                 self._hops_done += 1
                 i += 1
+        logger.info("Head wobbler thread exited")
 
     def drain_audio_queue(self) -> None:
         """Empty the audio queue."""
