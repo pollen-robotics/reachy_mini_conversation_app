@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -218,9 +219,24 @@ class MovementManager:
         # Listening pose state
         self.listening_active = False
         self._listening_pose: Optional[FullBodyPose] = None
+        self.loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop_thread_id: Optional[int] = None
+
+    def _run_in_control_loop(self, callback, *args, **kwargs) -> None:
+        loop = self.loop
+        if loop and loop.is_running():
+            if threading.get_ident() == self._loop_thread_id:
+                callback(*args, **kwargs)
+            else:
+                loop.call_soon_threadsafe(callback, *args, **kwargs)
+        else:
+            callback(*args, **kwargs)
 
     def queue_move(self, move: Move) -> None:
         """Add a move to the primary move queue."""
+        self._run_in_control_loop(self._queue_move_internal, move)
+
+    def _queue_move_internal(self, move: Move) -> None:
         self.move_queue.append(move)
         self.state.update_activity()
         logger.info(
@@ -229,6 +245,9 @@ class MovementManager:
 
     def clear_queue(self) -> None:
         """Clear all queued moves and stop current move."""
+        self._run_in_control_loop(self._clear_queue_internal)
+
+    def _clear_queue_internal(self) -> None:
         self.move_queue.clear()
         self.state.current_move = None
         self.state.move_start_time = None
@@ -239,6 +258,11 @@ class MovementManager:
         self, offsets: Tuple[float, float, float, float, float, float]
     ) -> None:
         """Set speech head offsets (secondary move)."""
+        self._run_in_control_loop(self._set_speech_offsets_internal, offsets)
+
+    def _set_speech_offsets_internal(
+        self, offsets: Tuple[float, float, float, float, float, float]
+    ) -> None:
         if self.listening_active:
             self.state.speech_offsets = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
             return
@@ -267,6 +291,11 @@ class MovementManager:
         self, offsets: Tuple[float, float, float, float, float, float]
     ) -> None:
         """Set face tracking offsets (secondary move)."""
+        self._run_in_control_loop(self._set_face_tracking_offsets_internal, offsets)
+
+    def _set_face_tracking_offsets_internal(
+        self, offsets: Tuple[float, float, float, float, float, float]
+    ) -> None:
         if self.listening_active:
             return
 
@@ -274,6 +303,9 @@ class MovementManager:
 
     def set_moving_state(self, duration: float) -> None:
         """Set legacy moving state for goto moves."""
+        self._run_in_control_loop(self._set_moving_state_internal, duration)
+
+    def _set_moving_state_internal(self, duration: float) -> None:
         self.state.moving_start = time.time()
         self.state.moving_for = duration
         self.state.update_activity()
@@ -411,6 +443,9 @@ class MovementManager:
 
     def set_neutral(self) -> None:
         """Set neutral robot position."""
+        self._run_in_control_loop(self._set_neutral_internal)
+
+    def _set_neutral_internal(self) -> None:
         self.state.speech_offsets = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         self.state.face_tracking_offsets = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
@@ -422,6 +457,8 @@ class MovementManager:
         Single set_target() call with pose fusion.
         """
         logger.info("Starting enhanced movement control loop (50Hz)")
+        self.loop = asyncio.get_running_loop()
+        self._loop_thread_id = threading.get_ident()
 
         loop_count = 0
         last_print_time = time.time()
@@ -515,13 +552,16 @@ class MovementManager:
                 interpolation_start_antennas=current_antennas,
                 interpolation_duration=1.0,
             )
-            self.queue_move(breathing_move)
+            self._queue_move_internal(breathing_move)
             logger.info("Queued breathing move")
         except Exception as exc:
             logger.error(f"Failed to queue breathing move: {exc}")
 
     def begin_listening_pose(self) -> None:
         """Freeze motion and apply a quick listening roll."""
+        self._run_in_control_loop(self._begin_listening_pose_internal)
+
+    def _begin_listening_pose_internal(self) -> None:
         if self.listening_active:
             return
 
@@ -532,7 +572,7 @@ class MovementManager:
             current_head_pose = self.current_robot.get_current_head_pose()
             current_body_yaw = head_joints[0]
 
-            self.clear_queue()
+            self._clear_queue_internal()
             self.state.current_move = None
             self.state.move_start_time = None
             self.state.is_playing_move = False
@@ -560,6 +600,9 @@ class MovementManager:
 
     def end_listening_pose(self) -> None:
         """Release listening pose and restart breathing."""
+        self._run_in_control_loop(self._end_listening_pose_internal)
+
+    def _end_listening_pose_internal(self) -> None:
         if not self.listening_active:
             return
 

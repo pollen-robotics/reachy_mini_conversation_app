@@ -27,6 +27,8 @@ class HeadWobbler:
 
         self._consumer_loop: Optional[asyncio.AbstractEventLoop] = None
         self._movement_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._pending_reset = False
+        self._generation = 0
 
     def bind_loops(
         self,
@@ -54,6 +56,10 @@ class HeadWobbler:
         self._consumer_loop = loop
 
         while not stop_event.is_set():
+            if self._pending_reset:
+                self._pending_reset = False
+                await self._async_reset()
+
             try:
                 sr, chunk = self.audio_queue.get_nowait()  # (1,N) int16
             except QueueEmpty:
@@ -63,12 +69,15 @@ class HeadWobbler:
 
             pcm = np.asarray(chunk).squeeze(0)
             results = self.sway.feed(pcm, sr)
+            generation = self._generation
 
             if self._base_ts is None:
                 self._base_ts = loop.time()
 
             i = 0
             while i < len(results):
+                if generation != self._generation:
+                    break
                 if self._base_ts is None:
                     self._base_ts = loop.time()
                     continue
@@ -113,15 +122,48 @@ class HeadWobbler:
 
     def drain_audio_queue(self) -> None:
         """Empty the audio queue."""
-        try:
-            while True:
-                self.audio_queue.get_nowait()
-        except QueueEmpty:
-            pass
+        loop = self._consumer_loop
+        if loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(self._async_drain_queue(), loop)
+        else:
+            # Nothing to drain yet – queue will be empty once loop starts
+            self.audio_queue = asyncio.Queue()
 
     def reset(self) -> None:
         """Reset the internal state."""
-        self.drain_audio_queue()
+        loop = self._consumer_loop
+        if loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(self._async_reset(), loop)
+        else:
+            # Wobbler loop not ready yet; mark reset to be processed on start.
+            self._pending_reset = True
+            self._base_ts = None
+            self._hops_done = 0
+            self.sway.reset()
+            self._emit_neutral_offsets()
+
+    async def _async_drain_queue(self) -> None:
+        while True:
+            try:
+                self.audio_queue.get_nowait()
+            except QueueEmpty:
+                break
+
+    async def _async_reset(self) -> None:
+        self._generation += 1
+        await self._async_drain_queue()
         self._base_ts = None
         self._hops_done = 0
         self.sway.reset()
+        self._emit_neutral_offsets()
+
+    def _emit_neutral_offsets(self) -> None:
+        neutral = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        if self._movement_loop:
+            try:
+                self._movement_loop.call_soon_threadsafe(self._apply_offsets, neutral)
+            except RuntimeError:
+                # Movement loop might be shutting down; ignore.
+                pass
+        else:
+            self._apply_offsets(neutral)
