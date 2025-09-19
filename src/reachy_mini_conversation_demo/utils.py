@@ -50,14 +50,13 @@ def handle_vision_stuff(args, current_robot):
     head_tracker = None
     vision_manager = None
     if not args.no_camera:
-        if not args.sim:
-            camera = find_camera()
-        else:
-            import cv2
+        camera = find_camera()
 
-            camera = cv2.VideoCapture(0)
-
-        camera_ready = False
+        if args.head_tracker is not None:
+            if args.head_tracker == "yolo":
+                from reachy_mini_conversation_demo.vision.yolo_head_tracker import (
+                    HeadTracker,
+                )
 
         if camera is None:
             msg = "[Vision] No camera detected (find_camera returned None); vision features disabled."
@@ -181,6 +180,7 @@ def setup_logger(debug):
     warnings.filterwarnings("ignore", message=".*AVCaptureDeviceTypeExternal.*")
     warnings.filterwarnings("ignore", category=UserWarning, module="aiortc")
 
+<<<<<<< HEAD
     third_party_levels = {
         "aiortc": logging.INFO,
         "fastrtc": logging.INFO,
@@ -191,4 +191,17 @@ def setup_logger(debug):
     }
     for name, level in third_party_levels.items():
         logging.getLogger(name).setLevel(level)
+=======
+    # Tame third-party noise (looser in DEBUG)
+    if log_level == "DEBUG":
+        logging.getLogger("aiortc").setLevel(logging.INFO)
+        logging.getLogger("fastrtc").setLevel(logging.INFO)
+        logging.getLogger("aioice").setLevel(logging.INFO)
+        logging.getLogger("openai").setLevel(logging.INFO)
+        logging.getLogger("websockets").setLevel(logging.INFO)
+    else:
+        logging.getLogger("aiortc").setLevel(logging.ERROR)
+        logging.getLogger("fastrtc").setLevel(logging.ERROR)
+        logging.getLogger("aioice").setLevel(logging.WARNING)
+>>>>>>> develop
     return logger

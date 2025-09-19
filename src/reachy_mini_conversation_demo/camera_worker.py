@@ -61,7 +61,12 @@ class CameraWorker:
     def get_latest_frame(self) -> Optional[np.ndarray]:
         """Get the latest frame (thread-safe)."""
         with self.frame_lock:
-            return self.latest_frame.copy() if self.latest_frame is not None else None
+            if self.latest_frame is None:
+                return None
+            else:
+                frame = self.latest_frame.copy()
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                return frame
 
     def get_face_tracking_offsets(
         self,
