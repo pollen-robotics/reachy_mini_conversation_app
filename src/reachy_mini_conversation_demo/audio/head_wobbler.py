@@ -51,7 +51,6 @@ class HeadWobbler:
         """Convert audio deltas into head movement offsets."""
         hop_dt = HOP_MS / 1000.0
         loop = asyncio.get_running_loop()
-        self._consumer_loop = loop
 
         while not self._stop_event.is_set():
             logger.debug("Head wobbler loop iteration")
