@@ -39,6 +39,7 @@ def handle_vision_stuff(args, current_robot):
     camera_worker = None
     head_tracker = None
     vision_manager = None
+    camera_ready = False
     if not args.no_camera:
         camera = find_camera()
 
