@@ -227,6 +227,11 @@ class MovementManager:
         # enable() so that every mutating API can marshal work back to the owning thread.
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self._loop_thread_id: Optional[int] = None
+        # Hold onto the latest full-body pose produced by the primary move pipeline so that,
+        # when a move finishes away from neutral, we can keep that pose until breathing (or the
+        # next command) interpolates it back.  Without this the head snaps to neutral as soon as
+        # a move completes.
+        self._last_primary_pose: Optional[FullBodyPose] = None
 
     def _run_in_control_loop(self, callback, *args, **kwargs) -> None:
         """Execute `callback` on the movement control loop thread.
@@ -404,15 +409,21 @@ class MovementManager:
             self.state.is_playing_move = True
             self.state.is_moving = True
         else:
-            # Default neutral pose when no move is playing
+            # No primary move is active.  Keep whatever pose we last commanded so that motions
+            # end smoothly.  Breathing (or the next move) is responsible for easing things back
+            # to neutral.  Only fall back to a neutral pose during initialisation when we do not
+            # yet have any stored pose.
             self.state.is_playing_move = False
             self.state.is_moving = (
                 time.time() - self.state.moving_start < self.state.moving_for
             )
-            # Neutral primary pose
-            neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
-            primary_full_body_pose = (neutral_head_pose, (0.0, 0.0), 0.0)
+            if self._last_primary_pose is None:
+                neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
+                primary_full_body_pose = (neutral_head_pose, (0.0, 0.0), 0.0)
+            else:
+                primary_full_body_pose = self._last_primary_pose
 
+        self._last_primary_pose = primary_full_body_pose
         return primary_full_body_pose
 
     def _get_secondary_pose(self) -> FullBodyPose:
