@@ -242,6 +242,7 @@ class CameraWorker:
 
             except Exception as e:
                 logger.error(f"Camera worker error: {e}")
-                await asyncio.sleep(0.1)  # Longer sleep on error, but yield the loop
+                # Give the loop room to process other callbacks even when the camera is flaky.
+                await asyncio.sleep(0.1)
 
         logger.info("Camera worker thread exited")

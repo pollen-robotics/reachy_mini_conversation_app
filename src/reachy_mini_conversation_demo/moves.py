@@ -219,10 +219,30 @@ class MovementManager:
         # Listening pose state
         self.listening_active = False
         self._listening_pose: Optional[FullBodyPose] = None
+        # The movement control loop is executed via AioTaskThread in main.py, meaning it runs
+        # inside its own event loop on a dedicated thread.  Many call sites (tool handlers,
+        # head wobble callbacks, idle timers) live on *different* threads/event loops.  Any
+        # direct mutation of internal state from those threads can race with the control loop
+        # that consumes the same data at 50 Hz.  The two attributes below are captured in
+        # enable() so that every mutating API can marshal work back to the owning thread.
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self._loop_thread_id: Optional[int] = None
 
     def _run_in_control_loop(self, callback, *args, **kwargs) -> None:
+        """Execute `callback` on the movement control loop thread.
+        
+        All public mutators delegate to this helper so they remain thread-safe:
+        * If `enable()` has already started the control loop and the caller is running on the
+          same thread, we simply execute the callback immediately.
+        * If the loop is running but the call originates from another thread or event loop
+          (the common case for tool invocations), we schedule the callback onto the control
+          loop using `call_soon_threadsafe`, which safely queues the work without blocking the
+          caller.
+        * If the control loop is not running yet (start-up/tear-down), we fall back to a direct
+          call so that initialisation routines can still populate state.
+        Centralising this pattern prevents races between the frame-synchronous control loop and
+        asynchronous tool callbacks that manipulate the same queues and state fields.
+        """
         loop = self.loop
         if loop and loop.is_running():
             if threading.get_ident() == self._loop_thread_id:
@@ -457,6 +477,7 @@ class MovementManager:
         Single set_target() call with pose fusion.
         """
         logger.info("Starting enhanced movement control loop (50Hz)")
+        # Record loop/thread info so _run_in_control_loop can marshal work safely.
         self.loop = asyncio.get_running_loop()
         self._loop_thread_id = threading.get_ident()
 

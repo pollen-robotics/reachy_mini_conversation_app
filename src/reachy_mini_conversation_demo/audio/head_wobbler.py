@@ -44,6 +44,9 @@ class HeadWobbler:
         buf = np.frombuffer(base64.b64decode(delta_b64), dtype=np.int16).reshape(1, -1)
         if self._consumer_loop is None:
             return
+        # Audio deltas arrive on the OpenAI realtime handler's thread.  We place them onto the
+        # wobbler loop's queue using run_coroutine_threadsafe so that the consumer loop remains
+        # the sole owner of the asyncio.Queue instance.
         asyncio.run_coroutine_threadsafe(
             self.audio_queue.put((SAMPLE_RATE, buf)),
             self._consumer_loop,
@@ -56,6 +59,10 @@ class HeadWobbler:
         self._consumer_loop = loop
 
         while not stop_event.is_set():
+            # `reset()` can be called from other threads (e.g. OpenAI handler).  Rather than
+            # touching internal state directly, it flips `_pending_reset` or schedules
+            # `_async_reset()` onto this loop.  Doing the reset work here keeps state changes
+            # confined to the owning loop.
             if self._pending_reset:
                 self._pending_reset = False
                 await self._async_reset()
@@ -69,6 +76,8 @@ class HeadWobbler:
 
             pcm = np.asarray(chunk).squeeze(0)
             results = self.sway.feed(pcm, sr)
+            # `_generation` increments whenever a reset happens.  Capturing the value lets us
+            # abandon partially processed audio hops if a reset races with this loop.
             generation = self._generation
 
             if self._base_ts is None:
@@ -76,6 +85,8 @@ class HeadWobbler:
 
             i = 0
             while i < len(results):
+                # If `_generation` changed mid-loop, a reset happened – discard remaining hops
+                # so no stale offsets leak through.
                 if generation != self._generation:
                     break
                 if self._base_ts is None:
@@ -126,7 +137,8 @@ class HeadWobbler:
         if loop and loop.is_running():
             asyncio.run_coroutine_threadsafe(self._async_drain_queue(), loop)
         else:
-            # Nothing to drain yet – queue will be empty once loop starts
+            # Nothing to drain yet – queue will be empty once loop starts.  Replace the queue
+            # instance so any pending `feed()` calls continue to have somewhere to enqueue data.
             self.audio_queue = asyncio.Queue()
 
     def reset(self) -> None:
