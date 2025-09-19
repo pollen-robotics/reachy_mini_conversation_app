@@ -53,7 +53,6 @@ class HeadWobbler:
         loop = asyncio.get_running_loop()
 
         while not self._stop_event.is_set():
-            logger.debug("Head wobbler loop iteration")
             try:
                 sr, chunk = self.audio_queue.get_nowait()  # (1,N) int16
             except QueueEmpty:

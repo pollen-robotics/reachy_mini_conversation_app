@@ -422,7 +422,6 @@ class MovementManager:
         last_print_time = time.time()
 
         while not self._stop_event.is_set():
-            logger.debug("Movement control loop iteration")
             loop_start_time = time.time()
             loop_count += 1
             current_time = time.time()
