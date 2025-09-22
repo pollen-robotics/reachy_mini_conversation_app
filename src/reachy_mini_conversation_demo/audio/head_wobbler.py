@@ -1,7 +1,10 @@
-import asyncio  # noqa: D100
+"""Moves head given audio samples."""
+
 import base64
 import logging
-from asyncio import QueueEmpty
+import queue
+import threading
+import time
 from typing import Optional
 
 import numpy as np
@@ -22,53 +25,59 @@ class HeadWobbler:
         self._base_ts: Optional[float] = None
         self._hops_done: int = 0
 
-        self.audio_queue: asyncio.Queue = asyncio.Queue()
+        self.audio_queue: queue.Queue = queue.Queue()
         self.sway = SwayRollRT()
 
-        self._consumer_loop: Optional[asyncio.AbstractEventLoop] = None
-        self._movement_loop: Optional[asyncio.AbstractEventLoop] = None
-
-    def bind_loops(
-        self,
-        consumer_loop: asyncio.AbstractEventLoop,
-        movement_loop: asyncio.AbstractEventLoop,
-    ) -> None:
-        """Bind the event loops for thread-safe communication."""
-        self._consumer_loop = consumer_loop
-        self._movement_loop = movement_loop
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
 
     def feed(self, delta_b64: str) -> None:
         """Thread-safe: push audio into the consumer queue."""
         buf = np.frombuffer(base64.b64decode(delta_b64), dtype=np.int16).reshape(1, -1)
-        if self._consumer_loop is None:
-            return
-        asyncio.run_coroutine_threadsafe(
-            self.audio_queue.put((SAMPLE_RATE, buf)),
-            self._consumer_loop,
-        )
+        self.audio_queue.put((SAMPLE_RATE, buf))
 
-    async def enable(self, stop_event: asyncio.Event) -> None:
+    def start(self) -> None:
+        """Start the head wobbler loop in a thread."""
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self.working_loop, daemon=True)
+        self._thread.start()
+        logger.info("Head wobbler started")
+
+    def stop(self) -> None:
+        """Stop the head wobbler loop."""
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join()
+        logger.info("Head wobbler stopped")
+
+    def working_loop(self) -> None:
         """Convert audio deltas into head movement offsets."""
         hop_dt = HOP_MS / 1000.0
-        loop = asyncio.get_running_loop()
-        self._consumer_loop = loop
 
-        while not stop_event.is_set():
-            sr, chunk = await self.audio_queue.get()  # (1,N) int16
+        logger.debug("Head wobbler thread started")
+        while not self._stop_event.is_set():
+            try:
+                sr, chunk = self.audio_queue.get_nowait()  # (1,N) int16
+            except queue.Empty:
+                # avoid while to never exit
+                time.sleep(MOVEMENT_LATENCY_S)
+                continue
+
             pcm = np.asarray(chunk).squeeze(0)
             results = self.sway.feed(pcm, sr)
+            self.audio_queue.task_done()
 
             if self._base_ts is None:
-                self._base_ts = loop.time()
+                self._base_ts = time.time()
 
             i = 0
             while i < len(results):
                 if self._base_ts is None:
-                    self._base_ts = loop.time()
+                    self._base_ts = time.time()
                     continue
 
                 target = self._base_ts + MOVEMENT_LATENCY_S + self._hops_done * hop_dt
-                now = loop.time()
+                now = time.time()
 
                 if now - target >= hop_dt:
                     lag_hops = int((now - target) / hop_dt)
@@ -79,7 +88,7 @@ class HeadWobbler:
                         continue
 
                 if target > now:
-                    await asyncio.sleep(target - now)
+                    time.sleep(target - now)
 
                 r = results[i]
                 offsets = (
@@ -91,16 +100,13 @@ class HeadWobbler:
                     r["yaw_rad"],
                 )
 
-                if self._movement_loop:
-                    self._movement_loop.call_soon_threadsafe(
-                        self._apply_offsets, offsets
-                    )
-                else:
-                    self._apply_offsets(offsets)
+                self._apply_offsets(offsets)
 
                 self._hops_done += 1
                 i += 1
+        logger.debug("Head wobbler thread exited")
 
+    '''
     def drain_audio_queue(self) -> None:
         """Empty the audio queue."""
         try:
@@ -108,10 +114,12 @@ class HeadWobbler:
                 self.audio_queue.get_nowait()
         except QueueEmpty:
             pass
+    '''
 
     def reset(self) -> None:
         """Reset the internal state."""
-        self.drain_audio_queue()
+        # self.drain_audio_queue()
+        self.audio_queue = queue.Queue()
         self._base_ts = None
         self._hops_done = 0
         self.sway.reset()
