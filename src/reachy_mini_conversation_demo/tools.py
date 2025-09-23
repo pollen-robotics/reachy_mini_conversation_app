@@ -34,6 +34,10 @@ try:
     RECORDED_MOVES = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
     DANCE_AVAILABLE = True
     EMOTION_AVAILABLE = True
+
+    if "headbanger_combo" in AVAILABLE_MOVES:
+        del AVAILABLE_MOVES["headbanger_combo"]
+
 except ImportError as e:
     logger.warning(f"Dance/emotion libraries not available: {e}")
     AVAILABLE_MOVES = {}
@@ -397,7 +401,6 @@ class Dance(Tool):
                                         side_to_side_sway: A smooth, side-to-side sway of the entire head.
                                         dizzy_spin: A circular 'dizzy' head motion combining roll and pitch.
                                         stumble_and_recover: A simulated stumble and recovery with multiple axis movements. Good vibes
-                                        headbanger_combo: A strong head nod combined with a vertical bounce.
                                         interwoven_spirals: A complex spiral motion using three axes at different frequencies.
                                         sharp_side_tilt: A sharp, quick side-to-side tilt using a triangle waveform.
                                         side_peekaboo: A multi-stage peekaboo performance, hiding and peeking to each side.
