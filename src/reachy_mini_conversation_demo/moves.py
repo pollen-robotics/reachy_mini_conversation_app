@@ -58,7 +58,7 @@ class BreathingMove(Move):
         self.neutral_antennas = np.array([0.0, 0.0])
 
         # Breathing parameters
-        self.breathing_z_amplitude = 0.01  # 1cm gentle breathing
+        self.breathing_z_amplitude = 0.005  # 5mm gentle breathing
         self.breathing_frequency = 0.1  # Hz (6 breaths per minute)
         self.antenna_sway_amplitude = np.deg2rad(15)  # 15 degrees
         self.antenna_frequency = 0.5  # Hz (faster antenna sway)
@@ -141,6 +141,12 @@ def combine_full_body(
     return (combined_head, combined_antennas, combined_body_yaw)
 
 
+def clone_full_body_pose(pose: FullBodyPose) -> FullBodyPose:
+    """Create a deep copy of a full body pose tuple."""
+    head, antennas, body_yaw = pose
+    return (head.copy(), (float(antennas[0]), float(antennas[1])), float(body_yaw))
+
+
 @dataclass
 class MovementState:
     """State tracking for the movement system."""
@@ -175,6 +181,7 @@ class MovementState:
     # Status flags
     is_playing_move: bool = False
     is_moving: bool = False
+    last_primary_pose: Optional[FullBodyPose] = None
 
     def update_activity(self) -> None:
         """Update the last activity time."""
@@ -206,6 +213,8 @@ class MovementManager:
         # Movement state
         self.state = MovementState()
         self.state.last_activity_time = time.time()
+        neutral_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
+        self.state.last_primary_pose = (neutral_pose, (0.0, 0.0), 0.0)
 
         # Move queue (primary moves)
         self.move_queue = deque()
@@ -218,6 +227,14 @@ class MovementManager:
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._state_lock = threading.RLock()
+        self._is_listening = False
+        self._last_commanded_pose: FullBodyPose = clone_full_body_pose(
+            self.state.last_primary_pose
+        )
+        self._listening_antennas: Tuple[float, float] = self._last_commanded_pose[1]
+        self._antenna_unfreeze_blend = 1.0
+        self._antenna_blend_duration = 0.4  # seconds to blend back after listening
+        self._last_listening_blend_time = time.monotonic()
 
     def queue_move(self, move: Move) -> None:
         """Add a move to the primary move queue."""
@@ -267,9 +284,32 @@ class MovementManager:
     def is_idle(self):
         """Check if the robot is idle based on inactivity delay."""
         with self._state_lock:
+            if self._is_listening:
+                return False
             current_time = time.time()
             time_since_activity = current_time - self.state.last_activity_time
             return time_since_activity >= self.idle_inactivity_delay
+
+    def mark_user_activity(self) -> None:
+        """Record recent user activity to delay idle behaviours."""
+        with self._state_lock:
+            self.state.update_activity()
+
+    def set_listening(self, listening: bool) -> None:
+        """Toggle listening mode, freezing antennas when active."""
+        with self._state_lock:
+            if self._is_listening == listening:
+                return
+            self._is_listening = listening
+            self._last_listening_blend_time = time.monotonic()
+            if listening:
+                # Capture the last antenna command so we keep that pose during listening
+                self._listening_antennas = (
+                    float(self._last_commanded_pose[1][0]),
+                    float(self._last_commanded_pose[1][1]),
+                )
+                self._antenna_unfreeze_blend = 0.0
+            self.state.update_activity()
 
     def _manage_move_queue(self, current_time: float) -> None:
         """Manage the primary move queue (sequential execution)."""
@@ -328,6 +368,7 @@ class MovementManager:
     def _get_primary_pose(self, current_time: float) -> FullBodyPose:
         """Get the primary full body pose from current move or neutral."""
         with self._state_lock:
+            # When a primary move is playing, sample it and cache the resulting pose
             if (
                 self.state.current_move is not None
                 and self.state.move_start_time is not None
@@ -343,17 +384,33 @@ class MovementManager:
                     body_yaw = 0.0
 
                 antennas_tuple = (float(antennas[0]), float(antennas[1]))
-                primary_full_body_pose = (head, antennas_tuple, float(body_yaw))
+                head_copy = head.copy()
+                primary_full_body_pose = (
+                    head_copy,
+                    antennas_tuple,
+                    float(body_yaw),
+                )
 
                 self.state.is_playing_move = True
                 self.state.is_moving = True
+                self.state.last_primary_pose = clone_full_body_pose(primary_full_body_pose)
             else:
+                # Otherwise reuse the last primary pose so we avoid jumps between moves
                 self.state.is_playing_move = False
                 self.state.is_moving = (
                     time.time() - self.state.moving_start < self.state.moving_for
                 )
-                neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
-                primary_full_body_pose = (neutral_head_pose, (0.0, 0.0), 0.0)
+
+                if self.state.last_primary_pose is not None:
+                    primary_full_body_pose = clone_full_body_pose(
+                        self.state.last_primary_pose
+                    )
+                else:
+                    neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
+                    primary_full_body_pose = (neutral_head_pose, (0.0, 0.0), 0.0)
+                    self.state.last_primary_pose = clone_full_body_pose(
+                        primary_full_body_pose
+                    )
 
         return primary_full_body_pose
 
@@ -393,14 +450,6 @@ class MovementManager:
             # No camera worker, use neutral offsets
             with self._state_lock:
                 self.state.face_tracking_offsets = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-
-    def set_neutral(self) -> None:
-        """Set neutral robot position."""
-        with self._state_lock:
-            self.state.speech_offsets = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-            self.state.face_tracking_offsets = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-        neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
-        self.current_robot.set_target(head=neutral_head_pose, antennas=(0.0, 0.0))
 
     def start(self) -> None:
         """Start the move worker loop in a thread."""
@@ -453,14 +502,55 @@ class MovementManager:
 
             # 7. Extract pose components
             head, antennas, body_yaw = global_full_body_pose
+            now_monotonic = time.monotonic()
+            with self._state_lock:
+                listening = self._is_listening
+                listening_antennas = self._listening_antennas
+                blend = self._antenna_unfreeze_blend
+                blend_duration = self._antenna_blend_duration
+                last_update = self._last_listening_blend_time
+                self._last_listening_blend_time = now_monotonic
+
+            # Blend antenna outputs back to the live motion when leaving listening mode
+            if listening:
+                antennas_cmd = listening_antennas
+                new_blend = 0.0
+            else:
+                dt = max(0.0, now_monotonic - last_update)
+                if blend_duration <= 0:
+                    new_blend = 1.0
+                else:
+                    new_blend = min(1.0, blend + dt / blend_duration)
+                antennas_cmd = (
+                    listening_antennas[0] * (1.0 - new_blend)
+                    + antennas[0] * new_blend,
+                    listening_antennas[1] * (1.0 - new_blend)
+                    + antennas[1] * new_blend,
+                )
+
+            with self._state_lock:
+                if listening:
+                    self._antenna_unfreeze_blend = 0.0
+                else:
+                    self._antenna_unfreeze_blend = new_blend
+                    if new_blend >= 1.0:
+                        self._listening_antennas = (
+                            float(antennas[0]),
+                            float(antennas[1]),
+                        )
 
             # 8. Single set_target call - the one and only place we control the robot
             try:
                 self.current_robot.set_target(
-                    head=head, antennas=antennas, body_yaw=body_yaw
+                    head=head, antennas=antennas_cmd, body_yaw=body_yaw
                 )
             except Exception as e:
                 logger.error(f"Failed to set robot target: {e}")
+            else:
+                with self._state_lock:
+                    self._last_commanded_pose = clone_full_body_pose(
+                        (head, antennas_cmd, body_yaw)
+                    )
 
             # 9. Calculate computation time and adjust sleep for 50Hz
             computation_time = time.time() - loop_start_time
