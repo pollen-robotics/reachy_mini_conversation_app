@@ -58,8 +58,8 @@ class BreathingMove(Move):
         self.neutral_antennas = np.array([0.0, 0.0])
 
         # Breathing parameters
-        self.breathing_z_amplitude = 0.005  # 5mm gentle breathing
-        self.breathing_frequency = 0.1  # Hz (6 breaths per minute)
+        self.breathing_z_amplitude = 0.01  # 5mm gentle breathing
+        self.breathing_frequency = 0.25  # Hz (6 breaths per minute)
         self.antenna_sway_amplitude = np.deg2rad(15)  # 15 degrees
         self.antenna_frequency = 0.5  # Hz (faster antenna sway)
 
@@ -95,6 +95,7 @@ class BreathingMove(Move):
             z_offset = self.breathing_z_amplitude * np.sin(
                 2 * np.pi * self.breathing_frequency * breathing_time
             )
+            # print(z_offset)
             head_pose = create_head_pose(
                 x=0, y=0, z=z_offset, roll=0, pitch=0, yaw=0, degrees=True, mm=False
             )
@@ -393,7 +394,9 @@ class MovementManager:
 
                 self.state.is_playing_move = True
                 self.state.is_moving = True
-                self.state.last_primary_pose = clone_full_body_pose(primary_full_body_pose)
+                self.state.last_primary_pose = clone_full_body_pose(
+                    primary_full_body_pose
+                )
             else:
                 # Otherwise reuse the last primary pose so we avoid jumps between moves
                 self.state.is_playing_move = False
@@ -522,10 +525,8 @@ class MovementManager:
                 else:
                     new_blend = min(1.0, blend + dt / blend_duration)
                 antennas_cmd = (
-                    listening_antennas[0] * (1.0 - new_blend)
-                    + antennas[0] * new_blend,
-                    listening_antennas[1] * (1.0 - new_blend)
-                    + antennas[1] * new_blend,
+                    listening_antennas[0] * (1.0 - new_blend) + antennas[0] * new_blend,
+                    listening_antennas[1] * (1.0 - new_blend) + antennas[1] * new_blend,
                 )
 
             with self._state_lock:
