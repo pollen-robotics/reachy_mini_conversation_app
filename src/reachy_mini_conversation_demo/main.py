@@ -66,7 +66,7 @@ def main():
     )
     logger.info(f"Chatbot avatar images: {chatbot.avatar_images}")
 
-    handler = OpenaiRealtimeHandler(deps)
+    handler = OpenaiRealtimeHandler(deps, args.prompt)
     stream = Stream(
         handler=handler,
         mode="send-receive",

@@ -9,6 +9,12 @@ import numpy as np
 from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item
 from openai import AsyncOpenAI
 
+from reachy_mini_conversation_demo.prompts import (
+    SMALL_TALK_INSTRUCTIONS,
+    TED_SHOW_FALLBACK_INSTRUCTIONS,
+    TED_SHOW_INSTRUCTIONS,
+    prompt_list,
+)
 from reachy_mini_conversation_demo.tools import (
     ALL_TOOL_SPECS,
     ToolDependencies,
@@ -21,14 +27,19 @@ logger = logging.getLogger(__name__)
 class OpenaiRealtimeHandler(AsyncStreamHandler):
     """An OpenAI realtime handler for fastrtc Stream."""
 
-    def __init__(self, deps: ToolDependencies):
+    def __init__(self, deps: ToolDependencies, prompt: str):
         """Initialize the handler."""
         super().__init__(
             expected_layout="mono",
             output_sample_rate=24000,
             input_sample_rate=24000,
         )
+
+        if prompt not in prompt_list:
+            raise ValueError(f"Invalid prompt: {prompt}")
+
         self.deps = deps
+        self.prompt = prompt
 
         self.connection = None
         self.output_queue = asyncio.Queue()
@@ -41,12 +52,20 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
     def copy(self):
         """Create a copy of the handler."""
-        return OpenaiRealtimeHandler(self.deps)
+        return OpenaiRealtimeHandler(self.deps, self.prompt)
 
     async def start_up(self):
         """Start the handler."""
         self.client = AsyncOpenAI()
         async with self.client.beta.realtime.connect(model="gpt-realtime") as conn:
+            prompt = ""
+            if self.prompt == "TED":
+                prompt = TED_SHOW_INSTRUCTIONS
+            elif self.prompt == "TED_FB":
+                prompt = TED_SHOW_FALLBACK_INSTRUCTIONS
+            else:
+                prompt = SMALL_TALK_INSTRUCTIONS
+
             await conn.session.update(
                 session={
                     "turn_detection": {
@@ -56,8 +75,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         "model": "whisper-1",
                         "language": "en",
                     },
-                    "voice": "ballad",
-                    "instructions": "We speak in English",
+                    "voice": "echo",
+                    "instructions": prompt,
                     "tools": ALL_TOOL_SPECS,
                     "tool_choice": "auto",
                     "temperature": 0.7,
@@ -198,7 +217,6 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                 ],
                             }
                         )
-                        logger.info("additional input camera")
 
                         np_img = self.deps.camera_worker.get_latest_frame()
                         img = gr.Image(value=np_img)
