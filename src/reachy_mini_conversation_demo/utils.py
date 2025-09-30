@@ -2,8 +2,6 @@ import argparse  # noqa: D100
 import logging
 import warnings
 
-from reachy_mini.utils.camera import find_camera
-
 from reachy_mini_conversation_demo.camera_worker import CameraWorker
 
 
@@ -31,20 +29,10 @@ def parse_args():
 
 def handle_vision_stuff(args, current_robot):
     """Initialize camera, head tracker and camera worker."""
-    camera = None
     camera_worker = None
     head_tracker = None
     vision_manager = None
     if not args.no_camera:
-        camera = find_camera()
-        """
-        if not args.sim:
-            camera = find_camera()
-        else:
-            import cv2
-    
-            camera = cv2.VideoCapture(0)
-    """
         if args.head_tracker is not None:
             if args.head_tracker == "yolo":
                 from reachy_mini_conversation_demo.vision.yolo_head_tracker import (
@@ -58,9 +46,9 @@ def handle_vision_stuff(args, current_robot):
 
                 head_tracker = HeadTracker()
 
-        camera_worker = CameraWorker(camera, current_robot, head_tracker)
+        camera_worker = CameraWorker(current_robot, head_tracker)
 
-    return camera, camera_worker, head_tracker, vision_manager
+    return camera_worker, head_tracker, vision_manager
 
 
 def setup_logger(debug):

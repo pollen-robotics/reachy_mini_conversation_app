@@ -33,14 +33,11 @@ def main():
 
     robot = ReachyMini()
 
-    camera, camera_worker, head_tracker, vision_manager = handle_vision_stuff(
-        args, robot
-    )
+    camera_worker, head_tracker, vision_manager = handle_vision_stuff(args, robot)
 
     movement_manager = MovementManager(
         current_robot=robot,
         head_tracker=head_tracker,
-        camera=camera,
         camera_worker=camera_worker,
     )
 
@@ -49,7 +46,6 @@ def main():
     deps = ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
-        camera=camera,
         camera_worker=camera_worker,
         vision_manager=vision_manager,
         head_wobbler=head_wobbler,
