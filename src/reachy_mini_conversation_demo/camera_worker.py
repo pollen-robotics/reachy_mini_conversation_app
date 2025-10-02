@@ -23,11 +23,8 @@ logger = logging.getLogger(__name__)
 class CameraWorker:
     """Thread-safe camera worker with frame buffering and face tracking."""
 
-    def __init__(
-        self, camera: cv2.VideoCapture, reachy_mini: ReachyMini, head_tracker=None
-    ):
+    def __init__(self, reachy_mini: ReachyMini, head_tracker=None):
         """Initialize."""
-        self.camera = camera
         self.reachy_mini = reachy_mini
         self.head_tracker = head_tracker
 
@@ -109,9 +106,9 @@ class CameraWorker:
         while not self._stop_event.is_set():
             try:
                 current_time = time.time()
-                success, frame = self.camera.read()
+                frame = self.reachy_mini.media.get_frame()
 
-                if success:
+                if frame is not None:
                     # Thread-safe frame storage
                     with self.frame_lock:
                         self.latest_frame = frame  # .copy()

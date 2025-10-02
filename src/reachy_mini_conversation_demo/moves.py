@@ -201,13 +201,11 @@ class MovementManager:
         self,
         current_robot: ReachyMini,
         head_tracker=None,
-        camera=None,
         camera_worker=None,
     ):
         """Initialize movement manager."""
         self.current_robot = current_robot
         self.head_tracker = head_tracker
-        self.camera = camera
         self.camera_worker = camera_worker
 
         # Movement state
@@ -393,7 +391,9 @@ class MovementManager:
 
                 self.state.is_playing_move = True
                 self.state.is_moving = True
-                self.state.last_primary_pose = clone_full_body_pose(primary_full_body_pose)
+                self.state.last_primary_pose = clone_full_body_pose(
+                    primary_full_body_pose
+                )
             else:
                 # Otherwise reuse the last primary pose so we avoid jumps between moves
                 self.state.is_playing_move = False
@@ -522,10 +522,8 @@ class MovementManager:
                 else:
                     new_blend = min(1.0, blend + dt / blend_duration)
                 antennas_cmd = (
-                    listening_antennas[0] * (1.0 - new_blend)
-                    + antennas[0] * new_blend,
-                    listening_antennas[1] * (1.0 - new_blend)
-                    + antennas[1] * new_blend,
+                    listening_antennas[0] * (1.0 - new_blend) + antennas[0] * new_blend,
+                    listening_antennas[1] * (1.0 - new_blend) + antennas[1] * new_blend,
                 )
 
             with self._state_lock:

@@ -9,7 +9,6 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Literal, Optional
 
-import cv2
 from reachy_mini import ReachyMini
 from reachy_mini.utils import create_head_pose
 
@@ -74,7 +73,6 @@ class ToolDependencies:
     reachy_mini: ReachyMini
     movement_manager: Any  # MovementManager from moves.py
     # Optional deps
-    camera: Optional[cv2.VideoCapture] = None
     camera_worker: Optional[Any] = None  # CameraWorker for frame buffering
     vision_manager: Optional[Any] = None
     head_wobbler: Optional[Any] = None  # HeadWobbler for audio-reactive motion
