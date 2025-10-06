@@ -525,6 +525,8 @@ class MovementManager:
             idle_for = current_time - self.state.last_activity_time
             if idle_for >= self.idle_inactivity_delay:
                 try:
+                    # These 2 functions return the latest available sensor data from the robot, but don't perform I/O synchronously.
+                    # Therefore, we accept calling them inside the control loop.
                     _, current_antennas = self.current_robot.get_current_joint_positions()
                     current_head_pose = self.current_robot.get_current_head_pose()
 
@@ -625,6 +627,46 @@ class MovementManager:
         )
         return (secondary_head_pose, (0, 0), 0)
 
+    def _calculate_blended_antennas(
+        self, target_antennas: Tuple[float, float]
+    ) -> Tuple[float, float]:
+        """Blend target antennas with listening freeze state and update blending."""
+        now = self._now()
+        listening = self._is_listening
+        listening_antennas = self._listening_antennas
+        blend = self._antenna_unfreeze_blend
+        blend_duration = self._antenna_blend_duration
+        last_update = self._last_listening_blend_time
+        self._last_listening_blend_time = now
+
+        if listening:
+            antennas_cmd = listening_antennas
+            new_blend = 0.0
+        else:
+            dt = max(0.0, now - last_update)
+            if blend_duration <= 0:
+                new_blend = 1.0
+            else:
+                new_blend = min(1.0, blend + dt / blend_duration)
+            antennas_cmd = (
+                listening_antennas[0] * (1.0 - new_blend)
+                + target_antennas[0] * new_blend,
+                listening_antennas[1] * (1.0 - new_blend)
+                + target_antennas[1] * new_blend,
+            )
+
+        if listening:
+            self._antenna_unfreeze_blend = 0.0
+        else:
+            self._antenna_unfreeze_blend = new_blend
+            if new_blend >= 1.0:
+                self._listening_antennas = (
+                    float(target_antennas[0]),
+                    float(target_antennas[1]),
+                )
+
+        return antennas_cmd
+
     def _update_face_tracking(self, current_time: float) -> None:
         """Get face tracking offsets from camera worker thread."""
         if self.camera_worker is not None:
@@ -704,37 +746,7 @@ class MovementManager:
 
             # 6) Apply listening antenna freeze or blend-back
             head, antennas, body_yaw = global_full_body_pose
-            now_monotonic = self._now()
-            listening = self._is_listening
-            listening_antennas = self._listening_antennas
-            blend = self._antenna_unfreeze_blend
-            blend_duration = self._antenna_blend_duration
-            last_update = self._last_listening_blend_time
-            self._last_listening_blend_time = now_monotonic
-
-            if listening:
-                antennas_cmd = listening_antennas
-                new_blend = 0.0
-            else:
-                dt = max(0.0, now_monotonic - last_update)
-                if blend_duration <= 0:
-                    new_blend = 1.0
-                else:
-                    new_blend = min(1.0, blend + dt / blend_duration)
-                antennas_cmd = (
-                    listening_antennas[0] * (1.0 - new_blend) + antennas[0] * new_blend,
-                    listening_antennas[1] * (1.0 - new_blend) + antennas[1] * new_blend,
-                )
-
-            if listening:
-                self._antenna_unfreeze_blend = 0.0
-            else:
-                self._antenna_unfreeze_blend = new_blend
-                if new_blend >= 1.0:
-                    self._listening_antennas = (
-                        float(antennas[0]),
-                        float(antennas[1]),
-                    )
+            antennas_cmd = self._calculate_blended_antennas(antennas)
 
             # 7) Single set_target call - the only control point
             try:
