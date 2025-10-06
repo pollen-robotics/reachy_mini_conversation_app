@@ -66,6 +66,7 @@ select = [
 ]
 ignore = [
   "E501",  # handled by formatter
+  "D100",  # ignore missing module docstrings
   "D203",  # blank line before class docstring (conflicts with D211)
   "D213",  # summary on second line (conflicts with D212)
 ]
