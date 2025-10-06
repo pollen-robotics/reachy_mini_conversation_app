@@ -236,6 +236,7 @@ class MovementManager:
         self._antenna_unfreeze_blend = 1.0
         self._antenna_blend_duration = 0.4  # seconds to blend back after listening
         self._last_listening_blend_time = self._now()
+        self._breathing_active = False  # true when breathing move is running or queued
 
         # Cross-thread signalling
         self._command_queue: Queue[tuple[str, Any]] = Queue()
@@ -382,6 +383,7 @@ class MovementManager:
             self.state.current_move = None
             self.state.move_start_time = None
             self.state.is_playing_move = False
+            self._breathing_active = False
             logger.info("Cleared move queue and stopped current move")
         elif command == "set_moving_state":
             try:
@@ -430,19 +432,30 @@ class MovementManager:
             if self.move_queue:
                 self.state.current_move = self.move_queue.popleft()
                 self.state.move_start_time = current_time
+                # Any real move cancels breathing mode flag
+                self._breathing_active = isinstance(
+                    self.state.current_move, BreathingMove
+                )
                 logger.info(
                     f"Starting new move, duration: {self.state.current_move.duration}s"
                 )
 
     def _manage_breathing(self, current_time: float) -> None:
         """Manage automatic breathing when idle."""
-        # Start breathing after inactivity delay if no moves in queue
-        if self.state.current_move is None and not self.move_queue:
-            time_since_activity = current_time - self.state.last_activity_time
-            if not self._is_listening and time_since_activity >= self.idle_inactivity_delay:
+        if (
+            self.state.current_move is None
+            and not self.move_queue
+            and not self._is_listening
+            and not self._breathing_active
+        ):
+            idle_for = current_time - self.state.last_activity_time
+            if idle_for >= self.idle_inactivity_delay:
                 try:
                     _, current_antennas = self.current_robot.get_current_joint_positions()
                     current_head_pose = self.current_robot.get_current_head_pose()
+
+                    self._breathing_active = True
+                    self.state.update_activity()
 
                     breathing_move = BreathingMove(
                         interpolation_start_pose=current_head_pose,
@@ -450,21 +463,24 @@ class MovementManager:
                         interpolation_duration=1.0,
                     )
                     self.move_queue.append(breathing_move)
-                    self.state.update_activity()
-                    logger.info(
-                        f"Started breathing after {time_since_activity:.1f}s of inactivity"
-                    )
+                    logger.info("Started breathing after %.1fs of inactivity", idle_for)
                 except Exception as e:
-                    logger.error(f"Failed to start breathing: {e}")
+                    self._breathing_active = False
+                    logger.error("Failed to start breathing: %s", e)
 
         if (
-            self.state.current_move is not None
-            and isinstance(self.state.current_move, BreathingMove)
+            isinstance(self.state.current_move, BreathingMove)
             and self.move_queue
         ):
             self.state.current_move = None
             self.state.move_start_time = None
+            self._breathing_active = False
             logger.info("Stopping breathing due to new move activity")
+
+        if self.state.current_move is not None and not isinstance(
+            self.state.current_move, BreathingMove
+        ):
+            self._breathing_active = False
 
     def _get_primary_pose(self, current_time: float) -> FullBodyPose:
         """Get the primary full body pose from current move or neutral."""
