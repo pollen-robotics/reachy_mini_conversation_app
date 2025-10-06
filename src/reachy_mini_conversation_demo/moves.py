@@ -1,9 +1,35 @@
-"""Movement system with sequential primary moves and additive secondary moves.
+"""
+Movement system with sequential primary moves and additive secondary moves.
 
-This module implements the movement architecture from main_works.py:
-- Primary moves (sequential): emotions, dances, goto, breathing
-- Secondary moves (additive): speech offsets + face tracking
-- Single set_target() control point with pose fusion
+Design overview
+- Primary moves (emotions, dances, goto, breathing) are mutually exclusive and run
+  sequentially.
+- Secondary moves (speech sway, face tracking) are additive offsets applied on top
+  of the current primary pose.
+- There is a single control point to the robot: `ReachyMini.set_target`.
+- The control loop runs near 100 Hz and is phase-aligned via a monotonic clock.
+- Idle behaviour starts an infinite `BreathingMove` after a short inactivity delay
+  unless listening is active.
+
+Threading model
+- A dedicated worker thread owns all real-time state and issues `set_target`
+  commands.
+- Other threads communicate via a command queue (enqueue moves, mark activity,
+  toggle listening).
+- Secondary offset producers set pending values guarded by locks; the worker
+  snaps them atomically.
+
+Units and frames
+- Secondary offsets are interpreted as metres for x/y/z and radians for
+  roll/pitch/yaw in the world frame (unless noted by `compose_world_offset`).
+- Antennas and `body_yaw` are in radians.
+- Head pose composition uses `compose_world_offset(primary_head, secondary_head)`;
+  the secondary offset must therefore be expressed in the world frame.
+
+Safety
+- Listening freezes antennas, then blends them back on unfreeze.
+- Breathing is guarded to avoid duplicate enqueues.
+- `set_target` errors are rate-limited in logs.
 """
 
 from __future__ import annotations
@@ -126,8 +152,9 @@ def combine_full_body(
     primary_head, primary_antennas, primary_body_yaw = primary_pose
     secondary_head, secondary_antennas, secondary_body_yaw = secondary_pose
 
-    # Combine head poses using compose_world_offset
-    # primary_head is T_abs, secondary_head is T_off_world
+    # Combine head poses using compose_world_offset; the secondary pose must be an
+    # offset expressed in the world frame (T_off_world) applied to the absolute
+    # primary transform (T_abs).
     combined_head = compose_world_offset(
         primary_head, secondary_head, reorthonormalize=True
     )
@@ -190,12 +217,26 @@ class MovementState:
 
 
 class MovementManager:
-    """Enhanced movement manager that reproduces main_works.py behavior.
+    """Coordinate sequential moves, additive offsets, and robot output at 100 Hz.
 
-    - Sequential primary moves via queue
-    - Additive secondary moves (speech + face tracking)
-    - Single set_target control loop with pose fusion
-    - Automatic breathing after inactivity
+    Responsibilities:
+    - Own a real-time loop that samples the current primary move (if any), fuses
+      secondary offsets, and calls `set_target` exactly once per tick.
+    - Start an idle `BreathingMove` after `idle_inactivity_delay` when not
+      listening and no moves are queued.
+    - Expose thread-safe APIs so other threads can enqueue moves, mark activity,
+      or feed secondary offsets without touching internal state.
+
+    Timing:
+    - All elapsed-time calculations rely on `time.monotonic()` through `self._now`
+      to avoid wall-clock jumps.
+    - The loop attempts 100 Hz by sleeping toward the next absolute tick to limit
+      drift.
+
+    Concurrency:
+    - External threads communicate via `_command_queue` messages.
+    - Secondary offsets are staged via dirty flags guarded by locks and consumed
+      atomically inside the worker loop.
     """
 
     def __init__(
@@ -272,17 +313,28 @@ class MovementManager:
         self._shared_is_listening = self._is_listening
 
     def queue_move(self, move: Move) -> None:
-        """Add a move to the primary move queue."""
+        """Queue a primary move to run after the currently executing one.
+
+        Thread-safe: the move is enqueued via the worker command queue so the
+        control loop remains the sole mutator of movement state.
+        """
         self._command_queue.put(("queue_move", move))
 
     def clear_queue(self) -> None:
-        """Clear all queued moves and stop current move."""
+        """Stop the active move and discard any queued primary moves.
+
+        Thread-safe: executed by the worker thread via the command queue.
+        """
         self._command_queue.put(("clear_queue", None))
 
     def set_speech_offsets(
         self, offsets: Tuple[float, float, float, float, float, float]
     ) -> None:
-        """Set speech head offsets (secondary move)."""
+        """Update speech-induced secondary offsets (x, y, z, roll, pitch, yaw).
+
+        Offsets are interpreted as metres for translation and radians for
+        rotation in the world frame. Thread-safe via a pending snapshot.
+        """
         with self._speech_offsets_lock:
             self._pending_speech_offsets = offsets
             self._speech_offsets_dirty = True
@@ -290,23 +342,30 @@ class MovementManager:
     def set_offsets(
         self, offsets: Tuple[float, float, float, float, float, float]
     ) -> None:
-        """Compatibility alias for set_speech_offsets."""
+        """Compatibility alias for :meth:`set_speech_offsets`."""
         self.set_speech_offsets(offsets)
 
     def set_face_tracking_offsets(
         self, offsets: Tuple[float, float, float, float, float, float]
     ) -> None:
-        """Set face tracking offsets (secondary move)."""
+        """Update face-tracking secondary offsets (x, y, z, roll, pitch, yaw).
+
+        Offsets are staged atomically and applied in the worker thread.
+        """
         with self._face_offsets_lock:
             self._pending_face_offsets = offsets
             self._face_offsets_dirty = True
 
     def set_moving_state(self, duration: float) -> None:
-        """Set legacy moving state for goto moves."""
+        """Mark the robot as actively moving for the provided duration.
+
+        Legacy hook used by goto helpers to keep inactivity and breathing logic
+        aware of manual motions. Thread-safe via the command queue.
+        """
         self._command_queue.put(("set_moving_state", duration))
 
     def is_idle(self):
-        """Check if the robot is idle based on inactivity delay."""
+        """Return True when the robot has been inactive longer than the idle delay."""
         with self._shared_state_lock:
             last_activity = self._shared_last_activity_time
             listening = self._shared_is_listening
@@ -319,11 +378,19 @@ class MovementManager:
         return time_since_activity >= self.idle_inactivity_delay
 
     def mark_user_activity(self) -> None:
-        """Record recent user activity to delay idle behaviours."""
+        """Record external activity and postpone idle behaviours (thread-safe)."""
         self._command_queue.put(("mark_activity", None))
 
     def set_listening(self, listening: bool) -> None:
-        """Toggle listening mode, freezing antennas when active."""
+        """Enable or disable listening mode without touching shared state directly.
+
+        While listening:
+        - Antenna positions are frozen at the last commanded values.
+        - Blending is reset so that upon unfreezing the antennas return smoothly.
+        - Idle breathing is suppressed.
+
+        Thread-safe: the change is posted to the worker command queue.
+        """
         with self._shared_state_lock:
             if self._shared_is_listening == listening:
                 return
@@ -576,14 +643,14 @@ class MovementManager:
             self.state.face_tracking_offsets = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
     def start(self) -> None:
-        """Start the move worker loop in a thread."""
+        """Start the worker thread that drives the 100 Hz control loop."""
         self._stop_event.clear()
         self._thread = threading.Thread(target=self.working_loop, daemon=True)
         self._thread.start()
         logger.info("Move worker started")
 
     def stop(self) -> None:
-        """Stop the move worker loop."""
+        """Request the worker thread to stop and wait for it to exit."""
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join()
@@ -623,26 +690,26 @@ class MovementManager:
                     freq_min = min(freq_min, last_freq)
             prev_loop_start = loop_start
 
-            # 1. Poll external signals and commands
+            # 1) Poll external commands and apply pending offsets (atomic snapshot)
             self._poll_signals(current_time)
 
-            # 2. Sequential move management
+            # 2) Manage the primary move queue (start new move, end finished move)
             self._manage_move_queue(current_time)
 
-            # 3. Automatic behaviours (breathing)
+            # 3) Manage automatic idle behaviours (breathing)
             self._manage_breathing(current_time)
 
-            # 4. Update vision offsets
+            # 4) Update vision-based secondary offsets
             self._update_face_tracking(current_time)
 
-            # 5. Build pose snapshots
+            # 5) Build primary and secondary full-body poses, then fuse them
             primary_full_body_pose = self._get_primary_pose(current_time)
             secondary_full_body_pose = self._get_secondary_pose()
             global_full_body_pose = combine_full_body(
                 primary_full_body_pose, secondary_full_body_pose
             )
 
-            # 6. Blend listening state for antennas
+            # 6) Apply listening antenna freeze or blend-back
             head, antennas, body_yaw = global_full_body_pose
             now_monotonic = self._now()
             listening = self._is_listening
@@ -676,7 +743,7 @@ class MovementManager:
                         float(antennas[1]),
                     )
 
-            # 7. Single set_target call - the only control point
+            # 7) Single set_target call - the only control point
             try:
                 self.current_robot.set_target(
                     head=head, antennas=antennas_cmd, body_yaw=body_yaw
@@ -699,7 +766,7 @@ class MovementManager:
                     (head, antennas_cmd, body_yaw)
                 )
 
-            # 8. Timing bookkeeping + adaptive sleep for 100Hz
+            # 8) Adaptive sleep to align to next tick, then publish shared state
             computation_time = self._now() - loop_start
             potential_freq = (
                 1.0 / computation_time if computation_time > 0 else float("inf")
@@ -711,7 +778,7 @@ class MovementManager:
             if sleep_time > 0:
                 time.sleep(sleep_time)
 
-            # 9. Periodic telemetry
+            # 9) Periodic telemetry on loop frequency
             if loop_count % print_interval_loops == 0 and freq_count > 0:
                 variance = freq_m2 / freq_count if freq_count > 0 else 0.0
                 lowest = freq_min if freq_min != float("inf") else 0.0
