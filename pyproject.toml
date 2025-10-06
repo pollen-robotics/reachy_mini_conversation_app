@@ -10,9 +10,12 @@ description = ""
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    # "reachy_mini@git+ssh://git@github.com/pollen-robotics/reachy_mini@develop",
-    "openai",
+    "reachy_mini",
+    "reachy_mini_dances_library",
+    "reachy_mini_toolbox",
+    "openai>=2.1",
     "fastrtc",
+    "aiortc==1.13.0",
     "onnxruntime",
     "PyGObject>=3.42.2, <=3.46.0",
     "torch",
@@ -21,10 +24,14 @@ dependencies = [
     "dotenv",
     "ultralytics",
     "supervision",
-    "reachy_mini_toolbox@git+ssh://git@github.com/pollen-robotics/reachy_mini_toolbox@main",
-    "reachy_mini_dances_library@git+ssh://git@github.com/pollen-robotics/reachy_mini_dances_library@main"
+    "mediapipe>=0.10.14",
 ]
 
+[tool.uv.sources]
+reachy-mini-dances-library = { path = "../reachy_mini_dances_library", editable = true }
+reachy-mini = { git = "ssh://git@github.com/pollen-robotics/reachy_mini.git", branch = "develop" }
+reachy-mini-toolbox = { git = "ssh://git@github.com/pollen-robotics/reachy_mini_toolbox.git", branch = "main" }
+fastrtc = { git = "ssh://git@github.com/gradio-app/fastrtc.git", branch = "main" }
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff==0.12.0"]
