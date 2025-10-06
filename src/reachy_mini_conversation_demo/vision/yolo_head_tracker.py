@@ -94,9 +94,7 @@ class HeadTracker:
 
         return np.array([norm_x, norm_y], dtype=np.float32)
 
-    def get_eyes(
-        self, img: np.ndarray
-    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    def get_eyes(self, img: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         """Get eye positions (approximated from face bbox).
 
         Note: YOLO only provides face bbox, so we estimate eye positions
@@ -131,20 +129,14 @@ class HeadTracker:
         right_eye_x = bbox[0] + face_width * 0.65
 
         # Convert to MediaPipe coordinates
-        left_eye = np.array(
-            [(left_eye_x / w) * 2 - 1, (eye_y / h) * 2 - 1], dtype=np.float32
-        )
-        right_eye = np.array(
-            [(right_eye_x / w) * 2 - 1, (eye_y / h) * 2 - 1], dtype=np.float32
-        )
+        left_eye = np.array([(left_eye_x / w) * 2 - 1, (eye_y / h) * 2 - 1], dtype=np.float32)
+        right_eye = np.array([(right_eye_x / w) * 2 - 1, (eye_y / h) * 2 - 1], dtype=np.float32)
 
         return left_eye, right_eye
 
     def get_eyes_from_landmarks(self, face_landmarks) -> Tuple[np.ndarray, np.ndarray]:
         """Compatibility method - YOLO doesn't have landmarks, so we store bbox in the object."""
-        if not hasattr(face_landmarks, "_bbox") or not hasattr(
-            face_landmarks, "_img_shape"
-        ):
+        if not hasattr(face_landmarks, "_bbox") or not hasattr(face_landmarks, "_img_shape"):
             raise ValueError("Face landmarks object missing required attributes")
 
         bbox = face_landmarks._bbox
@@ -158,12 +150,8 @@ class HeadTracker:
         left_eye_x = bbox[0] + face_width * 0.35
         right_eye_x = bbox[0] + face_width * 0.65
 
-        left_eye = np.array(
-            [(left_eye_x / w) * 2 - 1, (eye_y / h) * 2 - 1], dtype=np.float32
-        )
-        right_eye = np.array(
-            [(right_eye_x / w) * 2 - 1, (eye_y / h) * 2 - 1], dtype=np.float32
-        )
+        left_eye = np.array([(left_eye_x / w) * 2 - 1, (eye_y / h) * 2 - 1], dtype=np.float32)
+        right_eye = np.array([(right_eye_x / w) * 2 - 1, (eye_y / h) * 2 - 1], dtype=np.float32)
 
         return left_eye, right_eye
 
@@ -177,9 +165,7 @@ class HeadTracker:
         left_eye, right_eye = self.get_eyes_from_landmarks(face_landmarks)
         return float(np.arctan2(right_eye[1] - left_eye[1], right_eye[0] - left_eye[0]))
 
-    def get_head_position(
-        self, img: np.ndarray
-    ) -> Tuple[Optional[np.ndarray], Optional[float]]:
+    def get_head_position(self, img: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[float]]:
         """Get head position from face detection.
 
         Args:

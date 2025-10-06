@@ -114,17 +114,10 @@ class CameraWorker:
                         self.latest_frame = frame  # .copy()
 
                     # Check if face tracking was just disabled
-                    if (
-                        self.previous_head_tracking_state
-                        and not self.is_head_tracking_enabled
-                    ):
+                    if self.previous_head_tracking_state and not self.is_head_tracking_enabled:
                         # Face tracking was just disabled - start interpolation to neutral
-                        self.last_face_detected_time = (
-                            current_time  # Trigger the face-lost logic
-                        )
-                        self.interpolation_start_time = (
-                            None  # Will be set by the face-lost interpolation
-                        )
+                        self.last_face_detected_time = current_time  # Trigger the face-lost logic
+                        self.interpolation_start_time = None  # Will be set by the face-lost interpolation
                         self.interpolation_start_pose = None
 
                     # Update tracking state
@@ -137,9 +130,7 @@ class CameraWorker:
                         if eye_center is not None:
                             # Face detected - immediately switch to tracking
                             self.last_face_detected_time = current_time
-                            self.interpolation_start_time = (
-                                None  # Stop any interpolation
-                            )
+                            self.interpolation_start_time = None  # Stop any interpolation
 
                             # Convert normalized coordinates to pixel coordinates
                             h, w, _ = frame.shape
@@ -159,9 +150,7 @@ class CameraWorker:
 
                             # Extract translation and rotation from the target pose directly
                             translation = target_pose[:3, 3]
-                            rotation = R.from_matrix(target_pose[:3, :3]).as_euler(
-                                "xyz", degrees=False
-                            )
+                            rotation = R.from_matrix(target_pose[:3, :3]).as_euler("xyz", degrees=False)
 
                             # Thread-safe update of face tracking offsets (use pose as-is)
                             with self.face_tracking_lock:
@@ -176,19 +165,14 @@ class CameraWorker:
 
                         else:
                             # No face detected while tracking enabled - set face lost timestamp
-                            if (
-                                self.last_face_detected_time is None
-                                or self.last_face_detected_time == current_time
-                            ):
+                            if self.last_face_detected_time is None or self.last_face_detected_time == current_time:
                                 # Only update if we haven't already set a face lost time
                                 # (current_time check prevents overriding the disable-triggered timestamp)
                                 pass
 
                     # Handle smooth interpolation (works for both face-lost and tracking-disabled cases)
                     if self.last_face_detected_time is not None:
-                        time_since_face_lost = (
-                            current_time - self.last_face_detected_time
-                        )
+                        time_since_face_lost = current_time - self.last_face_detected_time
 
                         if time_since_face_lost >= self.face_lost_delay:
                             # Start interpolation if not already started
@@ -197,27 +181,17 @@ class CameraWorker:
                                 # Capture current pose as start of interpolation
                                 with self.face_tracking_lock:
                                     current_translation = self.face_tracking_offsets[:3]
-                                    current_rotation_euler = self.face_tracking_offsets[
-                                        3:
-                                    ]
+                                    current_rotation_euler = self.face_tracking_offsets[3:]
                                     # Convert to 4x4 pose matrix
                                     self.interpolation_start_pose = np.eye(4)
-                                    self.interpolation_start_pose[:3, 3] = (
-                                        current_translation
-                                    )
-                                    self.interpolation_start_pose[:3, :3] = (
-                                        R.from_euler(
-                                            "xyz", current_rotation_euler
-                                        ).as_matrix()
-                                    )
+                                    self.interpolation_start_pose[:3, 3] = current_translation
+                                    self.interpolation_start_pose[:3, :3] = R.from_euler(
+                                        "xyz", current_rotation_euler
+                                    ).as_matrix()
 
                             # Calculate interpolation progress (t from 0 to 1)
-                            elapsed_interpolation = (
-                                current_time - self.interpolation_start_time
-                            )
-                            t = min(
-                                1.0, elapsed_interpolation / self.interpolation_duration
-                            )
+                            elapsed_interpolation = current_time - self.interpolation_start_time
+                            t = min(1.0, elapsed_interpolation / self.interpolation_duration)
 
                             # Interpolate between current pose and neutral pose
                             interpolated_pose = linear_pose_interpolation(
@@ -226,9 +200,7 @@ class CameraWorker:
 
                             # Extract translation and rotation from interpolated pose
                             translation = interpolated_pose[:3, 3]
-                            rotation = R.from_matrix(
-                                interpolated_pose[:3, :3]
-                            ).as_euler("xyz", degrees=False)
+                            rotation = R.from_matrix(interpolated_pose[:3, :3]).as_euler("xyz", degrees=False)
 
                             # Thread-safe update of face tracking offsets
                             with self.face_tracking_lock:

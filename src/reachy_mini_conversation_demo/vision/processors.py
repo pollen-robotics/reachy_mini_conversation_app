@@ -61,9 +61,7 @@ class VisionProcessor:
     def initialize(self) -> bool:
         """Load model and processor onto the selected device."""
         try:
-            logger.info(
-                f"Loading SmolVLM2 model on {self.device} (HF_HOME={os.getenv('HF_HOME')})"
-            )
+            logger.info(f"Loading SmolVLM2 model on {self.device} (HF_HOME={os.getenv('HF_HOME')})")
             self.processor = AutoProcessor.from_pretrained(self.model_path)
 
             # Select dtype depending on device
@@ -81,9 +79,7 @@ class VisionProcessor:
                 model_kwargs["_attn_implementation"] = "flash_attention_2"
 
             # Load model weights
-            self.model = AutoModelForImageTextToText.from_pretrained(
-                self.model_path, **model_kwargs
-            ).to(self.device)
+            self.model = AutoModelForImageTextToText.from_pretrained(self.model_path, **model_kwargs).to(self.device)
 
             self.model.eval()
             self._initialized = True
@@ -138,10 +134,7 @@ class VisionProcessor:
                 )
 
                 # Move tensors to device WITHOUT forcing dtype (keeps input_ids as torch.long)
-                inputs = {
-                    k: (v.to(self.device) if hasattr(v, "to") else v)
-                    for k, v in inputs.items()
-                }
+                inputs = {k: (v.to(self.device) if hasattr(v, "to") else v) for k, v in inputs.items()}
 
                 with torch.no_grad():
                     generated_ids = self.model.generate(
@@ -246,9 +239,7 @@ class VisionManager:
                         )
 
                         # Only update if we got a valid response
-                        if description and not description.startswith(
-                            ("Vision", "Failed", "Error")
-                        ):
+                        if description and not description.startswith(("Vision", "Failed", "Error")):
                             self._current_description = description
                             self._last_processed_time = current_time
 
@@ -268,18 +259,14 @@ class VisionManager:
         """Get the most recent scene description (thread-safe)."""
         return self._current_description
 
-    async def process_current_frame(
-        self, prompt: str = "Describe what you see in detail."
-    ) -> Dict[str, Any]:
+    async def process_current_frame(self, prompt: str = "Describe what you see in detail.") -> Dict[str, Any]:
         """Process current camera frame with custom prompt."""
         try:
             success, frame = self.camera.read()
             if not success or frame is None:
                 return {"error": "Failed to capture image from camera"}
 
-            description = await asyncio.to_thread(
-                lambda: self.processor.process_image(frame, prompt)
-            )
+            description = await asyncio.to_thread(lambda: self.processor.process_image(frame, prompt))
 
             return {
                 "description": description,
@@ -335,9 +322,7 @@ def create_vision_processor(config: VisionConfig):
         return VisionProcessor(config)
 
 
-def init_vision(
-    camera: cv2.VideoCapture, processor_type: str = "local"
-) -> VisionManager:
+def init_vision(camera: cv2.VideoCapture, processor_type: str = "local") -> VisionManager:
     """Initialize vision manager with the specified processor type."""
     model_id = "HuggingFaceTB/SmolVLM2-2.2B-Instruct"
 

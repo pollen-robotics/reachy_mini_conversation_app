@@ -68,7 +68,7 @@ def _loudness_gain(db: float, offset: float = SENS_DB_OFFSET) -> float:
 
 def _to_float32_mono(x: np.ndarray) -> np.ndarray:
     """Convert arbitrary PCM array to float32 mono in [-1,1].
-    
+
     Accepts shapes: (N,), (1,N), (N,1), (C,N), (N,C).
     """
     a = np.asarray(x)
@@ -258,24 +258,9 @@ class SwayRollRT:
                 * env
                 * math.sin(2 * math.pi * SWAY_F_ROLL * self.t + self.phase_roll)
             )
-            x_mm = (
-                SWAY_A_X_MM
-                * loud
-                * env
-                * math.sin(2 * math.pi * SWAY_F_X * self.t + self.phase_x)
-            )
-            y_mm = (
-                SWAY_A_Y_MM
-                * loud
-                * env
-                * math.sin(2 * math.pi * SWAY_F_Y * self.t + self.phase_y)
-            )
-            z_mm = (
-                SWAY_A_Z_MM
-                * loud
-                * env
-                * math.sin(2 * math.pi * SWAY_F_Z * self.t + self.phase_z)
-            )
+            x_mm = SWAY_A_X_MM * loud * env * math.sin(2 * math.pi * SWAY_F_X * self.t + self.phase_x)
+            y_mm = SWAY_A_Y_MM * loud * env * math.sin(2 * math.pi * SWAY_F_Y * self.t + self.phase_y)
+            z_mm = SWAY_A_Z_MM * loud * env * math.sin(2 * math.pi * SWAY_F_Z * self.t + self.phase_z)
 
             out.append(
                 {

@@ -15,7 +15,7 @@ def getenv_bool(key: str, default: bool = False) -> bool:
 
 class Config:
     """Configuration class for the conversation demo."""
-    
+
     # Required
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     if not OPENAI_API_KEY:

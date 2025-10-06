@@ -93,35 +93,22 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     pass
                     # self.deps.head_wobbler.reset()
 
-                if (
-                    event.type
-                    == "conversation.item.input_audio_transcription.completed"
-                ):
+                if event.type == "conversation.item.input_audio_transcription.completed":
                     logger.debug(f"user transcript: {event.transcript}")
-                    await self.output_queue.put(
-                        AdditionalOutputs({"role": "user", "content": event.transcript})
-                    )
+                    await self.output_queue.put(AdditionalOutputs({"role": "user", "content": event.transcript}))
 
                 if event.type == "response.audio_transcript.done":
                     logger.debug(f"assistant transcript: {event.transcript}")
-                    await self.output_queue.put(
-                        AdditionalOutputs(
-                            {"role": "assistant", "content": event.transcript}
-                        )
-                    )
+                    await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": event.transcript}))
 
                 if event.type == "response.audio.delta":
                     self.deps.head_wobbler.feed(event.delta)
                     self.last_activity_time = asyncio.get_event_loop().time()
-                    logger.debug(
-                        "last activity time updated to %s", self.last_activity_time
-                    )
+                    logger.debug("last activity time updated to %s", self.last_activity_time)
                     await self.output_queue.put(
                         (
                             self.output_sample_rate,
-                            np.frombuffer(
-                                base64.b64decode(event.delta), dtype=np.int16
-                            ).reshape(1, -1),
+                            np.frombuffer(base64.b64decode(event.delta), dtype=np.int16).reshape(1, -1),
                         ),
                     )
 
@@ -155,9 +142,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     args_json_str = info["args_buf"] or "{}"
 
                     try:
-                        tool_result = await dispatch_tool_call(
-                            tool_name, args_json_str, self.deps
-                        )
+                        tool_result = await dispatch_tool_call(tool_name, args_json_str, self.deps)
                         logger.debug("[Tool %s executed]", tool_name)
                         logger.debug("Tool result: %s", tool_result)
                     except Exception as e:
@@ -178,9 +163,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                             {
                                 "role": "assistant",
                                 "content": json.dumps(tool_result),
-                                "metadata": dict(
-                                    title="🛠️ Used tool " + tool_name, status="done"
-                                ),
+                                "metadata": dict(title="🛠️ Used tool " + tool_name, status="done"),
                             },
                         )
                     )
@@ -232,11 +215,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     err = getattr(event, "error", None)
                     msg = getattr(err, "message", str(err) if err else "unknown error")
                     logger.error("Realtime error: %s (raw=%s)", msg, err)
-                    await self.output_queue.put(
-                        AdditionalOutputs(
-                            {"role": "assistant", "content": f"[error] {msg}"}
-                        )
-                    )
+                    await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": f"[error] {msg}"}))
 
     # Microphone receive
     async def receive(self, frame: tuple[int, np.ndarray]) -> None:
@@ -259,9 +238,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         if idle_duration > 15.0 and self.deps.movement_manager.is_idle():
             await self.send_idle_signal(idle_duration)
 
-            self.last_activity_time = (
-                asyncio.get_event_loop().time()
-            )  # avoid repeated resets
+            self.last_activity_time = asyncio.get_event_loop().time()  # avoid repeated resets
 
         return await wait_for_item(self.output_queue)
 

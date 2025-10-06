@@ -25,18 +25,16 @@ class GstPlayer:
         self.appsrc = Gst.ElementFactory.make("appsrc", None)
         self.appsrc.set_property("format", Gst.Format.TIME)
         self.appsrc.set_property("is-live", True)
-        caps = Gst.Caps.from_string(
-            f"audio/x-raw,format=S16LE,channels=1,rate={sample_rate},layout=interleaved"
-        )
+        caps = Gst.Caps.from_string(f"audio/x-raw,format=S16LE,channels=1,rate={sample_rate},layout=interleaved")
         self.appsrc.set_property("caps", caps)
         queue = Gst.ElementFactory.make("queue")
         audioconvert = Gst.ElementFactory.make("audioconvert")
         audioresample = Gst.ElementFactory.make("audioresample")
 
         # Try to pin specific output device; fallback to autoaudiosink
-        audiosink = _create_device_element(
-            direction="sink", name_substr=device_name
-        ) or Gst.ElementFactory.make("autoaudiosink")
+        audiosink = _create_device_element(direction="sink", name_substr=device_name) or Gst.ElementFactory.make(
+            "autoaudiosink"
+        )
 
         self.pipeline.add(self.appsrc)
         self.pipeline.add(queue)
@@ -104,9 +102,9 @@ class GstRecorder:
         self.pipeline = Gst.Pipeline.new("audio_recorder")
 
         # Create elements: try specific mic; fallback to default
-        autoaudiosrc = _create_device_element(
-            direction="source", name_substr=device_name
-        ) or Gst.ElementFactory.make("autoaudiosrc", None)
+        autoaudiosrc = _create_device_element(direction="source", name_substr=device_name) or Gst.ElementFactory.make(
+            "autoaudiosrc", None
+        )
 
         queue = Gst.ElementFactory.make("queue", None)
         audioconvert = Gst.ElementFactory.make("audioconvert", None)
@@ -117,9 +115,7 @@ class GstRecorder:
             raise RuntimeError("Failed to create GStreamer elements")
 
         # Force mono/S16LE at 24000; resample handles device SR (e.g., 16000 → 24000)
-        caps = Gst.Caps.from_string(
-            f"audio/x-raw,channels=1,rate={sample_rate},format=S16LE"
-        )
+        caps = Gst.Caps.from_string(f"audio/x-raw,channels=1,rate={sample_rate},format=S16LE")
         self.appsink.set_property("caps", caps)
 
         # Build pipeline
@@ -183,9 +179,7 @@ class GstRecorder:
         logger.info("Stopped Recorder")
 
 
-def _create_device_element(
-    direction: str, name_substr: Optional[str]
-) -> Optional[Gst.Element]:
+def _create_device_element(direction: str, name_substr: Optional[str]) -> Optional[Gst.Element]:
     """direction: 'source' or 'sink'.
 
     name_substr: case-insensitive substring matching device display name/description.
@@ -205,30 +199,15 @@ def _create_device_element(
         for dev in monitor.get_devices() or []:
             disp = dev.get_display_name() or ""
             props = dev.get_properties()
-            desc = (
-                props.get_string("device.description")
-                if props and props.has_field("device.description")
-                else ""
-            )
+            desc = props.get_string("device.description") if props and props.has_field("device.description") else ""
             logger.info(f"Device candidate: disp='{disp}', desc='{desc}'")
 
-            if (
-                name_substr.lower() in disp.lower()
-                or name_substr.lower() in desc.lower()
-            ):
+            if name_substr.lower() in disp.lower() or name_substr.lower() in desc.lower():
                 elem = dev.create_element(None)
-                factory = (
-                    elem.get_factory().get_name()
-                    if elem and elem.get_factory()
-                    else "<?>"
-                )
-                logger.info(
-                    f"Using {direction} device: '{disp or desc}' (factory='{factory}')"
-                )
+                factory = elem.get_factory().get_name() if elem and elem.get_factory() else "<?>"
+                logger.info(f"Using {direction} device: '{disp or desc}' (factory='{factory}')")
                 return elem
     finally:
         monitor.stop()
-    logging.getLogger(__name__).warning(
-        "Requested %s '%s' not found; using auto*", direction, name_substr
-    )
+    logging.getLogger(__name__).warning("Requested %s '%s' not found; using auto*", direction, name_substr)
     return None

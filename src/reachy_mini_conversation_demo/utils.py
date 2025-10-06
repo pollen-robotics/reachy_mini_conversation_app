@@ -15,15 +15,9 @@ def parse_args():
         default=None,
         help="Choose head tracker (default: mediapipe)",
     )
-    parser.add_argument(
-        "--no-camera", default=False, action="store_true", help="Disable camera usage"
-    )
-    parser.add_argument(
-        "--headless", default=False, action="store_true", help="Run in headless mode"
-    )
-    parser.add_argument(
-        "--debug", default=False, action="store_true", help="Enable debug logging"
-    )
+    parser.add_argument("--no-camera", default=False, action="store_true", help="Disable camera usage")
+    parser.add_argument("--headless", default=False, action="store_true", help="Run in headless mode")
+    parser.add_argument("--debug", default=False, action="store_true", help="Enable debug logging")
     return parser.parse_args()
 
 
