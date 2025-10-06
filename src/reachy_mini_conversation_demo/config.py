@@ -26,6 +26,7 @@ class Config:
     MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-realtime-preview")
     OPENAI_VISION_MODEL = os.getenv("OPENAI_VISION_MODEL", "gpt-4.1-mini")
     HF_HOME = os.getenv("HF_HOME", "./cache")
+    HF_TOKEN = os.getenv("HF_TOKEN")  # Optional, falls back to hf auth login if not set
 
 
 config = Config()

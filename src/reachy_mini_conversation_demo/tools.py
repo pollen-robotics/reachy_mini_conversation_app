@@ -29,6 +29,7 @@ try:
     )
 
     # Initialize recorded moves for emotions
+    # Note: huggingface_hub automatically reads HF_TOKEN from environment variables
     RECORDED_MOVES = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
     DANCE_AVAILABLE = True
     EMOTION_AVAILABLE = True
