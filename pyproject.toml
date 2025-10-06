@@ -10,51 +10,76 @@ description = ""
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "reachy_mini",
+    "aiortc>=1.13.0",
+    "fastrtc",
+    "gradio>=5.49.0",
+    "huggingface_hub>=0.34.4",
+    "mediapipe>=0.10.14",
+    "num2words",
+    "onnxruntime",
+    "openai>=2.1",
+    "PyGObject>=3.42.2,<=3.46.0",
+    "python-dotenv",
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
-    "openai>=2.1",
-    "fastrtc",
-    "aiortc==1.13.0",
-    "onnxruntime",
-    "PyGObject>=3.42.2, <=3.46.0",
+    "reachy_mini",
+    "supervision",
     "torch",
     "transformers",
-    "num2words",
-    "dotenv",
     "ultralytics",
-    "supervision",
-    "mediapipe>=0.10.14",
 ]
-
-[tool.uv.sources]
-reachy-mini-dances-library = { path = "../reachy_mini_dances_library", editable = true }
-reachy-mini = { git = "ssh://git@github.com/pollen-robotics/reachy_mini.git", branch = "develop" }
-reachy-mini-toolbox = { git = "ssh://git@github.com/pollen-robotics/reachy_mini_toolbox.git", branch = "main" }
-fastrtc = { git = "ssh://git@github.com/gradio-app/fastrtc.git", branch = "main" }
-
-[project.optional-dependencies]
-dev = ["pytest", "ruff==0.12.0"]
 
 [project.scripts]
 reachy-mini-conversation-demo = "reachy_mini_conversation_demo.main:main"
+
+[dependency-groups]
+dev = ["pytest", "ruff==0.12.0"]
+
+[tool.uv.sources]
+reachy_mini_dances_library = { path = "../reachy_mini_dances_library", editable = true }
+reachy_mini = { git = "ssh://git@github.com/pollen-robotics/reachy_mini.git", branch = "develop" }
+reachy_mini_toolbox = { git = "ssh://git@github.com/pollen-robotics/reachy_mini_toolbox.git", branch = "main" }
+fastrtc = { git = "ssh://git@github.com/gradio-app/fastrtc.git", branch = "main" }
 
 [tool.setuptools]
 package-dir = { "" = "src" }
 include-package-data = true
 
-
 [tool.setuptools.packages.find]
 where = ["src"]
 
-
 [tool.setuptools.package-data]
-reachy_mini = ["**/*"] # Inclut tous les fichiers non .py
+reachy_mini_conversation_demo = ["images/*"]
 
 [tool.ruff]
-exclude = []
-lint.extend-select = ["I", "D"]
-lint.ignore = [
-    "D203", # Incompatible with D211
-    "D213", # Incompatible with D212
+line-length = 119
+exclude = [".venv", "dist", "build", "**/__pycache__", "*.egg-info", ".mypy_cache", ".pytest_cache"]
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle errors
+  "F",   # pyflakes
+  "W",   # pycodestyle warnings
+  "I",   # isort
+  "C4",  # flake8-comprehensions
+  "D",   # pydocstyle
 ]
+ignore = [
+  "E501",  # handled by formatter
+  "D203",  # blank line before class docstring (conflicts with D211)
+  "D213",  # summary on second line (conflicts with D212)
+]
+
+[tool.ruff.lint.isort]
+length-sort = true
+lines-after-imports = 2
+no-lines-before = ["standard-library", "local-folder"]
+known-local-folder = ["reachy_mini_conversation_demo"]
+known-first-party = ["reachy_mini", "reachy_mini_dances_library", "reachy_mini_toolbox"]
+split-on-trailing-comma = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
