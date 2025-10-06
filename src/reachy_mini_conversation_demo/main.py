@@ -31,17 +31,16 @@ def main():
     logger = setup_logger(args.debug)
     logger.info("Starting Reachy Mini Conversation Demo")
 
-    robot = ReachyMini()
+    robot = ReachyMini(use_sim=False)
 
-    camera_worker, head_tracker, vision_manager = handle_vision_stuff(args, robot)
+    camera_worker, _, vision_manager = handle_vision_stuff(args, robot)
 
     movement_manager = MovementManager(
         current_robot=robot,
-        head_tracker=head_tracker,
         camera_worker=camera_worker,
     )
 
-    head_wobbler = HeadWobbler(set_offsets=movement_manager.set_offsets)
+    head_wobbler = HeadWobbler(set_speech_offsets=movement_manager.set_speech_offsets)
 
     deps = ToolDependencies(
         reachy_mini=robot,

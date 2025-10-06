@@ -5,7 +5,7 @@ import queue
 import base64
 import logging
 import threading
-from typing import Optional
+from typing import Tuple, Optional
 
 import numpy as np
 
@@ -20,14 +20,19 @@ logger = logging.getLogger(__name__)
 class HeadWobbler:
     """Converts audio deltas (base64) into head movement offsets."""
 
-    def __init__(self, set_offsets):
+    def __init__(self, set_speech_offsets):
         """Initialize the head wobbler."""
-        self._apply_offsets = set_offsets
+        self._apply_offsets = set_speech_offsets
         self._base_ts: Optional[float] = None
         self._hops_done: int = 0
 
-        self.audio_queue: queue.Queue = queue.Queue()
+        self.audio_queue: queue.Queue[Tuple[int, int, np.ndarray]] = queue.Queue()
         self.sway = SwayRollRT()
+
+        # Synchronization primitives
+        self._state_lock = threading.Lock()
+        self._sway_lock = threading.Lock()
+        self._generation = 0
 
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -35,7 +40,9 @@ class HeadWobbler:
     def feed(self, delta_b64: str) -> None:
         """Thread-safe: push audio into the consumer queue."""
         buf = np.frombuffer(base64.b64decode(delta_b64), dtype=np.int16).reshape(1, -1)
-        self.audio_queue.put((SAMPLE_RATE, buf))
+        with self._state_lock:
+            generation = self._generation
+        self.audio_queue.put((generation, SAMPLE_RATE, buf))
 
     def start(self) -> None:
         """Start the head wobbler loop in a thread."""
@@ -57,54 +64,84 @@ class HeadWobbler:
 
         logger.debug("Head wobbler thread started")
         while not self._stop_event.is_set():
+            queue_ref = self.audio_queue
             try:
-                sr, chunk = self.audio_queue.get_nowait()  # (1,N) int16
+                chunk_generation, sr, chunk = queue_ref.get_nowait()  # (gen, sr, data)
             except queue.Empty:
                 # avoid while to never exit
                 time.sleep(MOVEMENT_LATENCY_S)
                 continue
 
-            pcm = np.asarray(chunk).squeeze(0)
-            results = self.sway.feed(pcm, sr)
-            self.audio_queue.task_done()
-
-            if self._base_ts is None:
-                self._base_ts = time.time()
-
-            i = 0
-            while i < len(results):
-                if self._base_ts is None:
-                    self._base_ts = time.time()
+            try:
+                with self._state_lock:
+                    current_generation = self._generation
+                if chunk_generation != current_generation:
                     continue
 
-                target = self._base_ts + MOVEMENT_LATENCY_S + self._hops_done * hop_dt
-                now = time.time()
+                pcm = np.asarray(chunk).squeeze(0)
+                with self._sway_lock:
+                    results = self.sway.feed(pcm, sr)
 
-                if now - target >= hop_dt:
-                    lag_hops = int((now - target) / hop_dt)
-                    drop = min(lag_hops, len(results) - i - 1)
-                    if drop > 0:
-                        self._hops_done += drop
-                        i += drop
-                        continue
+                if self._base_ts is None:
+                    with self._state_lock:
+                        if self._base_ts is None:
+                            self._base_ts = time.time()
 
-                if target > now:
-                    time.sleep(target - now)
+                i = 0
+                while i < len(results):
+                    with self._state_lock:
+                        if self._generation != current_generation:
+                            break
+                        base_ts = self._base_ts
+                        hops_done = self._hops_done
 
-                r = results[i]
-                offsets = (
-                    r["x_mm"] / 1000.0,
-                    r["y_mm"] / 1000.0,
-                    r["z_mm"] / 1000.0,
-                    r["roll_rad"],
-                    r["pitch_rad"],
-                    r["yaw_rad"],
-                )
+                    if base_ts is None:
+                        base_ts = time.time()
+                        with self._state_lock:
+                            if self._base_ts is None:
+                                self._base_ts = base_ts
+                                hops_done = self._hops_done
 
-                self._apply_offsets(offsets)
+                    target = base_ts + MOVEMENT_LATENCY_S + hops_done * hop_dt
+                    now = time.time()
 
-                self._hops_done += 1
-                i += 1
+                    if now - target >= hop_dt:
+                        lag_hops = int((now - target) / hop_dt)
+                        drop = min(lag_hops, len(results) - i - 1)
+                        if drop > 0:
+                            with self._state_lock:
+                                self._hops_done += drop
+                                hops_done = self._hops_done
+                            i += drop
+                            continue
+
+                    if target > now:
+                        time.sleep(target - now)
+                        with self._state_lock:
+                            if self._generation != current_generation:
+                                break
+
+                    r = results[i]
+                    offsets = (
+                        r["x_mm"] / 1000.0,
+                        r["y_mm"] / 1000.0,
+                        r["z_mm"] / 1000.0,
+                        r["roll_rad"],
+                        r["pitch_rad"],
+                        r["yaw_rad"],
+                    )
+
+                    with self._state_lock:
+                        if self._generation != current_generation:
+                            break
+
+                    self._apply_offsets(offsets)
+
+                    with self._state_lock:
+                        self._hops_done += 1
+                    i += 1
+            finally:
+                queue_ref.task_done()
         logger.debug("Head wobbler thread exited")
 
     '''
@@ -119,8 +156,24 @@ class HeadWobbler:
 
     def reset(self) -> None:
         """Reset the internal state."""
-        # self.drain_audio_queue()
-        self.audio_queue = queue.Queue()
-        self._base_ts = None
-        self._hops_done = 0
-        self.sway.reset()
+        with self._state_lock:
+            self._generation += 1
+            self._base_ts = None
+            self._hops_done = 0
+
+        # Drain any queued audio chunks from previous generations
+        drained_any = False
+        while True:
+            try:
+                _, _, _ = self.audio_queue.get_nowait()
+            except queue.Empty:
+                break
+            else:
+                drained_any = True
+                self.audio_queue.task_done()
+
+        with self._sway_lock:
+            self.sway.reset()
+
+        if drained_any:
+            logger.debug("Head wobbler queue drained during reset")
