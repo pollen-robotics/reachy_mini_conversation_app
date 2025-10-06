@@ -1,6 +1,7 @@
-import os  # noqa: D100
+import os
 
 from dotenv import load_dotenv
+
 
 load_dotenv()
 

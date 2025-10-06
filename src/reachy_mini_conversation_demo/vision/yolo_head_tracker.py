@@ -1,12 +1,12 @@
-from __future__ import annotations  # noqa: D100
-
+from __future__ import annotations
 import logging
-from typing import Optional, Tuple
+from typing import Tuple, Optional
 
 import numpy as np
-from huggingface_hub import hf_hub_download
 from supervision import Detections
 from ultralytics import YOLO
+from huggingface_hub import hf_hub_download
+
 
 logger = logging.getLogger(__name__)
 

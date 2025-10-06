@@ -1,12 +1,13 @@
-import logging  # noqa: D100
-from threading import Thread
+import logging
 from typing import Optional
+from threading import Thread
 
 import gi
 
+
 gi.require_version("Gst", "1.0")
 gi.require_version("GstApp", "1.0")
-from gi.repository import GLib, Gst  # noqa: E402
+from gi.repository import Gst, GLib  # noqa: E402
 
 
 class GstPlayer:

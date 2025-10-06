@@ -5,17 +5,17 @@ import os
 import gradio as gr
 from fastapi import FastAPI
 from fastrtc import Stream
-from reachy_mini import ReachyMini
 
-from reachy_mini_conversation_demo.audio.head_wobbler import HeadWobbler
+from reachy_mini import ReachyMini
 from reachy_mini_conversation_demo.moves import MovementManager
-from reachy_mini_conversation_demo.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_demo.tools import ToolDependencies
 from reachy_mini_conversation_demo.utils import (
-    handle_vision_stuff,
     parse_args,
     setup_logger,
+    handle_vision_stuff,
 )
+from reachy_mini_conversation_demo.openai_realtime import OpenaiRealtimeHandler
+from reachy_mini_conversation_demo.audio.head_wobbler import HeadWobbler
 
 
 def update_chatbot(chatbot: list[dict], response: dict):

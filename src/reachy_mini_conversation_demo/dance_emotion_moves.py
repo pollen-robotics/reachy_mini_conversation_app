@@ -5,14 +5,15 @@ and executed sequentially by the MovementManager.
 """
 
 from __future__ import annotations
-
 import logging
 from typing import Tuple
 
 import numpy as np
+
 from reachy_mini.motion.move import Move
 from reachy_mini.motion.recorded_move import RecordedMoves
 from reachy_mini_dances_library.dance_move import DanceMove
+
 
 logger = logging.getLogger(__name__)
 

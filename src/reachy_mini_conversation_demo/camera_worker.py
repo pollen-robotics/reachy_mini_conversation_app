@@ -6,16 +6,18 @@ Ported from main_works.py camera_worker() function to provide:
 - Latest frame always available for tools
 """
 
+import time
 import logging
 import threading
-import time
-from typing import Optional, Tuple
+from typing import Tuple, Optional
 
 import cv2
 import numpy as np
+from scipy.spatial.transform import Rotation as R
+
 from reachy_mini import ReachyMini
 from reachy_mini.utils.interpolation import linear_pose_interpolation
-from scipy.spatial.transform import Rotation as R
+
 
 logger = logging.getLogger(__name__)
 

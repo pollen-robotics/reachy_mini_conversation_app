@@ -1,5 +1,5 @@
-import argparse
 import logging
+import argparse
 import warnings
 
 from reachy_mini_conversation_demo.camera_worker import CameraWorker

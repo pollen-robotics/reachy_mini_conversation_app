@@ -1,11 +1,11 @@
-from __future__ import annotations  # noqa: D100
-
+from __future__ import annotations
 import math
-from collections import deque
-from itertools import islice
 from typing import Dict, List, Optional
+from itertools import islice
+from collections import deque
 
 import numpy as np
+
 
 # Tunables
 SR = 16_000

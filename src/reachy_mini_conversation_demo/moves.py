@@ -7,22 +7,23 @@ This module implements the movement architecture from main_works.py:
 """
 
 from __future__ import annotations
-
+import time
 import logging
 import threading
-import time
+from typing import Tuple, Optional
 from collections import deque
 from dataclasses import dataclass
-from typing import Optional, Tuple
 
 import numpy as np
+
 from reachy_mini import ReachyMini
-from reachy_mini.motion.move import Move
 from reachy_mini.utils import create_head_pose
+from reachy_mini.motion.move import Move
 from reachy_mini.utils.interpolation import (
     compose_world_offset,
     linear_pose_interpolation,
 )
+
 
 logger = logging.getLogger(__name__)
 

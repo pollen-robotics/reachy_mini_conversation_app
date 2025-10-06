@@ -1,16 +1,16 @@
-from __future__ import annotations  # noqa: D100
-
+from __future__ import annotations
 import abc
+import json
+import time
 import asyncio
 import inspect
-import json
 import logging
-import time
-from dataclasses import dataclass
 from typing import Any, Dict, Literal, Optional
+from dataclasses import dataclass
 
 from reachy_mini import ReachyMini
 from reachy_mini.utils import create_head_pose
+
 
 # from reachy_mini_conversation_demo.vision.processors import VisionManager
 
@@ -22,11 +22,10 @@ ENABLE_FACE_RECOGNITION = False
 try:
     from reachy_mini.motion.recorded_move import RecordedMoves
     from reachy_mini_dances_library.collection.dance import AVAILABLE_MOVES
-
     from reachy_mini_conversation_demo.dance_emotion_moves import (
+        GotoQueueMove,
         DanceQueueMove,
         EmotionQueueMove,
-        GotoQueueMove,
     )
 
     # Initialize recorded moves for emotions
@@ -382,8 +381,8 @@ class Dance(Tool):
         "properties": {
             "move": {
                 "type": "string",
-                "description": """Name of the move; use 'random' or omit for random. 
-                                    Here is a list of the available moves: 
+                "description": """Name of the move; use 'random' or omit for random.
+                                    Here is a list of the available moves:
                                         simple_nod: A simple, continuous up-and-down nodding motion.
                                         head_tilt_roll: A continuous side-to-side head roll (ear to shoulder).
                                         side_to_side_sway: A smooth, side-to-side sway of the entire head.

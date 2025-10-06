@@ -1,15 +1,16 @@
 """Moves head given audio samples."""
 
+import time
+import queue
 import base64
 import logging
-import queue
 import threading
-import time
 from typing import Optional
 
 import numpy as np
 
 from reachy_mini_conversation_demo.audio.speech_tapper import HOP_MS, SwayRollRT
+
 
 SAMPLE_RATE = 24000
 MOVEMENT_LATENCY_S = 0.08  # seconds between audio and robot movement

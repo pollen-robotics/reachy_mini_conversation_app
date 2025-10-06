@@ -1,20 +1,21 @@
-import asyncio  # noqa: D100
-import base64
 import json
+import base64
+import asyncio
 import logging
 from datetime import datetime
 
-import gradio as gr
 import numpy as np
-from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item
+import gradio as gr
 from openai import AsyncOpenAI
+from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item
 
-from reachy_mini_conversation_demo.config import config
 from reachy_mini_conversation_demo.tools import (
     ALL_TOOL_SPECS,
     ToolDependencies,
     dispatch_tool_call,
 )
+from reachy_mini_conversation_demo.config import config
+
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +164,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                             {
                                 "role": "assistant",
                                 "content": json.dumps(tool_result),
-                                "metadata": dict(title="🛠️ Used tool " + tool_name, status="done"),
+                                "metadata": {"title": "🛠️ Used tool " + tool_name, "status": "done"},
                             },
                         )
                     )

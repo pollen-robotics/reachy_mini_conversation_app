@@ -1,18 +1,19 @@
-import asyncio  # noqa: D100
-import base64
-import logging
 import os
 import sys
-import threading
 import time
-from dataclasses import dataclass
+import base64
+import asyncio
+import logging
+import threading
 from typing import Any, Dict
+from dataclasses import dataclass
 
 import cv2
 import numpy as np
 import torch
+from transformers import AutoProcessor, AutoModelForImageTextToText
 from huggingface_hub import snapshot_download
-from transformers import AutoModelForImageTextToText, AutoProcessor
+
 
 logger = logging.getLogger(__name__)
 
