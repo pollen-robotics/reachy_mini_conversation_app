@@ -11,18 +11,18 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     #Media
-    "aiortc>=1.13.0",
-    "fastrtc@git+ssh://git@github.com/gradio-app/fastrtc.git@main",
-    "gradio>=5.49.0",
-    "huggingface_hub>=0.34.4",
-    "opencv-python>=4.12.0.88",
+    "aiortc>=1.13.0,<2.0.0",
+    "fastrtc@git+ssh://git@github.com/gradio-app/fastrtc.git@main", #Bump to PyPI after the next release
+    "gradio>=5.49.0,<5.50.0",
+    "huggingface_hub>=0.34.4,<0.36",
+    "opencv-python>=4.12.0.88,<4.13",
     "PyGObject>=3.42.2,<=3.46.0",
 
     #Environment variables
-    "python-dotenv",
+    "python-dotenv,>=1.1.1,<2.0.0",
 
     #OpenAI
-    "openai>=2.1",
+    "openai>=2.1,<2.3.0",
 
     #Reachy mini    
     "reachy_mini_dances_library@git+ssh://git@github.com/pollen-robotics/reachy_mini_dances_library@main",
@@ -31,9 +31,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-local_vision = ["torch", "transformers"]
-yolo_vision = ["ultralytics", "supervision"]
-mediapipe_vision = ["mediapipe>=0.10.14"]
+local_vision = ["torch>=2.8.0,<2.9.0", "transformers>=4.57.0,4.58.0"]
+yolo_vision = ["ultralytics>=8.3.206,<8.4.0", "supervision>=0.26.1,<0.27.0"]
+mediapipe_vision = ["mediapipe>=0.10.14,<0.11.0"]
 all_vision = [
   "reachy_mini_conversation_demo[local_vision]",
   "reachy_mini_conversation_demo[yolo_vision]",
@@ -41,7 +41,7 @@ all_vision = [
 ]
 
 [dependency-groups]
-dev = ["pytest", "ruff==0.12.0"]
+dev = ["pytest>=8.4.2,<9.0.0", "ruff==0.12.0"]
 
 [project.scripts]
 reachy-mini-conversation-demo = "reachy_mini_conversation_demo.main:main"
