@@ -13,6 +13,19 @@ source .venv/bin/activate
 uv sync
 ```
 
+To include optional vision dependencies:
+```
+uv sync --extra local_vision        # For local PyTorch/Transformers vision
+uv sync --extra yolo_vision         # For YOLO-based vision
+uv sync --extra mediapipe_vision    # For MediaPipe-based vision
+uv sync --extra all_vision          # For all vision features
+```
+
+You can combine extras or include dev dependencies:
+```
+uv sync --extra all_vision --group dev
+```
+
 ### Using pip
 Alternatively, you can install using pip in editable mode:
 
@@ -20,6 +33,19 @@ Alternatively, you can install using pip in editable mode:
 python -m venv .venv  # Create a virtual environment
 source .venv/bin/activate
 pip install -e .
+```
+
+To include optional vision dependencies:
+```
+pip install -e .[local_vision]
+pip install -e .[yolo_vision]
+pip install -e .[mediapipe_vision]
+pip install -e .[all_vision]
+```
+
+To include dev dependencies:
+```
+pip install -e .[dev]
 ```
 
 ## Run
