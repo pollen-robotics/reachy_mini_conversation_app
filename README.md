@@ -54,14 +54,14 @@ pip install -e .[dev]
 reachy-mini-conversation-demo
 ```
 
-## Runtime Options
+## Command line arguments
 
 | Option | Values | Default | Description |
 |--------|--------|---------|-------------|
 | `--sim` | *(flag)* | off | Run in **simulation mode** (no physical robot required). |
 | `--head-tracker` | `yolo`, `mediapipe` | `None` | Enable **head tracking** using the specified tracker:<br>• **yolo** → YOLO-based head tracker.<br>• **mediapipe** → MediaPipe-based head tracker.<br>*(Automatically disabled when `--sim` is active)* |
 | `--no-camera` | *(flag)* | off | Disable **camera usage** entirely. |
-| `--headless` | *(flag)* | off | **⚠️ Under construction** - Run in headless mode (currently not implemented). |
+| `--gradio` | *(flag)* | off | **⚠️ Under construction** - Open Gradio interface (currently not implemented). |
 | `--debug` | *(flag)* | off | Enable **debug logging** (default log level is INFO). |
 
 ## Examples
