@@ -4,8 +4,8 @@ Conversational demo for the Reachy Mini robot combining OpenAI's realtime APIs, 
 
 ## Overview
 - Real-time audio conversation loop powered by the OpenAI realtime API and `fastrtc` for low-latency streaming.
-- Layered motion system queues primary moves (dances, emotions, goto poses, breathing) while blending speech-reactive wobble and face-tracking.
 - Camera capture can route to OpenAI multimodal vision or stay on-device with SmolVLM2 local analysis.
+- Layered motion system queues primary moves (dances, emotions, goto poses, breathing) while blending speech-reactive wobble and face-tracking.
 - Async tool dispatch integrates robot motion, camera capture, and optional facial-recognition helpers through a Gradio web UI with live transcripts.
 
 ## Installation
@@ -120,14 +120,14 @@ The app starts a Gradio UI served locally (http://127.0.0.1:7860/). When running
 | `stop_dance` | Clear queued dances. | Core install only. |
 | `play_emotion` | Play a recorded emotion clip via Hugging Face assets. | Needs `HF_TOKEN` for the recorded emotions dataset. |
 | `stop_emotion` | Clear queued emotions. | Core install only. |
-| `get_person_name` | Attempt DeepFace-based recognition of the current person. | Disabled by default (`ENABLE_FACE_RECOGNITION=False`); requires `deepface` and a local face database. |
+| `get_person_name` | DeepFace-based recognition of the current person. | Disabled by default (`ENABLE_FACE_RECOGNITION=False`); requires `deepface` and a local face database. |
 | `do_nothing` | Explicitly remain idle. | Core install only. |
 
 ## Development workflow
 - Install the dev group extras: `uv sync --group dev` or `pip install -e .[dev]`.
 - Run formatting and linting: `ruff check .`.
 - Execute the test suite: `pytest`.
-- When iterating on robot motions, keep the control loop responsive—offload blocking work using the helpers in `tools.py`.
+- When iterating on robot motions, keep the control loop responsive => offload blocking work using the helpers in `tools.py`.
 
 ## License
 Apache 2.0
