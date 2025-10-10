@@ -24,6 +24,7 @@ class LocalStream:
         self.handler = handler
         self._robot = robot
         self._stop_event = asyncio.Event()
+        self._tasks = []
         # Allow the handler to flush the player queue when appropriate.
         self.handler._clear_queue = self.clear_queue  # type: ignore[assignment]
 
@@ -34,18 +35,37 @@ class LocalStream:
         self._robot.media.start_playing()
 
         async def runner() -> None:
-            tasks = [
+            self._tasks = [
                 asyncio.create_task(self.handler.start_up(), name="openai-handler"),
                 asyncio.create_task(self.record_loop(), name="stream-record-loop"),
                 asyncio.create_task(self.play_loop(), name="stream-play-loop"),
             ]
-            await asyncio.gather(*tasks)
+            try:
+                await asyncio.gather(*self._tasks)
+            except asyncio.CancelledError:
+                logger.info("Tasks cancelled during shutdown")
+            finally:
+                # Ensure handler connection is closed
+                await self.handler.shutdown()
 
         asyncio.run(runner())
 
     def stop(self) -> None:
-        """Stop the stream and underlying GStreamer pipelines."""
+        """Stop the stream and underlying GStreamer pipelines.
+
+        This method:
+        - Sets the stop event to signal async loops to terminate
+        - Cancels all pending async tasks (openai-handler, record-loop, play-loop)
+        - Stops audio recording and playback
+        """
+        logger.info("Stopping LocalStream...")
         self._stop_event.set()
+
+        # Cancel all running tasks
+        for task in self._tasks:
+            if not task.done():
+                task.cancel()
+
         self._robot.media.stop_recording()
         self._robot.media.stop_playing()
 

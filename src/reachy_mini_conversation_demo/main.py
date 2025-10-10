@@ -77,6 +77,7 @@ def main():
     handler = OpenaiRealtimeHandler(deps)
 
     stream_manager = None
+
     if args.gradio:
         stream = Stream(
             handler=handler,
@@ -102,9 +103,12 @@ def main():
     try:
         stream_manager.launch()
     except KeyboardInterrupt:
-        logger.info("Exiting...")
-        stream_manager.stop()
+        logger.info("Keyboard interruption in main thread... closing server.")
     finally:
+        # Stop the stream manager and its pipelines
+        stream_manager.close()
+
+        # Stop other services
         movement_manager.stop()
         head_wobbler.stop()
         if camera_worker:
@@ -112,6 +116,7 @@ def main():
 
         # prevent connection to keep alive some threads
         robot.client.disconnect()
+        logger.info("Shutdown complete.")
 
 
 if __name__ == "__main__":
