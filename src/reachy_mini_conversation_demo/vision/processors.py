@@ -23,7 +23,6 @@ class VisionConfig:
     """Configuration for vision processing."""
 
     processor_type: str = "local"
-    openai_model: str = os.getenv("OPENAI_VISION_MODEL", "gpt-4.1-mini")
     model_path: str = "HuggingFaceTB/SmolVLM2-2.2B-Instruct"
     vision_interval: float = 5.0
     max_new_tokens: int = 64

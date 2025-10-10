@@ -23,8 +23,7 @@ class Config:
         raise RuntimeError("OPENAI_API_KEY is missing in .env")
 
     # Optional
-    MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-realtime-preview")
-    OPENAI_VISION_MODEL = os.getenv("OPENAI_VISION_MODEL", "gpt-4.1-mini")
+    MODEL_NAME = os.getenv("MODEL_NAME", "gpt-realtime")
     HF_HOME = os.getenv("HF_HOME", "./cache")
     HF_TOKEN = os.getenv("HF_TOKEN")  # Optional, falls back to hf auth login if not set
 

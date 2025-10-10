@@ -48,7 +48,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
     async def start_up(self):
         """Start the handler."""
         self.client = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
-        async with self.client.beta.realtime.connect(model="gpt-realtime") as conn:
+        async with self.client.beta.realtime.connect(model=config.MODEL_NAME) as conn:
             await conn.session.update(
                 session={
                     "turn_detection": {
