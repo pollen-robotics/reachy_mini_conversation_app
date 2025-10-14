@@ -16,6 +16,7 @@ dependencies = [
     "gradio>=5.49.0",
     "huggingface_hub>=0.34.4",
     "opencv-python>=4.12.0.88",
+    "num2words",
 
     #Environment variables
     "python-dotenv",

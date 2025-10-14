@@ -190,13 +190,7 @@ class MovementState:
         0.0,
     )
 
-    # Legacy movement state (for goto moves)
-    moving_start: float = 0.0
-    moving_for: float = 0.0
-
     # Status flags
-    is_playing_move: bool = False
-    is_moving: bool = False
     last_primary_pose: Optional[FullBodyPose] = None
 
     def update_activity(self) -> None:
@@ -325,7 +319,7 @@ class MovementManager:
         """
         self._command_queue.put(("queue_move", move))
 
-    def clear_queue(self) -> None:
+    def clear_move_queue(self) -> None:
         """Stop the active move and discard any queued primary moves.
 
         Thread-safe: executed by the worker thread via the command queue.
@@ -360,10 +354,6 @@ class MovementManager:
             return False
 
         return self._now() - last_activity >= self.idle_inactivity_delay
-
-    def mark_user_activity(self) -> None:
-        """Record external activity and postpone idle behaviours (thread-safe)."""
-        self._command_queue.put(("mark_activity", None))
 
     def set_listening(self, listening: bool) -> None:
         """Enable or disable listening mode without touching shared state directly.
@@ -427,7 +417,7 @@ class MovementManager:
                         duration_str = str(duration)
                 else:
                     duration_str = "?"
-                logger.info(
+                logger.debug(
                     "Queued move with duration %ss, queue size: %s",
                     duration_str,
                     len(self.move_queue),
@@ -438,7 +428,6 @@ class MovementManager:
             self.move_queue.clear()
             self.state.current_move = None
             self.state.move_start_time = None
-            self.state.is_playing_move = False
             self._breathing_active = False
             logger.info("Cleared move queue and stopped current move")
         elif command == "set_moving_state":
@@ -447,8 +436,6 @@ class MovementManager:
             except (TypeError, ValueError):
                 logger.warning("Invalid moving state duration: %s", payload)
                 return
-            self.state.moving_start = current_time
-            self.state.moving_for = max(0.0, duration)
             self.state.update_activity()
         elif command == "mark_activity":
             self.state.update_activity()
@@ -534,7 +521,7 @@ class MovementManager:
             self.state.current_move = None
             self.state.move_start_time = None
             self._breathing_active = False
-            logger.info("Stopping breathing due to new move activity")
+            logger.debug("Stopping breathing due to new move activity")
 
         if self.state.current_move is not None and not isinstance(self.state.current_move, BreathingMove):
             self._breathing_active = False
@@ -561,14 +548,9 @@ class MovementManager:
                 float(body_yaw),
             )
 
-            self.state.is_playing_move = True
-            self.state.is_moving = True
             self.state.last_primary_pose = clone_full_body_pose(primary_full_body_pose)
         else:
             # Otherwise reuse the last primary pose so we avoid jumps between moves
-            self.state.is_playing_move = False
-            self.state.is_moving = current_time - self.state.moving_start < self.state.moving_for
-
             if self.state.last_primary_pose is not None:
                 primary_full_body_pose = clone_full_body_pose(self.state.last_primary_pose)
             else:
@@ -745,7 +727,6 @@ class MovementManager:
         if self._thread is not None:
             self._thread.join()
             self._thread = None
-        logger.debug("Move worker stopped")
         logger.debug("Move worker stopped")
 
     def get_status(self) -> dict[str, Any]:

@@ -1,11 +1,10 @@
 import os
-import sys
 import time
 import base64
 import asyncio
 import logging
 import threading
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from dataclasses import dataclass
 
 import cv2
@@ -13,6 +12,8 @@ import numpy as np
 import torch
 from transformers import AutoProcessor, AutoModelForImageTextToText
 from huggingface_hub import snapshot_download
+
+from reachy_mini_conversation_demo.config import config
 
 
 logger = logging.getLogger(__name__)
@@ -22,11 +23,9 @@ logger = logging.getLogger(__name__)
 class VisionConfig:
     """Configuration for vision processing."""
 
-    processor_type: str = "local"
-    model_path: str = "HuggingFaceTB/SmolVLM2-2.2B-Instruct"
+    model_path: str = config.LOCAL_VISION_MODEL
     vision_interval: float = 5.0
     max_new_tokens: int = 64
-    temperature: float = 0.7
     jpeg_quality: int = 85
     max_retries: int = 3
     retry_delay: float = 1.0
@@ -36,17 +35,17 @@ class VisionConfig:
 class VisionProcessor:
     """Handles SmolVLM2 model loading and inference."""
 
-    def __init__(self, config: VisionConfig = None):
+    def __init__(self, vision_config: VisionConfig = None):
         """Initialize the vision processor."""
-        self.config = config or VisionConfig()
-        self.model_path = self.config.model_path
+        self.vision_config = vision_config or VisionConfig()
+        self.model_path = self.vision_config.model_path
         self.device = self._determine_device()
         self.processor = None
         self.model = None
         self._initialized = False
 
     def _determine_device(self) -> str:
-        pref = self.config.device_preference
+        pref = self.vision_config.device_preference
         if pref == "cpu":
             return "cpu"
         if pref == "cuda":
@@ -61,7 +60,7 @@ class VisionProcessor:
     def initialize(self) -> bool:
         """Load model and processor onto the selected device."""
         try:
-            logger.info(f"Loading SmolVLM2 model on {self.device} (HF_HOME={os.getenv('HF_HOME')})")
+            logger.info(f"Loading SmolVLM2 model on {self.device} (HF_HOME={config.HF_HOME})")
             self.processor = AutoProcessor.from_pretrained(self.model_path)
 
             # Select dtype depending on device
@@ -98,13 +97,13 @@ class VisionProcessor:
         if not self._initialized:
             return "Vision model not initialized"
 
-        for attempt in range(self.config.max_retries):
+        for attempt in range(self.vision_config.max_retries):
             try:
                 # Convert to JPEG bytes
                 success, jpeg_buffer = cv2.imencode(
                     ".jpg",
                     cv2_image,
-                    [cv2.IMWRITE_JPEG_QUALITY, self.config.jpeg_quality],
+                    [cv2.IMWRITE_JPEG_QUALITY, self.vision_config.jpeg_quality],
                 )
                 if not success:
                     return "Failed to encode image"
@@ -140,7 +139,7 @@ class VisionProcessor:
                     generated_ids = self.model.generate(
                         **inputs,
                         do_sample=False,
-                        max_new_tokens=self.config.max_new_tokens,
+                        max_new_tokens=self.vision_config.max_new_tokens,
                         pad_token_id=self.processor.tokenizer.eos_token_id,
                     )
 
@@ -165,17 +164,17 @@ class VisionProcessor:
                 logger.error(f"CUDA OOM on attempt {attempt + 1}: {e}")
                 if self.device == "cuda":
                     torch.cuda.empty_cache()
-                if attempt < self.config.max_retries - 1:
-                    time.sleep(self.config.retry_delay * (attempt + 1))
+                if attempt < self.vision_config.max_retries - 1:
+                    time.sleep(self.vision_config.retry_delay * (attempt + 1))
                 else:
                     return "GPU out of memory - vision processing failed"
 
             except Exception as e:
                 logger.error(f"Vision processing failed (attempt {attempt + 1}): {e}")
-                if attempt < self.config.max_retries - 1:
-                    time.sleep(self.config.retry_delay)
+                if attempt < self.vision_config.max_retries - 1:
+                    time.sleep(self.vision_config.retry_delay)
                 else:
-                    return f"Vision processing error after {self.config.max_retries} attempts"
+                    return f"Vision processing error after {self.vision_config.max_retries} attempts"
 
     def _extract_response(self, full_text: str) -> str:
         """Extract the assistant's response from the full generated text."""
@@ -194,7 +193,6 @@ class VisionProcessor:
     def get_model_info(self) -> Dict[str, Any]:
         """Get information about the loaded model."""
         return {
-            "processor_type": "local",
             "initialized": self._initialized,
             "device": self.device,
             "model_path": self.model_path,
@@ -208,14 +206,13 @@ class VisionProcessor:
 class VisionManager:
     """Manages periodic vision processing and scene understanding."""
 
-    def __init__(self, camera, config: VisionConfig = None):
+    def __init__(self, camera, vision_config: VisionConfig = None):
         """Initialize vision manager with camera and configuration."""
         self.camera = camera
-        self.config = config or VisionConfig()
-        self.vision_interval = self.config.vision_interval
-        self.processor = create_vision_processor(self.config)  # Use factory function
+        self.vision_config = vision_config or VisionConfig()
+        self.vision_interval = self.vision_config.vision_interval
+        self.processor = VisionProcessor(self.vision_config)
 
-        self._current_description = ""
         self._last_processed_time = 0
 
         # Initialize processor
@@ -230,8 +227,8 @@ class VisionManager:
                 current_time = time.time()
 
                 if current_time - self._last_processed_time >= self.vision_interval:
-                    success, frame = await asyncio.to_thread(self.camera.read)
-                    if success and frame is not None:
+                    frame = self.camera.get_latest_frame()
+                    if frame is not None:
                         description = await asyncio.to_thread(
                             lambda: self.processor.process_image(
                                 frame, "Briefly describe what you see in one sentence."
@@ -240,7 +237,6 @@ class VisionManager:
 
                         # Only update if we got a valid response
                         if description and not description.startswith(("Vision", "Failed", "Error")):
-                            self._current_description = description
                             self._last_processed_time = current_time
 
                             logger.info(f"Vision update: {description}")
@@ -255,29 +251,6 @@ class VisionManager:
 
         logger.info("Vision loop finished")
 
-    async def get_current_description(self) -> str:
-        """Get the most recent scene description (thread-safe)."""
-        return self._current_description
-
-    async def process_current_frame(self, prompt: str = "Describe what you see in detail.") -> Dict[str, Any]:
-        """Process current camera frame with custom prompt."""
-        try:
-            success, frame = self.camera.read()
-            if not success or frame is None:
-                return {"error": "Failed to capture image from camera"}
-
-            description = await asyncio.to_thread(lambda: self.processor.process_image(frame, prompt))
-
-            return {
-                "description": description,
-                "timestamp": time.time(),
-                "prompt": prompt,
-            }
-
-        except Exception as e:
-            logger.exception("Failed to process current frame")
-            return {"error": f"Frame processing failed: {str(e)}"}
-
     async def get_status(self) -> Dict[str, Any]:
         """Get comprehensive status information."""
         return {
@@ -285,84 +258,59 @@ class VisionManager:
             "processor_info": self.processor.get_model_info(),
             "config": {
                 "interval": self.vision_interval,
-                "processor_type": self.config.processor_type,
             },
         }
 
 
-def init_camera(camera_index=0, simulation=True):
-    """Initialize camera (real or simulated)."""
-    api_preference = cv2.CAP_AVFOUNDATION if sys.platform == "darwin" else 0
+def initialize_vision_manager(camera_worker) -> Optional[VisionManager]:
+    """Initialize vision manager with model download and configuration.
 
-    if simulation:
-        # Default build-in camera in SIM
-        # TODO: please, test on Linux and Windows
-        camera = cv2.VideoCapture(0, api_preference)
-    else:
-        # TODO handle macos properly
-        if sys.platform == "darwin":
-            camera = cv2.VideoCapture(camera_index, cv2.CAP_AVFOUNDATION)
-        else:
-            camera = cv2.VideoCapture(camera_index)
+    Args:
+        camera_worker: CameraWorker instance for frame capture
+    Returns:
+        VisionManager instance or None if initialization fails
 
-    return camera
+    """
+    try:
+        model_id = config.LOCAL_VISION_MODEL
+        cache_dir = os.path.expanduser(config.HF_HOME)
 
+        # Prepare cache directory
+        os.makedirs(cache_dir, exist_ok=True)
+        os.environ["HF_HOME"] = cache_dir
+        logger.info("HF_HOME set to %s", cache_dir)
 
-def create_vision_processor(config: VisionConfig):
-    """Create the appropriate vision processor (factory)."""
-    if config.processor_type == "openai":
-        try:
-            from .openai_vision import OpenAIVisionProcessor
-
-            return OpenAIVisionProcessor(config)
-        except ImportError:
-            logger.error("OpenAI vision processor not available, falling back to local")
-            return VisionProcessor(config)
-    else:
-        return VisionProcessor(config)
-
-
-def init_vision(camera: cv2.VideoCapture, processor_type: str = "local") -> VisionManager:
-    """Initialize vision manager with the specified processor type."""
-    model_id = "HuggingFaceTB/SmolVLM2-2.2B-Instruct"
-
-    cache_dir = os.path.expandvars(os.getenv("HF_HOME", "$HOME/.cache/huggingface"))
-
-    # Only download model if using local processor
-    if processor_type == "local":
-        try:
-            os.makedirs(cache_dir, exist_ok=True)
-            os.environ["HF_HOME"] = cache_dir
-            logger.info("HF_HOME set to %s", cache_dir)
-        except Exception as e:
-            logger.warning("Failed to prepare HF cache dir %s: %s", cache_dir, e)
-            return None
-
+        # Download model to cache
+        logger.info(f"Downloading vision model {model_id} to cache...")
         snapshot_download(
             repo_id=model_id,
             repo_type="model",
             cache_dir=cache_dir,
         )
-        logger.info(f"Prefetched model_id={model_id} into cache_dir={cache_dir}")
+        logger.info(f"Model {model_id} downloaded to {cache_dir}")
 
-    # Configure vision processing
-    vision_config = VisionConfig(
-        processor_type=processor_type,
-        model_path=model_id,
-        vision_interval=5.0,
-        max_new_tokens=64,
-        temperature=0.7,
-        jpeg_quality=85,
-        max_retries=3,
-        retry_delay=1.0,
-        device_preference="auto",
-    )
+        # Configure vision processing
+        vision_config = VisionConfig(
+            model_path=model_id,
+            vision_interval=5.0,
+            max_new_tokens=64,
+            jpeg_quality=85,
+            max_retries=3,
+            retry_delay=1.0,
+            device_preference="auto",
+        )
 
-    vision_manager = VisionManager(camera, vision_config)
+        # Initialize vision manager
+        vision_manager = VisionManager(camera_worker, vision_config)
 
-    device_info = vision_manager.processor.get_model_info()
-    logger.info(
-        f"Vision processing enabled: {device_info.get('model_path', device_info.get('processor_type'))} on {device_info.get('device', 'API')}",
-    )
+        # Log device info
+        device_info = vision_manager.processor.get_model_info()
+        logger.info(
+            f"Vision processing enabled: {device_info.get('model_path')} on {device_info.get('device')}"
+        )
 
-    return vision_manager
+        return vision_manager
+
+    except Exception as e:
+        logger.error(f"Failed to initialize vision manager: {e}")
+        return None

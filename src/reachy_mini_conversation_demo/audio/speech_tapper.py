@@ -120,7 +120,6 @@ class SwayRollRT:
         self._seed = int(rng_seed)
         self.samples = deque(maxlen=10 * SR)  # sliding window for VAD/env
         self.carry = np.zeros(0, dtype=np.float32)
-        self.frame_idx = 0
 
         self.vad_on = False
         self.vad_above = 0
@@ -143,7 +142,6 @@ class SwayRollRT:
         """Reset state (VAD/env/buffers/time) but keep initial phases/seed."""
         self.samples.clear()
         self.carry = np.zeros(0, dtype=np.float32)
-        self.frame_idx = 0
         self.vad_on = False
         self.vad_above = 0
         self.vad_below = 0
@@ -151,16 +149,6 @@ class SwayRollRT:
         self.sway_up = 0
         self.sway_down = 0
         self.t = 0.0
-
-    def reset_phases(self) -> None:
-        """Re-randomize phases deterministically from stored seed (Optional)."""
-        rng = np.random.default_rng(self._seed)
-        self.phase_pitch = float(rng.random() * 2 * math.pi)
-        self.phase_yaw = float(rng.random() * 2 * math.pi)
-        self.phase_roll = float(rng.random() * 2 * math.pi)
-        self.phase_x = float(rng.random() * 2 * math.pi)
-        self.phase_y = float(rng.random() * 2 * math.pi)
-        self.phase_z = float(rng.random() * 2 * math.pi)
 
     def feed(self, pcm: np.ndarray, sr: Optional[int]) -> List[Dict[str, float]]:
         """Stream in PCM chunk. Returns a list of sway dicts, one per hop (HOP_MS).
@@ -196,7 +184,6 @@ class SwayRollRT:
             self.samples.extend(hop.tolist())
             if len(self.samples) < FRAME:
                 self.t += HOP_MS / 1000.0
-                self.frame_idx += 1
                 continue
 
             frame = np.fromiter(

@@ -26,7 +26,7 @@ class LocalStream:
         self._stop_event = asyncio.Event()
         self._tasks = []
         # Allow the handler to flush the player queue when appropriate.
-        self.handler._clear_queue = self.clear_queue  # type: ignore[assignment]
+        self.handler._clear_queue = self.clear_audio_queue  # type: ignore[assignment]
 
     def launch(self) -> None:
         """Start the recorder/player and run the async processing loops."""
@@ -69,7 +69,7 @@ class LocalStream:
         self._robot.media.stop_recording()
         self._robot.media.stop_playing()
 
-    def clear_queue(self) -> None:
+    def clear_audio_queue(self) -> None:
         """Flush the player's appsrc to drop any queued audio immediately."""
         logger.info("User intervention: flushing player queue")
         self.handler.output_queue = asyncio.Queue()
@@ -78,9 +78,9 @@ class LocalStream:
         """Read mic frames from the recorder and forward them to the handler."""
         logger.info("Starting receive loop")
         while not self._stop_event.is_set():
-            data = self._robot.media.get_audio_sample()
-            if data is not None:
-                frame_mono = data.T[0]  # both channels are identical
+            audio_frame = self._robot.media.get_audio_sample()
+            if audio_frame is not None:
+                frame_mono = audio_frame.T[0]  # both channels are identical
                 frame = audio_to_int16(frame_mono)
                 await self.handler.receive((16000, frame))
                 # await asyncio.sleep(0)  # yield to event loop
@@ -90,10 +90,10 @@ class LocalStream:
     async def play_loop(self) -> None:
         """Fetch outputs from the handler: log text and play audio frames."""
         while not self._stop_event.is_set():
-            data = await self.handler.emit()
+            handler_output = await self.handler.emit()
 
-            if isinstance(data, AdditionalOutputs):
-                for msg in data.args:
+            if isinstance(handler_output, AdditionalOutputs):
+                for msg in handler_output.args:
                     content = msg.get("content", "")
                     if isinstance(content, str):
                         logger.info(
@@ -102,14 +102,17 @@ class LocalStream:
                             content if len(content) < 500 else content[:500] + "…",
                         )
 
-            elif isinstance(data, tuple):
-                sample_rate, frame = data
+            elif isinstance(handler_output, tuple):
+                input_sample_rate, audio_frame = handler_output
                 device_sample_rate = self._robot.media.get_audio_samplerate()
-                frame = audio_to_float32(frame.squeeze())
-                if sample_rate != device_sample_rate:
-                    frame = librosa.resample(frame, orig_sr=sample_rate, target_sr=device_sample_rate)
-                self._robot.media.push_audio_sample(frame)
+                audio_frame = audio_to_float32(audio_frame.squeeze())
+                if input_sample_rate != device_sample_rate:
+                    audio_frame = librosa.resample(
+                        audio_frame, orig_sr=input_sample_rate, target_sr=device_sample_rate
+                    )
+                self._robot.media.push_audio_sample(audio_frame)
 
-            # else: ignore None/unknown outputs
+            else:
+                logger.debug("Ignoring output type=%s", type(handler_output).__name__)
 
             await asyncio.sleep(0)  # yield to event loop

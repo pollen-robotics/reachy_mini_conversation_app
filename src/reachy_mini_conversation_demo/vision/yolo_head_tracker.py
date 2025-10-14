@@ -94,77 +94,6 @@ class HeadTracker:
 
         return np.array([norm_x, norm_y], dtype=np.float32)
 
-    def get_eyes(self, img: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-        """Get eye positions (approximated from face bbox).
-
-        Note: YOLO only provides face bbox, so we estimate eye positions
-
-        Args:
-            img: Input image
-
-        Returns:
-            Tuple of (left_eye, right_eye) in [-1, 1] coordinates
-
-        """
-        h, w = img.shape[:2]
-
-        # Run YOLO inference
-        results = self.model(img, verbose=False)
-        detections = Detections.from_ultralytics(results[0])
-
-        # Select best face
-        face_idx = self._select_best_face(detections)
-        if face_idx is None:
-            return None, None
-
-        bbox = detections.xyxy[face_idx]
-
-        # Estimate eye positions from face bbox (approximate locations)
-        face_width = bbox[2] - bbox[0]
-        face_height = bbox[3] - bbox[1]
-
-        # Eye positions are roughly at 1/3 and 2/3 of face width, 1/3 of face height
-        eye_y = bbox[1] + face_height * 0.35
-        left_eye_x = bbox[0] + face_width * 0.35
-        right_eye_x = bbox[0] + face_width * 0.65
-
-        # Convert to MediaPipe coordinates
-        left_eye = np.array([(left_eye_x / w) * 2 - 1, (eye_y / h) * 2 - 1], dtype=np.float32)
-        right_eye = np.array([(right_eye_x / w) * 2 - 1, (eye_y / h) * 2 - 1], dtype=np.float32)
-
-        return left_eye, right_eye
-
-    def get_eyes_from_landmarks(self, face_landmarks) -> Tuple[np.ndarray, np.ndarray]:
-        """Compatibility method - YOLO doesn't have landmarks, so we store bbox in the object."""
-        if not hasattr(face_landmarks, "_bbox") or not hasattr(face_landmarks, "_img_shape"):
-            raise ValueError("Face landmarks object missing required attributes")
-
-        bbox = face_landmarks._bbox
-        h, w = face_landmarks._img_shape[:2]
-
-        # Estimate eyes from stored bbox
-        face_width = bbox[2] - bbox[0]
-        face_height = bbox[3] - bbox[1]
-
-        eye_y = bbox[1] + face_height * 0.35
-        left_eye_x = bbox[0] + face_width * 0.35
-        right_eye_x = bbox[0] + face_width * 0.65
-
-        left_eye = np.array([(left_eye_x / w) * 2 - 1, (eye_y / h) * 2 - 1], dtype=np.float32)
-        right_eye = np.array([(right_eye_x / w) * 2 - 1, (eye_y / h) * 2 - 1], dtype=np.float32)
-
-        return left_eye, right_eye
-
-    def get_eye_center(self, face_landmarks) -> np.ndarray:
-        """Get center point between estimated eyes."""
-        left_eye, right_eye = self.get_eyes_from_landmarks(face_landmarks)
-        return np.mean([left_eye, right_eye], axis=0)
-
-    def get_roll(self, face_landmarks) -> float:
-        """Estimate roll from eye positions (will be 0 for YOLO since we estimate symmetric eyes)."""
-        left_eye, right_eye = self.get_eyes_from_landmarks(face_landmarks)
-        return float(np.arctan2(right_eye[1] - left_eye[1], right_eye[0] - left_eye[0]))
-
     def get_head_position(self, img: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[float]]:
         """Get head position from face detection.
 
@@ -204,18 +133,3 @@ class HeadTracker:
         except Exception as e:
             logger.error(f"Error in head position detection: {e}")
             return None, None
-
-    def cleanup(self):
-        """Clean up resources."""
-        if hasattr(self, "model"):
-            del self.model
-            logger.info("YOLO model cleaned up")
-
-
-class FaceLandmarks:
-    """Simple container for face detection results to maintain API compatibility."""
-
-    def __init__(self, bbox: np.ndarray, img_shape: tuple):
-        """Initialize with bounding box and image shape."""
-        self._bbox = bbox
-        self._img_shape = img_shape

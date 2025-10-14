@@ -15,6 +15,7 @@ from reachy_mini_conversation_demo.tools import (
     dispatch_tool_call,
 )
 from reachy_mini_conversation_demo.config import config
+from reachy_mini_conversation_demo.prompts import SESSION_INSTRUCTIONS
 
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         "language": "en",
                     },
                     "voice": "ballad",
-                    "instructions": "We speak in English",
+                    "instructions": SESSION_INSTRUCTIONS,
                     "tools": ALL_TOOL_SPECS,
                     "tool_choice": "auto",
                     "temperature": 0.7,
@@ -71,14 +72,15 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             async for event in self.connection:
                 logger.debug(f"OpenAI event: {event.type}")
                 if event.type == "input_audio_buffer.speech_started":
-                    self.clear_queue()
+                    if hasattr(self, '_clear_queue'):
+                        self._clear_queue()
                     self.deps.head_wobbler.reset()
                     self.deps.movement_manager.set_listening(True)
-                    logger.debug("user speech started")
+                    logger.debug("User speech started")
 
                 if event.type == "input_audio_buffer.speech_stopped":
                     self.deps.movement_manager.set_listening(False)
-                    logger.debug("user speech stopped")
+                    logger.debug("User speech stopped")
 
                 if event.type in ("response.audio.completed", "response.completed"):
                     # Doesn't seem to be called
@@ -86,20 +88,19 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     self.deps.head_wobbler.reset()
 
                 if event.type == "response.created":
-                    logger.debug("response created")
+                    logger.debug("Response created")
 
                 if event.type == "response.done":
                     # Doesn't mean the audio is done playing
-                    logger.debug("response done")
+                    logger.debug("Response done")
                     pass
-                    # self.deps.head_wobbler.reset()
 
                 if event.type == "conversation.item.input_audio_transcription.completed":
-                    logger.debug(f"user transcript: {event.transcript}")
+                    logger.debug(f"User transcript: {event.transcript}")
                     await self.output_queue.put(AdditionalOutputs({"role": "user", "content": event.transcript}))
 
                 if event.type == "response.audio_transcript.done":
-                    logger.debug(f"assistant transcript: {event.transcript}")
+                    logger.debug(f"Assistant transcript: {event.transcript}")
                     await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": event.transcript}))
 
                 if event.type == "response.audio.delta":
@@ -136,18 +137,18 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 # 3) when args done, execute Python tool, send function_call_output, then trigger a new response
                 if event.type == "response.function_call_arguments.done":
                     call_id = getattr(event, "call_id", None)
-                    info = self._pending_calls.get(call_id)
-                    if not info:
+                    tool_call_info = self._pending_calls.get(call_id)
+                    if not tool_call_info:
                         continue
-                    tool_name = info["name"]
-                    args_json_str = info["args_buf"] or "{}"
+                    tool_name = tool_call_info["name"]
+                    args_json_str = tool_call_info["args_buf"] or "{}"
 
                     try:
                         tool_result = await dispatch_tool_call(tool_name, args_json_str, self.deps)
-                        logger.debug("[Tool %s executed]", tool_name)
+                        logger.debug("Tool '%s' executed successfully", tool_name)
                         logger.debug("Tool result: %s", tool_result)
                     except Exception as e:
-                        logger.error("Tool %s failed", tool_name)
+                        logger.error("Tool '%s' failed", tool_name)
                         tool_result = {"error": str(e)}
 
                     # send the tool result back
@@ -183,7 +184,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                 ],
                             }
                         )
-                        logger.info("additional input camera")
+                        logger.info("Added camera image to conversation")
 
                         np_img = self.deps.camera_worker.get_latest_frame()
                         img = gr.Image(value=np_img)
@@ -256,6 +257,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         dt = datetime.fromtimestamp(current_time)
         return f"[{dt.strftime('%Y-%m-%d %H:%M:%S')} | +{elapsed_seconds:.1f}s]"
 
+
+
     async def send_idle_signal(self, idle_duration) -> None:
         """Send an idle signal to the openai server."""
         logger.debug("Sending idle signal")
@@ -278,4 +281,3 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 "tool_choice": "required",
             }
         )
-        # TODO additional inputs

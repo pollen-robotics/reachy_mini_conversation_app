@@ -1,12 +1,13 @@
 # Reachy Mini conversation demo
 
 Conversational demo for the Reachy Mini robot combining OpenAI's realtime APIs, vision pipelines, and choreographed motion libraries.
+![Reachy Mini Dance](src/reachy_mini_conversation_demo/images/reachy_mini_dance.gif)
 
 ## Overview
 - Real-time audio conversation loop powered by the OpenAI realtime API and `fastrtc` for low-latency streaming.
-- Camera capture can route to OpenAI multimodal vision or stay on-device with SmolVLM2 local analysis.
+- Local vision processing using SmolVLM2 model running on-device (CPU/GPU/MPS).
 - Layered motion system queues primary moves (dances, emotions, goto poses, breathing) while blending speech-reactive wobble and face-tracking.
-- Async tool dispatch integrates robot motion, camera capture, and optional facial-recognition helpers through a Gradio web UI with live transcripts.
+- Async tool dispatch integrates robot motion, camera capture, and optional face-tracking capabilities through a Gradio web UI with live transcripts.
 
 ## Installation
 
@@ -74,8 +75,9 @@ Some wheels (e.g. PyTorch) are large and require compatible CUDA or CPU buildsâ€
 |----------|-------------|
 | `OPENAI_API_KEY` | Required. Grants access to the OpenAI realtime endpoint.
 | `MODEL_NAME` | Override the realtime model (defaults to `gpt-realtime`).
-| `HF_HOME` | Cache directory for local Hugging Face downloads.
-| `HF_TOKEN` | Optional token for Hugging Face models.
+| `HF_HOME` | Cache directory for local Hugging Face downloads (defaults to `./cache`).
+| `HF_TOKEN` | Optional token for Hugging Face models (falls back to `huggingface-cli login`).
+| `LOCAL_VISION_MODEL` | Hugging Face model path for local vision processing (defaults to `HuggingFaceTB/SmolVLM2-2.2B-Instruct`).
 
 ## Running the demo
 
@@ -85,13 +87,13 @@ Activate your virtual environment, ensure the Reachy Mini robot (or simulator) i
 reachy-mini-conversation-demo
 ```
 
-The app starts a Gradio UI served locally (http://127.0.0.1:7860/). When running on a headless host, use `--headless`. With a camera attached, captured frames can be analysed remotely through OpenAI multimodal models or locally via the YOLO/MediaPipe pipelines depending on the extras you installed.
+By default, the app runs in console mode for direct audio interaction. Use the `--gradio` flag to launch a web UI served locally at http://127.0.0.1:7860/ (required when running in simulation mode). With a camera attached, captured frames are analyzed locally using the SmolVLM2 vision model. Additionally, you can enable face tracking via YOLO or MediaPipe pipelines depending on the extras you installed.
 
 ### CLI options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--head-tracker {yolo,mediapipe}` | `None` | Select a face-tracking backend when a camera is available. Requires the matching optional extra. |
+| `--head-tracker {yolo,mediapipe}` | `None` | Select a face-tracking backend when a camera is available. YOLO is implemented locally, MediaPipe comes from the `reachy_mini_toolbox` package. Requires the matching optional extra. |
 | `--no-camera` | `False` | Run without camera capture or face tracking. |
 | `--gradio` | `False` | Launch the Gradio web UI. Without this flag, runs in console mode. Required when running in simulation mode. |
 | `--debug` | `False` | Enable verbose logging for troubleshooting. |
@@ -116,12 +118,11 @@ The app starts a Gradio UI served locally (http://127.0.0.1:7860/). When running
 |------|--------|--------------|
 | `move_head` | Queue a head pose change (left/right/up/down/front). | Core install only. |
 | `camera` | Capture the latest camera frame and optionally query a vision backend. | Requires camera worker; vision analysis depends on selected extras. |
-| `head_tracking` | Enable or disable face-tracking offsets. | Camera worker with configured head tracker. |
+| `head_tracking` | Enable or disable face-tracking offsets (not facial recognition - only detects and tracks face position). | Camera worker with configured head tracker. |
 | `dance` | Queue a dance from `reachy_mini_dances_library`. | Core install only. |
 | `stop_dance` | Clear queued dances. | Core install only. |
 | `play_emotion` | Play a recorded emotion clip via Hugging Face assets. | Needs `HF_TOKEN` for the recorded emotions dataset. |
 | `stop_emotion` | Clear queued emotions. | Core install only. |
-| `get_person_name` | DeepFace-based recognition of the current person. | Disabled by default (`ENABLE_FACE_RECOGNITION=False`); requires `deepface` and a local face database. |
 | `do_nothing` | Explicitly remain idle. | Core install only. |
 
 ## Development workflow

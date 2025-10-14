@@ -3,6 +3,7 @@ import argparse
 import warnings
 
 from reachy_mini_conversation_demo.camera_worker import CameraWorker
+from reachy_mini_conversation_demo.vision.processors import initialize_vision_manager
 
 
 def parse_args():
@@ -21,25 +22,26 @@ def parse_args():
 
 
 def handle_vision_stuff(args, current_robot):
-    """Initialize camera, head tracker and camera worker."""
+    """Initialize camera, head tracker, camera worker, and vision manager."""
     camera_worker = None
     head_tracker = None
     vision_manager = None
+
     if not args.no_camera:
+        # Initialize head tracker if specified
         if args.head_tracker is not None:
             if args.head_tracker == "yolo":
-                from reachy_mini_conversation_demo.vision.yolo_head_tracker import (
-                    HeadTracker,
-                )
-
+                from reachy_mini_conversation_demo.vision.yolo_head_tracker import HeadTracker
                 head_tracker = HeadTracker()
-
             elif args.head_tracker == "mediapipe":
                 from reachy_mini_toolbox.vision import HeadTracker
-
                 head_tracker = HeadTracker()
 
+        # Initialize camera worker
         camera_worker = CameraWorker(current_robot, head_tracker)
+
+        # Initialize vision manager (handles model download and configuration)
+        vision_manager = initialize_vision_manager(camera_worker)
 
     return camera_worker, head_tracker, vision_manager
 
