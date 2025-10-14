@@ -16,13 +16,18 @@ def parse_args():
         help="Choose head tracker (default: None)",
     )
     parser.add_argument("--no-camera", default=False, action="store_true", help="Disable camera usage")
+    parser.add_argument("--local-vision", default=False, action="store_true", help="Use local vision model instead of gpt-realtime vision")
     parser.add_argument("--gradio", default=False, action="store_true", help="Open gradio interface")
     parser.add_argument("--debug", default=False, action="store_true", help="Enable debug logging")
     return parser.parse_args()
 
 
 def handle_vision_stuff(args, current_robot):
-    """Initialize camera, head tracker, camera worker, and vision manager."""
+    """Initialize camera, head tracker, camera worker, and vision manager.
+
+    By default, vision is handled by gpt-realtime model when camera tool is used.
+    If --local-vision flag is used, a local vision model will process images periodically.
+    """
     camera_worker = None
     head_tracker = None
     vision_manager = None
@@ -40,8 +45,11 @@ def handle_vision_stuff(args, current_robot):
         # Initialize camera worker
         camera_worker = CameraWorker(current_robot, head_tracker)
 
-        # Initialize vision manager (handles model download and configuration)
-        vision_manager = initialize_vision_manager(camera_worker)
+        # Initialize vision manager only if local vision is requested
+        if args.local_vision:
+            vision_manager = initialize_vision_manager(camera_worker)
+        else:
+            logging.getLogger(__name__).info("Using gpt-realtime for vision (default). Use --local-vision for local processing.")
 
     return camera_worker, head_tracker, vision_manager
 
