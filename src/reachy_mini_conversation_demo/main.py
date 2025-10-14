@@ -74,11 +74,11 @@ def main():
     )
     logger.debug(f"Chatbot avatar images: {chatbot.avatar_images}")
 
+    handler = OpenaiRealtimeHandler(deps)
+
     stream_manager = None
 
     if args.gradio:
-        # Gradio mode: no LocalStream, so no audio queue callback needed
-        handler = OpenaiRealtimeHandler(deps)
         stream = Stream(
             handler=handler,
             mode="send-receive",
@@ -92,8 +92,7 @@ def main():
         app = FastAPI()
         app = gr.mount_gradio_app(app, stream.ui, path="/")
     else:
-        # Console mode: LocalStream creates handler internally with proper callback
-        stream_manager = LocalStream(deps, robot)
+        stream_manager = LocalStream(handler, robot)
 
     # Each async service → its own thread/loop
     movement_manager.start()
