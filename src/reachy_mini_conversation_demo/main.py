@@ -31,6 +31,7 @@ def update_chatbot(chatbot: list[dict], response: dict):
 def main(robot=None):
     """Entrypoint for the Reachy Mini conversation demo."""
     args = parse_args()
+    args.gradio = True  # TODO Antoine - force gradio for testing appifying
 
     logger = setup_logger(args.debug)
     logger.info("Starting Reachy Mini Conversation Demo")
@@ -131,6 +132,7 @@ class ReachyMiniConversationDemo(ReachyMiniApp):
 
     def run(self, reachy_mini: ReachyMini, stop_event: threading.Event):
         """Run the Reachy Mini conversation demo app."""
+        print("AAAAAAAAAAAAAAAAAA")
         while not stop_event.is_set():
             main(robot=reachy_mini)
             time.sleep(1)
