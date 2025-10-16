@@ -24,9 +24,9 @@ dependencies = [
     "openai>=2.1",
 
     #Reachy mini    
-    "reachy_mini_dances_library@git+ssh://git@github.com/pollen-robotics/reachy_mini_dances_library@main",
-    "reachy_mini_toolbox@git+ssh://git@github.com/pollen-robotics/reachy_mini_toolbox@main",
-    "reachy_mini@git+ssh://git@github.com/pollen-robotics/reachy_mini@develop",
+    "reachy_mini_dances_library",
+    "reachy_mini_toolbox",
+    "reachy_mini>=1.0.0.rc4",
 ]
 
 [project.optional-dependencies]
