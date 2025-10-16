@@ -2,12 +2,14 @@
 
 import os
 import sys
+import time
+import threading
 
 import gradio as gr
 from fastapi import FastAPI
 from fastrtc import Stream
 
-from reachy_mini import ReachyMini
+from reachy_mini import ReachyMini, ReachyMiniApp
 from reachy_mini_conversation_demo.moves import MovementManager
 from reachy_mini_conversation_demo.tools import ToolDependencies
 from reachy_mini_conversation_demo.utils import (
@@ -26,7 +28,7 @@ def update_chatbot(chatbot: list[dict], response: dict):
     return chatbot
 
 
-def main():
+def main(robot=None):
     """Entrypoint for the Reachy Mini conversation demo."""
     args = parse_args()
 
@@ -36,7 +38,8 @@ def main():
     if args.no_camera and args.head_tracker is not None:
         logger.warning("Head tracking is not activated due to --no-camera.")
 
-    robot = ReachyMini()
+    if robot is None:
+        robot = ReachyMini()
 
     # Check if running in simulation mode without --gradio
     if robot.client.get_status()["simulation_enabled"] and not args.gradio:
@@ -121,6 +124,16 @@ def main():
         # prevent connection to keep alive some threads
         robot.client.disconnect()
         logger.info("Shutdown complete.")
+
+
+class ReachyMiniConversationDemo(ReachyMiniApp):
+    """Reachy Mini Apps entry point for the conversation demo."""
+
+    def run(self, reachy_mini: ReachyMini, stop_event: threading.Event):
+        """Run the Reachy Mini conversation demo app."""
+        while not stop_event.is_set():
+            main(robot=reachy_mini)
+            time.sleep(1)
 
 
 if __name__ == "__main__":

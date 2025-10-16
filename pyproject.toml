@@ -45,6 +45,9 @@ dev = ["pytest", "ruff==0.12.0"]
 [project.scripts]
 reachy-mini-conversation-demo = "reachy_mini_conversation_demo.main:main"
 
+[project.entry-points."reachy_mini_apps"]
+reachy_mini_conversation_demo = "reachy_mini_conversation_demo.main:ReachyMiniConversationDemo"
+
 [tool.setuptools]
 package-dir = { "" = "src" }
 include-package-data = true

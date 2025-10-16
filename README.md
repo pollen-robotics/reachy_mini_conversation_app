@@ -1,3 +1,14 @@
+---
+title: Reachy Mini Conversation Demo
+emoji: 🎤
+colorFrom: red
+colorTo: blue
+sdk: static
+pinned: false
+tags:
+ - reachy_mini
+---
+
 # Reachy Mini conversation demo
 
 Conversational demo for the Reachy Mini robot combining OpenAI's realtime APIs, vision pipelines, and choreographed motion libraries.
