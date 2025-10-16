@@ -3,7 +3,6 @@
 import os
 import sys
 import time
-import asyncio
 import threading
 
 import gradio as gr
@@ -134,7 +133,7 @@ class ReachyMiniConversationDemo(ReachyMiniApp):
     def run(self, reachy_mini: ReachyMini, stop_event: threading.Event):
         """Run the Reachy Mini conversation demo app."""
         while not stop_event.is_set():
-            asyncio.run(main(robot=reachy_mini))
+            main(robot=reachy_mini)
             time.sleep(1)
 
 
