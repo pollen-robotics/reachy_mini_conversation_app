@@ -8,19 +8,20 @@ from dotenv import load_dotenv
 logger = logging.getLogger(__name__)
 
 # Check if .env file exists
-env_file = Path(".env")
-if not env_file.exists():
-    raise RuntimeError(
-        ".env file not found. Please create one based on .env.example:\n"
-        "  cp .env.example .env\n"
-        "Then add your OPENAI_API_KEY to the .env file."
-    )
+# TODO Antoine - disabled this for testing appifying
+# env_file = Path(".env")
+# if not env_file.exists():
+#     raise RuntimeError(
+#         ".env file not found. Please create one based on .env.example:\n"
+#         "  cp .env.example .env\n"
+#         "Then add your OPENAI_API_KEY to the .env file."
+#     )
 
 # Load .env and verify it was loaded successfully
-if not load_dotenv():
-    raise RuntimeError(
-        "Failed to load .env file. Please ensure the file is readable and properly formatted."
-    )
+# if not load_dotenv():
+#     raise RuntimeError(
+#         "Failed to load .env file. Please ensure the file is readable and properly formatted."
+#     )
 
 logger.info("Configuration loaded from .env file")
 
