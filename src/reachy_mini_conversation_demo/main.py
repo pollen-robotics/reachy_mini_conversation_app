@@ -31,6 +31,7 @@ def update_chatbot(chatbot: list[dict], response: dict):
 def main(robot=None):
     """Entrypoint for the Reachy Mini conversation demo."""
     args = parse_args()
+    args.gradio = True # TODO Antoine - force gradio for testing appifying
 
     logger = setup_logger(args.debug)
     logger.info("Starting Reachy Mini Conversation Demo")
