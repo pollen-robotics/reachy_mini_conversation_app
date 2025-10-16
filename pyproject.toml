@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 dependencies = [
     #Media
     "aiortc>=1.13.0",
-    "fastrtc@git+ssh://git@github.com/gradio-app/fastrtc.git@main",
+    "fastrtc>=0.0.33",
     "gradio>=5.49.0",
     "huggingface_hub>=0.34.4",
     "opencv-python>=4.12.0.88",

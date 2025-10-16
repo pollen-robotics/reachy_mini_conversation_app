@@ -986,7 +986,7 @@ wheels = [
 [[package]]
 name = "fastrtc"
 version = "0.0.33"
-source = { git = "ssh://git@github.com/gradio-app/fastrtc.git?rev=main#27f054934f15070750ee0383a94c103231bd0bbb" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aioice" },
     { name = "aiortc" },
@@ -997,6 +997,9 @@ dependencies = [
     { name = "numpy" },
     { name = "standard-aifc", marker = "python_full_version >= '3.13'" },
     { name = "standard-sunau", marker = "python_full_version >= '3.13'" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ff/64/92a469f8f27a0552fff628903f9333d426efb3f5590d50b9884f3fd32384/fastrtc-0.0.33-py3-none-any.whl", hash = "sha256:04f4bd3d083cddf40189ec598db9b7472c0f460ecfd4c4b232e3224f3e045afb", size = 2806027, upload-time = "2025-09-17T12:04:23.754Z" },
 ]
 
 [[package]]
@@ -3604,7 +3607,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiortc", specifier = ">=1.13.0" },
-    { name = "fastrtc", git = "ssh://git@github.com/gradio-app/fastrtc.git?rev=main" },
+    { name = "fastrtc", specifier = ">=0.0.33" },
     { name = "gradio", specifier = ">=5.49.0" },
     { name = "huggingface-hub", specifier = ">=0.34.4" },
     { name = "mediapipe", marker = "extra == 'mediapipe-vision'", specifier = ">=0.10.14" },
