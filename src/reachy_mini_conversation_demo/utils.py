@@ -21,7 +21,7 @@ def parse_args():
         action="store_true",
         help="Use local vision model instead of gpt-realtime vision",
     )
-    parser.add_argument("--gradio", default=False, action="store_true", help="Open gradio interface")
+    parser.add_argument("--gradio", default=True, action="store_true", help="Open gradio interface") # TODO Antoine - force gradio for testing appifying
     parser.add_argument("--debug", default=False, action="store_true", help="Enable debug logging")
     return parser.parse_args()
 
