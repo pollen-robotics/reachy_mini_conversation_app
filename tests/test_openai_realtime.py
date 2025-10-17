@@ -2,8 +2,8 @@ import asyncio
 from datetime import datetime
 from unittest.mock import MagicMock
 
-from reachy_mini_conversation_demo.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_demo.tools import ToolDependencies
+from reachy_mini_conversation_demo.openai_realtime import OpenaiRealtimeHandler
 
 
 def _build_handler(loop):
@@ -13,6 +13,7 @@ def _build_handler(loop):
 
 
 def test_format_timestamp_uses_wall_clock():
+    """Test that format_timestamp uses wall clock time."""
     loop = asyncio.new_event_loop()
     try:
         print("Testing format_timestamp...")
