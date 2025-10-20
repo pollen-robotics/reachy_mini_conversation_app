@@ -5,6 +5,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -22,7 +23,6 @@ jobs:
 
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      HF_HOME: ${{ runner.temp }}/.hf 
       HF_HUB_ETAG_TIMEOUT: "120"
       HF_HUB_DOWNLOAD_TIMEOUT: "120"
 
@@ -35,19 +35,23 @@ jobs:
 
       - uses: astral-sh/setup-uv@v5
 
+      # Set HF_HOME using the runner's temp dir for this job
+      - name: Set HF_HOME
+        run: |
+          echo "HF_HOME=${RUNNER_TEMP}/.hf" >> "$GITHUB_ENV"
+          mkdir -p "${RUNNER_TEMP}/.hf"
+
       # Cache HF artifacts so subsequent runs don't re-download
       - name: Cache Hugging Face hub
         uses: actions/cache@v4
         with:
-          path: ${{ env.HF_HOME }}
+          path: ${{ runner.temp }}/.hf
           key: hf-${{ runner.os }}-${{ hashFiles('uv.lock', 'pyproject.toml') }}
           restore-keys: hf-${{ runner.os }}-
 
       - name: Install (locked)
         run: |
           uv sync --frozen --group dev --extra all_vision
-          # If using hf-transfer, ensure extra is installed:
-          # uv pip install "huggingface_hub[hf_transfer]"
 
       # Authenticate to HF so gated/private datasets work
       - name: Login to Hugging Face
