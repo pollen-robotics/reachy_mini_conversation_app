@@ -35,13 +35,12 @@ jobs:
 
       - uses: astral-sh/setup-uv@v5
 
-      # Set HF_HOME using the runner's temp dir for this job
       - name: Set HF_HOME
+        shell: bash
         run: |
           echo "HF_HOME=${RUNNER_TEMP}/.hf" >> "$GITHUB_ENV"
           mkdir -p "${RUNNER_TEMP}/.hf"
 
-      # Cache HF artifacts so subsequent runs don't re-download
       - name: Cache Hugging Face hub
         uses: actions/cache@v4
         with:
@@ -52,14 +51,20 @@ jobs:
       - name: Install (locked)
         run: |
           uv sync --frozen --group dev --extra all_vision
+          # If you enable HF_HUB_ENABLE_HF_TRANSFER above:
+          # uv pip install "huggingface_hub[hf_transfer]"
 
-      # Authenticate to HF so gated/private datasets work
-      - name: Login to Hugging Face
+      # Prefetch the dataset to avoid download during test collection
+      - name: Prefetch HF dataset
         run: |
-          python - <<'PY'
-          import os
-          from huggingface_hub import login
-          login(token=os.environ["HF_TOKEN"])
+          uv run python - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(
+              repo_id="pollen-robotics/reachy-mini-emotions-library",
+              repo_type="dataset",
+              etag_timeout=120,
+              max_workers=4
+          )
           PY
 
       - name: Run tests
