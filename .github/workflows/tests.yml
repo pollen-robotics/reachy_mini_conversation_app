@@ -48,13 +48,16 @@ jobs:
           key: hf-${{ runner.os }}-${{ hashFiles('uv.lock', 'pyproject.toml') }}
           restore-keys: hf-${{ runner.os }}-
 
+      # test-only .env file
+      - name: Create test .env
+        run: |
+          printf "OPENAI_API_KEY=test-dummy\n" > .env
+
       - name: Install (locked)
         run: |
           uv sync --frozen --group dev --extra all_vision
-          # If you enable HF_HUB_ENABLE_HF_TRANSFER above:
-          # uv pip install "huggingface_hub[hf_transfer]"
 
-      # Prefetch the dataset to avoid download during test collection
+      # Prefetch HF dataset to avoid download during test collection
       - name: Prefetch HF dataset
         run: |
           uv run python - <<'PY'
