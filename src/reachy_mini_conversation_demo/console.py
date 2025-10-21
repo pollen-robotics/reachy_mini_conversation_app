@@ -7,7 +7,7 @@ import asyncio
 import logging
 from typing import List
 
-import librosa
+import scipy
 from fastrtc import AdditionalOutputs, audio_to_int16, audio_to_float32
 
 from reachy_mini import ReachyMini
@@ -108,8 +108,9 @@ class LocalStream:
                 device_sample_rate = self._robot.media.get_audio_samplerate()
                 audio_frame_float = audio_to_float32(audio_frame.squeeze())
                 if input_sample_rate != device_sample_rate:
-                    audio_frame_float = librosa.resample(
-                        audio_frame_float, orig_sr=input_sample_rate, target_sr=device_sample_rate,
+                    audio_frame_float = scipy.signal.resample(
+                        audio_frame_float,
+                        int(len(audio_frame_float) * (self._robot.media.get_audio_samplerate() / input_sample_rate)),
                     )
                 self._robot.media.push_audio_sample(audio_frame_float)
 
