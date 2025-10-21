@@ -11,13 +11,13 @@ from openai import AsyncOpenAI
 from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item
 from numpy.typing import NDArray
 
-from reachy_mini_conversation_demo.tools import (
+from reachy_mini_conversation_app.tools import (
     ALL_TOOL_SPECS,
     ToolDependencies,
     dispatch_tool_call,
 )
-from reachy_mini_conversation_demo.config import config
-from reachy_mini_conversation_demo.prompts import SESSION_INSTRUCTIONS
+from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.prompts import SESSION_INSTRUCTIONS
 
 
 logger = logging.getLogger(__name__)

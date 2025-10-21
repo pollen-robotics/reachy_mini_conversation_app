@@ -1,15 +1,15 @@
-# Reachy Mini conversation demo
+# Reachy Mini conversation app
 
-Conversational demo for the Reachy Mini robot combining OpenAI's realtime APIs, vision pipelines, and choreographed motion libraries.
+Conversational app for the Reachy Mini robot combining OpenAI's realtime APIs, vision pipelines, and choreographed motion libraries.
 
 ![Reachy Mini Dance](docs/assets/reachy_mini_dance.gif)
 
 ## Architecture
 
-The demo follows a layered architecture connecting the user, AI services, and robot hardware:
+The app follows a layered architecture connecting the user, AI services, and robot hardware:
 
 <p align="center">
-  <img src="docs/assets/conversation_demo_arch.svg" alt="Architecture Diagram" width="600"/>
+  <img src="docs/assets/conversation_app_arch.svg" alt="Architecture Diagram" width="600"/>
 </p>
 
 ## Overview
@@ -91,12 +91,12 @@ Some wheels (e.g. PyTorch) are large and require compatible CUDA or CPU buildsâ€
 | `HF_TOKEN` | Optional token for Hugging Face models (only used with `--local-vision` flag, falls back to `huggingface-cli login`).
 | `LOCAL_VISION_MODEL` | Hugging Face model path for local vision processing (only used with `--local-vision` flag, defaults to `HuggingFaceTB/SmolVLM2-2.2B-Instruct`).
 
-## Running the demo
+## Running the app
 
 Activate your virtual environment, ensure the Reachy Mini robot (or simulator) is reachable, then launch:
 
 ```bash
-reachy-mini-conversation-demo
+reachy-mini-conversation-app
 ```
 
 By default, the app runs in console mode for direct audio interaction. Use the `--gradio` flag to launch a web UI served locally at http://127.0.0.1:7860/ (required when running in simulation mode). With a camera attached, vision is handled by the gpt-realtime model when the camera tool is used. For local vision processing, use the `--local-vision` flag to process frames periodically using the SmolVLM2 model. Additionally, you can enable face tracking via YOLO or MediaPipe pipelines depending on the extras you installed.
@@ -116,19 +116,19 @@ By default, the app runs in console mode for direct audio interaction. Use the `
 - Run on hardware with MediaPipe face tracking:
 
   ```bash
-  reachy-mini-conversation-demo --head-tracker mediapipe
+  reachy-mini-conversation-app --head-tracker mediapipe
   ```
 
 - Run with local vision processing (requires `local_vision` extra):
 
   ```bash
-  reachy-mini-conversation-demo --local-vision
+  reachy-mini-conversation-app --local-vision
   ```
 
 - Disable the camera pipeline (audio-only conversation):
 
   ```bash
-  reachy-mini-conversation-demo --no-camera
+  reachy-mini-conversation-app --no-camera
   ```
 
 ## LLM tools exposed to the assistant

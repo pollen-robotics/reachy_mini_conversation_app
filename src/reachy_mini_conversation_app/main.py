@@ -1,4 +1,4 @@
-"""Entrypoint for the Reachy Mini conversation demo."""
+"""Entrypoint for the Reachy Mini conversation app."""
 
 import os
 import sys
@@ -9,16 +9,16 @@ from fastapi import FastAPI
 from fastrtc import Stream
 
 from reachy_mini import ReachyMini
-from reachy_mini_conversation_demo.moves import MovementManager
-from reachy_mini_conversation_demo.tools import ToolDependencies
-from reachy_mini_conversation_demo.utils import (
+from reachy_mini_conversation_app.moves import MovementManager
+from reachy_mini_conversation_app.tools import ToolDependencies
+from reachy_mini_conversation_app.utils import (
     parse_args,
     setup_logger,
     handle_vision_stuff,
 )
-from reachy_mini_conversation_demo.console import LocalStream
-from reachy_mini_conversation_demo.openai_realtime import OpenaiRealtimeHandler
-from reachy_mini_conversation_demo.audio.head_wobbler import HeadWobbler
+from reachy_mini_conversation_app.console import LocalStream
+from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
+from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
 
 
 def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -28,11 +28,11 @@ def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> L
 
 
 def main() -> None:
-    """Entrypoint for the Reachy Mini conversation demo."""
+    """Entrypoint for the Reachy Mini conversation app."""
     args = parse_args()
 
     logger = setup_logger(args.debug)
-    logger.info("Starting Reachy Mini Conversation Demo")
+    logger.info("Starting Reachy Mini Conversation App")
 
     if args.no_camera and args.head_tracker is not None:
         logger.warning("Head tracking is not activated due to --no-camera.")

@@ -26,7 +26,7 @@ logger.info("Configuration loaded from .env file")
 
 
 class Config:
-    """Configuration class for the conversation demo."""
+    """Configuration class for the conversation app."""
 
     # Required
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")

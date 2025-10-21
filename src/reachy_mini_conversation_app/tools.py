@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 try:
     from reachy_mini.motion.recorded_move import RecordedMoves
     from reachy_mini_dances_library.collection.dance import AVAILABLE_MOVES
-    from reachy_mini_conversation_demo.dance_emotion_moves import (
+    from reachy_mini_conversation_app.dance_emotion_moves import (
         GotoQueueMove,
         DanceQueueMove,
         EmotionQueueMove,

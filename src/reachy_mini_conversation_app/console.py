@@ -11,7 +11,7 @@ import scipy
 from fastrtc import AdditionalOutputs, audio_to_int16, audio_to_float32
 
 from reachy_mini import ReachyMini
-from reachy_mini_conversation_demo.openai_realtime import OpenaiRealtimeHandler
+from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 
 
 logger = logging.getLogger(__name__)

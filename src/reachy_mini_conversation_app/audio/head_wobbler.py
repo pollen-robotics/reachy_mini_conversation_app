@@ -11,7 +11,7 @@ from collections.abc import Callable
 import numpy as np
 from numpy.typing import NDArray
 
-from reachy_mini_conversation_demo.audio.speech_tapper import HOP_MS, SwayRollRT
+from reachy_mini_conversation_app.audio.speech_tapper import HOP_MS, SwayRollRT
 
 
 SAMPLE_RATE = 24000
