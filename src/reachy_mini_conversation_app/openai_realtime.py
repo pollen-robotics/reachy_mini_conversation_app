@@ -17,7 +17,7 @@ from reachy_mini_conversation_app.tools import (
     dispatch_tool_call,
 )
 from reachy_mini_conversation_app.config import config
-from reachy_mini_conversation_app.prompts import SESSION_INSTRUCTIONS
+from reachy_mini_conversation_app.prompts import get_session_instructions
 
 
 logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         "language": "en",
                     },
                     "voice": "ballad",
-                    "instructions": SESSION_INSTRUCTIONS,
+                    "instructions": get_session_instructions(),
                     "tools": ALL_TOOL_SPECS,  # type: ignore[typeddict-item]
                     "tool_choice": "auto",
                     "temperature": 0.7,

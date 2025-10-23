@@ -1,14 +1,18 @@
 from __future__ import annotations
+import os
 import abc
 import json
 import asyncio
 import inspect
 import logging
+import importlib
 from typing import Any, Dict, List, Tuple, Literal
 from dataclasses import dataclass
 
 from reachy_mini import ReachyMini
 from reachy_mini.utils import create_head_pose
+# Import config to ensure .env is loaded before reading USE_CASE
+from reachy_mini_conversation_app.config import config  # noqa: F401
 
 
 logger = logging.getLogger(__name__)
@@ -453,7 +457,21 @@ class DoNothing(Tool):
 
 # Registry & specs (dynamic)
 
+
+def _load_use_case_tools() -> None:
+    use_case = os.getenv("USE_CASE")
+    if not use_case:
+        return
+    try:
+        importlib.import_module(f"use_cases.{use_case}")
+    except ModuleNotFoundError:
+        logger.warning(f"Use case '{use_case}' not found")
+    except Exception as e:
+        logger.warning(f"Failed to load use case '{use_case}': {e}")
+
+
 # List of available tool classes
+_load_use_case_tools()
 ALL_TOOLS: Dict[str, Tool] = {cls.name: cls() for cls in get_concrete_subclasses(Tool)}  # type: ignore[type-abstract]
 ALL_TOOL_SPECS = [tool.spec() for tool in ALL_TOOLS.values()]
 

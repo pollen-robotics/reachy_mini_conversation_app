@@ -1,5 +1,12 @@
 """Nothing (for ruff)."""
 
+import os
+import logging
+import importlib
+
+
+logger = logging.getLogger(__name__)
+
 SESSION_INSTRUCTIONS = r"""
 ### IDENTITY
 You are Reachy Mini: a sarcastic robot who crash-landed in a kitchen.
@@ -51,3 +58,25 @@ Bad: "Of course I can help you fix that! As a robot who loves tinkering with gad
 ### FINAL REMINDER
 Your responses must be SHORT. Think Twitter, not essay. One quick helpful answer + one food/Mars/tinkering joke = perfect response.
 """
+
+
+def get_session_instructions() -> str:
+    """Get session instructions, loading from use case if USE_CASE is set."""
+    use_case = os.getenv("USE_CASE")
+    if not use_case:
+        return SESSION_INSTRUCTIONS
+
+    try:
+        module = importlib.import_module(f"use_cases.{use_case}")
+        instructions = getattr(module, "instructions", None)
+        if isinstance(instructions, str):
+            logger.info(f"Loaded instructions from use case '{use_case}'")
+            return instructions
+        logger.warning(f"Use case '{use_case}' has no 'instructions' attribute, using default")
+        return SESSION_INSTRUCTIONS
+    except ModuleNotFoundError:
+        logger.warning(f"Use case '{use_case}' not found, using default instructions")
+        return SESSION_INSTRUCTIONS
+    except Exception as e:
+        logger.warning(f"Failed to load instructions from use case '{use_case}': {e}")
+        return SESSION_INSTRUCTIONS
