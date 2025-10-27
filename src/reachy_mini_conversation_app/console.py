@@ -3,6 +3,7 @@
 records mic frames to the handler and plays handler audio frames to the speaker.
 """
 
+import time
 import asyncio
 import logging
 from typing import List
@@ -34,6 +35,7 @@ class LocalStream:
         self._stop_event.clear()
         self._robot.media.start_recording()
         self._robot.media.start_playing()
+        time.sleep(1)  # give some time to the pipelines to start
 
         async def runner() -> None:
             self._tasks = [
@@ -84,9 +86,8 @@ class LocalStream:
                 frame_mono = audio_frame.T[0]  # both channels are identical
                 frame = audio_to_int16(frame_mono)
                 await self.handler.receive((16000, frame))
-                # await asyncio.sleep(0)  # yield to event loop
-            else:
-                await asyncio.sleep(0.01)  # avoid busy loop
+
+            await asyncio.sleep(0.01)  # avoid busy loop
 
     async def play_loop(self) -> None:
         """Fetch outputs from the handler: log text and play audio frames."""
@@ -107,10 +108,14 @@ class LocalStream:
                 input_sample_rate, audio_frame = handler_output
                 device_sample_rate = self._robot.media.get_audio_samplerate()
                 audio_frame_float = audio_to_float32(audio_frame.squeeze())
+
                 if input_sample_rate != device_sample_rate:
                     audio_frame_float = librosa.resample(
-                        audio_frame_float, orig_sr=input_sample_rate, target_sr=device_sample_rate,
+                        audio_frame_float,
+                        orig_sr=input_sample_rate,
+                        target_sr=device_sample_rate,
                     )
+
                 self._robot.media.push_audio_sample(audio_frame_float)
 
             else:
