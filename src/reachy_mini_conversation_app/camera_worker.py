@@ -16,20 +16,27 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation as R
 
-from reachy_mini import ReachyMini
 from reachy_mini.utils.interpolation import linear_pose_interpolation
 
 
 logger = logging.getLogger(__name__)
 
 
+
 class CameraWorker:
     """Thread-safe camera worker with frame buffering and face tracking."""
 
-    def __init__(self, reachy_mini: ReachyMini, head_tracker: Any = None) -> None:
-        """Initialize."""
-        self.reachy_mini = reachy_mini
+    def __init__(self, media_manager: Any, head_tracker: Any = None, daemon_client: Any = None) -> None:
+        """Initialize.
+
+        Args:
+            media_manager: MediaManager instance for camera access
+            head_tracker: Optional head tracker for face detection
+            daemon_client: DaemonClient instance for IK calculations
+        """
+        self.media_manager = media_manager
         self.head_tracker = head_tracker
+        self.daemon_client = daemon_client
 
         # Thread-safe frame storage
         self.latest_frame: NDArray[np.uint8] | None = None
@@ -59,6 +66,13 @@ class CameraWorker:
         # Track state changes
         self.previous_head_tracking_state = self.is_head_tracking_enabled
 
+        # Pitch interpolation for smooth tracking (0.5s ramp to target)
+        self._current_interpolated_pitch = np.deg2rad(-10.0)  # Start at neutral (-10°)
+        self._pitch_interpolation_target: float | None = None  # Target pitch to interpolate toward
+        self._pitch_interpolation_start: float | None = None   # Starting pitch of current interpolation
+        self._pitch_interpolation_start_time: float | None = None  # When interpolation started
+        self._pitch_interpolation_duration = 0.5  # 0.5 seconds to reach target
+
     def get_latest_frame(self) -> NDArray[np.uint8] | None:
         """Get the latest frame (thread-safe)."""
         with self.frame_lock:
@@ -79,7 +93,14 @@ class CameraWorker:
     def set_head_tracking_enabled(self, enabled: bool) -> None:
         """Enable/disable head tracking."""
         self.is_head_tracking_enabled = enabled
+        if not enabled:
+            # Reset pitch interpolation state when disabling
+            self._current_interpolated_pitch = np.deg2rad(-10.0)  # Back to neutral
+            self._pitch_interpolation_target = None
+            self._pitch_interpolation_start = None
+            self._pitch_interpolation_start_time = None
         logger.info(f"Head tracking {'enabled' if enabled else 'disabled'}")
+
 
     def start(self) -> None:
         """Start the camera worker loop in a thread."""
@@ -104,15 +125,19 @@ class CameraWorker:
         logger.debug("Starting camera working loop")
 
         # Initialize head tracker if available
-        neutral_pose = np.eye(4)  # Neutral pose (identity matrix)
+        # Neutral pose: -10° pitch (looking up slightly) + 1.5cm z-lift
+        neutral_pose = np.eye(4, dtype=np.float32)
+        neutral_pose[2, 3] = 0.015  # Raise head by 1.5cm to avoid low position problems
+        neutral_rotation = R.from_euler("xyz", [0, np.deg2rad(-10.0), 0])  # -10° pitch (looking up)
+        neutral_pose[:3, :3] = neutral_rotation.as_matrix()
         self.previous_head_tracking_state = self.is_head_tracking_enabled
 
         while not self._stop_event.is_set():
             try:
                 current_time = time.time()
 
-                # Get frame from robot
-                frame = self.reachy_mini.media.get_frame()
+                # Get frame from media manager
+                frame = self.media_manager.get_frame()
 
                 if frame is not None:
                     # Thread-safe frame storage
@@ -125,6 +150,11 @@ class CameraWorker:
                         self.last_face_detected_time = current_time  # Trigger the face-lost logic
                         self.interpolation_start_time = None  # Will be set by the face-lost interpolation
                         self.interpolation_start_pose = None
+                        # Reset pitch interpolation to neutral
+                        self._current_interpolated_pitch = np.deg2rad(-10.0)
+                        self._pitch_interpolation_target = None
+                        self._pitch_interpolation_start = None
+                        self._pitch_interpolation_start_time = None
 
                     # Update tracking state
                     self.previous_head_tracking_state = self.is_head_tracking_enabled
@@ -136,7 +166,7 @@ class CameraWorker:
                         if eye_center is not None:
                             # Face detected - immediately switch to tracking
                             self.last_face_detected_time = current_time
-                            self.interpolation_start_time = None  # Stop any interpolation
+                            self.interpolation_start_time = None  # Stop any face-lost interpolation
 
                             # Convert normalized coordinates to pixel coordinates
                             h, w, _ = frame.shape
@@ -146,27 +176,47 @@ class CameraWorker:
                                 eye_center_norm[1] * h,
                             ]
 
-                            # Get the head pose needed to look at the target, but don't perform movement
-                            target_pose = self.reachy_mini.look_at_image(
-                                eye_center_pixels[0],
-                                eye_center_pixels[1],
-                                duration=0.0,
-                                perform_movement=False,
+                            # Get the head pose needed to look at the target via daemon IK
+                            if self.daemon_client is None:
+                                continue
+
+                            target_pose = self.daemon_client.look_at_image(
+                                int(eye_center_pixels[0]),
+                                int(eye_center_pixels[1]),
                             )
 
                             # Extract translation and rotation from the target pose directly
                             translation = target_pose[:3, 3]
                             rotation = R.from_matrix(target_pose[:3, :3]).as_euler("xyz", degrees=False)
 
-                            # Thread-safe update of face tracking offsets (use pose as-is)
+                            # Invert pitch: daemon API coordinate system is opposite of robot's
+                            # Daemon: positive pitch = down, Robot needs: positive pitch = up
+                            inverted_pitch = -rotation[1]
+
+                            # Start pitch interpolation if target changed significantly (>1°)
+                            if (self._pitch_interpolation_target is None or
+                                abs(inverted_pitch - self._pitch_interpolation_target) > np.deg2rad(1.0)):
+                                # New target - start interpolation
+                                self._pitch_interpolation_target = inverted_pitch
+                                self._pitch_interpolation_start = self._current_interpolated_pitch
+                                self._pitch_interpolation_start_time = current_time
+
+                            logger.debug(
+                                f"Face tracking: target={np.rad2deg(inverted_pitch):.1f}°, "
+                                f"current={np.rad2deg(self._current_interpolated_pitch):.1f}°, "
+                                f"yaw={np.rad2deg(rotation[2]):.1f}°"
+                            )
+
+                            # Thread-safe update of face tracking offsets
+                            # Use interpolated pitch (smoothly approaches target)
                             with self.face_tracking_lock:
                                 self.face_tracking_offsets = [
                                     translation[0],
                                     translation[1],
                                     translation[2],  # x, y, z
                                     rotation[0],
-                                    rotation[1],
-                                    rotation[2],  # roll, pitch, yaw
+                                    self._current_interpolated_pitch,  # Smoothly interpolated pitch
+                                    rotation[2],     # roll, pitch, yaw
                                 ]
 
                         # No face detected while tracking enabled - set face lost timestamp
@@ -174,6 +224,23 @@ class CameraWorker:
                             # Only update if we haven't already set a face lost time
                             # (current_time check prevents overriding the disable-triggered timestamp)
                             pass
+
+                    # Update pitch interpolation (runs every frame to smooth approach to target)
+                    if self._pitch_interpolation_target is not None and self._pitch_interpolation_start_time is not None:
+                        elapsed = current_time - self._pitch_interpolation_start_time
+                        t = min(1.0, elapsed / self._pitch_interpolation_duration)
+
+                        # Linear interpolation from start to target
+                        self._current_interpolated_pitch = (
+                            self._pitch_interpolation_start * (1.0 - t) +
+                            self._pitch_interpolation_target * t
+                        )
+
+                        # If interpolation complete, clear state
+                        if t >= 1.0:
+                            self._pitch_interpolation_target = None
+                            self._pitch_interpolation_start = None
+                            self._pitch_interpolation_start_time = None
 
                     # Handle smooth interpolation (works for both face-lost and tracking-disabled cases)
                     if self.last_face_detected_time is not None:
@@ -209,21 +276,27 @@ class CameraWorker:
                             rotation = R.from_matrix(interpolated_pose[:3, :3]).as_euler("xyz", degrees=False)
 
                             # Thread-safe update of face tracking offsets
+                            # No clamping - interpolating back to neutral (0°) which is safe
                             with self.face_tracking_lock:
                                 self.face_tracking_offsets = [
                                     translation[0],
                                     translation[1],
                                     translation[2],  # x, y, z
                                     rotation[0],
-                                    rotation[1],
+                                    rotation[1],  # pitch
                                     rotation[2],  # roll, pitch, yaw
                                 ]
 
-                            # If interpolation is complete, reset timing
+                            # If interpolation is complete, reset timing and pitch state
                             if t >= 1.0:
                                 self.last_face_detected_time = None
                                 self.interpolation_start_time = None
                                 self.interpolation_start_pose = None
+                                # Reset pitch interpolation to neutral
+                                self._current_interpolated_pitch = np.deg2rad(-10.0)
+                                self._pitch_interpolation_target = None
+                                self._pitch_interpolation_start = None
+                                self._pitch_interpolation_start_time = None
                         # else: Keep current offsets (within 2s delay period)
 
                 # Small sleep to prevent excessive CPU usage (same as main_works.py)

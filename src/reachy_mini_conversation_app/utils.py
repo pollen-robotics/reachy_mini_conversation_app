@@ -25,14 +25,20 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--gradio", default=False, action="store_true", help="Open gradio interface")
     parser.add_argument("--debug", default=False, action="store_true", help="Enable debug logging")
+    parser.add_argument("--api", choices=["openai", "gemini"], default="openai", help="Choose the API to use (default: openai)")
     return parser.parse_args()
 
 
-def handle_vision_stuff(args: argparse.Namespace, current_robot: ReachyMini) -> Tuple[CameraWorker | None, Any, Any]:
+def handle_vision_stuff(args: argparse.Namespace, media_manager: Any, daemon_client: Any) -> Tuple[CameraWorker | None, Any, Any]:
     """Initialize camera, head tracker, camera worker, and vision manager.
 
     By default, vision is handled by gpt-realtime model when camera tool is used.
     If --local-vision flag is used, a local vision model will process images periodically.
+
+    Args:
+        args: Command line arguments
+        media_manager: MediaManager instance for camera access
+        daemon_client: DaemonClient instance for IK calculations
     """
     camera_worker = None
     head_tracker = None
@@ -51,7 +57,7 @@ def handle_vision_stuff(args: argparse.Namespace, current_robot: ReachyMini) -> 
                 head_tracker = HeadTracker()
 
         # Initialize camera worker
-        camera_worker = CameraWorker(current_robot, head_tracker)
+        camera_worker = CameraWorker(media_manager, head_tracker, daemon_client)
 
         # Initialize vision manager only if local vision is requested
         if args.local_vision:
@@ -74,9 +80,22 @@ def handle_vision_stuff(args: argparse.Namespace, current_robot: ReachyMini) -> 
 def setup_logger(debug: bool) -> logging.Logger:
     """Setups the logger."""
     log_level = "DEBUG" if debug else "INFO"
+
+    # Custom formatter to shorten module names
+    class ShortNameFormatter(logging.Formatter):
+        def format(self, record):
+            # Shorten reachy_mini_conversation_app.x to just x
+            if record.name.startswith('reachy_mini_conversation_app.'):
+                record.name = record.name.replace('reachy_mini_conversation_app.', '')
+            return super().format(record)
+
+    handler = logging.StreamHandler()
+    handler.setFormatter(ShortNameFormatter("%(levelname)s:%(name)s | %(message)s"))
+
     logging.basicConfig(
         level=getattr(logging, log_level, logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s:%(lineno)d | %(message)s",
+        handlers=[handler],
+        force=True
     )
     logger = logging.getLogger(__name__)
 

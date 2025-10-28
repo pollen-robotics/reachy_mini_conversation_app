@@ -57,6 +57,9 @@ cache/
 .Trash-*
 .nfs*
 
+# Secrets
+src/reachy_mini_conversation_app/secrets.py
+
 # Project-specific exclusions
 docs for gemini/
 src/reachy_mini_conversation_app/gemini_live.py
