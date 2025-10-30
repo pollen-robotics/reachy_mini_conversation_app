@@ -1,11 +1,55 @@
 """Nothing (for ruff)."""
 
 import os
+import re
 import logging
-import importlib
+from pathlib import Path
 
 
 logger = logging.getLogger(__name__)
+
+
+def _expand_prompt_includes(content: str, prompts_library_path: Path) -> str:
+    """Expand [<name>] placeholders with content from prompts_library/<name>.txt.
+
+    Args:
+        content: The template content with [<name>] placeholders
+        prompts_library_path: Path to the prompts_library directory
+
+    Returns:
+        Expanded content with placeholders replaced by file contents
+
+    """
+    # Pattern to match [<name>] where name is a valid file stem (alphanumeric, underscores, hyphens)
+    pattern = re.compile(r'^\[([a-zA-Z0-9_-]+)\]$')
+
+    lines = content.split('\n')
+    expanded_lines = []
+
+    for line in lines:
+        stripped = line.strip()
+        match = pattern.match(stripped)
+
+        if match:
+            # Extract the name from [<name>]
+            template_name = match.group(1)
+            template_file = prompts_library_path / f"{template_name}.txt"
+
+            try:
+                if template_file.exists():
+                    template_content = template_file.read_text(encoding="utf-8").rstrip()
+                    expanded_lines.append(template_content)
+                    logger.debug("Expanded template: [%s]", template_name)
+                else:
+                    logger.warning("Template file not found: %s, keeping placeholder", template_file)
+                    expanded_lines.append(line)
+            except Exception as e:
+                logger.warning("Failed to read template '%s': %s, keeping placeholder", template_name, e)
+                expanded_lines.append(line)
+        else:
+            expanded_lines.append(line)
+
+    return '\n'.join(expanded_lines)
 
 SESSION_INSTRUCTIONS = r"""
 ### IDENTITY
@@ -67,16 +111,23 @@ def get_session_instructions() -> str:
         return SESSION_INSTRUCTIONS
 
     try:
-        module = importlib.import_module(f"demos.{demo}")
-        instructions = getattr(module, "instructions", None)
-        if isinstance(instructions, str):
-            logger.info(f"Loaded instructions from demo '{demo}'")
-            return instructions
-        logger.warning(f"Demo '{demo}' has no 'instructions' attribute, using default")
-        return SESSION_INSTRUCTIONS
-    except ModuleNotFoundError:
-        logger.warning(f"Demo '{demo}' not found, using default instructions")
+        # Look for instructions.txt in the demo directory
+        demo_path = Path(__file__).parent.parent / "demos" / demo
+        instructions_file = demo_path / "instructions.txt"
+
+        if instructions_file.exists():
+            instructions = instructions_file.read_text(encoding="utf-8").strip()
+            if instructions:
+                # Expand [<name>] placeholders with content from prompts_library
+                prompts_library_path = Path(__file__).parent.parent / "prompts_library"
+                expanded_instructions = _expand_prompt_includes(instructions, prompts_library_path)
+                logger.info("Loaded instructions from demo '%s'", demo)
+                return expanded_instructions
+            logger.warning("Demo '%s' has empty instructions.txt, using default", demo)
+            return SESSION_INSTRUCTIONS
+
+        logger.warning("Demo '%s' has no instructions.txt file, using default", demo)
         return SESSION_INSTRUCTIONS
     except Exception as e:
-        logger.warning(f"Failed to load instructions from demo '{demo}': {e}")
+        logger.warning("Failed to load instructions from demo '%s': %s", demo, e)
         return SESSION_INSTRUCTIONS

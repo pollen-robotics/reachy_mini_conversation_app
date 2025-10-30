@@ -8,7 +8,6 @@ import inspect
 import logging
 import importlib
 from typing import Any, Dict, List, Tuple, Literal
-from pathlib import Path
 from dataclasses import dataclass
 
 from reachy_mini import ReachyMini
@@ -461,6 +460,7 @@ class DoNothing(Tool):
 def _load_demo_tools() -> None:
     demo = os.getenv("DEMO")
     if not demo:
+        print("No DEMO env variable set; using default.")
         return
     try:
         importlib.import_module(f"demos.{demo}")
@@ -471,17 +471,9 @@ def _load_demo_tools() -> None:
             print(f"✗ Demo '{demo}' not found in src/demos/")
             sys.exit(1)
         else:
-            # Check for requirements.txt in demo folder
-            demo_path = Path(__file__).parent.parent / "demos" / demo
-            requirements_file = demo_path / "requirements.txt"
-            if requirements_file.exists():
-                print(f"✗ Demo '{demo}' requires additional dependencies.")
-                print(f"  Install them with: uv pip install -r src/demos/{demo}/requirements.txt")
-                sys.exit(1)
-            else:
-                print(f"✗ Demo '{demo}' failed due to missing dependency: {e.name}")
-                print(f"  Install it with: uv pip install {e.name}")
-                sys.exit(1)
+            print(f"✗ Demo '{demo}' failed due to missing dependency: {e.name}")
+            print(f"  Install it with: uv pip install {e.name}")
+            sys.exit(1)
     except Exception as e:
         print(f"✗ Failed to load demo '{demo}': {e}")
         sys.exit(1)
