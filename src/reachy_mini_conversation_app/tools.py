@@ -1,18 +1,18 @@
 from __future__ import annotations
 import os
+import sys
 import abc
 import json
 import asyncio
 import inspect
 import logging
 import importlib
+from pathlib import Path
 from typing import Any, Dict, List, Tuple, Literal
 from dataclasses import dataclass
 
 from reachy_mini import ReachyMini
 from reachy_mini.utils import create_head_pose
-# Import config to ensure .env is loaded before reading DEMO
-from reachy_mini_conversation_app.config import config  # noqa: F401
 # Import config to ensure .env is loaded before reading DEMO
 from reachy_mini_conversation_app.config import config  # noqa: F401
 
@@ -458,20 +458,33 @@ class DoNothing(Tool):
 
 
 # Registry & specs (dynamic)
-
-
 def _load_demo_tools() -> None:
     demo = os.getenv("DEMO")
     if not demo:
-        logger.info(f"No DEMO specified, skipping demo tool loading, default scenario.")
         return
     try:
         importlib.import_module(f"demos.{demo}")
-        logger.info(f"Demo '{demo}' loaded successfully.")
-    except ModuleNotFoundError:
-        logger.warning(f"Demo '{demo}' not found")
+        print(f"✓ Demo '{demo}' loaded successfully.")
+    except ModuleNotFoundError as e:
+        # Check if the demo module itself is missing or if it's a dependency
+        if e.name == f"demos.{demo}":
+            print(f"✗ Demo '{demo}' not found in src/demos/")
+            sys.exit(1)
+        else:
+            # Check for requirements.txt in demo folder
+            demo_path = Path(__file__).parent.parent / "demos" / demo
+            requirements_file = demo_path / "requirements.txt"
+            if requirements_file.exists():
+                print(f"✗ Demo '{demo}' requires additional dependencies.")
+                print(f"  Install them with: uv pip install -r src/demos/{demo}/requirements.txt")
+                sys.exit(1)
+            else:
+                print(f"✗ Demo '{demo}' failed due to missing dependency: {e.name}")
+                print(f"  Install it with: uv pip install {e.name}")
+                sys.exit(1)
     except Exception as e:
-        logger.warning(f"Failed to load demo '{demo}': {e}")
+        print(f"✗ Failed to load demo '{demo}': {e}")
+        sys.exit(1)
 
 
 # List of available tool classes
