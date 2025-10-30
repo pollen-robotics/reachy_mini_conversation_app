@@ -12,7 +12,7 @@ from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item
 from numpy.typing import NDArray
 
 from reachy_mini_conversation_app.tools import (
-    ALL_TOOL_SPECS,
+    get_tool_specs,
     ToolDependencies,
     dispatch_tool_call,
 )
@@ -99,7 +99,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                 "voice": "cedar",
                             },
                         },
-                        "tools": ALL_TOOL_SPECS,  # type: ignore[typeddict-item]
+                        "tools":  get_tool_specs(),  # type: ignore[typeddict-item]
                         "tool_choice": "auto",
                     },
                 )

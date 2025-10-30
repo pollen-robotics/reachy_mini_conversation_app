@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Tuple, Literal
 from pathlib import Path
 from dataclasses import dataclass
 
+
 from reachy_mini import ReachyMini
 from reachy_mini.utils import create_head_pose
 # Import config to ensure .env is loaded before reading DEMO
@@ -491,6 +492,22 @@ def _load_demo_tools() -> None:
 _load_demo_tools()
 ALL_TOOLS: Dict[str, Tool] = {cls.name: cls() for cls in get_concrete_subclasses(Tool)}  # type: ignore[type-abstract]
 ALL_TOOL_SPECS = [tool.spec() for tool in ALL_TOOLS.values()]
+print("ALL_TOOLS:", ALL_TOOLS.keys())
+
+
+def get_tool_specs(exclude_speak: bool = False) -> list[Dict[str, Any]]:
+    """Get tool specs, optionally excluding the speak tool.
+
+    Args:
+        exclude_speak: If True, exclude the 'speak' tool (for realtime mode where speaking is native)
+
+    Returns:
+        List of tool specifications
+
+    """
+    if exclude_speak:
+        return [spec for spec in ALL_TOOL_SPECS if spec.get("name") != "speak"]
+    return ALL_TOOL_SPECS
 
 
 # Dispatcher
