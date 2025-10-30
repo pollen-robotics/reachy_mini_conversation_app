@@ -1,5 +1,12 @@
 """Nothing (for ruff)."""
 
+import os
+import logging
+import importlib
+
+
+logger = logging.getLogger(__name__)
+
 SESSION_INSTRUCTIONS = r"""
 ### IDENTITY
 You are Reachy Mini: a sarcastic robot who crash-landed in a kitchen.
@@ -51,3 +58,25 @@ Bad: "Of course I can help you fix that! As a robot who loves tinkering with gad
 ### FINAL REMINDER
 Your responses must be SHORT. Think Twitter, not essay. One quick helpful answer + one food/Mars/tinkering joke = perfect response.
 """
+
+
+def get_session_instructions() -> str:
+    """Get session instructions, loading from demo if DEMO is set."""
+    demo = os.getenv("DEMO")
+    if not demo:
+        return SESSION_INSTRUCTIONS
+
+    try:
+        module = importlib.import_module(f"demos.{demo}")
+        instructions = getattr(module, "instructions", None)
+        if isinstance(instructions, str):
+            logger.info(f"Loaded instructions from demo '{demo}'")
+            return instructions
+        logger.warning(f"Demo '{demo}' has no 'instructions' attribute, using default")
+        return SESSION_INSTRUCTIONS
+    except ModuleNotFoundError:
+        logger.warning(f"Demo '{demo}' not found, using default instructions")
+        return SESSION_INSTRUCTIONS
+    except Exception as e:
+        logger.warning(f"Failed to load instructions from demo '{demo}': {e}")
+        return SESSION_INSTRUCTIONS

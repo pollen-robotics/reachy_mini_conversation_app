@@ -1,14 +1,20 @@
 from __future__ import annotations
+import os
 import abc
 import json
 import asyncio
 import inspect
 import logging
+import importlib
 from typing import Any, Dict, List, Tuple, Literal
 from dataclasses import dataclass
 
 from reachy_mini import ReachyMini
 from reachy_mini.utils import create_head_pose
+# Import config to ensure .env is loaded before reading DEMO
+from reachy_mini_conversation_app.config import config  # noqa: F401
+# Import config to ensure .env is loaded before reading DEMO
+from reachy_mini_conversation_app.config import config  # noqa: F401
 
 
 logger = logging.getLogger(__name__)
@@ -453,7 +459,23 @@ class DoNothing(Tool):
 
 # Registry & specs (dynamic)
 
+
+def _load_demo_tools() -> None:
+    demo = os.getenv("DEMO")
+    if not demo:
+        logger.info(f"No DEMO specified, skipping demo tool loading, default scenario.")
+        return
+    try:
+        importlib.import_module(f"demos.{demo}")
+        logger.info(f"Demo '{demo}' loaded successfully.")
+    except ModuleNotFoundError:
+        logger.warning(f"Demo '{demo}' not found")
+    except Exception as e:
+        logger.warning(f"Failed to load demo '{demo}': {e}")
+
+
 # List of available tool classes
+_load_demo_tools()
 ALL_TOOLS: Dict[str, Tool] = {cls.name: cls() for cls in get_concrete_subclasses(Tool)}  # type: ignore[type-abstract]
 ALL_TOOL_SPECS = [tool.spec() for tool in ALL_TOOLS.values()]
 
