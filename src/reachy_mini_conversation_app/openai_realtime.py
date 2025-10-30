@@ -13,6 +13,7 @@ from numpy.typing import NDArray
 
 from reachy_mini_conversation_app.tools import (
     ALL_TOOL_SPECS,
+    Tool,
     ToolDependencies,
     dispatch_tool_call,
 )
@@ -48,6 +49,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.start_time = asyncio.get_event_loop().time()
         self.is_idle_tool_call = False
         self.websocket_base_url = None
+        self.tools = ALL_TOOL_SPECS
+        self.idle_duration = 15.0
 
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
@@ -97,7 +100,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                 "voice": "cedar",
                             },
                         },
-                        "tools": ALL_TOOL_SPECS,  # type: ignore[typeddict-item]
+                        "tools": self.tools,  # type: ignore[typeddict-item]
                         "tool_choice": "auto",
                     },
                 )
@@ -106,6 +109,13 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 return
 
             logger.info("Realtime session updated successfully")
+            # Generate a greating message
+            await conn.response.create(
+                response={
+                    "modalities": ["text"],
+                    "instructions": "Give a fun response about you just waking up.",
+                },
+            )
 
             # Manage event received from the openai server
             self.connection = conn
@@ -290,13 +300,12 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
         # Handle idle
         idle_duration = asyncio.get_event_loop().time() - self.last_activity_time
-        if idle_duration > 15.0 and self.deps.movement_manager.is_idle():
+        if idle_duration > self.idle_duration and self.deps.movement_manager.is_idle():
             try:
                 await self.send_idle_signal(idle_duration)
             except Exception as e:
                 logger.warning("Idle signal skipped (connection closed?): %s", e)
                 return None
-
             self.last_activity_time = asyncio.get_event_loop().time()  # avoid repeated resets
 
         return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
@@ -325,6 +334,14 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         """Use Dora as the backend."""
         self.websocket_base_url = websocket_base_url
 
+    def set_tools(self, tools: list[Tool]) -> None:
+        """Set the tools to be used."""
+        self.tools = tools
+
+    def set_idle_duration(self, idle_duration: float) -> None:
+        """Set the idle duration."""
+        self.idle_duration = idle_duration
+
     async def send_idle_signal(self, idle_duration: float) -> None:
         """Send an idle signal to the openai server."""
         logger.debug("Sending idle signal")
@@ -333,11 +350,12 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         if not self.connection:
             logger.debug("No connection, cannot send idle signal")
             return
+
         await self.connection.conversation.item.create(
             item={
                 "type": "message",
                 "role": "user",
-                "content": [{"type": "input_text", "text": timestamp_msg}],
+                "content": [{"input_text": {"text": timestamp_msg}}],
             },
         )
         await self.connection.response.create(

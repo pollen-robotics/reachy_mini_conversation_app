@@ -10,23 +10,24 @@ description = ""
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    #Media
-    "aiortc>=1.13.0",
-    "fastrtc>=0.0.33",
-    "gradio>=5.49.0",
-    "huggingface_hub>=0.34.4",
-    "opencv-python>=4.12.0.88",
+  #Media
+  "aiortc>=1.13.0",
+  "fastrtc>=0.0.33",
+  "gradio>=5.49.0",
+  "huggingface_hub>=0.34.4",
+  "opencv-python>=4.12.0.88",
 
-    #Environment variables
-    "python-dotenv",
+  #Environment variables
+  "python-dotenv",
 
-    #OpenAI
-    "openai>=2.1",
+  #OpenAI
+  "openai>=2.1",
 
-    #Reachy mini
-    "reachy_mini_dances_library",
-    "reachy_mini_toolbox",
-    "reachy_mini>=1.0.0.rc4",
+  #Reachy mini
+  "reachy_mini_dances_library",
+  "reachy_mini_toolbox",
+  "reachy_mini>=1.0.0.rc4",
+  "dora-rs==0.3.13",
 ]
 
 [project.optional-dependencies]
@@ -84,7 +85,11 @@ length-sort = true
 lines-after-imports = 2
 no-lines-before = ["standard-library", "local-folder"]
 known-local-folder = ["reachy_mini_conversation_app"]
-known-first-party = ["reachy_mini", "reachy_mini_dances_library", "reachy_mini_toolbox"]
+known-first-party = [
+  "reachy_mini",
+  "reachy_mini_dances_library",
+  "reachy_mini_toolbox",
+]
 split-on-trailing-comma = true
 
 [tool.ruff.format]
