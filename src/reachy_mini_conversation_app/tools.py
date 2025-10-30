@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Tuple, Literal
 from pathlib import Path
 from dataclasses import dataclass
 
-
 from reachy_mini import ReachyMini
 from reachy_mini.utils import create_head_pose
 # Import config to ensure .env is loaded before reading DEMO

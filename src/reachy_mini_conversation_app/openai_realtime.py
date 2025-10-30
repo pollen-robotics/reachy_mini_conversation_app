@@ -12,8 +12,8 @@ from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item
 from numpy.typing import NDArray
 
 from reachy_mini_conversation_app.tools import (
-    get_tool_specs,
     ToolDependencies,
+    get_tool_specs,
     dispatch_tool_call,
 )
 from reachy_mini_conversation_app.config import config
