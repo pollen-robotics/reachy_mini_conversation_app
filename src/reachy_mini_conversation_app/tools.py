@@ -1,14 +1,14 @@
 from __future__ import annotations
 import os
-import sys
 import abc
+import sys
 import json
 import asyncio
 import inspect
 import logging
 import importlib
-from pathlib import Path
 from typing import Any, Dict, List, Tuple, Literal
+from pathlib import Path
 from dataclasses import dataclass
 
 from reachy_mini import ReachyMini
