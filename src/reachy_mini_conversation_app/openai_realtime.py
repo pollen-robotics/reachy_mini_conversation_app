@@ -47,6 +47,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.last_activity_time = asyncio.get_event_loop().time()
         self.start_time = asyncio.get_event_loop().time()
         self.is_idle_tool_call = False
+        self.websocket_base_url = None
 
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
@@ -69,7 +70,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
     async def start_up(self) -> None:
         """Start the handler."""
-        self.client = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+        self.client = AsyncOpenAI(api_key=config.OPENAI_API_KEY, websocket_base_url=self.websocket_base_url)
         async with self.client.realtime.connect(model=config.MODEL_NAME) as conn:
             try:
                 await conn.session.update(
@@ -82,10 +83,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                     "type": "audio/pcm",
                                     "rate": self.target_input_rate,
                                 },
-                                "transcription": {
-                                    "model": "whisper-1",
-                                    "language": "en"
-                                },
+                                "transcription": {"model": "whisper-1", "language": "en"},
                                 "turn_detection": {
                                     "type": "server_vad",
                                     "interrupt_response": True,
@@ -126,10 +124,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     logger.debug("User speech stopped - server will auto-commit with VAD")
 
                 if event.type in (
-                    "response.audio.done",            # GA
-                    "response.output_audio.done",     # GA alias
-                    "response.audio.completed",       # legacy (for safety)
-                    "response.completed",             # text-only completion
+                    "response.audio.done",  # GA
+                    "response.output_audio.done",  # GA alias
+                    "response.audio.completed",  # legacy (for safety)
+                    "response.completed",  # text-only completion
                 ):
                     logger.debug("response completed")
 
@@ -169,7 +167,6 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                             np.frombuffer(base64.b64decode(event.delta), dtype=np.int16).reshape(1, -1),
                         ),
                     )
-
 
                 # ---- tool-calling plumbing ----
                 if event.type == "response.function_call_arguments.done":
@@ -267,7 +264,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
                     # Only show user-facing errors, not internal state errors
                     if code not in ("input_audio_buffer_commit_empty", "conversation_already_has_active_response"):
-                        await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": f"[error] {msg}"}))
+                        await self.output_queue.put(
+                            AdditionalOutputs({"role": "assistant", "content": f"[error] {msg}"})
+                        )
 
     # Microphone receive
     async def receive(self, frame: Tuple[int, NDArray[np.int16]]) -> None:
@@ -321,6 +320,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         elapsed_seconds = loop_time - self.start_time
         dt = datetime.now()  # wall-clock
         return f"[{dt.strftime('%Y-%m-%d %H:%M:%S')} | +{elapsed_seconds:.1f}s]"
+
+    def set_websocket_base_url(self, websocket_base_url: str) -> None:
+        """Use Dora as the backend."""
+        self.websocket_base_url = websocket_base_url
 
     async def send_idle_signal(self, idle_duration: float) -> None:
         """Send an idle signal to the openai server."""
