@@ -102,7 +102,7 @@ def main() -> None:
         # Use local endpoint
         handler.set_websocket_base_url("ws://0.0.0.0:7860")
         handler.set_tools(MIN_TOOL_SPECS)
-        handler.set_idle_duration(60.0)
+        handler.set_idle_duration(120.0)
 
         from dora import run, build
 

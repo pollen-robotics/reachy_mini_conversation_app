@@ -1,9 +1,6 @@
 nodes:
   - id: NODE_ID
-    git: https://github.com/dora-rs/dora-hub.git
-    branch: a786cf456b2e0e32e66e74d39cca22fbb21f5635
-    build: pip install -e node-hub/node-hub/dora-openai-websocket
-    path: dora-openai-websocket
+    path: ../../../../node-hub/target/release/dora-openai-websocket
     inputs:
       audio: tts/audio
       transcript: stt/text
@@ -19,9 +16,7 @@ nodes:
       - tools
 
   - id: dora-vad
-    git: https://github.com/dora-rs/dora-hub.git
-    branch: a786cf456b2e0e32e66e74d39cca22fbb21f5635
-    build: pip install -e node-hub/node-hub/dora-vad
+    build: pip install -e ../../../../node-hub/node-hub/dora-vad
     path: dora-vad
     inputs:
       audio:
@@ -37,9 +32,7 @@ nodes:
       THRESHOLD: 0.6
 
   - id: stt
-    git: https://github.com/dora-rs/dora-hub.git
-    branch: a786cf456b2e0e32e66e74d39cca22fbb21f5635
-    build: pip install -e node-hub/node-hub/dora-funasr
+    build: pip install -e ../../../../node-hub/node-hub/dora-funasr
     path: dora-funasr
     inputs:
       audio:
@@ -53,9 +46,7 @@ nodes:
       TARGET_LANGUAGE: english
 
   - id: llm
-    git: https://github.com/dora-rs/dora-hub.git
-    branch: a786cf456b2e0e32e66e74d39cca22fbb21f5635
-    build: pip install -e node-hub/node-hub/dora-qwen
+    build: pip install -e ../../../../node-hub/node-hub/dora-qwen
     path: dora-qwen
     inputs:
       text: stt/text
@@ -73,9 +64,7 @@ nodes:
       CONTEXT_SIZE: 10_000
 
   - id: tts
-    git: https://github.com/dora-rs/dora-hub.git
-    branch: a786cf456b2e0e32e66e74d39cca22fbb21f5635
-    build: pip install -e node-hub/node-hub/dora-kokoro-tts
+    build: pip install -e ../../../../node-hub/node-hub/dora-kokoro-tts
     path: dora-kokoro-tts
     inputs:
       text: llm/text
@@ -83,4 +72,3 @@ nodes:
       - audio
     env:
       VOICE: am_fenrir
-      LANGUAGE: z
