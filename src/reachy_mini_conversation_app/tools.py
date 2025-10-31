@@ -486,7 +486,7 @@ ALL_TOOL_SPECS = [tool.spec() for tool in ALL_TOOLS.values()]
 print("ALL_TOOLS:", ALL_TOOLS.keys())
 
 
-def get_tool_specs(exclusion_list = []) -> list[Dict[str, Any]]:
+def get_tool_specs(exclusion_list : list[str] = []) -> list[Dict[str, Any]]:
     """Get tool specs, optionally excluding some tools."""
     return [spec for spec in ALL_TOOL_SPECS if spec.get("name") not in exclusion_list]
 
