@@ -1,5 +1,3 @@
-"""Nothing (for ruff)."""
-
 import os
 import re
 import logging
@@ -9,12 +7,16 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-def _expand_prompt_includes(content: str, prompts_library_path: Path) -> str:
-    """Expand [<name>] placeholders with content from prompts_library/<name>.txt.
+DEMOS_DIRECTORY = Path(__file__).parent.parent / "demos"
+PROMPTS_LIBRARY_DIRECTORY = Path(__file__).parent.parent / "prompts_library"
+INSTRUCTIONS_FILENAME = "instructions.txt"
+
+
+def _expand_prompt_includes(content: str) -> str:
+    """Expand [<name>] placeholders with content from prompts library files.
 
     Args:
         content: The template content with [<name>] placeholders
-        prompts_library_path: Path to the prompts_library directory
 
     Returns:
         Expanded content with placeholders replaced by file contents
@@ -33,7 +35,7 @@ def _expand_prompt_includes(content: str, prompts_library_path: Path) -> str:
         if match:
             # Extract the name from [<name>]
             template_name = match.group(1)
-            template_file = prompts_library_path / f"{template_name}.txt"
+            template_file = PROMPTS_LIBRARY_DIRECTORY / f"{template_name}.txt"
 
             try:
                 if template_file.exists():
@@ -111,23 +113,21 @@ def get_session_instructions() -> str:
         return SESSION_INSTRUCTIONS
 
     try:
-        # Look for instructions.txt in the demo directory
-        demo_path = Path(__file__).parent.parent / "demos" / demo
-        instructions_file = demo_path / "instructions.txt"
+        # Look for instructions in the demo directory
+        instructions_file = DEMOS_DIRECTORY / demo / INSTRUCTIONS_FILENAME
 
         if instructions_file.exists():
             instructions = instructions_file.read_text(encoding="utf-8").strip()
             if instructions:
-                # Expand [<name>] placeholders with content from prompts_library
-                prompts_library_path = Path(__file__).parent.parent / "prompts_library"
-                expanded_instructions = _expand_prompt_includes(instructions, prompts_library_path)
-                logger.info("Loaded instructions from demo '%s'", demo)
+                # Expand [<name>] placeholders with content from prompts library
+                expanded_instructions = _expand_prompt_includes(instructions)
+                logger.info(f"Loaded instructions from demo '{demo}'")
                 return expanded_instructions
-            logger.warning("Demo '%s' has empty instructions.txt, using default", demo)
+            logger.warning(f"Demo '{demo}' has empty {INSTRUCTIONS_FILENAME}, using default")
             return SESSION_INSTRUCTIONS
 
-        logger.warning("Demo '%s' has no instructions.txt file, using default", demo)
+        logger.warning(f"Demo {demo} has no {INSTRUCTIONS_FILENAME} file, using default")
         return SESSION_INSTRUCTIONS
     except Exception as e:
-        logger.warning("Failed to load instructions from demo '%s': %s", demo, e)
+        logger.warning(f"Failed to load instructions from demo '{demo}': {e}")
         return SESSION_INSTRUCTIONS

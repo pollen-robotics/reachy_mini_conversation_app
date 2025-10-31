@@ -458,6 +458,7 @@ class DoNothing(Tool):
 
 # Registry & specs (dynamic)
 def _load_demo_tools() -> None:
+    """Load demo-specific tools if DEMO env variable is set."""
     demo = os.getenv("DEMO")
     if not demo:
         print("No DEMO env variable set; using default.")
@@ -472,7 +473,6 @@ def _load_demo_tools() -> None:
             sys.exit(1)
         else:
             print(f"✗ Demo '{demo}' failed due to missing dependency: {e.name}")
-            print(f"  Install it with: uv pip install {e.name}")
             sys.exit(1)
     except Exception as e:
         print(f"✗ Failed to load demo '{demo}': {e}")
@@ -486,19 +486,9 @@ ALL_TOOL_SPECS = [tool.spec() for tool in ALL_TOOLS.values()]
 print("ALL_TOOLS:", ALL_TOOLS.keys())
 
 
-def get_tool_specs(exclude_speak: bool = False) -> list[Dict[str, Any]]:
-    """Get tool specs, optionally excluding the speak tool.
-
-    Args:
-        exclude_speak: If True, exclude the 'speak' tool (for realtime mode where speaking is native)
-
-    Returns:
-        List of tool specifications
-
-    """
-    if exclude_speak:
-        return [spec for spec in ALL_TOOL_SPECS if spec.get("name") != "speak"]
-    return ALL_TOOL_SPECS
+def get_tool_specs(exclusion_list = []) -> list[Dict[str, Any]]:
+    """Get tool specs, optionally excluding some tools."""
+    return [spec for spec in ALL_TOOL_SPECS if spec.get("name") not in exclusion_list]
 
 
 # Dispatcher

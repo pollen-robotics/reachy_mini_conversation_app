@@ -3,8 +3,8 @@
 import logging
 from typing import Any, Dict
 
-# Import a tool from the tools library: use an alias.
-from tools_library.sweep_look import SweepLook as SweepLook
+# Import a tool from the tools library: use an alias or noqa to avoid linter errors if unused
+from tools_library.sweep_look import SweepLook as SweepLook  # noqa: F401
 from reachy_mini_conversation_app.tools import Tool, ToolDependencies
 
 
