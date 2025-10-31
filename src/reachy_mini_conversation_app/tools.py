@@ -81,6 +81,7 @@ class ToolDependencies:
     vision_manager: Any | None = None
     head_wobbler: Any | None = None  # HeadWobbler for audio-reactive motion
     motion_duration_s: float = 1.0
+    flute_player: Any | None = None
 
 
 # Tool base class
@@ -415,6 +416,10 @@ class PlayEmotion(Tool):
             movement_manager = deps.movement_manager
             emotion_move = EmotionQueueMove(emotion_name, RECORDED_MOVES)
             movement_manager.queue_move(emotion_move)
+            if deps.flute_player is not None:
+                deps.flute_player.play(emotion_name, RECORDED_MOVES)
+            else:
+                logger.debug("Flute player not available; skipping audio for %s", emotion_name)
 
             return {"status": "queued", "emotion": emotion_name}
 
@@ -444,6 +449,8 @@ class StopEmotion(Tool):
         logger.info("Tool call: stop_emotion")
         movement_manager = deps.movement_manager
         movement_manager.clear_move_queue()
+        if deps.flute_player is not None:
+            deps.flute_player.stop()
         return {"status": "stopped emotion and cleared queue"}
 
 

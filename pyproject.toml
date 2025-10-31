@@ -23,6 +23,9 @@ dependencies = [
     #OpenAI
     "openai>=2.1",
 
+    #Audio playback for emotion flutes
+    "simpleaudio>=1.0.4",
+
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
