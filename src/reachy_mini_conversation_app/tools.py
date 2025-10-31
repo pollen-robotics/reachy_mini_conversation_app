@@ -18,6 +18,18 @@ from reachy_mini_conversation_app.config import config  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s:%(lineno)d | %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+
+ALL_TOOLS: Dict[str, "Tool"] = {}
+ALL_TOOL_SPECS: List[Dict[str, Any]] = []
+_TOOLS_INITIALIZED = False
+
 # Initialize dance and emotion libraries
 try:
     from reachy_mini.motion.recorded_move import RecordedMoves
@@ -461,29 +473,44 @@ def _load_demo_tools() -> None:
     """Load demo-specific tools if DEMO env variable is set."""
     demo = os.getenv("DEMO")
     if not demo:
-        print("No DEMO env variable set; using default.")
+        logger.info("No DEMO env variable set; using default.")
         return
     try:
         importlib.import_module(f"demos.{demo}")
-        print(f"✓ Demo '{demo}' loaded successfully.")
+        logger.info(f"✓ Demo '{demo}' loaded successfully.")
     except ModuleNotFoundError as e:
         # Check if the demo module itself is missing or if it's a dependency
         if e.name == f"demos.{demo}":
-            print(f"✗ Demo '{demo}' not found in src/demos/")
+            logger.info(f"✗ Demo '{demo}' not found in src/demos/")
             sys.exit(1)
         else:
-            print(f"✗ Demo '{demo}' failed due to missing dependency: {e.name}")
+            logger.info(f"✗ Demo '{demo}' failed due to missing dependency: {e.name}")
             sys.exit(1)
     except Exception as e:
-        print(f"✗ Failed to load demo '{demo}': {e}")
+        logger.info(f"✗ Failed to load demo '{demo}': {e}")
         sys.exit(1)
 
 
-# List of available tool classes
-_load_demo_tools()
-ALL_TOOLS: Dict[str, Tool] = {cls.name: cls() for cls in get_concrete_subclasses(Tool)}  # type: ignore[type-abstract]
-ALL_TOOL_SPECS = [tool.spec() for tool in ALL_TOOLS.values()]
-print("ALL_TOOLS:", ALL_TOOLS.keys())
+def _initialize_tools() -> None:
+    """Populate registry once, even if module is imported repeatedly."""
+    global ALL_TOOLS, ALL_TOOL_SPECS, _TOOLS_INITIALIZED
+
+    if _TOOLS_INITIALIZED:
+        logger.debug("Tools already initialized; skipping reinitialization.")
+        return
+
+    _load_demo_tools()
+
+    ALL_TOOLS = {cls.name: cls() for cls in get_concrete_subclasses(Tool)}  # type: ignore[type-abstract]
+    ALL_TOOL_SPECS = [tool.spec() for tool in ALL_TOOLS.values()]
+
+    for tool_name, tool in ALL_TOOLS.items():
+        logger.info(f"tool registered: {tool_name} - {tool.description}")
+
+    _TOOLS_INITIALIZED = True
+
+
+_initialize_tools()
 
 
 def get_tool_specs(exclusion_list : list[str] = []) -> list[Dict[str, Any]]:
