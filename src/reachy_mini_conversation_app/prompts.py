@@ -116,18 +116,21 @@ def get_session_instructions() -> str:
         # Look for instructions in the demo directory
         instructions_file = DEMOS_DIRECTORY / demo / INSTRUCTIONS_FILENAME
 
-        if instructions_file.exists():
-            instructions = instructions_file.read_text(encoding="utf-8").strip()
-            if instructions:
-                # Expand [<name>] placeholders with content from prompts library
-                expanded_instructions = _expand_prompt_includes(instructions)
-                logger.info(f"Loaded instructions from demo '{demo}'")
-                return expanded_instructions
-            logger.warning(f"Demo '{demo}' has empty {INSTRUCTIONS_FILENAME}, using default")
-            return SESSION_INSTRUCTIONS
+        if not instructions_file.exists():
+            raise RuntimeError(
+                f"Demo '{demo}' not found: missing {INSTRUCTIONS_FILENAME} at {instructions_file}",
+            )
 
-        logger.warning(f"Demo {demo} has no {INSTRUCTIONS_FILENAME} file, using default")
-        return SESSION_INSTRUCTIONS
+        instructions = instructions_file.read_text(encoding="utf-8").strip()
+        if not instructions:
+            raise RuntimeError(
+                f"Demo '{demo}' has empty {INSTRUCTIONS_FILENAME} at {instructions_file}",
+            )
+
+        # Expand [<name>] placeholders with content from prompts library
+        expanded_instructions = _expand_prompt_includes(instructions)
+        logger.info(f"Loaded instructions from demo '{demo}'")
+        return expanded_instructions
     except Exception as e:
         logger.warning(f"Failed to load instructions from demo '{demo}': {e}")
-        return SESSION_INSTRUCTIONS
+        raise

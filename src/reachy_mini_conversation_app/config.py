@@ -17,7 +17,7 @@ if not env_file.exists():
     )
 
 # Load .env and verify it was loaded successfully
-if not load_dotenv():
+if not load_dotenv(override=True):
     raise RuntimeError(
         "Failed to load .env file. Please ensure the file is readable and properly formatted.",
     )

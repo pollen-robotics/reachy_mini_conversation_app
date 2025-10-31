@@ -29,6 +29,8 @@ if not logger.handlers:
 ALL_TOOLS: Dict[str, "Tool"] = {}
 ALL_TOOL_SPECS: List[Dict[str, Any]] = []
 _TOOLS_INITIALIZED = False
+_DEMO_TOOL_ALLOWLIST: set[str] | None = None
+_DEMO_ENABLE_VOICE = True
 
 # Initialize dance and emotion libraries
 try:
@@ -472,11 +474,19 @@ class DoNothing(Tool):
 def _load_demo_tools() -> None:
     """Load demo-specific tools if DEMO env variable is set."""
     demo = os.getenv("DEMO")
+    global _DEMO_TOOL_ALLOWLIST, _DEMO_ENABLE_VOICE
+
     if not demo:
         logger.info("No DEMO env variable set; using default.")
         return
     try:
-        importlib.import_module(f"demos.{demo}")
+        module = importlib.import_module(f"demos.{demo}")
+        allowlist = getattr(module, "TOOL_ALLOWLIST", None)
+        if allowlist is not None:
+            _DEMO_TOOL_ALLOWLIST = {name for name in allowlist}
+            logger.info(f"✓ Demo '{demo}' provided tool allowlist: {_DEMO_TOOL_ALLOWLIST}")
+        _DEMO_ENABLE_VOICE = bool(getattr(module, "ENABLE_VOICE", True))
+        logger.info(f"✓ Demo '{demo}' voice enabled: {_DEMO_ENABLE_VOICE}")
         logger.info(f"✓ Demo '{demo}' loaded successfully.")
     except ModuleNotFoundError as e:
         # Check if the demo module itself is missing or if it's a dependency
@@ -502,6 +512,13 @@ def _initialize_tools() -> None:
     _load_demo_tools()
 
     ALL_TOOLS = {cls.name: cls() for cls in get_concrete_subclasses(Tool)}  # type: ignore[type-abstract]
+
+    if _DEMO_TOOL_ALLOWLIST is not None:
+        missing = [name for name in _DEMO_TOOL_ALLOWLIST if name not in ALL_TOOLS]
+        if missing:
+            logger.warning(f"Demo requested unavailable tools: {missing}")
+        ALL_TOOLS = {name: tool for name, tool in ALL_TOOLS.items() if name in _DEMO_TOOL_ALLOWLIST}
+
     ALL_TOOL_SPECS = [tool.spec() for tool in ALL_TOOLS.values()]
 
     for tool_name, tool in ALL_TOOLS.items():
@@ -542,3 +559,8 @@ async def dispatch_tool_call(tool_name: str, args_json: str, deps: ToolDependenc
         msg = f"{type(e).__name__}: {e}"
         logger.exception("Tool error in %s: %s", tool_name, msg)
         return {"error": msg}
+
+
+def demo_voice_enabled() -> bool:
+    """Return True when the current demo allows voice responses."""
+    return _DEMO_ENABLE_VOICE

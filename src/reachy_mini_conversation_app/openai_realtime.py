@@ -15,6 +15,7 @@ from reachy_mini_conversation_app.tools import (
     ToolDependencies,
     get_tool_specs,
     dispatch_tool_call,
+    demo_voice_enabled,
 )
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.prompts import get_session_instructions
@@ -70,12 +71,14 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
     async def start_up(self) -> None:
         """Start the handler."""
         self.client = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+        instructions = get_session_instructions()
+        logger.info("Session instructions loaded:\n%s", instructions)
         async with self.client.realtime.connect(model=config.MODEL_NAME) as conn:
             try:
                 await conn.session.update(
                     session={
                         "type": "realtime",
-                        "instructions": get_session_instructions(),
+                        "instructions": instructions,
                         "audio": {
                             "input": {
                                 "format": {
@@ -199,11 +202,18 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                             },
                         )
 
+                    tool_display = tool_result
+                    if tool_name == "camera" and "b64_im" in tool_result:
+                        tool_display = {
+                            **tool_result,
+                            "b64_im": "<base64 image omitted>",
+                        }
+
                     await self.output_queue.put(
                         AdditionalOutputs(
                             {
                                 "role": "assistant",
-                                "content": json.dumps(tool_result),
+                                "content": json.dumps(tool_display),
                                 "metadata": {"title": f"🛠️ Used tool {tool_name}", "status": "done"},
                             },
                         ),
@@ -246,12 +256,14 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     # for other tool calls, let the robot reply out loud
                     if self.is_idle_tool_call:
                         self.is_idle_tool_call = False
-                    else:
+                    elif demo_voice_enabled():
                         await self.connection.response.create(
                             response={
                                 "instructions": "Use the tool result just returned and answer concisely in speech.",
                             },
                         )
+                    else:
+                        logger.info("Voice disabled for current demo; skipping speech response.")
 
                     # re synchronize the head wobble after a tool call that may have taken some time
                     if self.deps.head_wobbler is not None:
