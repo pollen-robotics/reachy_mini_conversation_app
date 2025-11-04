@@ -48,7 +48,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.last_activity_time = asyncio.get_event_loop().time()
         self.start_time = asyncio.get_event_loop().time()
         self.is_idle_tool_call = False
-        self.websocket_base_url = None
+        self.websocket_base_url = ""
         self.tools = ALL_TOOL_SPECS
         self.idle_duration = 15.0
 
@@ -334,7 +334,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         """Use Dora as the backend."""
         self.websocket_base_url = websocket_base_url
 
-    def set_tools(self, tools: list[Tool]) -> None:
+    def set_tools(self, tools: list[dict[str, Any]]) -> None:
         """Set the tools to be used."""
         self.tools = tools
 
