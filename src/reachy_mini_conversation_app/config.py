@@ -30,16 +30,7 @@ class Config:
 
     # OpenAI Configuration (required for OpenAI agent)
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-    if OPENAI_API_KEY is None:
-        logger.warning(
-            "OPENAI_API_KEY is not set in .env file. "
-            "This is required for OpenAI agent. Add it:\n"
-            "  OPENAI_API_KEY=your_api_key_here",
-        )
-    elif not OPENAI_API_KEY.strip():
-        logger.warning(
-            "OPENAI_API_KEY is empty in .env file. Please provide a valid API key.",
-        )
+    # Note: Validation happens at runtime when OpenAI agent is selected
 
     # ElevenLabs Configuration (required for ElevenLabs agent)
     ELEVENLABS_AGENT_ID = os.getenv("ELEVENLABS_AGENT_ID")
