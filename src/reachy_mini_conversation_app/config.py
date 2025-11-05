@@ -28,18 +28,23 @@ logger.info("Configuration loaded from .env file")
 class Config:
     """Configuration class for the conversation app."""
 
-    # Required
+    # OpenAI Configuration (required for OpenAI agent)
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     if OPENAI_API_KEY is None:
-        raise RuntimeError(
-            "OPENAI_API_KEY is not set in .env file. Please add it:\n"
+        logger.warning(
+            "OPENAI_API_KEY is not set in .env file. "
+            "This is required for OpenAI agent. Add it:\n"
             "  OPENAI_API_KEY=your_api_key_here",
         )
-    if not OPENAI_API_KEY.strip():
-        raise RuntimeError(
+    elif not OPENAI_API_KEY.strip():
+        logger.warning(
             "OPENAI_API_KEY is empty in .env file. Please provide a valid API key.",
         )
 
+    # ElevenLabs Configuration (required for ElevenLabs agent)
+    ELEVENLABS_AGENT_ID = os.getenv("ELEVENLABS_AGENT_ID")
+    ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")  # Optional for public agents
+    
     # Optional
     MODEL_NAME = os.getenv("MODEL_NAME", "gpt-realtime")
     HF_HOME = os.getenv("HF_HOME", "./cache")
