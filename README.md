@@ -13,6 +13,7 @@ The app follows a layered architecture connecting the user, AI services, and rob
 </p>
 
 ## Overview
+
 - Real-time audio conversation loop powered by the OpenAI realtime API and `fastrtc` for low-latency streaming.
 - Vision processing uses gpt-realtime by default (when camera tool is used), with optional local vision processing using SmolVLM2 model running on-device (CPU/GPU/MPS) via `--local-vision` flag.
 - Layered motion system queues primary moves (dances, emotions, goto poses, breathing) while blending speech-reactive wobble and face-tracking.
@@ -24,6 +25,7 @@ The app follows a layered architecture connecting the user, AI services, and rob
 > Windows support is currently experimental and has not been extensively tested. Use with caution.
 
 ### Using uv
+
 You can set up the project quickly using [uv](https://docs.astral.sh/uv/):
 
 ```bash
@@ -33,6 +35,7 @@ uv sync
 ```
 
 To include optional vision dependencies:
+
 ```
 uv sync --extra local_vision        # For local PyTorch/Transformers vision
 uv sync --extra yolo_vision         # For YOLO-based vision
@@ -41,6 +44,7 @@ uv sync --extra all_vision          # For all vision features
 ```
 
 You can combine extras or include dev dependencies:
+
 ```
 uv sync --extra all_vision --group dev
 ```
@@ -70,26 +74,31 @@ Some wheels (e.g. PyTorch) are large and require compatible CUDA or CPU buildsâ€
 
 ## Optional dependency groups
 
-| Extra | Purpose | Notes |
-|-------|---------|-------|
-| `local_vision` | Run the local VLM (SmolVLM2) through PyTorch/Transformers. | GPU recommended; ensure compatible PyTorch builds for your platform.
-| `yolo_vision` | YOLOv8 tracking via `ultralytics` and `supervision`. | CPU friendly; supports the `--head-tracker yolo` option.
-| `mediapipe_vision` | Lightweight landmark tracking with MediaPipe. | Works on CPU; enables `--head-tracker mediapipe`.
-| `all_vision` | Convenience alias installing every vision extra. | Install when you want the flexibility to experiment with every provider.
-| `dev` | Developer tooling (`pytest`, `ruff`). | Add on top of either base or `all_vision` environments.
+| Extra              | Purpose                                                    | Notes                                                                    |
+| ------------------ | ---------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `local_vision`     | Run the local VLM (SmolVLM2) through PyTorch/Transformers. | GPU recommended; ensure compatible PyTorch builds for your platform.     |
+| `yolo_vision`      | YOLOv8 tracking via `ultralytics` and `supervision`.       | CPU friendly; supports the `--head-tracker yolo` option.                 |
+| `mediapipe_vision` | Lightweight landmark tracking with MediaPipe.              | Works on CPU; enables `--head-tracker mediapipe`.                        |
+| `elevenlabs`       | ElevenLabs conversational AI agent support.                | Required for `--agent elevenlabs` option.                                |
+| `all_vision`       | Convenience alias installing every vision extra.           | Install when you want the flexibility to experiment with every provider. |
+| `dev`              | Developer tooling (`pytest`, `ruff`).                      | Add on top of either base or `all_vision` environments.                  |
 
 ## Configuration
 
 1. Copy `.env.example` to `.env`.
-2. Fill in the required values, notably the OpenAI API key.
+2. Fill in the required values based on which AI agent you plan to use.
 
-| Variable | Description |
-|----------|-------------|
-| `OPENAI_API_KEY` | Required. Grants access to the OpenAI realtime endpoint.
-| `MODEL_NAME` | Override the realtime model (defaults to `gpt-realtime`). Used for both conversation and vision (unless `--local-vision` flag is used).
-| `HF_HOME` | Cache directory for local Hugging Face downloads (only used with `--local-vision` flag, defaults to `./cache`).
-| `HF_TOKEN` | Optional token for Hugging Face models (only used with `--local-vision` flag, falls back to `huggingface-cli login`).
-| `LOCAL_VISION_MODEL` | Hugging Face model path for local vision processing (only used with `--local-vision` flag, defaults to `HuggingFaceTB/SmolVLM2-2.2B-Instruct`).
+### Environment Variables
+
+| Variable              | Description                                                                                                                                     |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OPENAI_API_KEY`      | Required for OpenAI agent. Grants access to the OpenAI realtime endpoint.                                                                       |
+| `MODEL_NAME`          | Override the realtime model (defaults to `gpt-realtime`). Used for both conversation and vision (unless `--local-vision` flag is used).         |
+| `ELEVENLABS_AGENT_ID` | Required for ElevenLabs agent. Your ElevenLabs agent ID from the [ElevenLabs dashboard](https://elevenlabs.io/).                                |
+| `ELEVENLABS_API_KEY`  | Optional for ElevenLabs agent. Required only for private agents with authentication enabled. Public agents don't need this.                     |
+| `HF_HOME`             | Cache directory for local Hugging Face downloads (only used with `--local-vision` flag, defaults to `./cache`).                                 |
+| `HF_TOKEN`            | Optional token for Hugging Face models (only used with `--local-vision` flag, falls back to `huggingface-cli login`).                           |
+| `LOCAL_VISION_MODEL`  | Hugging Face model path for local vision processing (only used with `--local-vision` flag, defaults to `HuggingFaceTB/SmolVLM2-2.2B-Instruct`). |
 
 ## Running the app
 
@@ -99,20 +108,58 @@ Activate your virtual environment, ensure the Reachy Mini robot (or simulator) i
 reachy-mini-conversation-app
 ```
 
-By default, the app runs in console mode for direct audio interaction. Use the `--gradio` flag to launch a web UI served locally at http://127.0.0.1:7860/ (required when running in simulation mode). With a camera attached, vision is handled by the gpt-realtime model when the camera tool is used. For local vision processing, use the `--local-vision` flag to process frames periodically using the SmolVLM2 model. Additionally, you can enable face tracking via YOLO or MediaPipe pipelines depending on the extras you installed.
+By default, the app runs in console mode with OpenAI Realtime API for direct audio interaction. The audio plays through the **Reachy Mini's built-in speaker** and records from its microphone.
+
+### AI Agent Selection
+
+You can choose between two AI agent providers:
+
+#### OpenAI Realtime (default)
+
+Uses OpenAI's realtime API with GPT models. Supports both console and Gradio modes.
+
+```bash
+reachy-mini-conversation-app  # Uses OpenAI by default
+# or explicitly
+reachy-mini-conversation-app --agent openai
+```
+
+#### ElevenLabs Agents
+
+Uses [ElevenLabs conversational AI agents](https://elevenlabs.io/docs/agents-platform/libraries/python). Currently supports console mode only.
+
+```bash
+# Install ElevenLabs extra first
+pip install -e .[elevenlabs]
+# or with uv
+uv sync --extra elevenlabs
+
+# Then run with ElevenLabs agent
+reachy-mini-conversation-app --agent elevenlabs
+```
+
+### Additional Features
+
+- Use the `--gradio` flag to launch a web UI served locally at http://127.0.0.1:7860/ (required when running in simulation mode, **OpenAI only**).
+- With a camera attached, vision is handled by the gpt-realtime model when the camera tool is used.
+- For local vision processing, use the `--local-vision` flag to process frames periodically using the SmolVLM2 model.
+- You can enable face tracking via YOLO or MediaPipe pipelines depending on the extras you installed.
 
 ### CLI options
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--head-tracker {yolo,mediapipe}` | `None` | Select a face-tracking backend when a camera is available. YOLO is implemented locally, MediaPipe comes from the `reachy_mini_toolbox` package. Requires the matching optional extra. |
-| `--no-camera` | `False` | Run without camera capture or face tracking. |
-| `--local-vision` | `False` | Use local vision model (SmolVLM2) for periodic image processing instead of gpt-realtime vision. Requires `local_vision` extra to be installed. |
-| `--gradio` | `False` | Launch the Gradio web UI. Without this flag, runs in console mode. Required when running in simulation mode. |
-| `--debug` | `False` | Enable verbose logging for troubleshooting. |
-
+| Option                            | Default  | Description                                                                                                                                                                           |
+| --------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--agent {openai,elevenlabs}`     | `openai` | Choose AI agent provider. OpenAI supports console and Gradio modes. ElevenLabs supports console mode only.                                                                            |
+| `--head-tracker {yolo,mediapipe}` | `None`   | Select a face-tracking backend when a camera is available. YOLO is implemented locally, MediaPipe comes from the `reachy_mini_toolbox` package. Requires the matching optional extra. |
+| `--no-camera`                     | `False`  | Run without camera capture or face tracking.                                                                                                                                          |
+| `--local-vision`                  | `False`  | Use local vision model (SmolVLM2) for periodic image processing instead of gpt-realtime vision. Requires `local_vision` extra to be installed.                                        |
+| `--gradio`                        | `False`  | Launch the Gradio web UI. Without this flag, runs in console mode. Required when running in simulation mode. **OpenAI only**.                                                         |
+| `--debug`                         | `False`  | Enable verbose logging for troubleshooting.                                                                                                                                           |
 
 ### Examples
+
+#### OpenAI Agent Examples
+
 - Run on hardware with MediaPipe face tracking:
 
   ```bash
@@ -125,30 +172,58 @@ By default, the app runs in console mode for direct audio interaction. Use the `
   reachy-mini-conversation-app --local-vision
   ```
 
+- Run with Gradio web interface:
+
+  ```bash
+  reachy-mini-conversation-app --gradio
+  ```
+
 - Disable the camera pipeline (audio-only conversation):
 
   ```bash
   reachy-mini-conversation-app --no-camera
   ```
 
+#### ElevenLabs Agent Examples
+
+- Run with ElevenLabs agent (basic):
+
+  ```bash
+  reachy-mini-conversation-app --agent elevenlabs
+  ```
+
+- Run with ElevenLabs and face tracking:
+
+  ```bash
+  reachy-mini-conversation-app --agent elevenlabs --head-tracker mediapipe
+  ```
+
+- Audio-only conversation with ElevenLabs:
+
+  ```bash
+  reachy-mini-conversation-app --agent elevenlabs --no-camera
+  ```
+
 ## LLM tools exposed to the assistant
 
-| Tool | Action | Dependencies |
-|------|--------|--------------|
-| `move_head` | Queue a head pose change (left/right/up/down/front). | Core install only. |
-| `camera` | Capture the latest camera frame and send it to gpt-realtime for vision analysis. | Requires camera worker; uses gpt-realtime vision by default. |
-| `head_tracking` | Enable or disable face-tracking offsets (not facial recognition - only detects and tracks face position). | Camera worker with configured head tracker. |
-| `dance` | Queue a dance from `reachy_mini_dances_library`. | Core install only. |
-| `stop_dance` | Clear queued dances. | Core install only. |
-| `play_emotion` | Play a recorded emotion clip via Hugging Face assets. | Needs `HF_TOKEN` for the recorded emotions dataset. |
-| `stop_emotion` | Clear queued emotions. | Core install only. |
-| `do_nothing` | Explicitly remain idle. | Core install only. |
+| Tool            | Action                                                                                                    | Dependencies                                                 |
+| --------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `move_head`     | Queue a head pose change (left/right/up/down/front).                                                      | Core install only.                                           |
+| `camera`        | Capture the latest camera frame and send it to gpt-realtime for vision analysis.                          | Requires camera worker; uses gpt-realtime vision by default. |
+| `head_tracking` | Enable or disable face-tracking offsets (not facial recognition - only detects and tracks face position). | Camera worker with configured head tracker.                  |
+| `dance`         | Queue a dance from `reachy_mini_dances_library`.                                                          | Core install only.                                           |
+| `stop_dance`    | Clear queued dances.                                                                                      | Core install only.                                           |
+| `play_emotion`  | Play a recorded emotion clip via Hugging Face assets.                                                     | Needs `HF_TOKEN` for the recorded emotions dataset.          |
+| `stop_emotion`  | Clear queued emotions.                                                                                    | Core install only.                                           |
+| `do_nothing`    | Explicitly remain idle.                                                                                   | Core install only.                                           |
 
 ## Development workflow
+
 - Install the dev group extras: `uv sync --group dev` or `pip install -e .[dev]`.
 - Run formatting and linting: `ruff check .`.
 - Execute the test suite: `pytest`.
 - When iterating on robot motions, keep the control loop responsive => offload blocking work using the helpers in `tools.py`.
 
 ## License
+
 Apache 2.0
