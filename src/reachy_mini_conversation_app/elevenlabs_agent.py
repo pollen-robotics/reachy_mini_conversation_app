@@ -66,6 +66,23 @@ class ReachyAudioInterface(AudioInterface):  # type: ignore[misc]
             f"input={self.input_sample_rate}Hz, output={self.output_sample_rate}Hz, "
             f"buffer={self.INPUT_FRAMES_PER_BUFFER} frames"
         )
+        
+        # Log audio device information for debugging
+        try:
+            import sounddevice as sd
+            logger.info("=== Audio Device Information ===")
+            logger.info(f"Default input device: {sd.default.device[0]}")
+            logger.info(f"Default output device: {sd.default.device[1]}")
+            logger.info(f"Default sample rate: {sd.default.samplerate}")
+            
+            # List available devices
+            devices = sd.query_devices()
+            logger.info(f"Available audio devices ({len(devices)} total):")
+            for idx, dev in enumerate(devices):
+                if dev['max_input_channels'] > 0:  # Input devices only
+                    logger.info(f"  [{idx}] {dev['name']} (inputs: {dev['max_input_channels']}, rate: {dev['default_samplerate']}Hz)")
+        except Exception as e:
+            logger.debug(f"Could not query audio devices: {e}")
 
     def start(self, input_callback: Callable[[bytes], None]) -> None:
         """Start audio input/output streams.
@@ -78,25 +95,35 @@ class ReachyAudioInterface(AudioInterface):  # type: ignore[misc]
         self.should_stop.clear()
         
         # Start robot audio
+        logger.info("Starting robot recording...")
         self.robot.media.start_recording()
+        logger.info("Starting robot playback...")
         self.robot.media.start_playing()
         logger.info("Waiting for audio streams to initialize...")
-        time.sleep(1.0)  # Wait longer for pipelines to fully initialize
+        time.sleep(1.5)  # Wait longer for pipelines to fully initialize
         
-        # Test if we're getting audio
-        test_frame = self.robot.media.get_audio_sample()
+        # Test if we're getting audio (try multiple times)
+        test_attempts = 0
+        test_frame = None
+        while test_frame is None and test_attempts < 10:
+            test_frame = self.robot.media.get_audio_sample()
+            if test_frame is None:
+                test_attempts += 1
+                time.sleep(0.1)
+        
         if test_frame is not None:
-            logger.info(f"Test audio frame received: shape={test_frame.shape}, dtype={test_frame.dtype}")
+            logger.info(f"✓ Test audio frame received after {test_attempts} attempts: shape={test_frame.shape}, dtype={test_frame.dtype}")
             test_mono = test_frame.T[0]
             test_rms = np.sqrt(np.mean(test_mono.astype(np.float32)**2))
-            logger.info(f"Test audio RMS: {test_rms:.2f}")
+            logger.info(f"✓ Test audio RMS: {test_rms:.2f}")
         else:
-            logger.warning("No test audio frame received!")
+            logger.error(f"✗ No test audio frame received after {test_attempts} attempts! Microphone may not be working.")
+            logger.error("  Check if the robot's microphone is properly connected and recording is enabled.")
         
         # Start input thread to read microphone and call the callback
         self.input_thread = threading.Thread(target=self._input_thread, daemon=True)
         self.input_thread.start()
-        logger.info("Input thread started")
+        logger.info("✓ Input thread started")
 
     def stop(self) -> None:
         """Stop audio input/output streams."""
@@ -119,12 +146,21 @@ class ReachyAudioInterface(AudioInterface):  # type: ignore[misc]
         logger.info("Input thread started - reading from microphone")
         frame_count = 0
         chunks_sent = 0
+        none_count = 0
+        last_log_time = time.time()
+        silent_chunk_count = 0  # Track consecutive silent chunks
         
         while not self.should_stop.is_set():
             try:
                 audio_frame = self.robot.media.get_audio_sample()
                 if audio_frame is not None:
                     frame_count += 1
+                    none_count = 0  # Reset none counter when we get data
+                    
+                    # Log occasionally to show we're receiving audio
+                    if time.time() - last_log_time > 5.0:
+                        logger.info(f"Audio input active: {frame_count} frames received, {chunks_sent} chunks sent to ElevenLabs")
+                        last_log_time = time.time()
                     
                     # Convert stereo to mono (both channels are identical)
                     frame_mono = audio_frame.T[0]
@@ -137,16 +173,42 @@ class ReachyAudioInterface(AudioInterface):  # type: ignore[misc]
                     self.audio_buffer.append(audio_bytes)
                     self.buffer_size += len(frame_int16)
                     
-                    # Send when we have enough samples (4000 frames = 250ms)
+                    # Debug buffering progress
+                    if frame_count <= 5 or (frame_count % 50 == 0 and self.buffer_size < self.INPUT_FRAMES_PER_BUFFER):
+                        logger.debug(f"Buffer progress: {self.buffer_size}/{self.INPUT_FRAMES_PER_BUFFER} samples ({len(frame_int16)} in this frame)")
+                    
+                    # Send when we have enough samples (4000 frames = 250ms @ 16kHz)
                     if self.buffer_size >= self.INPUT_FRAMES_PER_BUFFER:
                         # Concatenate buffered audio
                         combined_audio = b''.join(self.audio_buffer)
                         
-                        # Debug: Check audio levels
-                        if chunks_sent < 3:  # Log first few chunks
-                            audio_array_check = np.frombuffer(combined_audio, dtype=np.int16)
-                            rms = np.sqrt(np.mean(audio_array_check.astype(np.float32)**2))
-                            max_val = np.max(np.abs(audio_array_check))
+                        # Check audio levels for silence detection
+                        audio_array_check = np.frombuffer(combined_audio, dtype=np.int16)
+                        rms = np.sqrt(np.mean(audio_array_check.astype(np.float32)**2))
+                        max_val = np.max(np.abs(audio_array_check))
+                        
+                        # Track silent chunks
+                        if max_val < 10:  # Essentially silent (very low threshold)
+                            silent_chunk_count += 1
+                        else:
+                            if silent_chunk_count > 5:
+                                logger.info(f"Audio detected! (after {silent_chunk_count} silent chunks)")
+                            silent_chunk_count = 0
+                        
+                        # Warn about prolonged silence
+                        if silent_chunk_count == 10:
+                            logger.warning("⚠️  Microphone appears to be silent (10 consecutive silent chunks)")
+                            logger.warning("⚠️  Possible causes:")
+                            logger.warning("   - Wrong microphone device selected (check system audio settings)")
+                            logger.warning("   - Microphone is muted or not working")
+                            logger.warning("   - Robot's microphone hardware issue")
+                            logger.warning("   - Try speaking louder or checking microphone connection")
+                        elif silent_chunk_count == 50:
+                            logger.error("❌ Microphone definitely not working - 50 silent chunks in a row")
+                            logger.error("   Please check your microphone setup!")
+                        
+                        # Debug: Log first few chunks
+                        if chunks_sent < 5:
                             logger.info(
                                 f"Audio chunk {chunks_sent + 1}: {len(combined_audio)} bytes, "
                                 f"{self.buffer_size} samples, RMS={rms:.1f}, Max={max_val}"
@@ -157,14 +219,26 @@ class ReachyAudioInterface(AudioInterface):  # type: ignore[misc]
                             self.input_callback(combined_audio)
                             chunks_sent += 1
                             
-                            if chunks_sent % 10 == 0:
-                                logger.debug(f"Sent {chunks_sent} audio chunks to ElevenLabs")
+                            if chunks_sent % 20 == 0:
+                                logger.info(f"Sent {chunks_sent} audio chunks to ElevenLabs")
+                        else:
+                            logger.warning("No input_callback set! Audio not being sent to ElevenLabs.")
                         
                         # Clear buffer
                         self.audio_buffer = []
                         self.buffer_size = 0
                 else:
-                    time.sleep(0.01)
+                    none_count += 1
+                    # Log if we're getting too many None values
+                    if none_count == 10:
+                        logger.warning(f"No audio frames received after {none_count} attempts. Recording may not be working.")
+                        logger.warning("Possible causes: microphone not connected, recording not started, or audio stream closed.")
+                    elif none_count == 100:
+                        logger.error(f"Still no audio after {none_count} attempts! This likely indicates a problem with the audio pipeline.")
+                        logger.error("Try restarting the robot's audio system or checking microphone connections.")
+                    elif none_count % 500 == 0:
+                        logger.error(f"Audio pipeline appears to be broken: {none_count} failed attempts")
+                    time.sleep(0.01)  # Short sleep to avoid busy-waiting
             except Exception as e:
                 logger.error(f"Error in input thread: {e}", exc_info=True)
                 break
@@ -179,6 +253,11 @@ class ReachyAudioInterface(AudioInterface):  # type: ignore[misc]
         Args:
             audio: Raw PCM audio bytes from ElevenLabs (16kHz, int16, mono)
         """
+        # Don't try to play if we're shutting down
+        if self.should_stop.is_set():
+            logger.debug("Skipping audio output - stream is stopping")
+            return
+            
         try:
             # Convert bytes to numpy array (int16 PCM)
             audio_array = np.frombuffer(audio, dtype=np.int16)
@@ -195,9 +274,14 @@ class ReachyAudioInterface(AudioInterface):  # type: ignore[misc]
                     target_sr=self.device_sample_rate,
                 )
             
-            # Push to robot speaker
-            self.robot.media.push_audio_sample(audio_float)
-            
+            # Push to robot speaker (check if stream is still alive)
+            try:
+                self.robot.media.push_audio_sample(audio_float)
+            except Exception as push_error:
+                # Don't log error if we're shutting down
+                if not self.should_stop.is_set():
+                    logger.error(f"Error pushing audio to speaker: {push_error}")
+                    
         except Exception as e:
             logger.error(f"Error playing audio output: {e}")
 
