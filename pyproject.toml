@@ -34,9 +34,9 @@ local_vision = ["torch", "transformers", "num2words"]
 yolo_vision = ["ultralytics", "supervision"]
 mediapipe_vision = ["mediapipe>=0.10.14"]
 all_vision = [
-  "reachy_mini_conversation_app[local_vision]",
-  "reachy_mini_conversation_app[yolo_vision]",
-  "reachy_mini_conversation_app[mediapipe_vision]",
+  "torch", "transformers", "num2words",
+  "ultralytics", "supervision",
+  "mediapipe>=0.10.14",
 ]
 
 [dependency-groups]
