@@ -1,0 +1,74 @@
+nodes:
+  - id: NODE_ID
+    path: ../../../../node-hub/target/release/dora-openai-websocket
+    inputs:
+      audio: tts/audio
+      transcript: stt/text
+      text: llm/text
+      speech_started: dora-vad/timestamp_start
+      speech_stopped: dora-vad/timestamp_end
+    outputs:
+      - audio
+      - text
+      - function_call_output
+      - response.create
+      - system_prompt
+      - tools
+
+  - id: dora-vad
+    build: pip install -e ../../../../node-hub/node-hub/dora-vad
+    path: dora-vad
+    inputs:
+      audio:
+        source: NODE_ID/audio
+        queue_size: 10
+    outputs:
+      - audio
+      - timestamp_start
+      - timestamp_end
+    env:
+      MIN_SPEECH_DURATION_MS: 500
+      MIN_SILENCE_DURATION_MS: 500
+      THRESHOLD: 0.6
+
+  - id: stt
+    build: pip install -e ../../../../node-hub/node-hub/dora-funasr
+    path: dora-funasr
+    inputs:
+      audio:
+        source: dora-vad/audio
+        queue_size: 10
+    outputs:
+      - text
+      - word
+      - speech_started
+    env:
+      TARGET_LANGUAGE: english
+
+  - id: llm
+    build: pip install -e ../../../../node-hub/node-hub/dora-qwen
+    path: dora-qwen
+    inputs:
+      text: stt/text
+      text_to_audio: NODE_ID/text
+      text_tool_response: NODE_ID/function_call_output
+      response.create: NODE_ID/response.create
+      system_prompt: NODE_ID/system_prompt
+      tools: NODE_ID/tools
+    outputs:
+      - text
+    env:
+      MODEL_NAME_OR_PATH: Qwen/Qwen2.5-3B-Instruct-GGUF
+      MODEL_FILE_PATTERN: "*[qQ]6_[kK].[gG][gG][uU][fF]"
+      MAX_TOKENS: 10_000
+      CONTEXT_SIZE: 10_000
+
+  - id: tts
+    build: pip install -e ../../../../node-hub/node-hub/dora-kokoro-tts
+    path: dora-kokoro-tts
+    inputs:
+      text: llm/text
+    outputs:
+      - audio
+    env:
+      VOICE: am_fenrir

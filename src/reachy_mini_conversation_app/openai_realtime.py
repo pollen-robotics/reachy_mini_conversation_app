@@ -10,9 +10,10 @@ import gradio as gr
 from openai import AsyncOpenAI
 from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item
 from numpy.typing import NDArray
-
+import time
 from reachy_mini_conversation_app.tools import (
     ALL_TOOL_SPECS,
+    Tool,
     ToolDependencies,
     dispatch_tool_call,
 )
@@ -47,6 +48,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.last_activity_time = asyncio.get_event_loop().time()
         self.start_time = asyncio.get_event_loop().time()
         self.is_idle_tool_call = False
+        self.websocket_base_url: str | None = None
+        self.tools = ALL_TOOL_SPECS
+        self.idle_duration = 15.0
 
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
@@ -69,7 +73,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
     async def start_up(self) -> None:
         """Start the handler."""
-        self.client = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+        self.client = AsyncOpenAI(api_key=config.OPENAI_API_KEY, websocket_base_url=self.websocket_base_url)
         async with self.client.realtime.connect(model=config.MODEL_NAME) as conn:
             try:
                 await conn.session.update(
@@ -82,10 +86,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                     "type": "audio/pcm",
                                     "rate": self.target_input_rate,
                                 },
-                                "transcription": {
-                                    "model": "whisper-1",
-                                    "language": "en"
-                                },
+                                "transcription": {"model": "whisper-1", "language": "en"},
                                 "turn_detection": {
                                     "type": "server_vad",
                                     "interrupt_response": True,
@@ -99,7 +100,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                 "voice": "cedar",
                             },
                         },
-                        "tools": ALL_TOOL_SPECS,  # type: ignore[typeddict-item]
+                        "tools": self.tools,  # type: ignore[typeddict-item]
                         "tool_choice": "auto",
                     },
                 )
@@ -108,6 +109,13 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 return
 
             logger.info("Realtime session updated successfully")
+            # Generate a greating message
+            await conn.response.create(
+                response={
+                    "modalities": ["text"],
+                    "instructions": "Give a fun response about you just waking up.",
+                },
+            )
 
             # Manage event received from the openai server
             self.connection = conn
@@ -124,12 +132,13 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 if event.type == "input_audio_buffer.speech_stopped":
                     self.deps.movement_manager.set_listening(False)
                     logger.debug("User speech stopped - server will auto-commit with VAD")
+                    self.end_speech_time = time.time()
 
                 if event.type in (
-                    "response.audio.done",            # GA
-                    "response.output_audio.done",     # GA alias
-                    "response.audio.completed",       # legacy (for safety)
-                    "response.completed",             # text-only completion
+                    "response.audio.done",  # GA
+                    "response.output_audio.done",  # GA alias
+                    "response.audio.completed",  # legacy (for safety)
+                    "response.completed",  # text-only completion
                 ):
                     logger.debug("response completed")
 
@@ -163,13 +172,15 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         self.deps.head_wobbler.feed(event.delta)
                     self.last_activity_time = asyncio.get_event_loop().time()
                     logger.debug("last activity time updated to %s", self.last_activity_time)
+                    print("latency: ", self.end_speech_time - time.time())
+                    audio = np.frombuffer(base64.b64decode(event.delta), dtype=np.int16).reshape(1, -1)
+                    print("packet size: ", audio.shape)
                     await self.output_queue.put(
                         (
                             self.output_sample_rate,
-                            np.frombuffer(base64.b64decode(event.delta), dtype=np.int16).reshape(1, -1),
+                            audio,
                         ),
                     )
-
 
                 # ---- tool-calling plumbing ----
                 if event.type == "response.function_call_arguments.done":
@@ -267,7 +278,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
                     # Only show user-facing errors, not internal state errors
                     if code not in ("input_audio_buffer_commit_empty", "conversation_already_has_active_response"):
-                        await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": f"[error] {msg}"}))
+                        await self.output_queue.put(
+                            AdditionalOutputs({"role": "assistant", "content": f"[error] {msg}"})
+                        )
 
     # Microphone receive
     async def receive(self, frame: Tuple[int, NDArray[np.int16]]) -> None:
@@ -291,13 +304,12 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
         # Handle idle
         idle_duration = asyncio.get_event_loop().time() - self.last_activity_time
-        if idle_duration > 15.0 and self.deps.movement_manager.is_idle():
+        if idle_duration > self.idle_duration and self.deps.movement_manager.is_idle():
             try:
                 await self.send_idle_signal(idle_duration)
             except Exception as e:
                 logger.warning("Idle signal skipped (connection closed?): %s", e)
                 return None
-
             self.last_activity_time = asyncio.get_event_loop().time()  # avoid repeated resets
 
         return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
@@ -322,6 +334,18 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         dt = datetime.now()  # wall-clock
         return f"[{dt.strftime('%Y-%m-%d %H:%M:%S')} | +{elapsed_seconds:.1f}s]"
 
+    def set_websocket_base_url(self, websocket_base_url: str) -> None:
+        """Use Dora as the backend."""
+        self.websocket_base_url = websocket_base_url
+
+    def set_tools(self, tools: list[dict[str, Any]]) -> None:
+        """Set the tools to be used."""
+        self.tools = tools
+
+    def set_idle_duration(self, idle_duration: float) -> None:
+        """Set the idle duration."""
+        self.idle_duration = idle_duration
+
     async def send_idle_signal(self, idle_duration: float) -> None:
         """Send an idle signal to the openai server."""
         logger.debug("Sending idle signal")
@@ -330,11 +354,12 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         if not self.connection:
             logger.debug("No connection, cannot send idle signal")
             return
+
         await self.connection.conversation.item.create(
             item={
                 "type": "message",
                 "role": "user",
-                "content": [{"type": "input_text", "text": timestamp_msg}],
+                "content": [{"input_text": {"text": timestamp_msg}}],
             },
         )
         await self.connection.response.create(

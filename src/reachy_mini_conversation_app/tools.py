@@ -202,7 +202,9 @@ class Camera(Tool):
         # Use vision manager for processing if available
         if deps.vision_manager is not None:
             vision_result = await asyncio.to_thread(
-                deps.vision_manager.processor.process_image, frame, image_query,
+                deps.vision_manager.processor.process_image,
+                frame,
+                image_query,
             )
             if isinstance(vision_result, dict) and "error" in vision_result:
                 return vision_result
@@ -245,7 +247,6 @@ class HeadTracking(Tool):
         status = "started" if enable else "stopped"
         logger.info("Tool call: head_tracking %s", status)
         return {"status": f"head tracking {status}"}
-
 
 
 class Dance(Tool):
@@ -356,6 +357,7 @@ def get_available_emotions_and_descriptions() -> str:
     except Exception as e:
         return f"Error getting emotions: {e}"
 
+
 class PlayEmotion(Tool):
     """Play a pre-recorded emotion."""
 
@@ -456,6 +458,14 @@ class DoNothing(Tool):
 # List of available tool classes
 ALL_TOOLS: Dict[str, Tool] = {cls.name: cls() for cls in get_concrete_subclasses(Tool)}  # type: ignore[type-abstract]
 ALL_TOOL_SPECS = [tool.spec() for tool in ALL_TOOLS.values()]
+MIN_TOOL_SPECS = [
+    tool.spec()
+    for tool_name, tool in ALL_TOOLS.items()
+    if tool_name
+    in {
+        "dance",
+    }
+]
 
 
 # Dispatcher

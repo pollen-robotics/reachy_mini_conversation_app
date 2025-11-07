@@ -2,7 +2,10 @@
 
 import os
 import sys
+import time
+import multiprocessing
 from typing import Any, Dict, List
+from pathlib import Path
 
 import gradio as gr
 from fastapi import FastAPI
@@ -10,7 +13,7 @@ from fastrtc import Stream
 
 from reachy_mini import ReachyMini
 from reachy_mini_conversation_app.moves import MovementManager
-from reachy_mini_conversation_app.tools import ToolDependencies
+from reachy_mini_conversation_app.tools import MIN_TOOL_SPECS, ToolDependencies
 from reachy_mini_conversation_app.utils import (
     parse_args,
     setup_logger,
@@ -95,6 +98,34 @@ def main() -> None:
     else:
         stream_manager = LocalStream(handler, robot)
 
+    if args.dora:
+        # Use local endpoint
+        handler.set_websocket_base_url("ws://0.0.0.0:7860")
+        handler.set_tools(MIN_TOOL_SPECS)
+        handler.set_idle_duration(120.0)
+
+        from dora import run, build
+
+        os.environ["PORT"] = "7860"
+        # Get current absolute path
+        file_path = Path(os.path.dirname(os.path.abspath(__file__))) / "dora" / args.dora
+        print(f"Using Dora config file at: {file_path}")
+        if not os.getenv("DORA_NO_BUILD"):
+            build(
+                str(file_path),
+                uv=True,
+            )
+        print("🚙 Ready to spawn dora backend")
+
+        multiprocessing.Process(
+            target=run,
+            kwargs={
+                "dataflow_path": str(file_path),
+                "uv": True,
+            },
+        ).start()
+
+        time.sleep(20)  # wait a bit for model to load
     # Each async service → its own thread/loop
     movement_manager.start()
     head_wobbler.start()
