@@ -24,7 +24,7 @@ def parse_args() -> argparse.Namespace:
         help="Use local vision model instead of gpt-realtime vision",
     )
     parser.add_argument("--gradio", default=False, action="store_true", help="Open gradio interface")
-    parser.add_argument("--dora", default="whisper.yml", help="Open gradio interface")
+    parser.add_argument("--dora", default="", help="Open gradio interface")
     parser.add_argument("--debug", default=False, action="store_true", help="Enable debug logging")
     return parser.parse_args()
 
