@@ -1,0 +1,15 @@
+# SELECT THE TOOLS YOU WANT TO ENABLE
+
+dance
+# stop_dance
+# play_emotion
+# stop_emotion
+# camera
+# do_nothing
+# head_tracking
+# move_head
+sweep_look
+
+# AN EXAMPLE OF A CUSTOM TOOL DEFINED LOCALLY
+throw_stone
+

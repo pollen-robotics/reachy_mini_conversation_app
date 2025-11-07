@@ -5,14 +5,10 @@ from typing import Any, Dict
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
-# Import a tool from the tools library: use an alias or noqa to avoid linter errors if unused
-from reachy_mini_conversation_app.tools.sweep_look import SweepLook as SweepLook  # noqa: F401
-
 
 logger = logging.getLogger(__name__)
 
 
-# Create a custom tool
 class ThrowStone(Tool):
     """Example of custom tool call."""
 
