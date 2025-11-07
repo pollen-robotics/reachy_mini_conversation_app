@@ -10,7 +10,7 @@ import gradio as gr
 from openai import AsyncOpenAI
 from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item
 from numpy.typing import NDArray
-
+import time
 from reachy_mini_conversation_app.tools import (
     ALL_TOOL_SPECS,
     Tool,
@@ -48,7 +48,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.last_activity_time = asyncio.get_event_loop().time()
         self.start_time = asyncio.get_event_loop().time()
         self.is_idle_tool_call = False
-        self.websocket_base_url = ""
+        self.websocket_base_url: str | None = None
         self.tools = ALL_TOOL_SPECS
         self.idle_duration = 15.0
 
@@ -132,6 +132,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 if event.type == "input_audio_buffer.speech_stopped":
                     self.deps.movement_manager.set_listening(False)
                     logger.debug("User speech stopped - server will auto-commit with VAD")
+                    self.end_speech_time = time.time()
 
                 if event.type in (
                     "response.audio.done",  # GA
@@ -171,10 +172,13 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         self.deps.head_wobbler.feed(event.delta)
                     self.last_activity_time = asyncio.get_event_loop().time()
                     logger.debug("last activity time updated to %s", self.last_activity_time)
+                    print("latency: ", self.end_speech_time - time.time())
+                    audio = np.frombuffer(base64.b64decode(event.delta), dtype=np.int16).reshape(1, -1)
+                    print("packet size: ", audio.shape)
                     await self.output_queue.put(
                         (
                             self.output_sample_rate,
-                            np.frombuffer(base64.b64decode(event.delta), dtype=np.int16).reshape(1, -1),
+                            audio,
                         ),
                     )
 
