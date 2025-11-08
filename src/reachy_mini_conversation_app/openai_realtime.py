@@ -15,12 +15,12 @@ from websockets.exceptions import ConnectionClosedError
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.prompts import get_session_instructions
+from reachy_mini_conversation_app.openai_cost_tracking import log_openai_cost
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_tool_specs,
     dispatch_tool_call,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.resample_ratio = self.target_input_rate / self.input_sample_rate
 
         self.connection: Any = None
-        self.output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]" = asyncio.Queue()
+        self.output_queue: (
+            "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]"
+        ) = asyncio.Queue()
 
         self.last_activity_time = asyncio.get_event_loop().time()
         self.start_time = asyncio.get_event_loop().time()
@@ -83,7 +85,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 # Abrupt close (e.g., "no close frame received or sent") → retry
                 logger.warning(
                     "Realtime websocket closed unexpectedly (attempt %d/%d): %s",
-                    attempt, max_attempts, e
+                    attempt,
+                    max_attempts,
+                    e,
                 )
                 if attempt < max_attempts:
                     # exponential backoff with jitter
@@ -114,7 +118,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                 },
                                 "transcription": {
                                     "model": "whisper-1",
-                                    "language": "en"
+                                    "language": "en",
                                 },
                                 "turn_detection": {
                                     "type": "server_vad",
@@ -129,7 +133,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                 "voice": "cedar",
                             },
                         },
-                        "tools":  get_tool_specs(),  # type: ignore[typeddict-item]
+                        "tools": get_tool_specs(),  # type: ignore[typeddict-item]
                         "tool_choice": "auto",
                     },
                 )
@@ -153,13 +157,15 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
                 if event.type == "input_audio_buffer.speech_stopped":
                     self.deps.movement_manager.set_listening(False)
-                    logger.debug("User speech stopped - server will auto-commit with VAD")
+                    logger.debug(
+                        "User speech stopped - server will auto-commit with VAD"
+                    )
 
                 if event.type in (
-                    "response.audio.done",            # GA
-                    "response.output_audio.done",     # GA alias
-                    "response.audio.completed",       # legacy (for safety)
-                    "response.completed",             # text-only completion
+                    "response.audio.done",  # GA
+                    "response.output_audio.done",  # GA alias
+                    "response.audio.completed",  # legacy (for safety)
+                    "response.completed",  # text-only completion
                 ):
                     logger.debug("response completed")
 
@@ -169,34 +175,56 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 if event.type == "response.done":
                     # Doesn't mean the audio is done playing
                     logger.debug("Response done")
+                    log_openai_cost(event, config.MODEL_NAME)
 
                 # Handle partial transcription (user speaking in real-time)
                 if event.type == "conversation.item.input_audio_transcription.partial":
                     logger.debug(f"User partial transcript: {event.transcript}")
                     await self.output_queue.put(
-                        AdditionalOutputs({"role": "user_partial", "content": event.transcript})
+                        AdditionalOutputs(
+                            {"role": "user_partial", "content": event.transcript}
+                        )
                     )
 
                 # Handle completed transcription (user finished speaking)
-                if event.type == "conversation.item.input_audio_transcription.completed":
+                if (
+                    event.type
+                    == "conversation.item.input_audio_transcription.completed"
+                ):
                     logger.debug(f"User transcript: {event.transcript}")
-                    await self.output_queue.put(AdditionalOutputs({"role": "user", "content": event.transcript}))
+                    await self.output_queue.put(
+                        AdditionalOutputs({"role": "user", "content": event.transcript})
+                    )
 
                 # Handle assistant transcription
-                if event.type in ("response.audio_transcript.done", "response.output_audio_transcript.done"):
+                if event.type in (
+                    "response.audio_transcript.done",
+                    "response.output_audio_transcript.done",
+                ):
                     logger.debug(f"Assistant transcript: {event.transcript}")
-                    await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": event.transcript}))
+                    await self.output_queue.put(
+                        AdditionalOutputs(
+                            {"role": "assistant", "content": event.transcript}
+                        )
+                    )
 
                 # Handle audio delta
-                if event.type in ("response.audio.delta", "response.output_audio.delta"):
+                if event.type in (
+                    "response.audio.delta",
+                    "response.output_audio.delta",
+                ):
                     if self.deps.head_wobbler is not None:
                         self.deps.head_wobbler.feed(event.delta)
                     self.last_activity_time = asyncio.get_event_loop().time()
-                    logger.debug("last activity time updated to %s", self.last_activity_time)
+                    logger.debug(
+                        "last activity time updated to %s", self.last_activity_time
+                    )
                     await self.output_queue.put(
                         (
                             self.output_sample_rate,
-                            np.frombuffer(base64.b64decode(event.delta), dtype=np.int16).reshape(1, -1),
+                            np.frombuffer(
+                                base64.b64decode(event.delta), dtype=np.int16
+                            ).reshape(1, -1),
                         ),
                     )
 
@@ -206,12 +234,20 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     args_json_str = getattr(event, "arguments", None)
                     call_id = getattr(event, "call_id", None)
 
-                    if not isinstance(tool_name, str) or not isinstance(args_json_str, str):
-                        logger.error("Invalid tool call: tool_name=%s, args=%s", tool_name, args_json_str)
+                    if not isinstance(tool_name, str) or not isinstance(
+                        args_json_str, str
+                    ):
+                        logger.error(
+                            "Invalid tool call: tool_name=%s, args=%s",
+                            tool_name,
+                            args_json_str,
+                        )
                         continue
 
                     try:
-                        tool_result = await dispatch_tool_call(tool_name, args_json_str, self.deps)
+                        tool_result = await dispatch_tool_call(
+                            tool_name, args_json_str, self.deps
+                        )
                         logger.debug("Tool '%s' executed successfully", tool_name)
                         logger.debug("Tool result: %s", tool_result)
                     except Exception as e:
@@ -233,7 +269,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                             {
                                 "role": "assistant",
                                 "content": json.dumps(tool_result),
-                                "metadata": {"title": f"🛠️ Used tool {tool_name}", "status": "done"},
+                                "metadata": {
+                                    "title": f"🛠️ Used tool {tool_name}",
+                                    "status": "done",
+                                },
                             },
                         ),
                     )
@@ -242,7 +281,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         # use raw base64, don't json.dumps (which adds quotes)
                         b64_im = tool_result["b64_im"]
                         if not isinstance(b64_im, str):
-                            logger.warning("Unexpected type for b64_im: %s", type(b64_im))
+                            logger.warning(
+                                "Unexpected type for b64_im: %s", type(b64_im)
+                            )
                             b64_im = str(b64_im)
                         await self.connection.conversation.item.create(
                             item={
@@ -295,8 +336,15 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     logger.error("Realtime error [%s]: %s (raw=%s)", code, msg, err)
 
                     # Only show user-facing errors, not internal state errors
-                    if code not in ("input_audio_buffer_commit_empty", "conversation_already_has_active_response"):
-                        await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": f"[error] {msg}"}))
+                    if code not in (
+                        "input_audio_buffer_commit_empty",
+                        "conversation_already_has_active_response",
+                    ):
+                        await self.output_queue.put(
+                            AdditionalOutputs(
+                                {"role": "assistant", "content": f"[error] {msg}"}
+                            )
+                        )
 
     # Microphone receive
     async def receive(self, frame: Tuple[int, NDArray[np.int16]]) -> None:
@@ -327,7 +375,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 logger.warning("Idle signal skipped (connection closed?): %s", e)
                 return None
 
-            self.last_activity_time = asyncio.get_event_loop().time()  # avoid repeated resets
+            self.last_activity_time = (
+                asyncio.get_event_loop().time()
+            )  # avoid repeated resets
 
         return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
 
