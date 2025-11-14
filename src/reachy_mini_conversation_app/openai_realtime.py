@@ -1,5 +1,6 @@
 import json
 import base64
+import random
 import asyncio
 import logging
 from typing import Any, Tuple, Literal, cast
@@ -10,6 +11,7 @@ import gradio as gr
 from openai import AsyncOpenAI
 from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item
 from numpy.typing import NDArray
+from websockets.exceptions import ConnectionClosedError
 
 from reachy_mini_conversation_app.tools import (
     ALL_TOOL_SPECS,
@@ -68,8 +70,36 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         return cast(NDArray[np.int16], resampled.astype(np.int16))
 
     async def start_up(self) -> None:
-        """Start the handler."""
+        """Start the handler with minimal retries on unexpected websocket closure."""
         self.client = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                await self._run_realtime_session()
+                # Normal exit from the session, stop retrying
+                return
+            except ConnectionClosedError as e:
+                # Abrupt close (e.g., "no close frame received or sent") → retry
+                logger.warning(
+                    "Realtime websocket closed unexpectedly (attempt %d/%d): %s",
+                    attempt, max_attempts, e
+                )
+                if attempt < max_attempts:
+                    # exponential backoff with jitter
+                    base_delay = 2 ** (attempt - 1)  # 1s, 2s, 4s, 8s, etc.
+                    jitter = random.uniform(0, 0.5)
+                    delay = base_delay + jitter
+                    logger.info("Retrying in %.1f seconds...", delay)
+                    await asyncio.sleep(delay)
+                    continue
+                raise
+            finally:
+                # never keep a stale reference
+                self.connection = None
+
+    async def _run_realtime_session(self) -> None:
+        """Establish and manage a single realtime session."""
         async with self.client.realtime.connect(model=config.MODEL_NAME) as conn:
             try:
                 await conn.session.update(
@@ -169,7 +199,6 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                             np.frombuffer(base64.b64decode(event.delta), dtype=np.int16).reshape(1, -1),
                         ),
                     )
-
 
                 # ---- tool-calling plumbing ----
                 if event.type == "response.function_call_arguments.done":
@@ -305,8 +334,14 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
     async def shutdown(self) -> None:
         """Shutdown the handler."""
         if self.connection:
-            await self.connection.close()
-            self.connection = None
+            try:
+                await self.connection.close()
+            except ConnectionClosedError as e:
+                logger.debug(f"Connection already closed during shutdown: {e}")
+            except Exception as e:
+                logger.debug(f"connection.close() ignored: {e}")
+            finally:
+                self.connection = None
 
         # Clear any remaining items in the output queue
         while not self.output_queue.empty():
