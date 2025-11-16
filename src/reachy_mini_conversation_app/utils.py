@@ -25,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--gradio", default=False, action="store_true", help="Open gradio interface")
     parser.add_argument("--debug", default=False, action="store_true", help="Enable debug logging")
+    parser.add_argument("--keyboard", default=False, action="store_true", help="Enable keyboard event triggers (S=audio, J=function call)")
     return parser.parse_args()
 
 

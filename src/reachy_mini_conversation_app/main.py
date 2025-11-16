@@ -18,6 +18,7 @@ from reachy_mini_conversation_app.utils import (
 from reachy_mini_conversation_app.console import LocalStream
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.keyboard_realtime_handler import KeyboardRealtimeHandler
 from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
 
 
@@ -75,7 +76,12 @@ def main() -> None:
     )
     logger.debug(f"Chatbot avatar images: {chatbot.avatar_images}")
 
-    handler = OpenaiRealtimeHandler(deps)
+    # Choose handler based on keyboard flag
+    if args.keyboard:
+        handler = KeyboardRealtimeHandler(deps)
+        logger.info("Using KeyboardRealtimeHandler - Press 'S' for audio, 'J' for function call")
+    else:
+        handler = OpenaiRealtimeHandler(deps)
 
     stream_manager: gr.Blocks | LocalStream | None = None
 

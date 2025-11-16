@@ -118,6 +118,7 @@ By default, the app runs in console mode for direct audio interaction. Use the `
 | `--local-vision` | `False` | Use local vision model (SmolVLM2) for periodic image processing instead of gpt-realtime vision. Requires `local_vision` extra to be installed. |
 | `--gradio` | `False` | Launch the Gradio web UI. Without this flag, runs in console mode. Required when running in simulation mode. |
 | `--debug` | `False` | Enable verbose logging for troubleshooting. |
+| `--keyboard` | `False` | Enable keyboard event triggers. Press 'S' to trigger audio response, 'J' to trigger function call, 'Q' to quit keyboard listener. |
 
 
 ### Examples
@@ -137,6 +138,12 @@ By default, the app runs in console mode for direct audio interaction. Use the `
 
   ```bash
   reachy-mini-conversation-app --no-camera
+  ```
+
+- Enable keyboard event triggers for testing:
+
+  ```bash
+  reachy-mini-conversation-app --keyboard
   ```
 
 ## LLM tools exposed to the assistant

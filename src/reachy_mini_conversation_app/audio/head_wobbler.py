@@ -46,6 +46,13 @@ class HeadWobbler:
             generation = self._generation
         self.audio_queue.put((generation, SAMPLE_RATE, buf))
 
+    def feed_raw(self, raw_audio: NDArray[np.int16]) -> None:
+        """Thread-safe: push raw audio into the consumer queue."""
+        buf = raw_audio.reshape(1, -1)
+        with self._state_lock:
+            generation = self._generation
+        self.audio_queue.put((generation, SAMPLE_RATE, buf))
+
     def start(self) -> None:
         """Start the head wobbler loop in a thread."""
         self._stop_event.clear()

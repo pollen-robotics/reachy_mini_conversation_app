@@ -552,8 +552,9 @@ class MovementManager:
 
             self.state.last_primary_pose = clone_full_body_pose(primary_full_body_pose)
         # Otherwise reuse the last primary pose so we avoid jumps between moves
-        elif self.state.last_primary_pose is not None:
-            primary_full_body_pose = clone_full_body_pose(self.state.last_primary_pose)
+        # Nasty fix to correcly play emotions/dances while speaking + speaking correctly afterwards
+        # elif self.state.last_primary_pose is not None:
+        #    primary_full_body_pose = clone_full_body_pose(self.state.last_primary_pose)
         else:
             neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
             primary_full_body_pose = (neutral_head_pose, (0.0, 0.0), 0.0)
