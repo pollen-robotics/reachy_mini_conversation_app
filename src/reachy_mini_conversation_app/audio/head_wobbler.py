@@ -80,14 +80,14 @@ class HeadWobbler:
                 if chunk_generation != current_generation:
                     continue
 
-                pcm = np.asarray(chunk).squeeze(0)
-                with self._sway_lock:
-                    results = self.sway.feed(pcm, sr)
-
                 if self._base_ts is None:
                     with self._state_lock:
                         if self._base_ts is None:
                             self._base_ts = time.time()
+
+                pcm = np.asarray(chunk).squeeze(0)
+                with self._sway_lock:
+                    results = self.sway.feed(pcm, sr)
 
                 i = 0
                 while i < len(results):
