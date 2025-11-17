@@ -128,7 +128,7 @@ def main(robot=None):
         logger.info("Shutdown complete.")
 
 
-class ReachyMiniConversationDemo(ReachyMiniApp):
+class ReachyMiniConversationApp(ReachyMiniApp):
     """Reachy Mini Apps entry point for the conversation demo."""
 
     def run(self, reachy_mini: ReachyMini, stop_event: threading.Event):
