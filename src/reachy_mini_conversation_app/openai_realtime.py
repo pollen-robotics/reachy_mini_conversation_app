@@ -96,7 +96,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                     "type": "audio/pcm",
                                     "rate": self.output_sample_rate,
                                 },
-                                "voice": "cedar",
+                                "voice": "ash",
                             },
                         },
                         "tools": ALL_TOOL_SPECS,  # type: ignore[typeddict-item]
