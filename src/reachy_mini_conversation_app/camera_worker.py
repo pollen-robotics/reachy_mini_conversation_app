@@ -9,10 +9,10 @@ Ported from main_works.py camera_worker() function to provide:
 import time
 import logging
 import threading
-from typing import Tuple, Optional
+from typing import Any, List, Tuple
 
-import cv2
 import numpy as np
+from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation as R
 
 from reachy_mini import ReachyMini
@@ -25,20 +25,20 @@ logger = logging.getLogger(__name__)
 class CameraWorker:
     """Thread-safe camera worker with frame buffering and face tracking."""
 
-    def __init__(self, reachy_mini: ReachyMini, head_tracker=None):
+    def __init__(self, reachy_mini: ReachyMini, head_tracker: Any = None) -> None:
         """Initialize."""
         self.reachy_mini = reachy_mini
         self.head_tracker = head_tracker
 
         # Thread-safe frame storage
-        self.latest_frame: Optional[np.ndarray] = None
+        self.latest_frame: NDArray[np.uint8] | None = None
         self.frame_lock = threading.Lock()
         self._stop_event = threading.Event()
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
 
         # Face tracking state
         self.is_head_tracking_enabled = True
-        self.face_tracking_offsets = [
+        self.face_tracking_offsets: List[float] = [
             0.0,
             0.0,
             0.0,
@@ -49,31 +49,30 @@ class CameraWorker:
         self.face_tracking_lock = threading.Lock()
 
         # Face tracking timing variables (same as main_works.py)
-        self.last_face_detected_time: Optional[float] = None
-        self.interpolation_start_time: Optional[float] = None
-        self.interpolation_start_pose: Optional[np.ndarray] = None
+        self.last_face_detected_time: float | None = None
+        self.interpolation_start_time: float | None = None
+        self.interpolation_start_pose: NDArray[np.float32] | None = None
         self.face_lost_delay = 2.0  # seconds to wait before starting interpolation
         self.interpolation_duration = 1.0  # seconds to interpolate back to neutral
 
         # Track state changes
         self.previous_head_tracking_state = self.is_head_tracking_enabled
 
-    def get_latest_frame(self) -> Optional[np.ndarray]:
+    def get_latest_frame(self) -> NDArray[np.uint8] | None:
         """Get the latest frame (thread-safe)."""
         with self.frame_lock:
             if self.latest_frame is None:
                 return None
-            else:
-                frame = self.latest_frame.copy()
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                return frame
+            # Return a copy in original BGR format (OpenCV native)
+            return self.latest_frame.copy()
 
     def get_face_tracking_offsets(
         self,
     ) -> Tuple[float, float, float, float, float, float]:
         """Get current face tracking offsets (thread-safe)."""
         with self.face_tracking_lock:
-            return tuple(self.face_tracking_offsets)
+            offsets = self.face_tracking_offsets
+            return (offsets[0], offsets[1], offsets[2], offsets[3], offsets[4], offsets[5])
 
     def set_head_tracking_enabled(self, enabled: bool) -> None:
         """Enable/disable head tracking."""
@@ -168,12 +167,11 @@ class CameraWorker:
                                     rotation[2],  # roll, pitch, yaw
                                 ]
 
-                        else:
-                            # No face detected while tracking enabled - set face lost timestamp
-                            if self.last_face_detected_time is None or self.last_face_detected_time == current_time:
-                                # Only update if we haven't already set a face lost time
-                                # (current_time check prevents overriding the disable-triggered timestamp)
-                                pass
+                        # No face detected while tracking enabled - set face lost timestamp
+                        elif self.last_face_detected_time is None or self.last_face_detected_time == current_time:
+                            # Only update if we haven't already set a face lost time
+                            # (current_time check prevents overriding the disable-triggered timestamp)
+                            pass
 
                     # Handle smooth interpolation (works for both face-lost and tracking-disabled cases)
                     if self.last_face_detected_time is not None:
@@ -188,11 +186,12 @@ class CameraWorker:
                                     current_translation = self.face_tracking_offsets[:3]
                                     current_rotation_euler = self.face_tracking_offsets[3:]
                                     # Convert to 4x4 pose matrix
-                                    self.interpolation_start_pose = np.eye(4)
-                                    self.interpolation_start_pose[:3, 3] = current_translation
-                                    self.interpolation_start_pose[:3, :3] = R.from_euler(
-                                        "xyz", current_rotation_euler
+                                    pose_matrix = np.eye(4, dtype=np.float32)
+                                    pose_matrix[:3, 3] = current_translation
+                                    pose_matrix[:3, :3] = R.from_euler(
+                                        "xyz", current_rotation_euler,
                                     ).as_matrix()
+                                    self.interpolation_start_pose = pose_matrix
 
                             # Calculate interpolation progress (t from 0 to 1)
                             elapsed_interpolation = current_time - self.interpolation_start_time
@@ -200,7 +199,7 @@ class CameraWorker:
 
                             # Interpolate between current pose and neutral pose
                             interpolated_pose = linear_pose_interpolation(
-                                self.interpolation_start_pose, neutral_pose, t
+                                self.interpolation_start_pose, neutral_pose, t,
                             )
 
                             # Extract translation and rotation from interpolated pose

@@ -4,7 +4,7 @@ import json
 import asyncio
 import inspect
 import logging
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Tuple, Literal
 from dataclasses import dataclass
 
 from reachy_mini import ReachyMini
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 try:
     from reachy_mini.motion.recorded_move import RecordedMoves
     from reachy_mini_dances_library.collection.dance import AVAILABLE_MOVES
-    from reachy_mini_conversation_demo.dance_emotion_moves import (
+    from reachy_mini_conversation_app.dance_emotion_moves import (
         GotoQueueMove,
         DanceQueueMove,
         EmotionQueueMove,
@@ -36,9 +36,9 @@ except ImportError as e:
     EMOTION_AVAILABLE = False
 
 
-def get_concrete_subclasses(base):
+def get_concrete_subclasses(base: type[Tool]) -> List[type[Tool]]:
     """Recursively find all concrete (non-abstract) subclasses of a base class."""
-    result = []
+    result: List[type[Tool]] = []
     for cls in base.__subclasses__():
         if not inspect.isabstract(cls):
             result.append(cls)
@@ -58,9 +58,9 @@ class ToolDependencies:
     reachy_mini: ReachyMini
     movement_manager: Any  # MovementManager from moves.py
     # Optional deps
-    camera_worker: Optional[Any] = None  # CameraWorker for frame buffering
-    vision_manager: Optional[Any] = None
-    head_wobbler: Optional[Any] = None  # HeadWobbler for audio-reactive motion
+    camera_worker: Any | None = None  # CameraWorker for frame buffering
+    vision_manager: Any | None = None
+    head_wobbler: Any | None = None  # HeadWobbler for audio-reactive motion
     motion_duration_s: float = 1.0
 
 
@@ -88,7 +88,7 @@ class Tool(abc.ABC):
         }
 
     @abc.abstractmethod
-    async def __call__(self, deps: ToolDependencies, **kwargs) -> Dict[str, Any]:
+    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Async tool execution entrypoint."""
         raise NotImplementedError
 
@@ -113,7 +113,7 @@ class MoveHead(Tool):
     }
 
     # mapping: direction -> args for create_head_pose
-    DELTAS: dict[str, tuple[int, int, int, int, int, int]] = {
+    DELTAS: Dict[str, Tuple[int, int, int, int, int, int]] = {
         "left": (0, 0, 0, 0, 0, 40),
         "right": (0, 0, 0, 0, 0, -40),
         "up": (0, 0, 0, 0, -30, 0),
@@ -121,9 +121,12 @@ class MoveHead(Tool):
         "front": (0, 0, 0, 0, 0, 0),
     }
 
-    async def __call__(self, deps: ToolDependencies, **kwargs) -> Dict[str, Any]:
+    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Move head in a given direction."""
-        direction: Direction = kwargs.get("direction")
+        direction_raw = kwargs.get("direction")
+        if not isinstance(direction_raw, str):
+            return {"error": "direction must be a string"}
+        direction: Direction = direction_raw  # type: ignore[assignment]
         logger.info("Tool call: move_head direction=%s", direction)
 
         deltas = self.DELTAS.get(direction, self.DELTAS["front"])
@@ -177,7 +180,7 @@ class Camera(Tool):
         "required": ["question"],
     }
 
-    async def __call__(self, deps: ToolDependencies, **kwargs) -> Dict[str, Any]:
+    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Take a picture with the camera and ask a question about it."""
         image_query = (kwargs.get("question") or "").strip()
         if not image_query:
@@ -199,7 +202,7 @@ class Camera(Tool):
         # Use vision manager for processing if available
         if deps.vision_manager is not None:
             vision_result = await asyncio.to_thread(
-                deps.vision_manager.processor.process_image, frame, image_query
+                deps.vision_manager.processor.process_image, frame, image_query,
             )
             if isinstance(vision_result, dict) and "error" in vision_result:
                 return vision_result
@@ -208,17 +211,16 @@ class Camera(Tool):
                 if isinstance(vision_result, str)
                 else {"error": "vision returned non-string"}
             )
-        else:
-            # Return base64 encoded image like main_works.py camera tool
-            import base64
+        # Return base64 encoded image like main_works.py camera tool
+        import base64
 
-            import cv2
+        import cv2
 
-            temp_path = "/tmp/camera_frame.jpg"
-            cv2.imwrite(temp_path, frame)
-            with open(temp_path, "rb") as f:
-                b64_encoded = base64.b64encode(f.read()).decode("utf-8")
-            return {"b64_im": b64_encoded}
+        temp_path = "/tmp/camera_frame.jpg"
+        cv2.imwrite(temp_path, frame)
+        with open(temp_path, "rb") as f:
+            b64_encoded = base64.b64encode(f.read()).decode("utf-8")
+        return {"b64_im": b64_encoded}
 
 
 class HeadTracking(Tool):
@@ -232,7 +234,7 @@ class HeadTracking(Tool):
         "required": ["start"],
     }
 
-    async def __call__(self, deps: ToolDependencies, **kwargs) -> Dict[str, Any]:
+    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Enable or disable head tracking."""
         enable = bool(kwargs.get("start"))
 
@@ -288,12 +290,12 @@ class Dance(Tool):
         "required": [],
     }
 
-    async def __call__(self, deps: ToolDependencies, **kwargs) -> Dict[str, Any]:
+    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Play a named or random dance move once (or repeat). Non-blocking."""
         if not DANCE_AVAILABLE:
             return {"error": "Dance system not available"}
 
-        move_name = kwargs.get("move", None)
+        move_name = kwargs.get("move")
         repeat = int(kwargs.get("repeat", 1))
 
         logger.info("Tool call: dance move=%s repeat=%d", move_name, repeat)
@@ -326,12 +328,12 @@ class StopDance(Tool):
             "dummy": {
                 "type": "boolean",
                 "description": "dummy boolean, set it to true",
-            }
+            },
         },
         "required": ["dummy"],
     }
 
-    async def __call__(self, deps: ToolDependencies, **kwargs) -> Dict[str, Any]:
+    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Stop the current dance move."""
         logger.info("Tool call: stop_dance")
         movement_manager = deps.movement_manager
@@ -373,7 +375,7 @@ class PlayEmotion(Tool):
         "required": ["emotion"],
     }
 
-    async def __call__(self, deps: ToolDependencies, **kwargs) -> Dict[str, Any]:
+    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Play a pre-recorded emotion."""
         if not EMOTION_AVAILABLE:
             return {"error": "Emotion system not available"}
@@ -399,7 +401,7 @@ class PlayEmotion(Tool):
 
         except Exception as e:
             logger.exception("Failed to play emotion")
-            return {"error": f"Failed to play emotion: {str(e)}"}
+            return {"error": f"Failed to play emotion: {e!s}"}
 
 
 class StopEmotion(Tool):
@@ -413,12 +415,12 @@ class StopEmotion(Tool):
             "dummy": {
                 "type": "boolean",
                 "description": "dummy boolean, set it to true",
-            }
+            },
         },
         "required": ["dummy"],
     }
 
-    async def __call__(self, deps: ToolDependencies, **kwargs) -> Dict[str, Any]:
+    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Stop the current emotion."""
         logger.info("Tool call: stop_emotion")
         movement_manager = deps.movement_manager
@@ -442,7 +444,7 @@ class DoNothing(Tool):
         "required": [],
     }
 
-    async def __call__(self, deps: ToolDependencies, **kwargs) -> Dict[str, Any]:
+    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Do nothing - stay still and silent."""
         reason = kwargs.get("reason", "just chilling")
         logger.info("Tool call: do_nothing reason=%s", reason)
@@ -452,12 +454,12 @@ class DoNothing(Tool):
 # Registry & specs (dynamic)
 
 # List of available tool classes
-ALL_TOOLS: Dict[str, Tool] = {cls.name: cls() for cls in get_concrete_subclasses(Tool)}
+ALL_TOOLS: Dict[str, Tool] = {cls.name: cls() for cls in get_concrete_subclasses(Tool)}  # type: ignore[type-abstract]
 ALL_TOOL_SPECS = [tool.spec() for tool in ALL_TOOLS.values()]
 
 
 # Dispatcher
-def _safe_load_obj(args_json: str) -> dict[str, Any]:
+def _safe_load_obj(args_json: str) -> Dict[str, Any]:
     try:
         parsed_args = json.loads(args_json or "{}")
         return parsed_args if isinstance(parsed_args, dict) else {}

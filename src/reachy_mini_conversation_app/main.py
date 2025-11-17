@@ -1,28 +1,29 @@
-"""Entrypoint for the Reachy Mini conversation demo."""
+"""Entrypoint for the Reachy Mini conversation app."""
 
 import os
 import sys
 import time
 import threading
+from typing import Any, Dict, List
 
 import gradio as gr
 from fastapi import FastAPI
 from fastrtc import Stream
 
 from reachy_mini import ReachyMini, ReachyMiniApp
-from reachy_mini_conversation_demo.moves import MovementManager
-from reachy_mini_conversation_demo.tools import ToolDependencies
-from reachy_mini_conversation_demo.utils import (
+from reachy_mini_conversation_app.moves import MovementManager
+from reachy_mini_conversation_app.tools import ToolDependencies
+from reachy_mini_conversation_app.utils import (
     parse_args,
     setup_logger,
     handle_vision_stuff,
 )
-from reachy_mini_conversation_demo.console import LocalStream
-from reachy_mini_conversation_demo.openai_realtime import OpenaiRealtimeHandler
-from reachy_mini_conversation_demo.audio.head_wobbler import HeadWobbler
+from reachy_mini_conversation_app.console import LocalStream
+from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
+from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
 
 
-def update_chatbot(chatbot: list[dict], response: dict):
+def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Update the chatbot with AdditionalOutputs."""
     chatbot.append(response)
     return chatbot
@@ -34,7 +35,7 @@ def main(robot=None):
     args.gradio = True  # TODO Antoine - force gradio for testing appifying
 
     logger = setup_logger(args.debug)
-    logger.info("Starting Reachy Mini Conversation Demo")
+    logger.info("Starting Reachy Mini Conversation App")
 
     if args.no_camera and args.head_tracker is not None:
         logger.warning("Head tracking is not activated due to --no-camera.")
@@ -45,7 +46,7 @@ def main(robot=None):
     # Check if running in simulation mode without --gradio
     if robot.client.get_status()["simulation_enabled"] and not args.gradio:
         logger.error(
-            "Simulation mode requires Gradio interface. Please use --gradio flag when running in simulation mode."
+            "Simulation mode requires Gradio interface. Please use --gradio flag when running in simulation mode.",
         )
         robot.client.disconnect()
         sys.exit(1)
@@ -80,7 +81,7 @@ def main(robot=None):
 
     handler = OpenaiRealtimeHandler(deps)
 
-    stream_manager = None
+    stream_manager: gr.Blocks | LocalStream | None = None
 
     if args.gradio:
         stream = Stream(

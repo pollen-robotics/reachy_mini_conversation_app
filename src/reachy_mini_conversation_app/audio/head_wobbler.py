@@ -5,11 +5,13 @@ import queue
 import base64
 import logging
 import threading
-from typing import Tuple, Optional
+from typing import Tuple
+from collections.abc import Callable
 
 import numpy as np
+from numpy.typing import NDArray
 
-from reachy_mini_conversation_demo.audio.speech_tapper import HOP_MS, SwayRollRT
+from reachy_mini_conversation_app.audio.speech_tapper import HOP_MS, SwayRollRT
 
 
 SAMPLE_RATE = 24000
@@ -20,13 +22,13 @@ logger = logging.getLogger(__name__)
 class HeadWobbler:
     """Converts audio deltas (base64) into head movement offsets."""
 
-    def __init__(self, set_speech_offsets):
+    def __init__(self, set_speech_offsets: Callable[[Tuple[float, float, float, float, float, float]], None]) -> None:
         """Initialize the head wobbler."""
         self._apply_offsets = set_speech_offsets
-        self._base_ts: Optional[float] = None
+        self._base_ts: float | None = None
         self._hops_done: int = 0
 
-        self.audio_queue: queue.Queue[Tuple[int, int, np.ndarray]] = queue.Queue()
+        self.audio_queue: "queue.Queue[Tuple[int, int, NDArray[np.int16]]]" = queue.Queue()
         self.sway = SwayRollRT()
 
         # Synchronization primitives
@@ -35,7 +37,7 @@ class HeadWobbler:
         self._generation = 0
 
         self._stop_event = threading.Event()
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
 
     def feed(self, delta_b64: str) -> None:
         """Thread-safe: push audio into the consumer queue."""
@@ -78,14 +80,14 @@ class HeadWobbler:
                 if chunk_generation != current_generation:
                     continue
 
-                pcm = np.asarray(chunk).squeeze(0)
-                with self._sway_lock:
-                    results = self.sway.feed(pcm, sr)
-
                 if self._base_ts is None:
                     with self._state_lock:
                         if self._base_ts is None:
-                            self._base_ts = time.time()
+                            self._base_ts = time.monotonic()
+
+                pcm = np.asarray(chunk).squeeze(0)
+                with self._sway_lock:
+                    results = self.sway.feed(pcm, sr)
 
                 i = 0
                 while i < len(results):
@@ -96,14 +98,14 @@ class HeadWobbler:
                         hops_done = self._hops_done
 
                     if base_ts is None:
-                        base_ts = time.time()
+                        base_ts = time.monotonic()
                         with self._state_lock:
                             if self._base_ts is None:
                                 self._base_ts = base_ts
                                 hops_done = self._hops_done
 
                     target = base_ts + MOVEMENT_LATENCY_S + hops_done * hop_dt
-                    now = time.time()
+                    now = time.monotonic()
 
                     if now - target >= hop_dt:
                         lag_hops = int((now - target) / hop_dt)

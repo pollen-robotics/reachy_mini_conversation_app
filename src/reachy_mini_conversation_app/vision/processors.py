@@ -3,16 +3,17 @@ import time
 import base64
 import logging
 import threading
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from dataclasses import dataclass
 
 import cv2
 import numpy as np
 import torch
+from numpy.typing import NDArray
 from transformers import AutoProcessor, AutoModelForImageTextToText
 from huggingface_hub import snapshot_download
 
-from reachy_mini_conversation_demo.config import config
+from reachy_mini_conversation_app.config import config
 
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ class VisionConfig:
 class VisionProcessor:
     """Handles SmolVLM2 model loading and inference."""
 
-    def __init__(self, vision_config: VisionConfig = None):
+    def __init__(self, vision_config: VisionConfig | None = None):
         """Initialize the vision processor."""
         self.vision_config = vision_config or VisionConfig()
         self.model_path = self.vision_config.model_path
@@ -60,7 +61,7 @@ class VisionProcessor:
         """Load model and processor onto the selected device."""
         try:
             logger.info(f"Loading SmolVLM2 model on {self.device} (HF_HOME={config.HF_HOME})")
-            self.processor = AutoProcessor.from_pretrained(self.model_path)
+            self.processor = AutoProcessor.from_pretrained(self.model_path)  # type: ignore[no-untyped-call]
 
             # Select dtype depending on device
             if self.device == "cuda":
@@ -70,16 +71,17 @@ class VisionProcessor:
             else:
                 dtype = torch.float32
 
-            model_kwargs = {"dtype": dtype}
+            model_kwargs: Dict[str, Any] = {"dtype": dtype}
 
             # flash_attention_2 is CUDA-only; skip on MPS/CPU
             if self.device == "cuda":
                 model_kwargs["_attn_implementation"] = "flash_attention_2"
 
             # Load model weights
-            self.model = AutoModelForImageTextToText.from_pretrained(self.model_path, **model_kwargs).to(self.device)
+            self.model = AutoModelForImageTextToText.from_pretrained(self.model_path, **model_kwargs).to(self.device)  # type: ignore[arg-type]
 
-            self.model.eval()
+            if self.model is not None:
+                self.model.eval()
             self._initialized = True
             return True
 
@@ -89,11 +91,11 @@ class VisionProcessor:
 
     def process_image(
         self,
-        cv2_image: np.ndarray,
+        cv2_image: NDArray[np.uint8],
         prompt: str = "Briefly describe what you see in one sentence.",
     ) -> str:
         """Process CV2 image and return description with retry logic."""
-        if not self._initialized:
+        if not self._initialized or self.processor is None or self.model is None:
             return "Vision model not initialized"
 
         for attempt in range(self.vision_config.max_retries):
@@ -205,16 +207,16 @@ class VisionProcessor:
 class VisionManager:
     """Manages periodic vision processing and scene understanding."""
 
-    def __init__(self, camera, vision_config: VisionConfig = None):
+    def __init__(self, camera: Any, vision_config: VisionConfig | None = None):
         """Initialize vision manager with camera and configuration."""
         self.camera = camera
         self.vision_config = vision_config or VisionConfig()
         self.vision_interval = self.vision_config.vision_interval
         self.processor = VisionProcessor(self.vision_config)
 
-        self._last_processed_time = 0
+        self._last_processed_time = 0.0
         self._stop_event = threading.Event()
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
 
         # Initialize processor
         if not self.processor.initialize():
@@ -245,7 +247,7 @@ class VisionManager:
                     frame = self.camera.get_latest_frame()
                     if frame is not None:
                         description = self.processor.process_image(
-                            frame, "Briefly describe what you see in one sentence."
+                            frame, "Briefly describe what you see in one sentence.",
                         )
 
                         # Only update if we got a valid response
@@ -274,7 +276,7 @@ class VisionManager:
         }
 
 
-def initialize_vision_manager(camera_worker) -> Optional[VisionManager]:
+def initialize_vision_manager(camera_worker: Any) -> VisionManager | None:
     """Initialize vision manager with model download and configuration.
 
     Args:
@@ -318,7 +320,7 @@ def initialize_vision_manager(camera_worker) -> Optional[VisionManager]:
         # Log device info
         device_info = vision_manager.processor.get_model_info()
         logger.info(
-            f"Vision processing enabled: {device_info.get('model_path')} on {device_info.get('device')}"
+            f"Vision processing enabled: {device_info.get('model_path')} on {device_info.get('device')}",
         )
 
         return vision_manager

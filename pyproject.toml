@@ -3,7 +3,7 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "reachy_mini_conversation_demo"
+name = "reachy_mini_conversation_app"
 version = "0.1.0"
 authors = [{ name = "Pollen Robotics", email = "contact@pollen-robotics.com" }]
 description = ""
@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 dependencies = [
     #Media
     "aiortc>=1.13.0",
-    "fastrtc@git+ssh://git@github.com/gradio-app/fastrtc.git@main",
+    "fastrtc>=0.0.33",
     "gradio>=5.49.0",
     "huggingface_hub>=0.34.4",
     "opencv-python>=4.12.0.88",
@@ -23,7 +23,7 @@ dependencies = [
     #OpenAI
     "openai>=2.1",
 
-    #Reachy mini    
+    #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
     "reachy_mini>=1.0.0.rc5",
@@ -34,16 +34,23 @@ local_vision = ["torch", "transformers", "num2words"]
 yolo_vision = ["ultralytics", "supervision"]
 mediapipe_vision = ["mediapipe>=0.10.14"]
 all_vision = [
-  "reachy_mini_conversation_demo[local_vision]",
-  "reachy_mini_conversation_demo[yolo_vision]",
-  "reachy_mini_conversation_demo[mediapipe_vision]",
+  "torch", "transformers", "num2words",
+  "ultralytics", "supervision",
+  "mediapipe>=0.10.14",
 ]
 
 [dependency-groups]
-dev = ["pytest", "ruff==0.12.0"]
+dev = [
+  "pytest",
+  "pytest-asyncio",
+  "ruff==0.12.0",
+  "mypy==1.18.2",
+  "pre-commit",
+  "types-requests",
+]
 
 [project.scripts]
-reachy-mini-conversation-demo = "reachy_mini_conversation_demo.main:main"
+reachy-mini-conversation-app = "reachy_mini_conversation_app.main:main"
 
 [project.entry-points."reachy_mini_apps"]
 reachy_mini_conversation_demo_app = "reachy_mini_conversation_demo.main:ReachyMiniConversationDemo"
@@ -56,7 +63,7 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-reachy_mini_conversation_demo = ["images/*"]
+reachy_mini_conversation_app = ["images/*"]
 
 [tool.ruff]
 line-length = 119
@@ -82,7 +89,7 @@ ignore = [
 length-sort = true
 lines-after-imports = 2
 no-lines-before = ["standard-library", "local-folder"]
-known-local-folder = ["reachy_mini_conversation_demo"]
+known-local-folder = ["reachy_mini_conversation_app"]
 known-first-party = ["reachy_mini", "reachy_mini_dances_library", "reachy_mini_toolbox"]
 split-on-trailing-comma = true
 
@@ -91,3 +98,11 @@ quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src/"]
+ignore_missing_imports = true
+strict = true
+show_error_codes = true
+warn_unused_ignores = true

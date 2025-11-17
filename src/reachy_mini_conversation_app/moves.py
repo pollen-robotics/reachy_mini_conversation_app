@@ -36,11 +36,12 @@ import time
 import logging
 import threading
 from queue import Empty, Queue
-from typing import Any, Tuple, Optional
+from typing import Any, Dict, Tuple
 from collections import deque
 from dataclasses import dataclass
 
 import numpy as np
+from numpy.typing import NDArray
 
 from reachy_mini import ReachyMini
 from reachy_mini.utils import create_head_pose
@@ -57,15 +58,15 @@ logger = logging.getLogger(__name__)
 CONTROL_LOOP_FREQUENCY_HZ = 100.0  # Hz - Target frequency for the movement control loop
 
 # Type definitions
-FullBodyPose = Tuple[np.ndarray, Tuple[float, float], float]  # (head_pose_4x4, antennas, body_yaw)
+FullBodyPose = Tuple[NDArray[np.float32], Tuple[float, float], float]  # (head_pose_4x4, antennas, body_yaw)
 
 
-class BreathingMove(Move):
+class BreathingMove(Move):  # type: ignore
     """Breathing move with interpolation to neutral and then continuous breathing patterns."""
 
     def __init__(
         self,
-        interpolation_start_pose: np.ndarray,
+        interpolation_start_pose: NDArray[np.float32],
         interpolation_start_antennas: Tuple[float, float],
         interpolation_duration: float = 1.0,
     ):
@@ -96,7 +97,7 @@ class BreathingMove(Move):
         """Duration property required by official Move interface."""
         return float("inf")  # Continuous breathing (never ends naturally)
 
-    def evaluate(self, t: float) -> tuple[np.ndarray | None, np.ndarray | None, float | None]:
+    def evaluate(self, t: float) -> tuple[NDArray[np.float64] | None, NDArray[np.float64] | None, float | None]:
         """Evaluate breathing move at time t."""
         if t < self.interpolation_duration:
             # Phase 1: Interpolate to neutral base position
@@ -104,13 +105,14 @@ class BreathingMove(Move):
 
             # Interpolate head pose
             head_pose = linear_pose_interpolation(
-                self.interpolation_start_pose, self.neutral_head_pose, interpolation_t
+                self.interpolation_start_pose, self.neutral_head_pose, interpolation_t,
             )
 
             # Interpolate antennas
-            antennas = (
+            antennas_interp = (
                 1 - interpolation_t
             ) * self.interpolation_start_antennas + interpolation_t * self.neutral_antennas
+            antennas = antennas_interp.astype(np.float64)
 
         else:
             # Phase 2: Breathing patterns from neutral base
@@ -122,7 +124,7 @@ class BreathingMove(Move):
 
             # Antenna sway (opposite directions)
             antenna_sway = self.antenna_sway_amplitude * np.sin(2 * np.pi * self.antenna_frequency * breathing_time)
-            antennas = np.array([antenna_sway, -antenna_sway])
+            antennas = np.array([antenna_sway, -antenna_sway], dtype=np.float64)
 
         # Return in official Move interface format: (head_pose, antennas_array, body_yaw)
         return (head_pose, antennas, 0.0)
@@ -168,8 +170,8 @@ class MovementState:
     """State tracking for the movement system."""
 
     # Primary move state
-    current_move: Optional[Move] = None
-    move_start_time: Optional[float] = None
+    current_move: Move | None = None
+    move_start_time: float | None = None
     last_activity_time: float = 0.0
 
     # Secondary move state (offsets)
@@ -191,7 +193,7 @@ class MovementState:
     )
 
     # Status flags
-    last_primary_pose: Optional[FullBodyPose] = None
+    last_primary_pose: FullBodyPose | None = None
 
     def update_activity(self) -> None:
         """Update the last activity time."""
@@ -242,7 +244,7 @@ class MovementManager:
     def __init__(
         self,
         current_robot: ReachyMini,
-        camera_worker=None,
+        camera_worker: "Any" = None,
     ):
         """Initialize movement manager."""
         self.current_robot = current_robot
@@ -258,7 +260,7 @@ class MovementManager:
         self.state.last_primary_pose = (neutral_pose, (0.0, 0.0), 0.0)
 
         # Move queue (primary moves)
-        self.move_queue = deque()
+        self.move_queue: deque[Move] = deque()
 
         # Configuration
         self.idle_inactivity_delay = 0.3  # seconds
@@ -266,7 +268,7 @@ class MovementManager:
         self.target_period = 1.0 / self.target_frequency
 
         self._stop_event = threading.Event()
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._is_listening = False
         self._last_commanded_pose: FullBodyPose = clone_full_body_pose(self.state.last_primary_pose)
         self._listening_antennas: Tuple[float, float] = self._last_commanded_pose[1]
@@ -281,7 +283,7 @@ class MovementManager:
         self._set_target_err_suppressed = 0
 
         # Cross-thread signalling
-        self._command_queue: Queue[tuple[str, Any]] = Queue()
+        self._command_queue: "Queue[Tuple[str, Any]]" = Queue()
         self._speech_offsets_lock = threading.Lock()
         self._pending_speech_offsets: Tuple[float, float, float, float, float, float] = (
             0.0,
@@ -383,7 +385,7 @@ class MovementManager:
 
     def _apply_pending_offsets(self) -> None:
         """Apply the most recent speech/face offset updates."""
-        speech_offsets: Optional[Tuple[float, float, float, float, float, float]] = None
+        speech_offsets: Tuple[float, float, float, float, float, float] | None = None
         with self._speech_offsets_lock:
             if self._speech_offsets_dirty:
                 speech_offsets = self._pending_speech_offsets
@@ -393,7 +395,7 @@ class MovementManager:
             self.state.speech_offsets = speech_offsets
             self.state.update_activity()
 
-        face_offsets: Optional[Tuple[float, float, float, float, float, float]] = None
+        face_offsets: Tuple[float, float, float, float, float, float] | None = None
         with self._face_offsets_lock:
             if self._face_offsets_dirty:
                 face_offsets = self._pending_face_offsets
@@ -549,14 +551,13 @@ class MovementManager:
             )
 
             self.state.last_primary_pose = clone_full_body_pose(primary_full_body_pose)
+        # Otherwise reuse the last primary pose so we avoid jumps between moves
+        elif self.state.last_primary_pose is not None:
+            primary_full_body_pose = clone_full_body_pose(self.state.last_primary_pose)
         else:
-            # Otherwise reuse the last primary pose so we avoid jumps between moves
-            if self.state.last_primary_pose is not None:
-                primary_full_body_pose = clone_full_body_pose(self.state.last_primary_pose)
-            else:
-                neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
-                primary_full_body_pose = (neutral_head_pose, (0.0, 0.0), 0.0)
-                self.state.last_primary_pose = clone_full_body_pose(primary_full_body_pose)
+            neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
+            primary_full_body_pose = (neutral_head_pose, (0.0, 0.0), 0.0)
+            self.state.last_primary_pose = clone_full_body_pose(primary_full_body_pose)
 
         return primary_full_body_pose
 
@@ -631,7 +632,7 @@ class MovementManager:
 
         return antennas_cmd
 
-    def _issue_control_command(self, head: np.ndarray, antennas: Tuple[float, float], body_yaw: float) -> None:
+    def _issue_control_command(self, head: NDArray[np.float32], antennas: Tuple[float, float], body_yaw: float) -> None:
         """Send the fused pose to the robot with throttled error logging."""
         try:
             self.current_robot.set_target(head=head, antennas=antennas, body_yaw=body_yaw)
@@ -651,7 +652,7 @@ class MovementManager:
                 self._last_commanded_pose = clone_full_body_pose((head, antennas, body_yaw))
 
     def _update_frequency_stats(
-        self, loop_start: float, prev_loop_start: float, stats: LoopFrequencyStats
+        self, loop_start: float, prev_loop_start: float, stats: LoopFrequencyStats,
     ) -> LoopFrequencyStats:
         """Update frequency statistics based on the current loop start time."""
         period = loop_start - prev_loop_start
@@ -664,7 +665,7 @@ class MovementManager:
             stats.min_freq = min(stats.min_freq, stats.last_freq)
         return stats
 
-    def _schedule_next_tick(self, loop_start: float, stats: LoopFrequencyStats) -> tuple[float, LoopFrequencyStats]:
+    def _schedule_next_tick(self, loop_start: float, stats: LoopFrequencyStats) -> Tuple[float, LoopFrequencyStats]:
         """Compute sleep time to maintain target frequency and update potential freq."""
         computation_time = self._now() - loop_start
         stats.potential_freq = 1.0 / computation_time if computation_time > 0 else float("inf")
@@ -729,7 +730,7 @@ class MovementManager:
             self._thread = None
         logger.debug("Move worker stopped")
 
-    def get_status(self) -> dict[str, Any]:
+    def get_status(self) -> Dict[str, Any]:
         """Return a lightweight status snapshot for observability."""
         with self._status_lock:
             pose_snapshot = clone_full_body_pose(self._last_commanded_pose)

@@ -1,10 +1,11 @@
 from __future__ import annotations
 import math
-from typing import Dict, List, Optional
+from typing import Any, Dict, List
 from itertools import islice
 from collections import deque
 
 import numpy as np
+from numpy.typing import NDArray
 
 
 # Tunables
@@ -48,7 +49,7 @@ SWAY_ATTACK_FR = max(1, int(SWAY_ATTACK_MS / HOP_MS))
 SWAY_RELEASE_FR = max(1, int(SWAY_RELEASE_MS / HOP_MS))
 
 
-def _rms_dbfs(x: np.ndarray) -> float:
+def _rms_dbfs(x: NDArray[np.float32]) -> float:
     """Root-mean-square in dBFS for float32 mono array in [-1,1]."""
     # numerically stable rms (avoid overflow)
     x = x.astype(np.float32, copy=False)
@@ -66,7 +67,7 @@ def _loudness_gain(db: float, offset: float = SENS_DB_OFFSET) -> float:
     return t**LOUDNESS_GAMMA if LOUDNESS_GAMMA != 1.0 else t
 
 
-def _to_float32_mono(x: np.ndarray) -> np.ndarray:
+def _to_float32_mono(x: NDArray[Any]) -> NDArray[np.float32]:
     """Convert arbitrary PCM array to float32 mono in [-1,1].
 
     Accepts shapes: (N,), (1,N), (N,1), (C,N), (N,C).
@@ -94,7 +95,7 @@ def _to_float32_mono(x: np.ndarray) -> np.ndarray:
     return a.astype(np.float32) / (scale if scale != 0.0 else 1.0)
 
 
-def _resample_linear(x: np.ndarray, sr_in: int, sr_out: int) -> np.ndarray:
+def _resample_linear(x: NDArray[np.float32], sr_in: int, sr_out: int) -> NDArray[np.float32]:
     """Lightweight linear resampler for short buffers."""
     if sr_in == sr_out or x.size == 0:
         return x
@@ -118,8 +119,8 @@ class SwayRollRT:
     def __init__(self, rng_seed: int = 7):
         """Initialize state."""
         self._seed = int(rng_seed)
-        self.samples = deque(maxlen=10 * SR)  # sliding window for VAD/env
-        self.carry = np.zeros(0, dtype=np.float32)
+        self.samples: deque[float] = deque(maxlen=10 * SR)  # sliding window for VAD/env
+        self.carry: NDArray[np.float32] = np.zeros(0, dtype=np.float32)
 
         self.vad_on = False
         self.vad_above = 0
@@ -150,7 +151,7 @@ class SwayRollRT:
         self.sway_down = 0
         self.t = 0.0
 
-    def feed(self, pcm: np.ndarray, sr: Optional[int]) -> List[Dict[str, float]]:
+    def feed(self, pcm: NDArray[Any], sr: int | None) -> List[Dict[str, float]]:
         """Stream in PCM chunk. Returns a list of sway dicts, one per hop (HOP_MS).
 
         Args:
@@ -177,7 +178,8 @@ class SwayRollRT:
 
         while self.carry.size >= HOP:
             hop = self.carry[:HOP]
-            self.carry = self.carry[HOP:]
+            remaining: NDArray[np.float32] = self.carry[HOP:]
+            self.carry = remaining
 
             # keep sliding window for VAD/env computation
             # (deque accepts any iterable; list() for small HOP is fine)
@@ -260,7 +262,7 @@ class SwayRollRT:
                     "x_mm": x_mm,
                     "y_mm": y_mm,
                     "z_mm": z_mm,
-                }
+                },
             )
 
         return out
