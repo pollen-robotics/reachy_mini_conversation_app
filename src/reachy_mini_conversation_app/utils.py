@@ -24,6 +24,12 @@ def parse_args() -> argparse.Namespace:
         help="Use local vision model instead of gpt-realtime vision",
     )
     parser.add_argument("--gradio", default=False, action="store_true", help="Open gradio interface")
+    parser.add_argument(
+        "--cascade",
+        default=False,
+        action="store_true",
+        help="Use cascade pipeline (ASR→LLM→TTS) instead of a realtime autio-to-audio API",
+    )
     parser.add_argument("--debug", default=False, action="store_true", help="Enable debug logging")
     return parser.parse_args()
 
@@ -79,6 +85,9 @@ def setup_logger(debug: bool) -> logging.Logger:
         format="%(asctime)s %(levelname)s %(name)s:%(lineno)d | %(message)s",
     )
     logger = logging.getLogger(__name__)
+
+    # Suppress verbose debug logging from numba because of sound processing
+    logging.getLogger("numba").setLevel(logging.WARNING)
 
     # Suppress WebRTC warnings
     warnings.filterwarnings("ignore", message=".*AVCaptureDeviceTypeExternal.*")

@@ -20,6 +20,8 @@ from reachy_mini_conversation_app.tools.core_tools import (
     get_tool_specs,
     dispatch_tool_call,
 )
+from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.prompts import get_session_instructions
 
 
 logger = logging.getLogger(__name__)

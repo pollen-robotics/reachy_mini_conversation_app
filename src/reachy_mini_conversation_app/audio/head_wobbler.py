@@ -46,6 +46,13 @@ class HeadWobbler:
             generation = self._generation
         self.audio_queue.put((generation, SAMPLE_RATE, buf))
 
+    def feed_pcm(self, pcm_bytes: bytes) -> None:
+        """Thread-safe: push raw PCM audio bytes into the consumer queue."""
+        buf = np.frombuffer(pcm_bytes, dtype=np.int16).reshape(1, -1)
+        with self._state_lock:
+            generation = self._generation
+        self.audio_queue.put((generation, SAMPLE_RATE, buf))
+
     def start(self) -> None:
         """Start the head wobbler loop in a thread."""
         self._stop_event.clear()

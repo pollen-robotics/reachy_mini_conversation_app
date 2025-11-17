@@ -20,6 +20,9 @@ dependencies = [
     #Environment variables
     "python-dotenv",
 
+    #Configuration
+    "pyyaml>=6.0",
+
     #OpenAI
     "openai>=2.1",
 
@@ -40,6 +43,23 @@ all_vision = [
   "torch", "transformers", "num2words",
   "ultralytics", "supervision",
   "mediapipe>=0.10.14",
+]
+
+cascade = ["sounddevice>=0.4.6", "librosa>=0.10.0"]
+cascade_parakeet = ["parakeet-mlx>=0.4.0", "ffmpeg-python>=0.2.0"]
+cascade_kokoro = ["kokoro>=0.9.4"]
+cascade_elevenlabs = ["elevenlabs>=1.0.0"]
+cascade_gemini = ["google-genai>=0.6.0"]
+cascade_deepgram = ["deepgram-sdk>=3.0.0,<4.0.0"]
+cascade_gliner = ["gliner>=0.2.0"]
+cascade_all = [
+  "reachy_mini_conversation_app[cascade]",
+  "reachy_mini_conversation_app[cascade_parakeet]",
+  "reachy_mini_conversation_app[cascade_kokoro]",
+  "reachy_mini_conversation_app[cascade_elevenlabs]",
+  "reachy_mini_conversation_app[cascade_gemini]",
+  "reachy_mini_conversation_app[cascade_deepgram]",
+  "reachy_mini_conversation_app[cascade_gliner]",
 ]
 
 [dependency-groups]

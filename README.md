@@ -44,6 +44,16 @@ uv sync --extra mediapipe_vision     # For MediaPipe-based vision
 uv sync --extra all_vision           # For all vision features
 ```
 
+To include dependencies for the cascade of models:
+```
+uv sync --extra cascade             # For cascade pipeline (base, includes OpenAI providers)
+uv sync --extra cascade_parakeet    # Add Parakeet ASR (local, Apple Silicon)
+uv sync --extra cascade_kokoro      # Add Kokoro TTS (local, Apple Silicon)
+uv sync --extra cascade_elevenlabs  # Add ElevenLabs TTS
+uv sync --extra cascade_gemini      # Add Google Gemini LLM
+uv sync --extra cascade_all         # All cascade providers
+```
+
 You can combine extras or include dev dependencies:
 ```
 uv sync --extra all_vision --group dev
@@ -69,6 +79,14 @@ pip install -e .[yolo_vision]
 pip install -e .[mediapipe_vision]
 pip install -e .[all_vision]        # installs every vision extra
 
+# Cascade pipeline providers
+pip install -e .[cascade]            # Base cascade (includes OpenAI providers)
+pip install -e .[cascade_parakeet]   # Add Parakeet ASR (local, Apple Silicon)
+pip install -e .[cascade_kokoro]     # Add Kokoro TTS (local, Apple Silicon)
+pip install -e .[cascade_elevenlabs] # Add ElevenLabs TTS
+pip install -e .[cascade_gemini]     # Add Google Gemini LLM
+pip install -e .[cascade_all]        # All cascade providers
+
 # Tooling for development workflows
 pip install -e .[dev]
 ```
@@ -84,6 +102,12 @@ Some wheels (e.g. PyTorch) are large and require compatible CUDA or CPU buildsâ€
 | `yolo_vision` | YOLOv8 tracking via `ultralytics` and `supervision`. | CPU friendly; supports the `--head-tracker yolo` option.
 | `mediapipe_vision` | Lightweight landmark tracking with MediaPipe. | Works on CPU; enables `--head-tracker mediapipe`.
 | `all_vision` | Convenience alias installing every vision extra. | Install when you want the flexibility to experiment with every provider.
+| `cascade` | Base cascade pipeline (includes OpenAI providers). | Required for `--cascade` mode; includes sounddevice. OpenAI Whisper, GPT, and TTS work out of the box.
+| `cascade_parakeet` | Parakeet ASR provider (local, Apple Silicon). | Fast local ASR; requires MLX (Apple Silicon only).
+| `cascade_kokoro` | Kokoro TTS provider (local, Apple Silicon). | Fast local TTS; requires MLX (Apple Silicon only).
+| `cascade_elevenlabs` | ElevenLabs TTS provider (cloud). | High-quality TTS; requires ElevenLabs API key.
+| `cascade_gemini` | Google Gemini LLM provider (cloud). | Alternative to GPT; requires Gemini API key.
+| `cascade_all` | All cascade providers. | Install everything to have maximum flexibility in cascade.yaml.
 | `dev` | Developer tooling (`pytest`, `ruff`). | Add on top of either base or `all_vision` environments.
 
 ## Configuration
@@ -93,7 +117,7 @@ Some wheels (e.g. PyTorch) are large and require compatible CUDA or CPU buildsâ€
 
 | Variable | Description |
 |----------|-------------|
-| `OPENAI_API_KEY` | Required. Grants access to the OpenAI realtime endpoint.
+| `OPENAI_API_KEY` | Required. Grants access to the OpenAI realtime endpoint and cascade pipeline APIs.
 | `MODEL_NAME` | Override the realtime model (defaults to `gpt-realtime`). Used for both conversation and vision (unless `--local-vision` flag is used).
 | `HF_HOME` | Cache directory for local Hugging Face downloads (only used with `--local-vision` flag, defaults to `./cache`).
 | `HF_TOKEN` | Optional token for Hugging Face models (only used with `--local-vision` flag, falls back to `huggingface-cli login`).
@@ -116,6 +140,7 @@ By default, the app runs in console mode for direct audio interaction. Use the `
 | `--head-tracker {yolo,mediapipe}` | `None` | Select a face-tracking backend when a camera is available. YOLO is implemented locally, MediaPipe comes from the `reachy_mini_toolbox` package. Requires the matching optional extra. |
 | `--no-camera` | `False` | Run without camera capture or face tracking. |
 | `--local-vision` | `False` | Use local vision model (SmolVLM2) for periodic image processing instead of gpt-realtime vision. Requires `local_vision` extra to be installed. |
+| `--cascade` | `False` | Use cascade pipeline (ASRâ†’LLMâ†’TTS) instead of OpenAI Realtime API. Requires `cascade` extra and `--gradio` flag. |
 | `--gradio` | `False` | Launch the Gradio web UI. Without this flag, runs in console mode. Required when running in simulation mode. |
 | `--debug` | `False` | Enable verbose logging for troubleshooting. |
 
@@ -138,6 +163,14 @@ By default, the app runs in console mode for direct audio interaction. Use the `
   ```bash
   reachy-mini-conversation-app --no-camera
   ```
+
+- Run with cascade pipeline and Gradio web UI (requires `cascade` extra):
+
+  ```bash
+  reachy-mini-conversation-demo --cascade --gradio
+  ```
+  
+  Note: Cascade mode currently only supports Gradio UI. Console mode with VAD is planned for future.
 
 ## LLM tools exposed to the assistant
 
