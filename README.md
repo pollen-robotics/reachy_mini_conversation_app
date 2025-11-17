@@ -1,5 +1,5 @@
 ---
-title: Reachy Mini Conversation Demo
+title: Reachy Mini Conversation App
 emoji: 🎤
 colorFrom: red
 colorTo: blue
