@@ -2,13 +2,14 @@
 
 import os
 import sys
-import time
+import asyncio
 import threading
 from typing import Any, Dict, List
 
 import gradio as gr
 from fastapi import FastAPI
 from fastrtc import Stream
+from gradio.utils import get_space
 
 from reachy_mini import ReachyMini, ReachyMiniApp
 from reachy_mini_conversation_app.moves import MovementManager
@@ -18,6 +19,7 @@ from reachy_mini_conversation_app.utils import (
     setup_logger,
     handle_vision_stuff,
 )
+from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.console import LocalStream
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
@@ -29,7 +31,8 @@ def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> L
     return chatbot
 
 
-def main(robot=None):
+# TODO handle stop event properly
+def main(robot=None, stop_event=None):
     """Entrypoint for the Reachy Mini conversation demo."""
     args = parse_args()
     args.gradio = True  # TODO Antoine - force gradio for testing appifying
@@ -84,11 +87,16 @@ def main(robot=None):
     stream_manager: gr.Blocks | LocalStream | None = None
 
     if args.gradio:
+        api_key_textbox = gr.Textbox(
+            label="API Key",
+            type="password",
+            value=os.getenv("OPENAI_API_KEY") if not get_space() else "",
+        )
         stream = Stream(
             handler=handler,
             mode="send-receive",
             modality="audio",
-            additional_inputs=[chatbot],
+            additional_inputs=[chatbot, api_key_textbox],
             additional_outputs=[chatbot],
             additional_outputs_handler=update_chatbot,
             ui_args={"title": "Talk with Reachy Mini"},
@@ -133,9 +141,10 @@ class ReachyMiniConversationApp(ReachyMiniApp):
 
     def run(self, reachy_mini: ReachyMini, stop_event: threading.Event):
         """Run the Reachy Mini conversation demo app."""
-        while not stop_event.is_set():
-            main(robot=reachy_mini)
-            time.sleep(1)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        main(robot=reachy_mini, stop_event=stop_event)
 
 
 if __name__ == "__main__":

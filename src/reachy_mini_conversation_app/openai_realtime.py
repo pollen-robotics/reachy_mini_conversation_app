@@ -71,7 +71,15 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
     async def start_up(self) -> None:
         """Start the handler with minimal retries on unexpected websocket closure."""
-        self.client = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+        await self.wait_for_args()
+        args = list(self.latest_args)
+        textbox_api_key = args[3] if len(args[3]) > 0 else None
+        if textbox_api_key is not None:
+            openai_api_key = textbox_api_key
+        else:
+            openai_api_key = config.OPENAI_API_KEY
+
+        self.client = AsyncOpenAI(api_key=openai_api_key)
 
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
@@ -81,10 +89,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 return
             except ConnectionClosedError as e:
                 # Abrupt close (e.g., "no close frame received or sent") → retry
-                logger.warning(
-                    "Realtime websocket closed unexpectedly (attempt %d/%d): %s",
-                    attempt, max_attempts, e
-                )
+                logger.warning("Realtime websocket closed unexpectedly (attempt %d/%d): %s", attempt, max_attempts, e)
                 if attempt < max_attempts:
                     # exponential backoff with jitter
                     base_delay = 2 ** (attempt - 1)  # 1s, 2s, 4s, 8s, etc.
@@ -112,10 +117,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                     "type": "audio/pcm",
                                     "rate": self.target_input_rate,
                                 },
-                                "transcription": {
-                                    "model": "whisper-1",
-                                    "language": "en"
-                                },
+                                "transcription": {"model": "whisper-1", "language": "en"},
                                 "turn_detection": {
                                     "type": "server_vad",
                                     "interrupt_response": True,
@@ -156,10 +158,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     logger.debug("User speech stopped - server will auto-commit with VAD")
 
                 if event.type in (
-                    "response.audio.done",            # GA
-                    "response.output_audio.done",     # GA alias
-                    "response.audio.completed",       # legacy (for safety)
-                    "response.completed",             # text-only completion
+                    "response.audio.done",  # GA
+                    "response.output_audio.done",  # GA alias
+                    "response.audio.completed",  # legacy (for safety)
+                    "response.completed",  # text-only completion
                 ):
                     logger.debug("response completed")
 
@@ -296,7 +298,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
                     # Only show user-facing errors, not internal state errors
                     if code not in ("input_audio_buffer_commit_empty", "conversation_already_has_active_response"):
-                        await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": f"[error] {msg}"}))
+                        await self.output_queue.put(
+                            AdditionalOutputs({"role": "assistant", "content": f"[error] {msg}"})
+                        )
 
     # Microphone receive
     async def receive(self, frame: Tuple[int, NDArray[np.int16]]) -> None:
