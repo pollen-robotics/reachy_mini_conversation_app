@@ -83,7 +83,7 @@ class HeadWobbler:
                 if self._base_ts is None:
                     with self._state_lock:
                         if self._base_ts is None:
-                            self._base_ts = time.time()
+                            self._base_ts = time.monotonic()
 
                 pcm = np.asarray(chunk).squeeze(0)
                 with self._sway_lock:
@@ -98,14 +98,14 @@ class HeadWobbler:
                         hops_done = self._hops_done
 
                     if base_ts is None:
-                        base_ts = time.time()
+                        base_ts = time.monotonic()
                         with self._state_lock:
                             if self._base_ts is None:
                                 self._base_ts = base_ts
                                 hops_done = self._hops_done
 
                     target = base_ts + MOVEMENT_LATENCY_S + hops_done * hop_dt
-                    now = time.time()
+                    now = time.monotonic()
 
                     if now - target >= hop_dt:
                         lag_hops = int((now - target) / hop_dt)
