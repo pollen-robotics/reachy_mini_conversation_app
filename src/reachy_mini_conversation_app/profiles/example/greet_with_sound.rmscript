@@ -1,0 +1,13 @@
+# This is an example of rmscript to greet someone with sound and movement
+
+# Description of the tool, will be passed to the LLM
+DESCRIPTION Greet someone with sound and movement
+
+# Play greeting sound and wait for it to finish
+antenna both up
+antenna both down
+wait 2s
+play yummy pause
+antenna both up
+play yummy
+antenna both down slow

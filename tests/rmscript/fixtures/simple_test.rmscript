@@ -1,0 +1,4 @@
+DESCRIPTION Test basic movements
+look left
+wait 1s
+look right

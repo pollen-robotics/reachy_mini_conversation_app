@@ -535,6 +535,15 @@ class MovementManager:
             move_time = current_time - self.state.move_start_time
             head, antennas, body_yaw = self.state.current_move.evaluate(move_time)
 
+            # If ALL values are None, this is a "hold" move (e.g., SoundQueueMove or PictureQueueMove)
+            # that wants to maintain the current pose without any motion.
+            # In this case, reuse the last primary pose to avoid jumping to neutral.
+            if head is None and antennas is None and body_yaw is None:
+                if self.state.last_primary_pose is not None:
+                    return clone_full_body_pose(self.state.last_primary_pose)
+                # If no last pose exists, fall through to create neutral pose
+
+            # Replace individual None values with neutral pose components
             if head is None:
                 head = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
             if antennas is None:

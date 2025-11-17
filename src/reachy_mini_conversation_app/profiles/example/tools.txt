@@ -12,3 +12,8 @@ stop_emotion
 # AN EXAMPLE OF A CUSTOM TOOL DEFINED LOCALLY
 sweep_look
 
+# AN EXAMPLE OF RMSCRIPT
+check_behind
+# greet_with_sound
+# antennas_dance
+

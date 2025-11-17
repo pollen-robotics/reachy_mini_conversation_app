@@ -1,0 +1,16 @@
+# This is an example of rmscript to check behind the robot and take a picture
+
+# Description of the tool, will be passed to the LLM
+DESCRIPTION Robot turns around to look behind itself and take a picture with its camera
+
+# Turn to look behind
+turn left 180
+wait 0.5s
+
+# Take a picture
+play camera_shutter
+picture
+
+# Return to center
+wait 1s
+turn center

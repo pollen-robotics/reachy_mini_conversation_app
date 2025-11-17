@@ -184,7 +184,202 @@ On top of built-in tools found in the shared library, you can implement custom t
 Custom tools must subclass `reachy_mini_conversation_app.tools.core_tools.Tool` (see `profiles/example/sweep_look.py`).
 
 
+#### Local custom tools using the rmscript scripting language
+You can define custom tools using the `rmscript` scripting language and add them to tools.txt like the other tools.
+See examples in the `src/reachy_mini_conversation_app/profiles/example/` profile.
 
+## RMscript language
+
+rmscript is a natural language-inspired programming language designed to make robot programming accessible and fun for children. It compiles to Python code that controls the Reachy Mini robot.
+
+Example, create a `hello.rmscript` file with the following content:
+```rmscript
+DESCRIPTION Wave hello to someone
+antenna up
+wait 1s
+antenna down
+look left
+look right
+look center
+```
+
+Test the script using the provided runner (after starting the reachy-mini-daemon):
+
+```
+python src/reachy_mini_conversation_app/rmscript/run_rmscript.py path/to/hello.rmscript
+```
+
+### File Structure
+
+Every rmscript file has a simple structure:
+
+```rmscript
+DESCRIPTION Wave hello to someone
+# Your commands here
+look left
+wait 1s
+```
+
+- **Tool name**: Automatically derived from the filename (e.g., `wave_hello.rmscript` → tool name is `wave_hello`) Don't forget to add it to the tools.txt file to have the tool actually loaded.
+- **DESCRIPTION** (optional): One-line description used for LLM tool registration
+
+You can use # to add comments throughout the script.
+
+
+### Basic Commands
+
+```rmscript
+# Comments start with #
+
+# Movement commands
+look left
+turn right
+antenna up
+head forward 10
+
+# Wait command
+wait 2s
+wait 0.5s
+
+# Camera command
+picture
+
+# Sound playback
+play mysound
+play othersound pause
+```
+
+rmscript is case-insensitive for keywords.
+
+### Look (Head Orientation)
+
+Control the robot's head orientation (pitch and yaw):
+
+```rmscript
+look left          # Turn head left (30° default)
+look right 45      # Turn head right 45°
+look up           # Tilt head up (30° default)
+look down 20      # Tilt head down 20°
+look center       # Return to center position
+
+# Synonyms
+look straight     # Same as center
+look neutral      # Same as center
+```
+
+
+### Turn (Body Rotation)
+
+Rotate the robot's body (the head rotates together with the body):
+
+```rmscript
+turn left         # Rotate body and head left (30° default)
+turn right 90     # Rotate body and head right 90°
+turn center       # Face forward
+```
+
+
+### Antenna
+
+Control the antenna positions using multiple syntaxes:
+
+**Clock Position (Numeric 0-12):**
+```rmscript
+antenna both 0       # 0 o'clock = 0° (straight up)
+antenna both 3       # 3 o'clock = 90° (external/right)
+antenna both 6       # 6 o'clock = 180° (straight down)
+antenna both 9       # 9 o'clock = -90° (internal/left)
+antenna left 4.5     # Left antenna to 4.5 o'clock (135°)
+```
+The clock position is `as seen from the user facing the robot`, while the left/right antenna designation is from the robot's perspective.
+
+**Clock Keywords:**
+```rmscript
+antenna both high    # 0° (high position)
+antenna both ext     # 90° (external)
+antenna both low     # 180° (low position)
+antenna both int     # -90° (internal)
+```
+
+**Directional Keywords (Natural Language):**
+```rmscript
+antenna both up      # 0° (up)
+antenna both right   # 90° (right/external)
+antenna both down    # 180° (down)
+antenna both left    # -90° (left/internal)
+
+# Individual antenna control
+antenna left up      # Left antenna pointing up
+antenna right down   # Right antenna pointing down
+```
+### Head Translation
+
+Move the head forward/back/left/right/up/down in space:
+
+```rmscript
+head forward 10    # Move head forward 10mm
+head back 5        # Move head back 5mm
+head left 8        # Move head left 8mm
+head right 8       # Move head right 8mm
+head up 5          # Move head up 5mm
+head down 3        # Move head down 3mm
+```
+
+
+### Tilt (Head Roll)
+
+Tilt the head side-to-side:
+
+```rmscript
+tilt left 15       # Tilt head left
+tilt right 15      # Tilt head right
+tilt center        # Return to level
+```
+
+### Wait
+
+Pause between movements:
+
+```rmscript
+wait 1s           # Wait 1 second
+wait 0.5s         # Wait 0.5 seconds
+wait 2.5s         # Wait 2.5 seconds
+```
+
+**Important:** The `s` suffix is **required** for consistency. `wait 1` will produce a compilation error.
+
+### Picture
+
+Take a picture with the robot's camera and add it to the conversation:
+
+```rmscript
+picture           # Take a picture
+```
+
+The picture command captures a frame from the camera and returns it as a base64-encoded image.
+
+### Sound Playback
+
+Play a sound file stored in the local profile directory:
+
+```rmscript
+play mysound         # Play mysound.wav
+```
+
+Will search for `mysound.*` in the profile directory and play it, using sound extensions (.wav, .mp3, etc.).
+It will be played async, so the script continues executing while the sound plays.
+If you want to pause the script until the sound finishes, use the `pause` keyword:
+
+```rmscript
+play mysound pause    # Play mysound.wav and wait until it finishes
+```
+
+you can also use other keywords like "block",...
+
+### Reference document
+
+See `src/reachy_mini_conversation_app/rmscript/rmscript_reference_doc.md` for the full reference document.
+(WIP : it might not be fully up to date with the latest changes)
 
 ## Development workflow
 - Install the dev group extras: `uv sync --group dev` or `pip install -e .[dev]`.

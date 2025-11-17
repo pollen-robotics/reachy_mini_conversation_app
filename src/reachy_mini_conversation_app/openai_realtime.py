@@ -220,11 +220,15 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
                     # send the tool result back
                     if isinstance(call_id, str):
+                        # Filter out non-JSON-serializable internal fields (prefixed with _)
+                        json_safe_result = {
+                            k: v for k, v in tool_result.items() if not k.startswith("_")
+                        }
                         await self.connection.conversation.item.create(
                             item={
                                 "type": "function_call_output",
                                 "call_id": call_id,
-                                "output": json.dumps(tool_result),
+                                "output": json.dumps(json_safe_result),
                             },
                         )
 
@@ -232,13 +236,14 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         AdditionalOutputs(
                             {
                                 "role": "assistant",
-                                "content": json.dumps(tool_result),
+                                "content": json.dumps(json_safe_result),
                                 "metadata": {"title": f"🛠️ Used tool {tool_name}", "status": "done"},
                             },
                         ),
                     )
 
-                    if tool_name == "camera" and "b64_im" in tool_result:
+                    # Handle images from any tool (camera or rmscript pictures)
+                    if "b64_im" in tool_result:
                         # use raw base64, don't json.dumps (which adds quotes)
                         b64_im = tool_result["b64_im"]
                         if not isinstance(b64_im, str):
@@ -258,18 +263,24 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         )
                         logger.info("Added camera image to conversation")
 
-                        if self.deps.camera_worker is not None:
-                            np_img = self.deps.camera_worker.get_latest_frame()
-                            img = gr.Image(value=np_img)
+                        # Display image in Gradio UI
+                        # Decode base64 back to numpy array for display
+                        import cv2
+                        img_bytes = base64.b64decode(b64_im)
+                        img_array = np.frombuffer(img_bytes, dtype=np.uint8)
+                        np_img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                        np_img_rgb = cv2.cvtColor(np_img, cv2.COLOR_BGR2RGB)
+                        img = gr.Image(value=np_img_rgb)
+                        logger.info("Added camera image to gradio output")
 
-                            await self.output_queue.put(
-                                AdditionalOutputs(
-                                    {
-                                        "role": "assistant",
-                                        "content": img,
-                                    },
-                                ),
-                            )
+                        await self.output_queue.put(
+                            AdditionalOutputs(
+                                {
+                                    "role": "assistant",
+                                    "content": img,
+                                },
+                            ),
+                        )
 
                     # if this tool call was triggered by an idle signal, don't make the robot speak
                     # for other tool calls, let the robot reply out loud
