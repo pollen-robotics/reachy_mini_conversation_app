@@ -1,0 +1,153 @@
+name,aliases,ra_hours,dec_degrees,type,category,classic
+Polaris,North Star|Alpha UMi,2.530,89.264,star,,yes
+Sirius,Dog Star|Alpha CMa,6.752,-16.716,star,,yes
+Betelgeuse,Alpha Ori,5.919,7.407,star,,yes
+Rigel,Beta Ori,5.242,-8.202,star,,yes
+Vega,Alpha Lyr,18.615,38.783,star,,yes
+Altair,Alpha Aql,19.846,8.868,star,,yes
+Deneb,Alpha Cyg,20.690,45.280,star,,yes
+Antares,Alpha Sco,16.490,-26.432,star,,yes
+Arcturus,Alpha Boo,14.261,19.182,star,,yes
+Capella,Alpha Aur,5.278,45.998,star,,yes
+Aldebaran,Alpha Tau,4.598,16.509,star,,yes
+Spica,Alpha Vir,13.420,-11.161,star,,yes
+Pollux,Beta Gem,7.755,28.026,star,,no
+Castor,Alpha Gem,7.576,31.888,star,,no
+Procyon,Alpha CMi,7.655,5.225,star,,yes
+Regulus,Alpha Leo,10.139,11.967,star,,yes
+Canopus,Alpha Car,6.399,-52.696,star,,no
+Achernar,Alpha Eri,1.629,-57.237,star,,no
+Bellatrix,Gamma Ori,5.418,6.350,star,,no
+Alnilam,Epsilon Ori,5.603,-1.202,star,,no
+Alnitak,Zeta Ori,5.679,-1.943,star,,no
+Mintaka,Delta Ori,5.533,-0.299,star,,no
+Becrux,Beta Cru,12.795,-59.689,star,,no
+Acrux,Alpha Cru,12.443,-63.099,star,,no
+Fomalhaut,Alpha PsA,22.961,-29.622,star,,yes
+Denebola,Beta Leo,11.818,14.572,star,,no
+Algol,Beta Per,3.136,40.956,star,,no
+Mizar,Zeta UMa,13.398,54.925,star,,no
+Alcor,80 UMa,13.421,54.988,star,,no
+Dubhe,Alpha UMa,11.062,61.751,star,,no
+Merak,Beta UMa,11.031,56.382,star,,no
+Alioth,Epsilon UMa,12.900,55.960,star,,no
+Alkaid,Eta UMa,13.792,49.313,star,,no
+Megrez,Delta UMa,12.257,57.033,star,,no
+Phecda,Gamma UMa,11.897,53.695,star,,no
+Mirfak,Alpha Per,3.405,49.861,star,,no
+Alderamin,Alpha Cep,21.309,62.585,star,,no
+Scheat,Beta Peg,23.063,28.083,star,,no
+Markab,Alpha Peg,23.079,15.205,star,,no
+Alpheratz,Alpha And,0.140,29.091,star,,no
+Hamal,Alpha Ari,2.120,23.462,star,,no
+Rasalhague,Alpha Oph,17.582,12.560,star,,no
+Shaula,Lambda Sco,17.560,-37.104,star,,no
+Kaus Australis,Epsilon Sgr,18.403,-34.385,star,,no
+Nunki,Sigma Sgr,18.921,-26.297,star,,no
+Altais,Delta Dra,19.209,67.662,star,,no
+Thuban,Alpha Dra,14.073,64.376,star,,no
+Eltanin,Gamma Dra,17.943,51.489,star,,no
+Alphecca,Alpha CrB,15.578,26.715,star,,no
+Albireo,Beta Cyg,19.512,27.960,star,,no
+Andromeda Galaxy,M31|Messier 31|NGC 224,0.712,41.269,galaxy,,yes
+Orion Nebula,M42|Messier 42|NGC 1976,5.583,-5.391,nebula,,yes
+Pleiades,M45|Seven Sisters|Messier 45,3.783,24.117,cluster,,yes
+Crab Nebula,M1|Messier 1|NGC 1952,5.575,22.017,nebula,,no
+Ring Nebula,M57|Messier 57|NGC 6720,18.888,33.029,nebula,,yes
+Dumbbell Nebula,M27|Messier 27|NGC 6853,19.993,22.721,nebula,,no
+Hercules Cluster,M13|Messier 13|NGC 6205,16.695,36.460,cluster,,yes
+Whirlpool Galaxy,M51|Messier 51|NGC 5194,13.498,47.195,galaxy,,no
+Pinwheel Galaxy,M101|Messier 101|NGC 5457,14.054,54.349,galaxy,,no
+Sombrero Galaxy,M104|Messier 104|NGC 4594,12.666,-11.623,galaxy,,no
+Triangulum Galaxy,M33|Messier 33|NGC 598,1.564,30.660,galaxy,,no
+Lagoon Nebula,M8|Messier 8|NGC 6523,18.061,-24.380,nebula,,no
+Eagle Nebula,M16|Messier 16|NGC 6611,18.312,-13.763,nebula,,no
+Omega Nebula,M17|Messier 17|Swan Nebula|NGC 6618,18.346,-16.171,nebula,,no
+Trifid Nebula,M20|Messier 20|NGC 6514,18.035,-23.032,nebula,,no
+Wild Duck Cluster,M11|Messier 11|NGC 6705,18.851,-6.267,cluster,,no
+Ptolemy Cluster,M7|Messier 7|NGC 6475,17.895,-34.817,cluster,,no
+Butterfly Cluster,M6|Messier 6|NGC 6405,17.671,-32.215,cluster,,no
+Beehive Cluster,M44|Praesepe|Messier 44|NGC 2632,8.667,19.983,cluster,,no
+Hyades,Mel 25,4.450,15.867,cluster,,no
+Double Cluster,NGC 869 and 884,2.333,57.133,cluster,,no
+Omega Centauri,NGC 5139,13.447,-47.479,cluster,,no
+47 Tucanae,NGC 104,0.400,-72.081,cluster,,no
+Virgo Cluster,M87 region,12.500,12.400,cluster,,no
+Leo Triplet,M65 M66 NGC 3628 region,11.317,13.083,galaxy,,no
+Wild Duck,M11|Messier 11,18.851,-6.267,cluster,,no
+Bode's Galaxy,M81|Messier 81|NGC 3031,9.927,69.065,galaxy,,no
+Cigar Galaxy,M82|Messier 82|NGC 3034,9.928,69.678,galaxy,,no
+Southern Pinwheel,M83|Messier 83|NGC 5236,13.616,-29.866,galaxy,,no
+Sunflower Galaxy,M63|Messier 63|NGC 5055,13.262,42.029,galaxy,,no
+Black Eye Galaxy,M64|Messier 64|NGC 4826,12.950,21.683,galaxy,,no
+Owl Nebula,M97|Messier 97|NGC 3587,11.247,55.017,nebula,,no
+Little Dumbbell,M76|Messier 76|NGC 650,1.703,51.575,nebula,,no
+Spiral Galaxy,M74|Messier 74|NGC 628,1.614,15.784,galaxy,,no
+Spindle Galaxy,M102|NGC 5866,15.100,55.767,galaxy,,no
+M2,Messier 2|NGC 7089,21.557,-0.823,cluster,,no
+M3,Messier 3|NGC 5272,13.703,28.377,cluster,,no
+M4,Messier 4|NGC 6121,16.393,-26.525,cluster,,no
+M5,Messier 5|NGC 5904,15.308,2.081,cluster,,no
+M9,Messier 9|NGC 6333,17.319,-18.516,cluster,,no
+M10,Messier 10|NGC 6254,16.955,-4.100,cluster,,no
+M12,Messier 12|NGC 6218,16.786,-1.950,cluster,,no
+M14,Messier 14|NGC 6402,17.627,-3.250,cluster,,no
+M15,Messier 15|NGC 7078,21.500,12.167,cluster,,no
+M19,Messier 19|NGC 6273,17.043,-26.267,cluster,,no
+M22,Messier 22|NGC 6656,18.606,-23.905,cluster,,no
+M28,Messier 28|NGC 6626,18.407,-24.867,cluster,,no
+M30,Messier 30|NGC 7099,21.673,-23.183,cluster,,no
+M53,Messier 53|NGC 5024,13.213,18.167,cluster,,no
+M54,Messier 54|NGC 6715,18.920,-30.483,cluster,,no
+M55,Messier 55|NGC 6809,19.667,-30.967,cluster,,no
+M56,Messier 56|NGC 6779,19.278,30.183,cluster,,no
+M62,Messier 62|NGC 6266,17.017,-30.117,cluster,,no
+M69,Messier 69|NGC 6637,18.523,-32.350,cluster,,no
+M70,Messier 70|NGC 6681,18.717,-32.300,cluster,,no
+M71,Messier 71|NGC 6838,19.897,18.783,cluster,,no
+M72,Messier 72|NGC 6981,20.893,-12.533,cluster,,no
+M75,Messier 75|NGC 6864,20.100,-21.917,cluster,,no
+M79,Messier 79|NGC 1904,5.404,-24.525,cluster,,no
+M80,Messier 80|NGC 6093,16.283,-22.983,cluster,,no
+M92,Messier 92|NGC 6341,17.283,43.133,cluster,,no
+M107,Messier 107|NGC 6171,16.543,-13.050,cluster,,no
+Andromeda,The Chained Maiden,0.140,29.091,constellation,,no
+Aquarius,The Water Bearer,22.096,-0.320,constellation,,no
+Aquila,The Eagle,19.846,8.868,constellation,,no
+Aries,The Ram,2.120,23.462,constellation,,no
+Auriga,The Charioteer,5.278,45.998,constellation,,no
+Bootes,The Herdsman,14.261,19.182,constellation,,no
+Cancer,The Crab,8.975,11.858,constellation,,no
+Canis Major,The Great Dog,6.752,-16.716,constellation,,no
+Canis Minor,The Little Dog,7.655,5.225,constellation,,no
+Capricornus,The Sea Goat,20.301,-12.550,constellation,,no
+Cassiopeia,The Queen,0.676,56.537,constellation,,yes
+Cepheus,The King,21.309,62.585,constellation,,no
+Corona Borealis,The Northern Crown,15.578,26.715,constellation,,no
+Cygnus,The Swan,20.690,45.280,constellation,,yes
+Draco,The Dragon,14.073,64.376,constellation,,no
+Gemini,The Twins,7.576,31.888,constellation,,yes
+Hercules,The Hero,17.244,14.390,constellation,,no
+Leo,The Lion,10.139,11.967,constellation,,no
+Libra,The Scales,14.848,-16.033,constellation,,no
+Lyra,The Harp,18.615,38.783,constellation,,no
+Ophiuchus,The Serpent Bearer,17.582,12.560,constellation,,no
+Orion,The Hunter,5.919,7.407,constellation,,yes
+Pegasus,The Winged Horse,23.079,15.205,constellation,,no
+Perseus,The Hero,3.405,49.861,constellation,,no
+Pisces,The Fishes,2.034,2.764,constellation,,no
+Sagittarius,The Archer,19.398,-40.617,constellation,,no
+Scorpius,The Scorpion,16.490,-26.432,constellation,,no
+Taurus,The Bull,4.598,16.509,constellation,,no
+Ursa Major,The Great Bear,11.062,61.751,constellation,,yes
+Ursa Minor,The Little Bear,2.530,89.264,constellation,,no
+Virgo,The Maiden,13.420,-11.161,constellation,,no
+Sun,,0,0,star,solar_system,yes
+Moon,,0,0,satellite,solar_system,yes
+Mercury,,0,0,planet,solar_system,yes
+Venus,,0,0,planet,solar_system,yes
+Mars,Red Planet,0,0,planet,solar_system,yes
+Jupiter,,0,0,planet,solar_system,yes
+Saturn,,0,0,planet,solar_system,yes
+Uranus,,0,0,planet,solar_system,yes
+Neptune,,0,0,planet,solar_system,yes
