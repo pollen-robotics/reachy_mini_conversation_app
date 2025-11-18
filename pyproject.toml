@@ -60,7 +60,11 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-reachy_mini_conversation_app = ["images/*"]
+reachy_mini_conversation_app = [
+  "images/*",
+  "demos/**/*.txt",
+  "prompts_library/*.txt",
+]
 
 [tool.ruff]
 line-length = 119

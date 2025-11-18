@@ -38,5 +38,7 @@ class Config:
 
     logger.debug(f"Model: {MODEL_NAME}, HF_HOME: {HF_HOME}, Vision Model: {LOCAL_VISION_MODEL}")
 
+    REACHY_MINI_CUSTOM_PROFILE = os.getenv("REACHY_MINI_CUSTOM_PROFILE")
+    logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")
 
 config = Config()

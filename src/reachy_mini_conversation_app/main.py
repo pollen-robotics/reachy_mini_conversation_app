@@ -10,7 +10,6 @@ from fastrtc import Stream
 
 from reachy_mini import ReachyMini
 from reachy_mini_conversation_app.moves import MovementManager
-from reachy_mini_conversation_app.tools import ToolDependencies
 from reachy_mini_conversation_app.utils import (
     parse_args,
     setup_logger,
@@ -18,6 +17,7 @@ from reachy_mini_conversation_app.utils import (
 )
 from reachy_mini_conversation_app.console import LocalStream
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
+from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
 
 

@@ -13,13 +13,13 @@ from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item
 from numpy.typing import NDArray
 from websockets.exceptions import ConnectionClosedError
 
-from reachy_mini_conversation_app.tools import (
-    ALL_TOOL_SPECS,
+from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.prompts import get_session_instructions
+from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
+    get_tool_specs,
     dispatch_tool_call,
 )
-from reachy_mini_conversation_app.config import config
-from reachy_mini_conversation_app.prompts import SESSION_INSTRUCTIONS
 
 
 logger = logging.getLogger(__name__)
@@ -105,7 +105,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 await conn.session.update(
                     session={
                         "type": "realtime",
-                        "instructions": SESSION_INSTRUCTIONS,
+                        "instructions": get_session_instructions(),
                         "audio": {
                             "input": {
                                 "format": {
@@ -129,7 +129,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                 "voice": "cedar",
                             },
                         },
-                        "tools": ALL_TOOL_SPECS,  # type: ignore[typeddict-item]
+                        "tools":  get_tool_specs(),  # type: ignore[typeddict-item]
                         "tool_choice": "auto",
                     },
                 )

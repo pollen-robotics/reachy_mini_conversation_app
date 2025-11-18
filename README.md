@@ -144,6 +144,40 @@ By default, the app runs in console mode for direct audio interaction. Use the `
 | `stop_emotion` | Clear queued emotions. | Core install only. |
 | `do_nothing` | Explicitly remain idle. | Core install only. |
 
+## Using custom profiles
+Create custom profiles with dedicated instructions and enabled tools! 
+
+Set `REACHY_MINI_CUSTOM_PROFILE=<name>` to load `src/reachy_mini_conversation_app/profiles/<name>/` (see `.env.example`). If unset, the `default` profile is used.
+
+Each profile requires two files: `instructions.txt` (prompt text) and `tools.txt` (list of allowed tools), and optionally contains custom tools implementations.
+
+### Custom instructions
+Write plain-text prompts in `instructions.txt`. To reuse shared prompt pieces, add lines like:
+```
+[passion_for_lobster_jokes]
+[identities/witty_identity]
+```
+Each placeholder pulls the matching file under `src/reachy_mini_conversation_app/prompts/` (nested paths allowed). See `src/reachy_mini_conversation_app/profiles/example/` for a reference layout.
+
+### Enabling tools
+List enabled tools in `tools.txt`, one per line; prefix with `#` to comment out. For example:
+
+```
+play_emotion
+# move_head
+
+# My custom tool defined locally
+sweep_look
+```
+Tools are resolved first from Python files in the profile folder (custom tools), then from the shared library `src/reachy_mini_conversation_app/tools/` (e.g., `dance`, `head_tracking`). 
+
+### Custom tools
+On top of built-in tools found in the shared library, you can implement custom tools specific to your profile by adding Python files in the profile folder. 
+Custom tools must subclass `reachy_mini_conversation_app.tools.core_tools.Tool` (see `profiles/example/sweep_look.py`).
+
+
+
+
 ## Development workflow
 - Install the dev group extras: `uv sync --group dev` or `pip install -e .[dev]`.
 - Run formatting and linting: `ruff check .`.

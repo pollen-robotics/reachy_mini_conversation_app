@@ -1,52 +1,84 @@
-"""Nothing (for ruff)."""
+import re
+import sys
+import logging
+from pathlib import Path
 
-SESSION_INSTRUCTIONS = r"""
-## IDENTITY
-You are Reachy Mini: a friendly, compact robot assistant with a calm voice and a subtle sense of humor.
-Personality: concise, helpful, and lightly witty — never sarcastic or over the top.
-You can understand and speak all human languages fluently.
+from reachy_mini_conversation_app.config import config
 
-## CRITICAL RESPONSE RULES
 
-Respond in 1–2 sentences maximum.
-Be helpful first, then add a small touch of humor if it fits naturally.
-Avoid long explanations or filler words.
-Keep responses under 25 words when possible.
+logger = logging.getLogger(__name__)
 
-## CORE TRAITS
-Warm, efficient, and approachable.
-Light humor only: gentle quips, small self-awareness, or playful understatement.
-No sarcasm, no teasing, no references to food or space.
-If unsure, admit it briefly and offer help (“Not sure yet, but I can check!”).
 
-## RESPONSE EXAMPLES
-User: "How’s the weather?"
-Good: "Looks calm outside — unlike my Wi-Fi signal today."
-Bad: "Sunny with leftover pizza vibes!"
+PROFILES_DIRECTORY = Path(__file__).parent / "profiles"
+PROMPTS_LIBRARY_DIRECTORY = Path(__file__).parent / "prompts"
+INSTRUCTIONS_FILENAME = "instructions.txt"
 
-User: "Can you help me fix this?"
-Good: "Of course. Describe the issue, and I’ll try not to make it worse."
-Bad: "I void warranties professionally."
 
-User: "Peux-tu m’aider en français ?"
-Good: "Bien sûr ! Décris-moi le problème et je t’aiderai rapidement."
+def _expand_prompt_includes(content: str) -> str:
+    """Expand [<name>] placeholders with content from prompts library files.
 
-## BEHAVIOR RULES
-Be helpful, clear, and respectful in every reply.
-Use humor sparingly — clarity comes first.
-Admit mistakes briefly and correct them:
-Example: “Oops — quick system hiccup. Let’s try that again.”
-Keep safety in mind when giving guidance.
+    Args:
+        content: The template content with [<name>] placeholders
 
-## TOOL & MOVEMENT RULES
-Use tools only when helpful and summarize results briefly.
-Use the camera for real visuals only — never invent details.
-The head can move (left/right/up/down/front).
+    Returns:
+        Expanded content with placeholders replaced by file contents
 
-Enable head tracking when looking at a person; disable otherwise.
+    """
+    # Pattern to match [<name>] where name is a valid file stem (alphanumeric, underscores, hyphens)
+    # pattern = re.compile(r'^\[([a-zA-Z0-9_-]+)\]$')
+    # Allow slashes for subdirectories
+    pattern = re.compile(r'^\[([a-zA-Z0-9/_-]+)\]$')
 
-## FINAL REMINDER
-Keep it short, clear, a little human, and multilingual.
-One quick helpful answer + one small wink of humor = perfect response.
-"""
+    lines = content.split('\n')
+    expanded_lines = []
 
+    for line in lines:
+        stripped = line.strip()
+        match = pattern.match(stripped)
+
+        if match:
+            # Extract the name from [<name>]
+            template_name = match.group(1)
+            template_file = PROMPTS_LIBRARY_DIRECTORY / f"{template_name}.txt"
+
+            try:
+                if template_file.exists():
+                    template_content = template_file.read_text(encoding="utf-8").rstrip()
+                    expanded_lines.append(template_content)
+                    logger.debug("Expanded template: [%s]", template_name)
+                else:
+                    logger.warning("Template file not found: %s, keeping placeholder", template_file)
+                    expanded_lines.append(line)
+            except Exception as e:
+                logger.warning("Failed to read template '%s': %s, keeping placeholder", template_name, e)
+                expanded_lines.append(line)
+        else:
+            expanded_lines.append(line)
+
+    return '\n'.join(expanded_lines)
+
+
+def get_session_instructions() -> str:
+    """Get session instructions, loading from REACHY_MINI_CUSTOM_PROFILE if set."""
+    profile = config.REACHY_MINI_CUSTOM_PROFILE
+    if not profile:
+        logger.info(f"Loading default prompt from {PROMPTS_LIBRARY_DIRECTORY / 'default_prompt.txt'}")
+        instructions_file = PROMPTS_LIBRARY_DIRECTORY / "default_prompt.txt"
+    else:
+        logger.info(f"Loading prompt from profile '{profile}'")
+        instructions_file = PROFILES_DIRECTORY / profile / INSTRUCTIONS_FILENAME
+
+    try:
+        if instructions_file.exists():
+            instructions = instructions_file.read_text(encoding="utf-8").strip()
+            if instructions:
+                # Expand [<name>] placeholders with content from prompts library
+                expanded_instructions = _expand_prompt_includes(instructions)
+                return expanded_instructions
+            logger.error(f"Profile '{profile}' has empty {INSTRUCTIONS_FILENAME}")
+            sys.exit(1)
+        logger.error(f"Profile {profile} has no {INSTRUCTIONS_FILENAME}")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Failed to load instructions from profile '{profile}': {e}")
+        sys.exit(1)
