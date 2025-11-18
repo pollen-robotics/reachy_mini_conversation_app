@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--gradio", default=False, action="store_true", help="Open gradio interface")
     parser.add_argument("--debug", default=False, action="store_true", help="Enable debug logging")
-    parser.add_argument("--sim", default=False, action="store_true", help="DUMMYYYYYY") # TODO remove, to test stuff
+    # parser.add_argument("--sim", default=False, action="store_true", help="DUMMYYYYYY") # TODO remove, to test stuff
     return parser.parse_args()
 
 

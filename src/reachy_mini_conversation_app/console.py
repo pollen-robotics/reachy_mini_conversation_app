@@ -9,8 +9,9 @@ import logging
 from typing import List
 
 from fastrtc import AdditionalOutputs, audio_to_int16, audio_to_float32
-from librosa import resample
+from scipy.signal import resample
 
+# from librosa import resample
 from reachy_mini import ReachyMini
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 
@@ -33,7 +34,8 @@ class LocalStream:
         # Hack to avoid the first lenghty call to resample at runtime.
         # This is likely caused by cache initialization overhead.
         import numpy as np
-        resample(np.array([0.0]), orig_sr=1, target_sr=1)
+
+        resample(np.array([0.0]), 1)
 
     def launch(self) -> None:
         """Start the recorder/player and run the async processing loops."""
@@ -117,9 +119,13 @@ class LocalStream:
                 if input_sample_rate != device_sample_rate:
                     audio_frame_float = resample(
                         audio_frame_float,
-                        orig_sr=input_sample_rate,
-                        target_sr=device_sample_rate,
+                        int(len(audio_frame_float) * (device_sample_rate / input_sample_rate)),
                     )
+                    # audio_frame_float = resample(
+                    #     audio_frame_float,
+                    #     orig_sr=input_sample_rate,
+                    #     target_sr=device_sample_rate,
+                    # )
 
                 self._robot.media.push_audio_sample(audio_frame_float)
 
