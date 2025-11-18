@@ -56,6 +56,7 @@ all_vision = [
   "supervision",
   "mediapipe==0.10.14",
 ]
+astronomer = ["rapidfuzz", "astropy"]
 
 [dependency-groups]
 dev = [
