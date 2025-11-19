@@ -2,6 +2,7 @@
 
 import os
 import sys
+import time
 import asyncio
 import threading
 from typing import Any, Dict, List
@@ -31,10 +32,11 @@ def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> L
 
 
 # TODO handle stop event properly
-def main(robot=None, stop_event=None):
+def main(robot=None, app_stop_event=None):
     """Entrypoint for the Reachy Mini conversation app."""
     args = parse_args()
-    args.gradio = True  # TODO Antoine - force gradio for testing appifying
+    # args.gradio = True  # TODO Antoine - force gradio for testing appifying
+    # args.debug = True  # TODO Antoine - force debug for testing
 
     logger = setup_logger(args.debug)
     logger.info("Starting Reachy Mini Conversation App")
@@ -114,15 +116,25 @@ def main(robot=None, stop_event=None):
     if vision_manager:
         vision_manager.start()
 
+    def poll_stop_event():
+        """Poll the stop event to allow graceful shutdown."""
+        while app_stop_event.is_set():
+            time.sleep(0.1)
+
+        logger.info("App stop event detected, shutting down...")
+        try:
+            stream_manager.close()
+        except Exception as e:
+            logger.error(f"Error while closing stream manager: {e}")
+
+    if app_stop_event:
+        threading.Thread(target=poll_stop_event, daemon=True).start()
+
     try:
         stream_manager.launch()
-    except KeyboardInterrupt or stop_event and stop_event.is_set():
+    except KeyboardInterrupt:
         logger.info("Keyboard interruption in main thread... closing server.")
     finally:
-        # Stop the stream manager and its pipelines
-        stream_manager.close()
-
-        # Stop other services
         movement_manager.stop()
         head_wobbler.stop()
         if camera_worker:
@@ -132,6 +144,7 @@ def main(robot=None, stop_event=None):
 
         # prevent connection to keep alive some threads
         robot.client.disconnect()
+        time.sleep(1)
         logger.info("Shutdown complete.")
 
 
@@ -145,7 +158,7 @@ class ReachyMiniConversationApp(ReachyMiniApp):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        main(robot=reachy_mini, stop_event=stop_event)
+        main(robot=reachy_mini, app_stop_event=stop_event)
 
 
 if __name__ == "__main__":
