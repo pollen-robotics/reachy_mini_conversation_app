@@ -8,7 +8,7 @@ import asyncio
 import logging
 from typing import List
 
-from fastrtc import AdditionalOutputs, audio_to_int16, audio_to_float32
+from fastrtc import AdditionalOutputs, audio_to_float32
 from scipy.signal import resample
 
 from reachy_mini import ReachyMini
