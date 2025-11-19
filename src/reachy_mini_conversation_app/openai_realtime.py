@@ -3,7 +3,7 @@ import base64
 import random
 import asyncio
 import logging
-from typing import Any, Tuple, Literal, cast
+from typing import Any, Tuple, Literal
 from datetime import datetime
 
 import numpy as np
@@ -291,12 +291,12 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
         Args:
             frame: A tuple containing the sample rate and the audio frame.
+
         """
-        
         if not self.connection:
             return
         input_sample_rate, audio_frame = frame
-        
+
         # Reshape if needed
         if audio_frame.ndim == 2:
             audio_frame = audio_frame.squeeze()
