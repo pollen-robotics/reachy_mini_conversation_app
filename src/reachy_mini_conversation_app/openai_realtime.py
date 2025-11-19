@@ -9,8 +9,9 @@ from datetime import datetime
 import numpy as np
 import gradio as gr
 from openai import AsyncOpenAI
-from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item
+from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item, audio_to_int16
 from numpy.typing import NDArray
+from scipy.signal import resample
 from websockets.exceptions import ConnectionClosedError
 
 from reachy_mini_conversation_app.config import config
@@ -24,6 +25,9 @@ from reachy_mini_conversation_app.tools.core_tools import (
 
 logger = logging.getLogger(__name__)
 
+OPEN_AI_INPUT_SAMPLE_RATE = 24000
+OPEN_AI_OUTPUT_SAMPLE_RATE = 24000
+
 
 class OpenaiRealtimeHandler(AsyncStreamHandler):
     """An OpenAI realtime handler for fastrtc Stream."""
@@ -32,16 +36,14 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         """Initialize the handler."""
         super().__init__(
             expected_layout="mono",
-            output_sample_rate=24000,  # openai outputs
-            input_sample_rate=16000,  # respeaker output
+            output_sample_rate=OPEN_AI_OUTPUT_SAMPLE_RATE, # openai outputs at 24000 Hz
+            input_sample_rate=OPEN_AI_INPUT_SAMPLE_RATE,  # openai expects 24000 Hz inputs
         )
         self.deps = deps
 
         # Override type annotations for OpenAI strict typing (only for values used in API)
-        self.output_sample_rate: Literal[24000]
-        self.target_input_rate: Literal[24000] = 24000
-        # input_sample_rate rest as int for comparison logic
-        self.resample_ratio = self.target_input_rate / self.input_sample_rate
+        self.output_sample_rate: Literal[OPEN_AI_OUTPUT_SAMPLE_RATE]
+        self.input_sample_rate: Literal[OPEN_AI_INPUT_SAMPLE_RATE]
 
         self.connection: Any = None
         self.output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]" = asyncio.Queue()
@@ -53,21 +55,6 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
         return OpenaiRealtimeHandler(self.deps)
-
-    def resample_audio(self, audio: NDArray[np.int16]) -> NDArray[np.int16]:
-        """Resample audio using linear interpolation."""
-        if self.input_sample_rate == self.target_input_rate:
-            return audio
-
-        # Use numpy's interp for simple linear resampling
-        input_length = len(audio)
-        output_length = int(input_length * self.resample_ratio)
-
-        input_time = np.arange(input_length)
-        output_time = np.linspace(0, input_length - 1, output_length)
-
-        resampled = np.interp(output_time, input_time, audio.astype(np.float32))
-        return cast(NDArray[np.int16], resampled.astype(np.int16))
 
     async def start_up(self) -> None:
         """Start the handler with minimal retries on unexpected websocket closure."""
@@ -110,7 +97,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                             "input": {
                                 "format": {
                                     "type": "audio/pcm",
-                                    "rate": self.target_input_rate,
+                                    "rate": OPEN_AI_INPUT_SAMPLE_RATE,
                                 },
                                 "transcription": {
                                     "model": "whisper-1",
@@ -124,7 +111,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                             "output": {
                                 "format": {
                                     "type": "audio/pcm",
-                                    "rate": self.output_sample_rate,
+                                    "rate": OPEN_AI_OUTPUT_SAMPLE_RATE,
                                 },
                                 "voice": "cedar",
                             },
@@ -300,17 +287,28 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
     # Microphone receive
     async def receive(self, frame: Tuple[int, NDArray[np.int16]]) -> None:
-        """Receive audio frame from the microphone and send it to the openai server."""
+        """Receive audio frame from the microphone and send it to the openai server.
+
+        Args:
+            frame: A tuple containing the sample rate and the audio frame.
+        """
+        
         if not self.connection:
             return
-        _, array = frame
-        array = array.squeeze()
+        input_sample_rate, audio_frame = frame
+        
+        # Reshape if needed
+        if audio_frame.ndim == 2:
+            audio_frame = audio_frame.squeeze()
 
         # Resample if needed
-        if self.input_sample_rate != self.target_input_rate:
-            array = self.resample_audio(array)
+        if self.input_sample_rate != input_sample_rate:
+            audio_frame = resample(audio_frame, int(len(audio_frame) * self.input_sample_rate / input_sample_rate))
 
-        audio_message = base64.b64encode(array.tobytes()).decode("utf-8")
+        # Cast if needed
+        audio_frame = audio_to_int16(audio_frame)
+
+        audio_message = base64.b64encode(audio_frame.tobytes()).decode("utf-8")
         await self.connection.input_audio_buffer.append(audio=audio_message)
 
     async def emit(self) -> Tuple[int, NDArray[np.int16]] | AdditionalOutputs | None:
