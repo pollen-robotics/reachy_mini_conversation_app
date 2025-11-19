@@ -15,7 +15,7 @@ import soundfile as sf
 from pathlib import Path
 import reachy_mini_conversation_app
 
-from reachy_mini_conversation_app.tools import ToolDependencies, dispatch_tool_call
+from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, dispatch_tool_call
 
 from reachy_mini.motion.recorded_move import RecordedMoves
 RECORDED_MOVES = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
@@ -162,13 +162,16 @@ class KeyboardRealtimeHandler(AsyncStreamHandler):
         
         if key == 's' and self.action_index < len(self.actions_sequence):
             next_action = self.actions_sequence[self.action_index]
-            if next_action[1] is not None:
-                emotion_duration = RECORDED_MOVES.get(next_action[1]).duration
-                await self._queue_function_call(next_action[1])
-                await asyncio.sleep(emotion_duration + 1.0)  # Wait for the emotion to finish + 1 second for neutral pose
+            # if next_action[1] is not None:
+            #     emotion_duration = RECORDED_MOVES.get(next_action[1]).duration
+            #     await self._queue_function_call(next_action[1])
+            #     logger.info(f"Waiting for {emotion_duration} seconds for emotion {next_action[1]}")
+            #     await asyncio.sleep(emotion_duration + 1.0)  # Wait for the emotion to finish + 1 second for neutral pose
                 
-            await self._queue_audio_delta(next_action[0])
-            #await self._queue_audio_delta(next_action[0], next_action[1])  #Alternative
+            #await self._queue_audio_delta(next_action[0])
+            
+            
+            await self._queue_audio_delta(next_action[0], next_action[1])  #Alternative
             self.action_index += 1
     
     async def _queue_audio_delta(self, audio_file: str, emotion: str | None = None):
