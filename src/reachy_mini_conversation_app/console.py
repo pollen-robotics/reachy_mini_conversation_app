@@ -11,7 +11,6 @@ from typing import List
 from fastrtc import AdditionalOutputs, audio_to_int16, audio_to_float32
 from scipy.signal import resample
 
-# from librosa import resample
 from reachy_mini import ReachyMini
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 
@@ -121,11 +120,6 @@ class LocalStream:
                         audio_frame_float,
                         int(len(audio_frame_float) * (device_sample_rate / input_sample_rate)),
                     )
-                    # audio_frame_float = resample(
-                    #     audio_frame_float,
-                    #     orig_sr=input_sample_rate,
-                    #     target_sr=device_sample_rate,
-                    # )
 
                 self._robot.media.push_audio_sample(audio_frame_float)
 

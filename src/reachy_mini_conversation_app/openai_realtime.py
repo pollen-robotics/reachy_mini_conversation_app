@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 class OpenaiRealtimeHandler(AsyncStreamHandler):
     """An OpenAI realtime handler for fastrtc Stream."""
 
-    def __init__(self, deps: ToolDependencies):
+    def __init__(self, deps: ToolDependencies, gradio_mode: bool = False):
         """Initialize the handler."""
         super().__init__(
             expected_layout="mono",
@@ -49,6 +49,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.last_activity_time = asyncio.get_event_loop().time()
         self.start_time = asyncio.get_event_loop().time()
         self.is_idle_tool_call = False
+        self.gradio_mode = gradio_mode
 
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
@@ -71,13 +72,15 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
     async def start_up(self) -> None:
         """Start the handler with minimal retries on unexpected websocket closure."""
-        await self.wait_for_args()
-        args = list(self.latest_args)
-        textbox_api_key = args[3] if len(args[3]) > 0 else None
-        if textbox_api_key is not None:
-            openai_api_key = textbox_api_key
-        else:
-            openai_api_key = config.OPENAI_API_KEY
+        openai_api_key = config.OPENAI_API_KEY
+        if self.gradio_mode:
+            await self.wait_for_args()
+            args = list(self.latest_args)
+            textbox_api_key = args[3] if len(args[3]) > 0 else None
+            if textbox_api_key is not None:
+                openai_api_key = textbox_api_key
+            else:
+                openai_api_key = config.OPENAI_API_KEY
 
         self.client = AsyncOpenAI(api_key=openai_api_key)
 
