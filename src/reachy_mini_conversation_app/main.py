@@ -34,7 +34,7 @@ def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> L
 def main(robot=None, stop_event=None):
     """Entrypoint for the Reachy Mini conversation app."""
     args = parse_args()
-    # args.gradio = True  # TODO Antoine - force gradio for testing appifying
+    args.gradio = True  # TODO Antoine - force gradio for testing appifying
 
     logger = setup_logger(args.debug)
     logger.info("Starting Reachy Mini Conversation App")
@@ -137,6 +137,8 @@ def main(robot=None, stop_event=None):
 
 class ReachyMiniConversationApp(ReachyMiniApp):
     """Reachy Mini Apps entry point for the conversation app."""
+
+    custom_app_url = "http://127.0.0.1:7860/"
 
     def run(self, reachy_mini: ReachyMini, stop_event: threading.Event):
         """Run the Reachy Mini conversation app."""
