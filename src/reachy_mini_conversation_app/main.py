@@ -87,7 +87,7 @@ def main(robot=None, stop_event=None):
 
     if args.gradio:
         api_key_textbox = gr.Textbox(
-            label="API Key",
+            label="OPENAI API Key",
             type="password",
             value=os.getenv("OPENAI_API_KEY") if not get_space() else "",
         )
@@ -116,7 +116,7 @@ def main(robot=None, stop_event=None):
 
     try:
         stream_manager.launch()
-    except KeyboardInterrupt:
+    except KeyboardInterrupt or stop_event and stop_event.is_set():
         logger.info("Keyboard interruption in main thread... closing server.")
     finally:
         # Stop the stream manager and its pipelines
