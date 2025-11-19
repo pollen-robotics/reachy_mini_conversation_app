@@ -31,10 +31,8 @@ def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> L
     return chatbot
 
 
-# TODO handle stop event properly
-def main(robot=None, app_stop_event=None):
+def main(args, robot=None, app_stop_event=None):
     """Entrypoint for the Reachy Mini conversation app."""
-    args = parse_args()
     # args.gradio = True  # TODO Antoine - force gradio for testing appifying
     # args.debug = True  # TODO Antoine - force debug for testing
 
@@ -158,8 +156,11 @@ class ReachyMiniConversationApp(ReachyMiniApp):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
+        args = parse_args()
+        args.gradio = True  # Force gradio for Reachy Mini App integration
         main(robot=reachy_mini, app_stop_event=stop_event)
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(args)
