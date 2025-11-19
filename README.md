@@ -32,6 +32,9 @@ source .venv/bin/activate
 uv sync
 ```
 
+> [!NOTE]
+> To reproduce the exact dependency set from this repo's `uv.lock`, run `uv sync` with `--locked` (or `--frozen`). This ensures `uv` installs directly from the lockfile without re-resolving or updating any versions.
+
 To include optional dependencies:
 ```
 uv sync --extra reachy_mini_wireless # For wireless Reachy Mini with GStreamer support
