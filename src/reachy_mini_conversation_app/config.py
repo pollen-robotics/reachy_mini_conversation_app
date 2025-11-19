@@ -23,19 +23,14 @@ class Config:
     # Required
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     if not OPENAI_API_KEY or not OPENAI_API_KEY.strip():
-        print(
-            "OPENAI_API_KEY is missing or empty.\n"
+        logger.warning(  # was raise RuntimeError
+            "\nOPENAI_API_KEY is missing or empty.\n"
             "Either:\n"
             "  1. Create a .env file with: OPENAI_API_KEY=your_api_key_here (recomended)\n"
-            "  2. Set environment variable: export OPENAI_API_KEY=your_api_key_here"
+            "  2. Set environment variable: export OPENAI_API_KEY=your_api_key_here\n"
+            "  3. If using Gradio, you can enter it in the API Key textbox.\n\n"
+            ""
         )
-
-        # raise RuntimeError(
-        #     "OPENAI_API_KEY is missing or empty.\n"
-        #     "Either:\n"
-        #     "  1. Create a .env file with: OPENAI_API_KEY=your_api_key_here (recomended)\n"
-        #     "  2. Set environment variable: export OPENAI_API_KEY=your_api_key_here"
-        # )
 
     # Optional
     MODEL_NAME = os.getenv("MODEL_NAME", "gpt-realtime")

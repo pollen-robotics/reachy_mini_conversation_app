@@ -81,6 +81,14 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 openai_api_key = textbox_api_key
             else:
                 openai_api_key = config.OPENAI_API_KEY
+        else:
+            if not openai_api_key or not openai_api_key.strip():
+                raise RuntimeError(
+                    "\nOPENAI_API_KEY is missing or empty.\n"
+                    "Either:\n"
+                    "  1. Create a .env file with: OPENAI_API_KEY=your_api_key_here (recomended)\n"
+                    "  2. Set environment variable: export OPENAI_API_KEY=your_api_key_here\n"
+                )
 
         self.client = AsyncOpenAI(api_key=openai_api_key)
 
