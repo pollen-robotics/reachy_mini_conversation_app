@@ -37,7 +37,7 @@ def main():
     run(args)
 
 
-def run(args, robot=None, app_stop_event=None):
+def run(args, robot=None, app_stop_event: threading.Event = None):
     """Run the Reachy Mini conversation app."""
     # args.gradio = True  # TODO Antoine - force gradio for testing appifying
     # args.debug = True  # TODO Antoine - force debug for testing
@@ -122,16 +122,14 @@ def run(args, robot=None, app_stop_event=None):
 
     def poll_stop_event():
         """Poll the stop event to allow graceful shutdown."""
-        while not app_stop_event.is_set():
-            logger.info("=========== Polling stop event...")
-            time.sleep(0.1)
+        app_stop_event.wait()
 
         logger.info("App stop event detected, shutting down...")
         try:
             stream_manager.close()
         except Exception as e:
             logger.error(f"Error while closing stream manager: {e}")
-    print("APP STOP EVENT:", "YES" if app_stop_event else "NO")
+
     if app_stop_event:
         threading.Thread(target=poll_stop_event, daemon=True).start()
 
