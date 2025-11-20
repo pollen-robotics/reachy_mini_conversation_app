@@ -220,7 +220,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
                     # send the tool result back
                     if isinstance(call_id, str):
-                        # Filter out non-JSON-serializable internal fields (prefixed with _)
+                        # Filter out internal metadata fields before sending to OpenAI.
+                        # Tools (especially rmscript-compiled ones) may return fields prefixed with _
+                        # for internal bookkeeping (e.g., _move_queue) that should not be part of
+                        # the LLM conversation context.
                         json_safe_result = {
                             k: v for k, v in tool_result.items() if not k.startswith("_")
                         }
@@ -242,13 +245,15 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         ),
                     )
 
-                    # Handle images from any tool (camera or rmscript pictures)
+                    # Handle image results from any tool (camera tool or rmscript picture command).
+                    # Tools that capture images return a base64-encoded JPEG in the "b64_im" field.
                     if "b64_im" in tool_result:
-                        # use raw base64, don't json.dumps (which adds quotes)
                         b64_im = tool_result["b64_im"]
                         if not isinstance(b64_im, str):
                             logger.warning("Unexpected type for b64_im: %s", type(b64_im))
                             b64_im = str(b64_im)
+
+                        # Add image to conversation context for vision analysis
                         await self.connection.conversation.item.create(
                             item={
                                 "type": "message",
@@ -261,17 +266,16 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                 ],
                             },
                         )
-                        logger.info("Added camera image to conversation")
+                        logger.info("Added image to conversation")
 
-                        # Display image in Gradio UI
-                        # Decode base64 back to numpy array for display
+                        # Display image in Gradio UI by decoding base64 to numpy array
                         import cv2
                         img_bytes = base64.b64decode(b64_im)
                         img_array = np.frombuffer(img_bytes, dtype=np.uint8)
                         np_img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
                         np_img_rgb = cv2.cvtColor(np_img, cv2.COLOR_BGR2RGB)
                         img = gr.Image(value=np_img_rgb)
-                        logger.info("Added camera image to gradio output")
+                        logger.info("Added image to gradio output")
 
                         await self.output_queue.put(
                             AdditionalOutputs(

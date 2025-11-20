@@ -121,12 +121,15 @@ def _load_profile_tools() -> None:
 
     logger.info(f"Found {len(tool_names)} tools to load: {tool_names}")
 
-    # Import each tool
+    # Import each tool using a three-tier loading strategy:
+    # 1. Profile-local .rmscript files (compiled to Tool classes at runtime)
+    # 2. Profile-local .py modules (custom Python tool implementations)
+    # 3. Shared tools library (reusable tools in reachy_mini_conversation_app.tools.*)
     for tool_name in tool_names:
         loaded = False
         profile_error = None
 
-        # Try profile-local .rmscript file first
+        # Tier 1: Try loading .rmscript file from profile directory
         rmscript_path = profile_module_path / f"{tool_name}.rmscript"
         if rmscript_path.exists():
             try:
@@ -147,13 +150,15 @@ def _load_profile_tools() -> None:
                     for warning in compiled.warnings:
                         logger.info(f"  {warning}")
 
-                # Create Tool class dynamically
+                # Dynamically create a Tool subclass for the compiled rmscript.
+                # The class is automatically registered when _initialize_tools() calls
+                # get_concrete_subclasses(Tool), which discovers all Tool subclasses.
                 if compiled.success:
 
                     async def __call__(
                             self: Tool, deps: ToolDependencies, **kwargs: Any
                     ) -> Dict[str, Any]:
-                        """Execute the rmscript tool."""
+                        """Execute the rmscript tool by delegating to the compiled executor."""
                         return compiled.execute_queued(deps)
 
                 else:
@@ -161,12 +166,11 @@ def _load_profile_tools() -> None:
                     async def __call__(
                             self: Tool, deps: ToolDependencies, **kwargs: Any
                     ) -> Dict[str, Any]:
-                        """Return compilation errors."""
+                        """Return compilation errors when tool failed to compile."""
                         error_messages = "\n".join(str(e) for e in compiled.errors)
                         return {"error": f"Tool compilation failed:\n{error_messages}"}
 
-                # Create the Tool subclass using type()
-                # The class is automatically registered via get_concrete_subclasses(Tool)
+                # Create the Tool subclass using type() with name, description, and schema from rmscript
                 type(
                     compiled.name if compiled.name else tool_name,
                     (Tool,),
@@ -190,10 +194,8 @@ def _load_profile_tools() -> None:
             except Exception as e:
                 logger.warning(f"Error loading rmscript {tool_name}: {e}")
 
-        # Try profile-local .py tool if not rmscript
+        # Tier 2: Try loading .py module from profile directory
         if not loaded:
-
-            # Try profile-local tool first
             try:
                 profile_tool_module = f"{PROFILES_DIRECTORY}.{profile}.{tool_name}"
                 importlib.import_module(profile_tool_module)
@@ -217,7 +219,7 @@ def _load_profile_tools() -> None:
                 logger.error(f"❌ Failed to load profile-local tool '{tool_name}': {profile_error}")
                 logger.error(f"  Module path: {profile_tool_module}")
 
-        # Try shared tools library if not found in profile
+        # Tier 3: Try loading from shared tools library
         if not loaded:
             try:
                 shared_tool_module = f"reachy_mini_conversation_app.tools.{tool_name}"

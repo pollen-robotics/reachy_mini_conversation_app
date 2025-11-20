@@ -535,9 +535,12 @@ class MovementManager:
             move_time = current_time - self.state.move_start_time
             head, antennas, body_yaw = self.state.current_move.evaluate(move_time)
 
-            # If ALL values are None, this is a "hold" move (e.g., SoundQueueMove or PictureQueueMove)
-            # that wants to maintain the current pose without any motion.
-            # In this case, reuse the last primary pose to avoid jumping to neutral.
+            # Handle "hold moves" that return all None values.
+            # These are used by rmscript tools (e.g., SoundQueueMove, PictureQueueMove) that need
+            # to queue an action (playing sound, capturing image) while maintaining the robot's
+            # current physical pose without any motion. If we didn't handle this case, the robot
+            # would jump to the neutral pose during the action.
+            # Solution: freeze at the last commanded pose until the hold move completes.
             if head is None and antennas is None and body_yaw is None:
                 if self.state.last_primary_pose is not None:
                     return clone_full_body_pose(self.state.last_primary_pose)
