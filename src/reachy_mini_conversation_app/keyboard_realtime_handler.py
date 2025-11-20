@@ -109,10 +109,10 @@ class KeyboardRealtimeHandler(AsyncStreamHandler):
 
         audio_folder = Path(reachy_mini_conversation_app.__file__).parent / "audio_data"
         self.actions_sequence = [
-            (audio_folder / "response_audio_2.wav", None),
-            (audio_folder / "response_audio_3.wav", None),
-            (audio_folder / "response_audio_4.wav", "laughing1"),
-            (audio_folder / "response_audio_5.wav", "scared1"),
+            (audio_folder / "response_audio_2.wav", None, audio_folder / "sway_results_2.json"),
+            (audio_folder / "response_audio_3.wav", None, audio_folder / "sway_results_3.json"),
+            (audio_folder / "response_audio_4.wav", "laughing1", audio_folder / "sway_results_4.json"),
+            (audio_folder / "response_audio_5.wav", "scared1", audio_folder / "sway_results_5.json"),
         ]
         self.action_index = 0
 
@@ -157,19 +157,10 @@ class KeyboardRealtimeHandler(AsyncStreamHandler):
         
         if key == 's' and self.action_index < len(self.actions_sequence):
             next_action = self.actions_sequence[self.action_index]
-            # if next_action[1] is not None:
-            #     emotion_duration = RECORDED_MOVES.get(next_action[1]).duration
-            #     await self._queue_function_call(next_action[1])
-            #     logger.info(f"Waiting for {emotion_duration} seconds for emotion {next_action[1]}")
-            #     await asyncio.sleep(emotion_duration + 1.0)  # Wait for the emotion to finish + 1 second for neutral pose
-                
-            #await self._queue_audio_delta(next_action[0])
-            
-            
-            await self._queue_audio_delta(next_action[0], next_action[1])  #Alternative
+            await self._queue_audio_delta(next_action[0], next_action[1], next_action[2])
             self.action_index += 1
     
-    async def _queue_audio_delta(self, audio_file: str, emotion: str | None = None):
+    async def _queue_audio_delta(self, audio_file: str, emotion: str | None = None, sway_results_file: str | None = None):
         """Queue audio delta event to output_queue."""
         try:
             #Load audio file
@@ -180,7 +171,12 @@ class KeyboardRealtimeHandler(AsyncStreamHandler):
             # Feed to head wobbler if available
             if self.deps.head_wobbler is not None:
                 self.deps.head_wobbler.reset()
-                self.deps.head_wobbler.feed_raw(audio_data)
+                if sway_results_file is not None:
+                    with open(sway_results_file, "r") as f:
+                        sway_results = json.load(f)
+                    self.deps.head_wobbler.feed_array(sway_results)
+                else:
+                    self.deps.head_wobbler.feed_raw(audio_data)
                 if emotion_move is not None:
                     self.deps.movement_manager.queue_move(emotion_move)
             

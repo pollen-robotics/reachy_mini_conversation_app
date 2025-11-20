@@ -53,6 +53,11 @@ class HeadWobbler:
             generation = self._generation
         self.audio_queue.put((generation, SAMPLE_RATE, buf))
 
+    def feed_array(self, array) -> None:
+        with self._state_lock:
+            generation = self._generation
+        self.audio_queue.put((generation, -1, array))
+
     def start(self) -> None:
         """Start the head wobbler loop in a thread."""
         self._stop_event.clear()
@@ -92,9 +97,13 @@ class HeadWobbler:
                         if self._base_ts is None:
                             self._base_ts = time.monotonic()
 
-                pcm = np.asarray(chunk).squeeze(0)
-                with self._sway_lock:
-                    results = self.sway.feed(pcm, sr)
+                if sr == -1:
+                    with self._sway_lock:
+                        results = chunk
+                else:
+                    pcm = np.asarray(chunk).squeeze(0)
+                    with self._sway_lock:
+                        results = self.sway.feed(pcm, sr)
 
                 i = 0
                 while i < len(results):
