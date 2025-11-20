@@ -1,10 +1,5 @@
 import asyncio
 import logging
-import threading
-import sys
-import tty
-import termios
-import select
 import json
 
 import numpy as np
@@ -14,6 +9,7 @@ from typing import Tuple
 import soundfile as sf
 from pathlib import Path
 import reachy_mini_conversation_app
+from pynput import keyboard
 
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, dispatch_tool_call
 
@@ -25,58 +21,57 @@ from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item
 logger = logging.getLogger(__name__)
 
 class KeyboardListener:
-    """Non-blocking keyboard listener that enqueues all keys except escape."""
+    """Non-blocking keyboard listener using pynput that enqueues all keys except escape."""
     
     def __init__(self, key_queue, event_loop_ref):
         self.running = False
         self.key_queue = key_queue
         self.event_loop_ref = event_loop_ref
-        self._thread = None
-        self._old_settings = None
+        self._listener = None
     
     def start(self):
-        """Start the keyboard listener in a separate thread."""
+        """Start the keyboard listener using pynput."""
         if self.running:
             return
         
         self.running = True
-        self._thread = threading.Thread(target=self._listen_loop, daemon=True)
-        self._thread.start()
-        logger.info("Keyboard listener started. Press any key (ESC to quit).")
+        self._listener = keyboard.Listener(
+            on_press=self._on_key_press,
+            on_release=None  # We only care about key presses
+        )
+        self._listener.start()
+        logger.info("Keyboard listener started.")
     
     def stop(self):
         """Stop the keyboard listener."""
         self.running = False
-        if self._old_settings:
-            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self._old_settings)
+        if self._listener:
+            self._listener.stop()
+            self._listener = None
     
-    def _listen_loop(self):
-        """Main listening loop (runs in separate thread)."""
+    def _on_key_press(self, key):
+        """Handle key press events from pynput."""
         try:
-            # Set terminal to raw mode for single character input
-            self._old_settings = termios.tcgetattr(sys.stdin)
-            tty.setraw(sys.stdin.fileno())
-            
-            while self.running:
-                if sys.stdin in select.select([sys.stdin], [], [], 0.1)[0]:
-                    key = sys.stdin.read(1)
-                    
-                    # Check for escape key (ASCII 27)
-                    if ord(key) == 27:
-                        logger.info("Escape key pressed, stopping listener")
-                        self.running = False
-                        # Queue escape to signal shutdown
-                        self._enqueue_key('escape')
-                        break
-                    
-                    # Enqueue any other key
-                    self._enqueue_key(key)
-                        
+            if not self.running:
+                return False  # Stop listener
+                
+            # Handle all keys generically
+            try:
+                # Try to get character representation first
+                if hasattr(key, 'char') and key.char is not None:
+                    key_str = key.char
+                else:
+                    # Use string representation for all other keys
+                    key_str = str(key).replace('Key.', '')
+                self._enqueue_key(key_str)
+                
+            except AttributeError:
+                # Fallback for any unexpected key types
+                self._enqueue_key(str(key))
+
         except Exception as e:
             logger.error(f"Keyboard listener error: {e}")
-        finally:
-            if self._old_settings:
-                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self._old_settings)
+            return False  # Stop listener on error
     
     def _enqueue_key(self, key):
         """Enqueue a key press to the async queue."""

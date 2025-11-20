@@ -79,7 +79,6 @@ def main() -> None:
     # Choose handler based on keyboard flag
     if args.keyboard:
         handler = KeyboardRealtimeHandler(deps)
-        logger.info("Using KeyboardRealtimeHandler - Press 'S' for audio, 'J' for function call")
     else:
         handler = OpenaiRealtimeHandler(deps)
 

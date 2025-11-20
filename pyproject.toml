@@ -20,13 +20,16 @@ dependencies = [
     #Environment variables
     "python-dotenv",
 
+    #Keyboard input
+    "pynput>=1.7.0",
+
     #OpenAI
     "openai>=2.1",
 
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
-    "reachy_mini @ git+https://github.com/pollen-robotics/reachy_mini.git",
+    "reachy_mini @ file:///Users/caroline/Documents/reachy_mini",
 ]
 
 [project.optional-dependencies]
