@@ -50,7 +50,13 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         )
         self.deps = deps
         self.session_instructions = get_session_instructions()
-        logger.info(f"Session instructions loaded:\n{self.session_instructions}")
+        logger.info(f"\nSession instructions loaded:\n{self.session_instructions}\n")
+        profile_settings = get_profile_settings()
+        logger.info(
+            f"Current profile configuration:\n"
+            f"  enable_voice: {profile_settings.enable_voice}\n"
+            f"  enable_idle_behaviors: {profile_settings.enable_idle_behaviors}\n"
+        )
 
         # Override type annotations for OpenAI strict typing (only for values used in API)
         self.output_sample_rate: Literal[24000]
@@ -306,7 +312,11 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                 },
                             )
                         else:
-                            logger.info("Voice disabled for current profile; skipping speech response.")
+                            await self.connection.response.create(
+                                response={
+                                    "instructions": "Use the tool result just returned but don't use speech. Respond with tool calls only if it makes sense in the current context.",
+                                },
+                            )
 
                     # re synchronize the head wobble after a tool call that may have taken some time
                     if self.deps.head_wobbler is not None:

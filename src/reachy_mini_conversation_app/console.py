@@ -101,13 +101,11 @@ class LocalStream:
 
             if isinstance(handler_output, AdditionalOutputs):
                 for msg in handler_output.args:
+                    role = msg.get("role", "assistant")
                     content = msg.get("content", "")
                     if isinstance(content, str):
-                        logger.info(
-                            "role=%s content=%s",
-                            msg.get("role"),
-                            content if len(content) < 500 else content[:500] + "…",
-                        )
+                        snippet = content if len(content) < 500 else content[:500] + "…"
+                        logger.info(f"\n--- {role} ---\n{snippet}\n")
 
             elif isinstance(handler_output, tuple):
                 input_sample_rate, audio_frame = handler_output
