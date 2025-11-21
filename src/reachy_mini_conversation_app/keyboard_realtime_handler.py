@@ -155,7 +155,7 @@ class KeyboardRealtimeHandler(AsyncStreamHandler):
         """Process any key press - you can customize this method."""
         logger.info(f"Processing key: '{key}'")
         
-        if key == 's' and self.action_index < len(self.actions_sequence):
+        if key == 'page_down' and self.action_index < len(self.actions_sequence):
             next_action = self.actions_sequence[self.action_index]
             await self._queue_audio_delta(next_action[0], next_action[1], next_action[2])
             self.action_index += 1
