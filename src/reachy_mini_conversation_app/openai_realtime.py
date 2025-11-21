@@ -16,6 +16,7 @@ from websockets.exceptions import ConnectionClosedError
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.prompts import get_session_instructions
+from reachy_mini_conversation_app.profile_settings import get_profile_settings
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_tool_specs,
@@ -37,6 +38,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             input_sample_rate=16000,  # respeaker output
         )
         self.deps = deps
+        self.profile_settings = get_profile_settings()
 
         # Override type annotations for OpenAI strict typing (only for values used in API)
         self.output_sample_rate: Literal[24000]
@@ -281,12 +283,14 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     # for other tool calls, let the robot reply out loud
                     if self.is_idle_tool_call:
                         self.is_idle_tool_call = False
-                    else:
+                    elif self.profile_settings.enable_voice:
                         await self.connection.response.create(
                             response={
                                 "instructions": "Use the tool result just returned and answer concisely in speech.",
                             },
                         )
+                    else:
+                        logger.info("Voice disabled for current profile; skipping speech response.")
 
                     # re synchronize the head wobble after a tool call that may have taken some time
                     if self.deps.head_wobbler is not None:

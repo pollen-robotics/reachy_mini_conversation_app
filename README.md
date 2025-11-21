@@ -183,6 +183,17 @@ Tools are resolved first from Python files in the profile folder (custom tools),
 On top of built-in tools found in the shared library, you can implement custom tools specific to your profile by adding Python files in the profile folder. 
 Custom tools must subclass `reachy_mini_conversation_app.tools.core_tools.Tool` (see `profiles/example/sweep_look.py`).
 
+### Profile settings
+Profiles can optionally expose runtime knobs via `profile.json`. Currently the app looks for the `enable_voice` boolean to decide whether the assistant should speak after tool calls. For example, to keep a profile silent:
+
+```json
+{
+  "enable_voice": false
+}
+```
+
+If `profile.json` is missing or the key is omitted, voice stays enabled.
+
 
 
 
