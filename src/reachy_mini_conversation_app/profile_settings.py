@@ -20,6 +20,7 @@ class ProfileSettings:
     """Profile-level knobs that adjust runtime behavior."""
 
     enable_voice: bool = True
+    enable_idle_behaviors: bool = True
 
 
 _PROFILE_SETTINGS: ProfileSettings | None = None
@@ -54,6 +55,32 @@ def _load_profile_settings() -> ProfileSettings:
         return ProfileSettings()
 
     enable_voice = bool(data.get("enable_voice", True))
-    settings = ProfileSettings(enable_voice=enable_voice)
+    enable_idle_behaviors = bool(data.get("enable_idle_behaviors", True))
+    settings = ProfileSettings(
+        enable_voice=enable_voice,
+        enable_idle_behaviors=enable_idle_behaviors,
+    )
     logger.info(f"Profile '{profile}' settings loaded: {settings}")
     return settings
+
+
+def update_profile_settings(
+    *,
+    enable_voice: bool | None = None,
+    enable_idle_behaviors: bool | None = None,
+) -> ProfileSettings:
+    """Update the cached profile settings and return the new values."""
+
+    global _PROFILE_SETTINGS
+    current = get_profile_settings()
+    new_settings = ProfileSettings(
+        enable_voice=current.enable_voice if enable_voice is None else bool(enable_voice),
+        enable_idle_behaviors=(
+            current.enable_idle_behaviors
+            if enable_idle_behaviors is None
+            else bool(enable_idle_behaviors)
+        ),
+    )
+    _PROFILE_SETTINGS = new_settings
+    logger.info(f"Profile settings updated: {new_settings}")
+    return new_settings

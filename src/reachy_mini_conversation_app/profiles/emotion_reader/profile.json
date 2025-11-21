@@ -1,3 +1,4 @@
 {
-  "enable_voice": false
+  "enable_voice": false,
+  "enable_idle_behaviors": false
 }

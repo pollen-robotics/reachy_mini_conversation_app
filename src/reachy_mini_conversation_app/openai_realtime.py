@@ -49,7 +49,6 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             input_sample_rate=16000,  # respeaker output
         )
         self.deps = deps
-        self.profile_settings = get_profile_settings()
         self.session_instructions = get_session_instructions()
         logger.info(f"Session instructions loaded:\n{self.session_instructions}")
 
@@ -298,14 +297,16 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     # for other tool calls, let the robot reply out loud
                     if self.is_idle_tool_call:
                         self.is_idle_tool_call = False
-                    elif self.profile_settings.enable_voice:
-                        await self.connection.response.create(
-                            response={
-                                "instructions": "Use the tool result just returned and answer concisely in speech.",
-                            },
-                        )
                     else:
-                        logger.info("Voice disabled for current profile; skipping speech response.")
+                        profile_settings = get_profile_settings()
+                        if profile_settings.enable_voice:
+                            await self.connection.response.create(
+                                response={
+                                    "instructions": "Use the tool result just returned and answer concisely in speech.",
+                                },
+                            )
+                        else:
+                            logger.info("Voice disabled for current profile; skipping speech response.")
 
                     # re synchronize the head wobble after a tool call that may have taken some time
                     if self.deps.head_wobbler is not None:
@@ -344,8 +345,13 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         # This is called periodically by the fastrtc Stream
 
         # Handle idle
+        profile_settings = get_profile_settings()
         idle_duration = asyncio.get_event_loop().time() - self.last_activity_time
-        if idle_duration > 15.0 and self.deps.movement_manager.is_idle():
+        if (
+            profile_settings.enable_idle_behaviors
+            and idle_duration > 15.0
+            and self.deps.movement_manager.is_idle()
+        ):
             try:
                 await self.send_idle_signal(idle_duration)
             except Exception as e:

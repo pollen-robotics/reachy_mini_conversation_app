@@ -184,11 +184,16 @@ On top of built-in tools found in the shared library, you can implement custom t
 Custom tools must subclass `reachy_mini_conversation_app.tools.core_tools.Tool` (see `profiles/example/sweep_look.py`).
 
 ### Profile settings
-Profiles can optionally expose runtime knobs via `profile.json`. Currently the app looks for the `enable_voice` boolean to decide whether the assistant should speak after tool calls. For example, to keep a profile silent:
+Profiles can optionally expose runtime knobs via `profile.json`. Supported keys include:
+- `enable_voice`: controls whether the assistant should speak after tool calls (defaults to `true`).
+- `enable_idle_behaviors`: toggles idle behaviors such as spontaneous dances or look-arounds triggered by inactivity (defaults to `true`).
+
+For example, to keep a profile silent and idle-free:
 
 ```json
 {
-  "enable_voice": false
+  "enable_voice": false,
+  "enable_idle_behaviors": false
 }
 ```
 
