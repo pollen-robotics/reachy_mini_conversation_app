@@ -3,7 +3,7 @@ import base64
 import random
 import asyncio
 import logging
-from typing import Any, Tuple, Literal, cast
+from typing import Any, Dict, Tuple, Literal, cast
 from datetime import datetime
 
 import cv2
@@ -27,6 +27,17 @@ from reachy_mini_conversation_app.tools.core_tools import (
 logger = logging.getLogger(__name__)
 
 
+def _redact_tool_result(result: Any) -> Any:
+    """Return a copy of the tool result with bulky fields replaced."""
+    if not isinstance(result, dict):
+        return result
+
+    redacted: Dict[str, Any] = dict(result)
+    if "b64_im" in redacted:
+        redacted["b64_im"] = "<base64 image omitted>"
+    return redacted
+
+
 class OpenaiRealtimeHandler(AsyncStreamHandler):
     """An OpenAI realtime handler for fastrtc Stream."""
 
@@ -39,6 +50,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         )
         self.deps = deps
         self.profile_settings = get_profile_settings()
+        self.session_instructions = get_session_instructions()
+        logger.info(f"Session instructions loaded:\n{self.session_instructions}")
 
         # Override type annotations for OpenAI strict typing (only for values used in API)
         self.output_sample_rate: Literal[24000]
@@ -108,7 +121,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 await conn.session.update(
                     session={
                         "type": "realtime",
-                        "instructions": get_session_instructions(),
+                        "instructions": self.session_instructions,
                         "audio": {
                             "input": {
                                 "format": {
@@ -216,10 +229,12 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     try:
                         tool_result = await dispatch_tool_call(tool_name, args_json_str, self.deps)
                         logger.debug("Tool '%s' executed successfully", tool_name)
-                        logger.debug("Tool result: %s", tool_result)
                     except Exception as e:
                         logger.error("Tool '%s' failed", tool_name)
                         tool_result = {"error": str(e)}
+
+                    redacted_tool_result = _redact_tool_result(tool_result)
+                    logger.debug(f"Tool result: {redacted_tool_result}")
 
                     # send the tool result back
                     if isinstance(call_id, str):
@@ -235,7 +250,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         AdditionalOutputs(
                             {
                                 "role": "assistant",
-                                "content": json.dumps(tool_result),
+                                "content": json.dumps(redacted_tool_result),
                                 "metadata": {"title": f"🛠️ Used tool {tool_name}", "status": "done"},
                             },
                         ),
