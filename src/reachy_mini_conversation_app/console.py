@@ -12,7 +12,7 @@ from fastrtc import AdditionalOutputs, audio_to_int16, audio_to_float32
 from librosa import resample
 
 from reachy_mini import ReachyMini
-from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
+from reachy_mini_conversation_app.handlers.base import ConversationHandler
 
 
 logger = logging.getLogger(__name__)
@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 class LocalStream:
     """LocalStream using Reachy Mini's recorder/player."""
 
-    def __init__(self, handler: OpenaiRealtimeHandler, robot: ReachyMini):
-        """Initialize the stream with an OpenAI realtime handler and pipelines."""
+    def __init__(self, handler: ConversationHandler, robot: ReachyMini):
+        """Initialize the stream with a conversation handler and pipelines."""
         self.handler = handler
         self._robot = robot
         self._stop_event = asyncio.Event()
@@ -44,7 +44,7 @@ class LocalStream:
 
         async def runner() -> None:
             self._tasks = [
-                asyncio.create_task(self.handler.start_up(), name="openai-handler"),
+                asyncio.create_task(self.handler.start_up(), name="conversation-handler"),
                 asyncio.create_task(self.record_loop(), name="stream-record-loop"),
                 asyncio.create_task(self.play_loop(), name="stream-play-loop"),
             ]

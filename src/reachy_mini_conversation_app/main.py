@@ -15,8 +15,9 @@ from reachy_mini_conversation_app.utils import (
     setup_logger,
     handle_vision_stuff,
 )
+from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.console import LocalStream
-from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
+from reachy_mini_conversation_app.handlers import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
 
@@ -75,7 +76,17 @@ def main() -> None:
     )
     logger.debug(f"Chatbot avatar images: {chatbot.avatar_images}")
 
-    handler = OpenaiRealtimeHandler(deps)
+    # Select handler based on configuration.
+    if config.HANDLER_TYPE == "openai":
+        handler = OpenaiRealtimeHandler(deps)
+        logger.info("Using OpenAI Realtime API handler")
+    elif config.HANDLER_TYPE == "gemini":
+        # Note: we import here to avoid importing Gemini dependencies when not used
+        from reachy_mini_conversation_app.handlers.gemini_realtime import GeminiRealtimeHandler
+        handler = GeminiRealtimeHandler(deps)
+        logger.info("Using Gemini Live API handler")
+    else:
+        raise ValueError(f"Unknown HANDLER_TYPE: {config.HANDLER_TYPE}")
 
     stream_manager: gr.Blocks | LocalStream | None = None
 

@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import reachy_mini_conversation_app.openai_realtime as rt_mod
-from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
+import reachy_mini_conversation_app.handlers.openai_realtime as rt_mod
+from reachy_mini_conversation_app.handlers import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 
 

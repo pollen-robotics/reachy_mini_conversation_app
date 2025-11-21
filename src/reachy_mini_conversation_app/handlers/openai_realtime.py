@@ -10,12 +10,13 @@ import cv2
 import numpy as np
 import gradio as gr
 from openai import AsyncOpenAI
-from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item
+from fastrtc import AdditionalOutputs, wait_for_item
 from numpy.typing import NDArray
 from websockets.exceptions import ConnectionClosedError
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.prompts import get_session_instructions
+from reachy_mini_conversation_app.handlers.base import ConversationHandler
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_tool_specs,
@@ -26,7 +27,7 @@ from reachy_mini_conversation_app.tools.core_tools import (
 logger = logging.getLogger(__name__)
 
 
-class OpenaiRealtimeHandler(AsyncStreamHandler):
+class OpenaiRealtimeHandler(ConversationHandler):
     """An OpenAI realtime handler for fastrtc Stream."""
 
     def __init__(self, deps: ToolDependencies):
@@ -101,7 +102,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
     async def _run_realtime_session(self) -> None:
         """Establish and manage a single realtime session."""
-        async with self.client.realtime.connect(model=config.MODEL_NAME) as conn:
+        async with self.client.realtime.connect(model=config.OPENAI_REALTIME_MODEL_NAME) as conn:
             try:
                 await conn.session.update(
                     session={

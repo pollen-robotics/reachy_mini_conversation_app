@@ -23,6 +23,9 @@ dependencies = [
     #OpenAI
     "openai>=2.1",
 
+    #Gemini
+    "google-genai>=0.2.0",
+
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
