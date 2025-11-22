@@ -85,6 +85,7 @@ Some wheels (e.g. PyTorch) are large and require compatible CUDA or CPU buildsâ€
 | `mediapipe_vision` | Lightweight landmark tracking with MediaPipe. | Works on CPU; enables `--head-tracker mediapipe`.
 | `all_vision` | Convenience alias installing every vision extra. | Install when you want the flexibility to experiment with every provider.
 | `dev` | Developer tooling (`pytest`, `ruff`). | Add on top of either base or `all_vision` environments.
+| `emotion_reader_profile` | Flute soundtrack support for the emotion_reader profile. | Installs audio backends so emotions can play their companion WAV file. |
 
 ## Configuration
 
@@ -187,6 +188,7 @@ Custom tools must subclass `reachy_mini_conversation_app.tools.core_tools.Tool` 
 Profiles can optionally expose runtime knobs via `profile.json`. Supported keys include:
 - `enable_voice`: controls whether the assistant should speak after tool calls (defaults to `true`).
 - `enable_idle_behaviors`: toggles idle behaviors such as spontaneous dances or look-arounds triggered by inactivity (defaults to `true`).
+- `enable_flute_audio`: plays the flute soundtrack alongside emotions when true (defaults to `false`).
 
 For example, to keep a profile silent and idle-free:
 

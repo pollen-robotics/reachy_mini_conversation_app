@@ -21,6 +21,7 @@ class ProfileSettings:
 
     enable_voice: bool = True
     enable_idle_behaviors: bool = True
+    enable_flute_audio: bool = False
 
 
 _PROFILE_SETTINGS: ProfileSettings | None = None
@@ -56,9 +57,11 @@ def _load_profile_settings() -> ProfileSettings:
 
     enable_voice = bool(data.get("enable_voice", True))
     enable_idle_behaviors = bool(data.get("enable_idle_behaviors", True))
+    enable_flute_audio = bool(data.get("enable_flute_audio", False))
     settings = ProfileSettings(
         enable_voice=enable_voice,
         enable_idle_behaviors=enable_idle_behaviors,
+        enable_flute_audio=enable_flute_audio,
     )
     logger.info(f"Profile '{profile}' settings loaded: {settings}")
     return settings
@@ -68,6 +71,7 @@ def update_profile_settings(
     *,
     enable_voice: bool | None = None,
     enable_idle_behaviors: bool | None = None,
+    enable_flute_audio: bool | None = None,
 ) -> ProfileSettings:
     """Update the cached profile settings and return the new values."""
 
@@ -79,6 +83,11 @@ def update_profile_settings(
             current.enable_idle_behaviors
             if enable_idle_behaviors is None
             else bool(enable_idle_behaviors)
+        ),
+        enable_flute_audio=(
+            current.enable_flute_audio
+            if enable_flute_audio is None
+            else bool(enable_flute_audio)
         ),
     )
     _PROFILE_SETTINGS = new_settings

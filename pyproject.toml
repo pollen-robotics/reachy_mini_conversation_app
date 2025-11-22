@@ -41,6 +41,10 @@ all_vision = [
   "ultralytics", "supervision",
   "mediapipe>=0.10.14",
 ]
+emotion_reader_profile = [
+  "sounddevice>=0.4.7",
+  "soundfile>=0.12.1",
+]
 
 [dependency-groups]
 dev = [

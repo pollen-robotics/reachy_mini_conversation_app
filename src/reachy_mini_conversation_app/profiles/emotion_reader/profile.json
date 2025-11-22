@@ -1,4 +1,5 @@
 {
   "enable_voice": false,
-  "enable_idle_behaviors": false
+  "enable_idle_behaviors": false,
+  "enable_flute_audio": true
 }

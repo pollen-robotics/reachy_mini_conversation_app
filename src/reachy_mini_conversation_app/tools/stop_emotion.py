@@ -28,4 +28,6 @@ class StopEmotion(Tool):
         logger.info("Tool call: stop_emotion")
         movement_manager = deps.movement_manager
         movement_manager.clear_move_queue()
+        if deps.flute_player is not None:
+            deps.flute_player.stop()
         return {"status": "stopped emotion and cleared queue"}

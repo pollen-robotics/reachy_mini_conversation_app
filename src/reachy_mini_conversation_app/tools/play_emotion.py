@@ -2,6 +2,7 @@ import logging
 from typing import Any, Dict
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
+from reachy_mini_conversation_app.profile_settings import get_profile_settings
 
 
 logger = logging.getLogger(__name__)
@@ -76,6 +77,9 @@ class PlayEmotion(Tool):
             movement_manager = deps.movement_manager
             emotion_move = EmotionQueueMove(emotion_name, RECORDED_MOVES)
             movement_manager.queue_move(emotion_move)
+            settings = get_profile_settings()
+            if settings.enable_flute_audio and deps.flute_player is not None:
+                deps.flute_player.play(emotion_name, RECORDED_MOVES)
 
             return {"status": "queued", "emotion": emotion_name}
 

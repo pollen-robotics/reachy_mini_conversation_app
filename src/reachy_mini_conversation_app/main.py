@@ -19,6 +19,7 @@ from reachy_mini_conversation_app.console import LocalStream
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
+from reachy_mini_conversation_app.audio import build_flute_player
 
 
 def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -55,6 +56,7 @@ def main() -> None:
     )
 
     head_wobbler = HeadWobbler(set_speech_offsets=movement_manager.set_speech_offsets)
+    flute_player = build_flute_player()
 
     deps = ToolDependencies(
         reachy_mini=robot,
@@ -62,6 +64,7 @@ def main() -> None:
         camera_worker=camera_worker,
         vision_manager=vision_manager,
         head_wobbler=head_wobbler,
+        flute_player=flute_player,
     )
     current_file_path = os.path.dirname(os.path.abspath(__file__))
     logger.debug(f"Current file absolute path: {current_file_path}")
@@ -118,6 +121,8 @@ def main() -> None:
             camera_worker.stop()
         if vision_manager:
             vision_manager.stop()
+        if flute_player:
+            flute_player.stop()
 
         # prevent connection to keep alive some threads
         robot.client.disconnect()
