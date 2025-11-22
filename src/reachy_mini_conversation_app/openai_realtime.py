@@ -81,7 +81,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
     def _output_modalities(self, settings: ProfileSettings | None = None) -> list[str]:
         """Return the OpenAI output modalities based on profile settings."""
         active_settings = settings or self.profile_settings
-        return ["text", "audio"] if active_settings.enable_voice else ["text"]
+        return ["audio"] if active_settings.enable_voice else ["text"]
 
     def _session_payload(self, settings: ProfileSettings | None = None) -> dict[str, Any]:
         """Build the session configuration payload."""
