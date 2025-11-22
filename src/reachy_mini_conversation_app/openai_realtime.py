@@ -353,18 +353,12 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     if self.is_idle_tool_call:
                         self.is_idle_tool_call = False
                     else:
-                        if self.profile_settings.enable_voice:
-                            await self.connection.response.create(
-                                response={
-                                    "instructions": "Use the tool result just returned and answer concisely in speech.",
-                                },
-                            )
-                        else:
-                            await self.connection.response.create(
-                                response={
-                                    "instructions": "Use the emotion tool with to try to mime the appropriate emotion.",
-                                },
-                            )
+                        await self.connection.response.create(
+                            response={
+                                "instructions": "Use the tool result just returned and answer concisely if it makes sense given the context.",
+                            },
+                        )
+
 
                     # re synchronize the head wobble after a tool call that may have taken some time
                     if self.deps.head_wobbler is not None:
