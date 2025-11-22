@@ -83,6 +83,40 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         active_settings = settings or self.profile_settings
         return ["text", "audio"] if active_settings.enable_voice else ["text"]
 
+    def _session_payload(self, settings: ProfileSettings | None = None) -> dict[str, Any]:
+        """Build the session configuration payload."""
+        active_settings = settings or self.profile_settings
+        return {
+            "type": "realtime",
+            "instructions": self.session_instructions,
+            "audio": {
+                "input": {
+                    "format": {
+                        "type": "audio/pcm",
+                        "rate": self.target_input_rate,
+                    },
+                    "transcription": {
+                        "model": "whisper-1",
+                        "language": "en",
+                    },
+                    "turn_detection": {
+                        "type": "server_vad",
+                        "interrupt_response": True,
+                    },
+                },
+                "output": {
+                    "format": {
+                        "type": "audio/pcm",
+                        "rate": self.output_sample_rate,
+                    },
+                    "voice": "cedar",
+                },
+            },
+            "output_modalities": self._output_modalities(active_settings),
+            "tools": get_tool_specs(),  # type: ignore[typeddict-item]
+            "tool_choice": "auto",
+        }
+
     async def _refresh_profile_settings(self) -> None:
         """Reload profile settings and propagate runtime changes."""
         new_settings = get_profile_settings()
@@ -93,9 +127,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             f"Updated profile configuration: enable_voice={self.profile_settings.enable_voice}, enable_idle_behaviors={self.profile_settings.enable_idle_behaviors}"
         )
         if self.connection:
-            await self.connection.session.update(
-                session={"output_modalities": self._output_modalities()},
-            )
+            await self.connection.session.update(session=self._session_payload())
             logger.info(f"Session output modalities set to {self._output_modalities()}")
 
     def resample_audio(self, audio: NDArray[np.int16]) -> NDArray[np.int16]:
@@ -146,38 +178,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         """Establish and manage a single realtime session."""
         async with self.client.realtime.connect(model=config.MODEL_NAME) as conn:
             try:
-                await conn.session.update(
-                    session={
-                        "type": "realtime",
-                        "instructions": self.session_instructions,
-                        "audio": {
-                            "input": {
-                                "format": {
-                                    "type": "audio/pcm",
-                                    "rate": self.target_input_rate,
-                                },
-                                "transcription": {
-                                    "model": "whisper-1",
-                                    "language": "en"
-                                },
-                                "turn_detection": {
-                                    "type": "server_vad",
-                                    "interrupt_response": True,
-                                },
-                            },
-                            "output": {
-                                "format": {
-                                    "type": "audio/pcm",
-                                    "rate": self.output_sample_rate,
-                                },
-                                "voice": "cedar",
-                            },
-                        },
-                        "output_modalities": self._output_modalities(),
-                        "tools":  get_tool_specs(),  # type: ignore[typeddict-item]
-                        "tool_choice": "auto",
-                    },
-                )
+                await conn.session.update(session=self._session_payload())
             except Exception:
                 logger.exception("Realtime session.update failed; aborting startup")
                 return
@@ -340,7 +341,6 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                             await self.connection.response.create(
                                 response={
                                     "instructions": "Use the tool result just returned but don't use speech. Respond with tool calls only if it makes sense in the current context.",
-                                    "modalities": ["text"],
                                 },
                             )
 
