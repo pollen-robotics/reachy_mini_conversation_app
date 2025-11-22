@@ -233,6 +233,16 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     logger.debug(f"Assistant transcript: {event.transcript}")
                     await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": event.transcript}))
 
+                if event.type == "response.output_text.delta":
+                    delta_text = getattr(event, "delta", "")
+                    if delta_text:
+                        await self.output_queue.put(AdditionalOutputs({"role": "assistant_partial", "content": delta_text}))
+
+                if event.type == "response.output_text.done":
+                    final_text = getattr(event, "text", "")
+                    if final_text:
+                        await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": final_text}))
+
                 # Handle audio delta
                 if event.type in ("response.audio.delta", "response.output_audio.delta"):
                     if self.deps.head_wobbler is not None:
