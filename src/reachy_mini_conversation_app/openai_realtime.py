@@ -109,7 +109,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         "type": "audio/pcm",
                         "rate": self.output_sample_rate,
                     },
-                    "voice": "cedar",
+                    "voice": "cedar", # alloy, ash, ballad, coral, echo, sage, shimmer, verse, marin, and cedar
                 },
             },
             "output_modalities": self._output_modalities(active_settings),
@@ -266,6 +266,18 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     redacted_tool_result = _redact_tool_result(tool_result)
                     logger.debug(f"Tool result: {redacted_tool_result}")
 
+                    if tool_name == "camera" and isinstance(tool_result, dict):
+                        question = tool_result.get("question")
+                        if isinstance(question, str) and question.strip():
+                            await self.output_queue.put(
+                                AdditionalOutputs(
+                                    {
+                                        "role": "assistant",
+                                        "content": f"[camera] Question: {question.strip()}",
+                                    }
+                                )
+                            )
+
                     # send the tool result back
                     if isinstance(call_id, str):
                         await self.connection.conversation.item.create(
@@ -340,7 +352,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         else:
                             await self.connection.response.create(
                                 response={
-                                    "instructions": "Use the tool result just returned but don't use speech. Respond with tool calls only if it makes sense in the current context.",
+                                    "instructions": "Use the emotion tool with to try to mime the appropriate emotion.",
                                 },
                             )
 
