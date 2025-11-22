@@ -16,7 +16,10 @@ from websockets.exceptions import ConnectionClosedError
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.prompts import get_session_instructions
-from reachy_mini_conversation_app.profile_settings import get_profile_settings
+from reachy_mini_conversation_app.profile_settings import (
+    ProfileSettings,
+    get_profile_settings,
+)
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_tool_specs,
@@ -51,11 +54,11 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.deps = deps
         self.session_instructions = get_session_instructions()
         logger.info(f"\nSession instructions loaded:\n{self.session_instructions}\n")
-        profile_settings = get_profile_settings()
+        self.profile_settings: ProfileSettings = get_profile_settings()
         logger.info(
             f"Current profile configuration:\n"
-            f"  enable_voice: {profile_settings.enable_voice}\n"
-            f"  enable_idle_behaviors: {profile_settings.enable_idle_behaviors}\n"
+            f"  enable_voice: {self.profile_settings.enable_voice}\n"
+            f"  enable_idle_behaviors: {self.profile_settings.enable_idle_behaviors}\n"
         )
 
         # Override type annotations for OpenAI strict typing (only for values used in API)
@@ -74,6 +77,26 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
         return OpenaiRealtimeHandler(self.deps)
+
+    def _output_modalities(self, settings: ProfileSettings | None = None) -> list[str]:
+        """Return the OpenAI output modalities based on profile settings."""
+        active_settings = settings or self.profile_settings
+        return ["text", "audio"] if active_settings.enable_voice else ["text"]
+
+    async def _refresh_profile_settings(self) -> None:
+        """Reload profile settings and propagate runtime changes."""
+        new_settings = get_profile_settings()
+        if new_settings == self.profile_settings:
+            return
+        self.profile_settings = new_settings
+        logger.info(
+            f"Updated profile configuration: enable_voice={self.profile_settings.enable_voice}, enable_idle_behaviors={self.profile_settings.enable_idle_behaviors}"
+        )
+        if self.connection:
+            await self.connection.session.update(
+                session={"output_modalities": self._output_modalities()},
+            )
+            logger.info(f"Session output modalities set to {self._output_modalities()}")
 
     def resample_audio(self, audio: NDArray[np.int16]) -> NDArray[np.int16]:
         """Resample audio using linear interpolation."""
@@ -150,6 +173,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                 "voice": "cedar",
                             },
                         },
+                        "output_modalities": self._output_modalities(),
                         "tools":  get_tool_specs(),  # type: ignore[typeddict-item]
                         "tool_choice": "auto",
                     },
@@ -299,13 +323,14 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                 ),
                             )
 
+                    await self._refresh_profile_settings()
+
                     # if this tool call was triggered by an idle signal, don't make the robot speak
                     # for other tool calls, let the robot reply out loud
                     if self.is_idle_tool_call:
                         self.is_idle_tool_call = False
                     else:
-                        profile_settings = get_profile_settings()
-                        if profile_settings.enable_voice:
+                        if self.profile_settings.enable_voice:
                             await self.connection.response.create(
                                 response={
                                     "instructions": "Use the tool result just returned and answer concisely in speech.",
@@ -315,6 +340,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                             await self.connection.response.create(
                                 response={
                                     "instructions": "Use the tool result just returned but don't use speech. Respond with tool calls only if it makes sense in the current context.",
+                                    "modalities": ["text"],
                                 },
                             )
 
