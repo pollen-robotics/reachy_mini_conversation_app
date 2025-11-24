@@ -53,7 +53,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
         # Debouncing for partial transcripts
         self.partial_transcript_task: asyncio.Task[None] | None = None
-        self.partial_transcript_sequence: int = 0  # Removed unused latest_partial_transcript
+        self.partial_transcript_sequence: int = 0 # sequence counter to prevent stale emissions
         self.partial_debounce_delay = 0.5  # seconds
 
     def copy(self) -> "OpenaiRealtimeHandler":
