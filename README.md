@@ -5,6 +5,7 @@ colorFrom: red
 colorTo: blue
 sdk: static
 pinned: false
+short_description: Talk with Reachy Mini !
 tags:
  - reachy_mini
 ---
