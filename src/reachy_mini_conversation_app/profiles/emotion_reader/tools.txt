@@ -4,3 +4,6 @@ play_emotion
 stop_emotion
 camera
 do_nothing
+set_voice_enabled
+set_idle_behaviors_enabled
+set_flute_audio_enabled

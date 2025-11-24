@@ -12,7 +12,8 @@ requires-python = ">=3.10"
 dependencies = [
     #Media
     "aiortc>=1.13.0",
-    "fastrtc>=0.0.33",
+    #"fastrtc>=0.0.33", --> replaced by git version until new release is made to fix print spamming
+    "fastrtc @ git+https://github.com/gradio-app/fastrtc.git@27f054934f15070750ee0383a94c103231bd0bbb",
     "gradio>=5.49.0",
     "huggingface_hub>=0.34.4",
     "opencv-python>=4.12.0.88",
@@ -40,6 +41,10 @@ all_vision = [
   "torch", "transformers", "num2words",
   "ultralytics", "supervision",
   "mediapipe>=0.10.14",
+]
+emotion_reader_profile = [
+  "sounddevice>=0.4.7",
+  "soundfile>=0.12.1",
 ]
 
 [dependency-groups]

@@ -3,7 +3,7 @@ import base64
 import random
 import asyncio
 import logging
-from typing import Any, Tuple, Literal, cast
+from typing import Any, Dict, Tuple, Literal, cast
 from datetime import datetime
 
 import cv2
@@ -16,6 +16,10 @@ from websockets.exceptions import ConnectionClosedError
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.prompts import get_session_instructions
+from reachy_mini_conversation_app.profile_settings import (
+    ProfileSettings,
+    get_profile_settings,
+)
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_tool_specs,
@@ -24,6 +28,17 @@ from reachy_mini_conversation_app.tools.core_tools import (
 
 
 logger = logging.getLogger(__name__)
+
+
+def _redact_tool_result(result: Any) -> Any:
+    """Return a copy of the tool result with bulky fields replaced."""
+    if not isinstance(result, dict):
+        return result
+
+    redacted: Dict[str, Any] = dict(result)
+    if "b64_im" in redacted:
+        redacted["b64_im"] = "<base64 image omitted>"
+    return redacted
 
 
 class OpenaiRealtimeHandler(AsyncStreamHandler):
@@ -37,6 +52,14 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             input_sample_rate=16000,  # respeaker output
         )
         self.deps = deps
+        self.session_instructions = get_session_instructions()
+        logger.info(f"\nSession instructions loaded:\n{self.session_instructions}\n")
+        self.profile_settings: ProfileSettings = get_profile_settings()
+        logger.info(
+            f"Current profile configuration:\n"
+            f"  enable_voice: {self.profile_settings.enable_voice}\n"
+            f"  enable_idle_behaviors: {self.profile_settings.enable_idle_behaviors}\n"
+        )
 
         # Override type annotations for OpenAI strict typing (only for values used in API)
         self.output_sample_rate: Literal[24000]
@@ -54,6 +77,58 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
         return OpenaiRealtimeHandler(self.deps)
+
+    def _output_modalities(self, settings: ProfileSettings | None = None) -> list[str]:
+        """Return the OpenAI output modalities based on profile settings."""
+        active_settings = settings or self.profile_settings
+        return ["audio"] if active_settings.enable_voice else ["text"]
+
+    def _session_payload(self, settings: ProfileSettings | None = None) -> dict[str, Any]:
+        """Build the session configuration payload."""
+        active_settings = settings or self.profile_settings
+        return {
+            "type": "realtime",
+            "instructions": self.session_instructions,
+            "audio": {
+                "input": {
+                    "format": {
+                        "type": "audio/pcm",
+                        "rate": self.target_input_rate,
+                    },
+                    "transcription": {
+                        "model": "whisper-1",
+                        "language": "en",
+                    },
+                    "turn_detection": {
+                        "type": "server_vad",
+                        "interrupt_response": True,
+                    },
+                },
+                "output": {
+                    "format": {
+                        "type": "audio/pcm",
+                        "rate": self.output_sample_rate,
+                    },
+                    "voice": "cedar", # alloy, ash, ballad, coral, echo, sage, shimmer, verse, marin, and cedar
+                },
+            },
+            "output_modalities": self._output_modalities(active_settings),
+            "tools": get_tool_specs(),  # type: ignore[typeddict-item]
+            "tool_choice": "auto",
+        }
+
+    async def _refresh_profile_settings(self) -> None:
+        """Reload profile settings and propagate runtime changes."""
+        new_settings = get_profile_settings()
+        if new_settings == self.profile_settings:
+            return
+        self.profile_settings = new_settings
+        logger.info(
+            f"Updated profile configuration: enable_voice={self.profile_settings.enable_voice}, enable_idle_behaviors={self.profile_settings.enable_idle_behaviors}"
+        )
+        if self.connection:
+            await self.connection.session.update(session=self._session_payload())
+            logger.info(f"Session output modalities set to {self._output_modalities()}")
 
     def resample_audio(self, audio: NDArray[np.int16]) -> NDArray[np.int16]:
         """Resample audio using linear interpolation."""
@@ -103,37 +178,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         """Establish and manage a single realtime session."""
         async with self.client.realtime.connect(model=config.MODEL_NAME) as conn:
             try:
-                await conn.session.update(
-                    session={
-                        "type": "realtime",
-                        "instructions": get_session_instructions(),
-                        "audio": {
-                            "input": {
-                                "format": {
-                                    "type": "audio/pcm",
-                                    "rate": self.target_input_rate,
-                                },
-                                "transcription": {
-                                    "model": "whisper-1",
-                                    "language": "en"
-                                },
-                                "turn_detection": {
-                                    "type": "server_vad",
-                                    "interrupt_response": True,
-                                },
-                            },
-                            "output": {
-                                "format": {
-                                    "type": "audio/pcm",
-                                    "rate": self.output_sample_rate,
-                                },
-                                "voice": "cedar",
-                            },
-                        },
-                        "tools":  get_tool_specs(),  # type: ignore[typeddict-item]
-                        "tool_choice": "auto",
-                    },
-                )
+                await conn.session.update(session=self._session_payload())
             except Exception:
                 logger.exception("Realtime session.update failed; aborting startup")
                 return
@@ -188,6 +233,16 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     logger.debug(f"Assistant transcript: {event.transcript}")
                     await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": event.transcript}))
 
+                if event.type == "response.output_text.delta":
+                    delta_text = getattr(event, "delta", "")
+                    if delta_text:
+                        await self.output_queue.put(AdditionalOutputs({"role": "assistant_partial", "content": delta_text}))
+
+                if event.type == "response.output_text.done":
+                    final_text = getattr(event, "text", "")
+                    if final_text:
+                        await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": final_text}))
+
                 # Handle audio delta
                 if event.type in ("response.audio.delta", "response.output_audio.delta"):
                     if self.deps.head_wobbler is not None:
@@ -214,10 +269,24 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     try:
                         tool_result = await dispatch_tool_call(tool_name, args_json_str, self.deps)
                         logger.debug("Tool '%s' executed successfully", tool_name)
-                        logger.debug("Tool result: %s", tool_result)
                     except Exception as e:
                         logger.error("Tool '%s' failed", tool_name)
                         tool_result = {"error": str(e)}
+
+                    redacted_tool_result = _redact_tool_result(tool_result)
+                    logger.debug(f"Tool result: {redacted_tool_result}")
+
+                    if tool_name == "camera" and isinstance(tool_result, dict):
+                        question = tool_result.get("question")
+                        if isinstance(question, str) and question.strip():
+                            await self.output_queue.put(
+                                AdditionalOutputs(
+                                    {
+                                        "role": "assistant",
+                                        "content": f"[camera] Question: {question.strip()}",
+                                    }
+                                )
+                            )
 
                     # send the tool result back
                     if isinstance(call_id, str):
@@ -233,7 +302,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         AdditionalOutputs(
                             {
                                 "role": "assistant",
-                                "content": json.dumps(tool_result),
+                                "content": json.dumps(redacted_tool_result),
                                 "metadata": {"title": f"🛠️ Used tool {tool_name}", "status": "done"},
                             },
                         ),
@@ -277,6 +346,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                 ),
                             )
 
+                    await self._refresh_profile_settings()
+
                     # if this tool call was triggered by an idle signal, don't make the robot speak
                     # for other tool calls, let the robot reply out loud
                     if self.is_idle_tool_call:
@@ -284,9 +355,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     else:
                         await self.connection.response.create(
                             response={
-                                "instructions": "Use the tool result just returned and answer concisely in speech.",
+                                "instructions": "Use the tool result just returned and answer concisely if it makes sense given the context.",
                             },
                         )
+
 
                     # re synchronize the head wobble after a tool call that may have taken some time
                     if self.deps.head_wobbler is not None:
@@ -325,8 +397,13 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         # This is called periodically by the fastrtc Stream
 
         # Handle idle
+        profile_settings = get_profile_settings()
         idle_duration = asyncio.get_event_loop().time() - self.last_activity_time
-        if idle_duration > 15.0 and self.deps.movement_manager.is_idle():
+        if (
+            profile_settings.enable_idle_behaviors
+            and idle_duration > 15.0
+            and self.deps.movement_manager.is_idle()
+        ):
             try:
                 await self.send_idle_signal(idle_duration)
             except Exception as e:

@@ -4,3 +4,4 @@ Never describe what you did or plan to do.
 If you must respond by speech or text, juste respond with '...'.
 
 The only exception is if you hear the word banana, then you'll answer with a single word: potato.
+If text is a viable modality, you'll also answer potato if you heard banana.

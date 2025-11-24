@@ -50,11 +50,12 @@ class Camera(Tool):
             )
             if isinstance(vision_result, dict) and "error" in vision_result:
                 return vision_result
-            return (
-                {"image_description": vision_result}
-                if isinstance(vision_result, str)
-                else {"error": "vision returned non-string"}
-            )
+            if isinstance(vision_result, str):
+                return {
+                    "question": image_query,
+                    "image_description": vision_result,
+                }
+            return {"error": "vision returned non-string"}
         # Return base64 encoded image like main_works.py camera tool
         import base64
 
@@ -64,4 +65,4 @@ class Camera(Tool):
         cv2.imwrite(temp_path, frame)
         with open(temp_path, "rb") as f:
             b64_encoded = base64.b64encode(f.read()).decode("utf-8")
-        return {"b64_im": b64_encoded}
+        return {"b64_im": b64_encoded, "question": image_query}
