@@ -8,8 +8,8 @@ import asyncio
 import logging
 from typing import List
 
-from fastrtc import AdditionalOutputs, audio_to_int16, audio_to_float32
-from librosa import resample
+from fastrtc import AdditionalOutputs, audio_to_float32
+from scipy.signal import resample
 
 from reachy_mini import ReachyMini
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
@@ -29,11 +29,6 @@ class LocalStream:
         self._tasks: List[asyncio.Task[None]] = []
         # Allow the handler to flush the player queue when appropriate.
         self.handler._clear_queue = self.clear_audio_queue
-
-        # Hack to avoid the first lenghty call to resample at runtime.
-        # This is likely caused by cache initialization overhead.
-        import numpy as np
-        resample(np.array([0.0]), orig_sr=1, target_sr=1)
 
     def launch(self) -> None:
         """Start the recorder/player and run the async processing loops."""
@@ -88,9 +83,7 @@ class LocalStream:
         while not self._stop_event.is_set():
             audio_frame = self._robot.media.get_audio_sample()
             if audio_frame is not None:
-                frame_mono = audio_frame.T[0]  # both channels are identical
-                frame = audio_to_int16(frame_mono)
-                await self.handler.receive((16000, frame))
+                await self.handler.receive((self._robot.media.get_input_audio_samplerate(), audio_frame))
 
             await asyncio.sleep(0.01)  # avoid busy loop
 
@@ -110,18 +103,24 @@ class LocalStream:
                         )
 
             elif isinstance(handler_output, tuple):
-                input_sample_rate, audio_frame = handler_output
-                device_sample_rate = self._robot.media.get_audio_samplerate()
-                audio_frame_float = audio_to_float32(audio_frame.squeeze())
+                input_sample_rate, audio_data = handler_output
+                output_sample_rate = self._robot.media.get_output_audio_samplerate()
 
-                if input_sample_rate != device_sample_rate:
-                    audio_frame_float = resample(
-                        audio_frame_float,
-                        orig_sr=input_sample_rate,
-                        target_sr=device_sample_rate,
+                # Reshape if needed
+                if audio_data.ndim == 2:
+                    audio_data = audio_data.squeeze()
+
+                # Cast if needed
+                audio_frame = audio_to_float32(audio_data)
+
+                # Resample if needed
+                if input_sample_rate != output_sample_rate:
+                    audio_frame = resample(
+                        audio_frame,
+                        int(len(audio_frame) * output_sample_rate / input_sample_rate),
                     )
 
-                self._robot.media.push_audio_sample(audio_frame_float)
+                self._robot.media.push_audio_sample(audio_frame)
 
             else:
                 logger.debug("Ignoring output type=%s", type(handler_output).__name__)
