@@ -29,7 +29,7 @@ dependencies = [
     "reachy_mini>=1.0.0.rc4",
 
     #RMScript (local development)
-    "rmscript @ file:///Users/david/code/rmscript",
+    "rmscript @ file:///Users/david/projects/reachy-mini/rmscript",
 ]
 
 [project.optional-dependencies]
