@@ -134,11 +134,14 @@ def _load_profile_tools() -> None:
         if rmscript_path.exists():
             try:
 
-                from reachy_mini_conversation_app.rmscript import ReachyMiniScriptCompiler
+                from rmscript import compile_file
+                from reachy_mini_conversation_app.rmscript_adapters import (
+                    QueueExecutionAdapter,
+                    QueueAdapterContext,
+                )
 
-                # Compile the rmscript
-                compiler = ReachyMiniScriptCompiler()
-                compiled = compiler.compile_file(str(rmscript_path))
+                # Compile the rmscript using standalone package
+                compiled = compile_file(str(rmscript_path))
 
                 # Log compilation results
                 if not compiled.success:
@@ -150,6 +153,9 @@ def _load_profile_tools() -> None:
                     for warning in compiled.warnings:
                         logger.info(f"  {warning}")
 
+                # Create the execution adapter
+                adapter = QueueExecutionAdapter()
+
                 # Dynamically create a Tool subclass for the compiled rmscript.
                 # The class is automatically registered when _initialize_tools() calls
                 # get_concrete_subclasses(Tool), which discovers all Tool subclasses.
@@ -158,8 +164,18 @@ def _load_profile_tools() -> None:
                     async def __call__(
                             self: Tool, deps: ToolDependencies, **kwargs: Any
                     ) -> Dict[str, Any]:
-                        """Execute the rmscript tool by delegating to the compiled executor."""
-                        return compiled.execute_queued(deps)
+                        """Execute the rmscript tool using queue-based adapter."""
+                        # Create execution context
+                        context = QueueAdapterContext(
+                            script_name=compiled.name,
+                            script_description=compiled.description,
+                            source_file_path=compiled.source_file_path,
+                            reachy_mini=deps.reachy_mini,
+                            movement_manager=deps.movement_manager,
+                            camera_worker=deps.camera_worker,
+                        )
+                        # Execute using adapter
+                        return adapter.execute(compiled.ir, context)
 
                 else:
 
@@ -184,7 +200,7 @@ def _load_profile_tools() -> None:
                         },
                         "__call__": __call__,
                         "__module__": f"{PROFILES_DIRECTORY}.{profile}",
-                        "_compiled_tool": compiled,
+                        "_compilation_result": compiled,
                     },
                 )
 

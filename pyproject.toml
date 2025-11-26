@@ -8,7 +8,7 @@ version = "0.1.0"
 authors = [{ name = "Pollen Robotics", email = "contact@pollen-robotics.com" }]
 description = ""
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     #Media
     "aiortc>=1.13.0",
@@ -27,6 +27,9 @@ dependencies = [
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
     "reachy_mini>=1.0.0.rc4",
+
+    #RMScript (local development)
+    "rmscript @ file:///Users/david/code/rmscript",
 ]
 
 [project.optional-dependencies]
