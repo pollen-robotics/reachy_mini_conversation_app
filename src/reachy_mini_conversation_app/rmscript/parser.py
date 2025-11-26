@@ -151,6 +151,10 @@ class Parser:
         if token.type == TokenType.KEYWORD_PLAY:
             return self.parse_play()
 
+        # Check for loop command
+        if token.type == TokenType.KEYWORD_LOOP:
+            return self.parse_loop()
+
         # Check for movement keywords
         if token.type in (
             TokenType.KEYWORD_TURN,
@@ -204,7 +208,7 @@ class Parser:
         return PictureStatement(line=token.line, column=token.column)
 
     def parse_play(self) -> PlaySoundStatement:
-        """Parse play command: 'play soundname' or 'play soundname pause'."""
+        """Parse play command: 'play soundname', 'play soundname pause', or 'play soundname 10s'."""
         token = self.current()
         self.advance()  # consume 'play'
 
@@ -217,10 +221,42 @@ class Parser:
         play.sound_name = self.current().value
         self.advance()
 
-        # Check for optional blocking modifier (pause, fully, wait, block, complete)
-        if self.current().type == TokenType.SOUND_BLOCKING:
+        # Check for optional duration or blocking modifier
+        if self.current().type == TokenType.DURATION:
+            # Duration specified (e.g., "play mysound 10s")
+            duration_str = self.current().value.rstrip("s")
+            play.duration = float(duration_str)
+            play.blocking = True  # Duration implies blocking
+            self.advance()
+        elif self.current().type == TokenType.SOUND_BLOCKING:
+            # Blocking modifier (pause, fully, wait, block, complete)
             play.blocking = True
             self.advance()
+
+        return play
+
+    def parse_loop(self) -> PlaySoundStatement:
+        """Parse loop command: 'loop soundname' or 'loop soundname 10s'."""
+        token = self.current()
+        self.advance()  # consume 'loop'
+
+        play = PlaySoundStatement(line=token.line, column=token.column, loop=True, blocking=True)
+
+        # Expect sound name (identifier)
+        if self.current().type != TokenType.IDENTIFIER:
+            raise self.error(f"Expected sound name after 'loop', got '{self.current().value}'")
+
+        play.sound_name = self.current().value
+        self.advance()
+
+        # Check for optional duration (default to 10s if not specified)
+        if self.current().type == TokenType.DURATION:
+            duration_str = self.current().value.rstrip("s")
+            play.duration = float(duration_str)
+            self.advance()
+        else:
+            # Default duration for loop is 10s
+            play.duration = 10.0
 
         return play
 
@@ -298,6 +334,12 @@ class Parser:
             action.keyword = token.value.lower()
             self.advance()
         elif previous_keyword:
+            # Check if current token is a control keyword (not allowed after 'and')
+            if token.type in (TokenType.KEYWORD_PICTURE, TokenType.KEYWORD_PLAY, TokenType.KEYWORD_LOOP, TokenType.KEYWORD_WAIT):
+                raise self.error(
+                    f"Cannot combine movement with '{token.value}' using 'and'. "
+                    f"Use separate lines instead."
+                )
             # Keyword reuse after 'and'
             action.keyword = previous_keyword
         else:

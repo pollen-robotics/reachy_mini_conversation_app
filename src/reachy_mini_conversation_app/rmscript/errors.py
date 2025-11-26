@@ -68,6 +68,8 @@ class PlaySoundAction:
 
     sound_name: str  # Name of the sound file (without extension)
     blocking: bool = False  # True = wait for sound to finish, False = play in background
+    loop: bool = False  # True = loop the sound
+    duration: Optional[float] = None  # Duration for looping or limited playback
     source_line: int = 0
     original_text: str = ""
 
@@ -192,14 +194,26 @@ class CompiledTool:
                 sound_file = find_sound_file(action.sound_name, search_paths)
 
                 if sound_file:
-                    # Get duration for blocking mode
-                    sound_duration = get_sound_duration(sound_file) if action.blocking else 0.0
+                    # Determine duration
+                    if action.loop:
+                        # Loop mode: use specified duration (or default 10s)
+                        sound_duration = action.duration if action.duration is not None else 10.0
+                    elif action.duration is not None:
+                        # Explicit duration specified (for play with duration)
+                        sound_duration = action.duration
+                    elif action.blocking:
+                        # Blocking mode: get actual sound duration
+                        sound_duration = get_sound_duration(sound_file)
+                    else:
+                        # Async mode: instant (0.0)
+                        sound_duration = 0.0
 
                     # Create a SoundQueueMove and add to queue
                     sound_move = SoundQueueMove(
                         sound_file_path=str(sound_file),
                         duration=sound_duration,
-                        blocking=action.blocking
+                        blocking=action.blocking,
+                        loop=action.loop
                     )
                     movement_manager.queue_move(sound_move)
 

@@ -166,3 +166,37 @@ def compile_rmscript(source: str, verbose: bool = False) -> CompiledTool:
     log_level = "INFO" if verbose else "WARNING"
     compiler = ReachyMiniScriptCompiler(log_level=log_level)
     return compiler.compile(source)
+
+
+def verify_rmscript(source: str) -> tuple[bool, list[str]]:
+    """Verify ReachyMiniScript source without generating executable code.
+
+    Args:
+        source: ReachyMiniScript source code to verify
+
+    Returns:
+        Tuple of (is_valid, error_messages)
+        - is_valid: True if compilation succeeds, False otherwise
+        - error_messages: List of error and warning messages (empty if no errors/warnings)
+
+    Example:
+        >>> is_valid, errors = verify_rmscript("look left\\nwait 1s")
+        >>> if not is_valid:
+        ...     for error in errors:
+        ...         print(error)
+
+    """
+    compiler = ReachyMiniScriptCompiler(log_level="ERROR")
+    result = compiler.compile(source)
+
+    error_messages = []
+
+    # Collect errors
+    for error in result.errors:
+        error_messages.append(str(error))
+
+    # Collect warnings
+    for warning in result.warnings:
+        error_messages.append(str(warning))
+
+    return result.success, error_messages

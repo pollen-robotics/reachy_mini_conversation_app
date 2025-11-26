@@ -92,3 +92,5 @@ class PlaySoundStatement(Statement):
 
     sound_name: str = ""  # Name of the sound file (without extension)
     blocking: bool = False  # True = wait for sound to finish
+    loop: bool = False  # True = loop the sound
+    duration: Optional[float] = None  # Duration for looping (or limited playback)

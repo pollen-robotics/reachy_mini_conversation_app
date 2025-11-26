@@ -157,6 +157,8 @@ Move the head forward/back/left/right/up/down in space:
 ```rmscript
 head forward 10    # Move head forward 10mm
 head back 5        # Move head back 5mm
+head backward 5    # Same as "back" (synonym)
+head backwards 5   # Same as "back" (synonym)
 head left 8        # Move head left 8mm
 head right 8       # Move head right 8mm
 head up 5          # Move head up 5mm
@@ -276,6 +278,7 @@ Play sound files (.wav, .mp3, .ogg, .flac) during script execution:
 ```rmscript
 play soundname         # Play sound in background (async, continues immediately)
 play soundname pause   # Wait for sound to finish before continuing (blocking)
+play soundname 5s      # Play sound for exactly 5 seconds (blocking)
 ```
 
 The script automatically searches for sound files in this order:
@@ -302,6 +305,25 @@ play mysound complete
 ```
 
 The script pauses until the sound finishes playing, then continues.
+
+**Duration-limited playback:**
+```rmscript
+play mysound 10s      # Play sound for exactly 10 seconds (blocks for 10s)
+```
+
+Plays the sound for the specified duration. If the sound is shorter, it will finish early. If longer, it will be cut off.
+
+### Loop Sound
+
+Loop a sound file repeatedly for a specified duration:
+
+```rmscript
+loop soundname        # Loop sound for 10 seconds (default)
+loop soundname 5s     # Loop sound for 5 seconds
+loop soundname 30s    # Loop sound for 30 seconds
+```
+
+The loop command automatically repeats the sound until the duration expires. This is useful for background music or ambient sounds.
 
 **Example use case:**
 ```rmscript
@@ -386,6 +408,7 @@ Use descriptive speed words:
 look left superfast    # 0.2 seconds
 look right fast        # 0.5 seconds
 look up slow           # 2.0 seconds
+look up slowly         # 2.0 seconds (synonym for slow)
 look down superslow    # 3.0 seconds
 ```
 
@@ -428,6 +451,25 @@ antenna both up and look up 25 and turn left 30
 ```
 
 This merges into a single `goto_target()` call with all parameters.
+
+**Important:** The `and` keyword can only combine movement commands (turn, look, head, tilt, antenna). You **cannot** combine movements with control commands (picture, play, loop, wait) using `and`. Use separate lines instead:
+
+```rmscript
+# ❌ ERROR - Cannot combine movement with picture
+look left and picture
+
+# ✓ CORRECT - Use separate lines
+look left
+wait 0.5s
+picture
+
+# ❌ ERROR - Cannot combine movement with play
+turn right and play mysound
+
+# ✓ CORRECT - Use separate lines
+turn right
+play mysound
+```
 
 ## Compiler Architecture
 
@@ -541,6 +583,40 @@ tool = compiler.compile(source_code)
 
 **Returns:**
 - `CompiledTool`: Compilation result object
+
+### verify_rmscript
+
+Verification function that checks if rmscript code compiles without generating executable code.
+
+```python
+from reachy_mini_conversation_app.rmscript import verify_rmscript
+
+is_valid, errors = verify_rmscript(source_code)
+if not is_valid:
+    for error in errors:
+        print(error)
+```
+
+**Parameters:**
+- `source_code` (str): rmscript source code to verify
+
+**Returns:**
+- `tuple[bool, list[str]]`: Tuple of (is_valid, error_messages)
+  - `is_valid`: True if compilation succeeds, False otherwise
+  - `error_messages`: List of error and warning messages (empty if valid)
+
+**Example:**
+
+```python
+script = """
+DESCRIPTION Test script
+look left and picture
+"""
+
+is_valid, errors = verify_rmscript(script)
+# is_valid = False
+# errors = ["❌ Line 3: Cannot combine movement with 'picture' using 'and'. Use separate lines instead."]
+```
 
 ### CompiledTool
 

@@ -39,6 +39,7 @@ from reachy_mini_conversation_app.rmscript.constants import (
     HEAD_YAW_MEDIUM,
     MEDIUM_KEYWORDS,
     DEFAULT_DISTANCE,
+    BACKWARD_SYNONYMS,
     # Other constants
     DEFAULT_DURATION,
     MAX_BODY_YAW_DEG,
@@ -169,8 +170,10 @@ class SemanticAnalyzer:
         return PlaySoundAction(
             sound_name=play.sound_name,
             blocking=play.blocking,
+            loop=play.loop,
+            duration=play.duration,
             source_line=play.line,
-            original_text=f"play {play.sound_name}{'pause' if play.blocking else ''}"
+            original_text=f"{'loop' if play.loop else 'play'} {play.sound_name}"
         )
 
     def analyze_repeat(self, repeat: RepeatBlock) -> List[Action | WaitAction | PictureAction | PlaySoundAction]:
@@ -425,7 +428,7 @@ class SemanticAnalyzer:
                 has_head_movement = True
                 if action.direction == "forward":
                     head_pose_params["x"] += action.strength
-                elif action.direction == "back":
+                elif action.direction in BACKWARD_SYNONYMS:
                     head_pose_params["x"] -= action.strength
                 elif action.direction == "left":
                     head_pose_params["y"] += action.strength

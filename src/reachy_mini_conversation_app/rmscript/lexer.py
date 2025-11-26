@@ -17,6 +17,7 @@ class TokenType(Enum):
     KEYWORD_WAIT = auto()
     KEYWORD_PICTURE = auto()
     KEYWORD_PLAY = auto()
+    KEYWORD_LOOP = auto()
     KEYWORD_REPEAT = auto()
     KEYWORD_END = auto()
     KEYWORD_DESCRIPTION = auto()
@@ -81,33 +82,19 @@ class Lexer:
             "wait": TokenType.KEYWORD_WAIT,
             "picture": TokenType.KEYWORD_PICTURE,
             "play": TokenType.KEYWORD_PLAY,
+            "loop": TokenType.KEYWORD_LOOP,
             "repeat": TokenType.KEYWORD_REPEAT,
             "end": TokenType.KEYWORD_END,
             "description": TokenType.KEYWORD_DESCRIPTION,
         }
 
-        # Directions
-        self.directions = {
-            "left",
-            "right",
-            "up",
-            "down",
-            "center",
-            "straight",
-            "forward",
-            "back",
-            "neutral",
-            "in",
-            "inside",
-            "inward",
-            "out",
-            "outside",
-            "outward",
-            "both",
-        }
+        # Directions - import from constants
+        from reachy_mini_conversation_app.rmscript.constants import ALL_DIRECTIONS
+        self.directions = set(ALL_DIRECTIONS)
 
-        # Duration keywords
-        self.duration_keywords = {"superfast", "fast", "slow", "superslow", "veryslow", "veryfast"}
+        # Duration keywords - import from constants
+        from reachy_mini_conversation_app.rmscript.constants import DURATION_KEYWORDS
+        self.duration_keywords = set(DURATION_KEYWORDS.keys())
 
         # Qualitative strength - import from constants
         from reachy_mini_conversation_app.rmscript.constants import (

@@ -1,0 +1,44 @@
+# This is an example of rmscript to make the antennas dance
+# Description of the tool, will be passed to the LLM
+DESCRIPTION To make antennas dance
+
+# Simple commands with default arguments
+look up
+wait 1s
+look down
+wait 1s
+look straight
+
+# Simple commands with quantitative arguments (degrees or millimeters)
+head right 30
+wait 1s
+head left 30
+wait 1s
+head right 0
+
+# Simple commands with timing in seconds
+tilt right 20 0.5s
+wait 1s
+tilt left 20 3s
+wait 1s
+
+# Using qualitative arguments instead of numbers
+look up big veryfast
+wait 1s
+look down alittle slow
+wait 1s
+
+# Simultaneous commands
+look up 30 and right 45 slow
+look down 30 and left 45 slow
+look straight and antenna left down and antenna right left
+wait 1s
+antenna left right and antenna right up
+antenna both up veryfast
+
+# Repeat
+repeat 3
+    # Antennas positioned using "clock" hours
+    antenna left 5 and antenna right 7 veryfast
+    antenna left 7 and antenna right 5 veryfast
+antenna both up

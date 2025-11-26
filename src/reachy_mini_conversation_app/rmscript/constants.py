@@ -66,6 +66,7 @@ DURATION_KEYWORDS: Dict[str, float] = {
     "veryfast": 0.2,
     "fast": 0.5,
     "slow": 2.0,
+    "slowly": 2.0,
     "veryslow": 3.0,
     "superslow": 3.0,
 }
@@ -81,6 +82,12 @@ VERY_LARGE_KEYWORDS: List[str] = ["verybig", "enormous","verylarge","maximum"]
 CENTER_SYNONYMS: List[str] = ["center", "straight", "forward", "neutral"]
 INWARD_SYNONYMS: List[str] = ["in", "inside", "inward"]
 OUTWARD_SYNONYMS: List[str] = ["out", "outside", "outward"]
+BACKWARD_SYNONYMS: List[str] = ["back", "backward", "backwards"]
+
+# All valid directions (used by lexer for tokenization)
+ALL_DIRECTIONS: List[str] = [
+    "left", "right", "up", "down", "both"
+] + CENTER_SYNONYMS + INWARD_SYNONYMS + OUTWARD_SYNONYMS + BACKWARD_SYNONYMS
 
 # Physical Limits (from robot constraints)
 MAX_BODY_YAW_DEG = 160.0  # degrees
@@ -101,7 +108,7 @@ SAFE_ANTENNA_ANGLE_DEG = 120.0  # recommended maximum for safety
 MOVEMENT_KEYWORDS: List[str] = ["turn", "look", "head", "tilt", "antenna"]
 
 # Control Keywords
-CONTROL_KEYWORDS: List[str] = ["wait", "repeat", "end", "play", "picture"]
+CONTROL_KEYWORDS: List[str] = ["wait", "repeat", "end", "play", "loop", "picture"]
 
 # Sound Playback Mode Keywords
 SOUND_BLOCKING_KEYWORDS: List[str] = ["pause", "fully", "wait", "block", "complete"]
@@ -109,7 +116,7 @@ SOUND_BLOCKING_KEYWORDS: List[str] = ["pause", "fully", "wait", "block", "comple
 # Valid Directions per Keyword
 TURN_DIRECTIONS: List[str] = ["left", "right"] + CENTER_SYNONYMS
 LOOK_DIRECTIONS: List[str] = ["left", "right", "up", "down"] + CENTER_SYNONYMS
-HEAD_DIRECTIONS: List[str] = ["forward", "back", "left", "right", "up", "down"]
+HEAD_DIRECTIONS: List[str] = ["forward", "left", "right", "up", "down"] + BACKWARD_SYNONYMS
 TILT_DIRECTIONS: List[str] = ["left", "right"] + CENTER_SYNONYMS
 
 # Antenna movements (OLD SYSTEM - kept for backward compatibility if needed)
@@ -146,4 +153,6 @@ NEGATIVE_DIRECTIONS = {
     "right": "yaw",  # Negative yaw (verified from robot)
     "up": "pitch",  # Negative pitch (verified from robot)
     "back": "x",  # Negative X
+    "backward": "x",  # Negative X (synonym for back)
+    "backwards": "x",  # Negative X (synonym for back)
 }

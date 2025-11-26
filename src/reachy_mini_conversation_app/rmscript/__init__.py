@@ -6,7 +6,7 @@ from typing import Any, Dict
 from pathlib import Path
 
 from reachy_mini_conversation_app.rmscript.errors import CompiledTool, CompilationError
-from reachy_mini_conversation_app.rmscript.compiler import ReachyMiniScriptCompiler
+from reachy_mini_conversation_app.rmscript.compiler import ReachyMiniScriptCompiler, verify_rmscript
 
 
 logger = logging.getLogger(__name__)
@@ -129,4 +129,5 @@ __all__ = [
     "CompilationError",
     "CompiledTool",
     "create_tool_from_rmscript",
+    "verify_rmscript",
 ]

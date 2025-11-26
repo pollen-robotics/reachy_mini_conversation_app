@@ -17,20 +17,23 @@ logger = logging.getLogger(__name__)
 class SoundQueueMove(Move):  # type: ignore
     """Wrapper for sound playback to work with the movement queue system."""
 
-    def __init__(self, sound_file_path: str, duration: float = 0.0, blocking: bool = False):
+    def __init__(self, sound_file_path: str, duration: float = 0.0, blocking: bool = False, loop: bool = False):
         """Initialize a SoundQueueMove.
 
         Args:
             sound_file_path: Absolute path to the sound file
-            duration: Duration of the sound in seconds (for blocking mode)
+            duration: Duration of the sound in seconds (for blocking mode or loop duration)
             blocking: If True, move lasts for sound duration. If False, move is instant.
+            loop: If True, loop the sound for the specified duration.
 
         """
         from pathlib import Path
         self.sound_file_path = str(Path(sound_file_path))
-        self._duration = duration if blocking else 0.01  # Instant for async, full duration for blocking
+        self.loop = loop
+        self._duration = duration if (blocking or loop) else 0.01  # Instant for async, full duration for blocking/loop
         self.blocking = blocking
         self._played = False
+        self._stop_event = None  # For stopping looped sounds
 
     @property
     def duration(self) -> float:
@@ -43,16 +46,18 @@ class SoundQueueMove(Move):  # type: ignore
         if not self._played and t <= 0.01:
             self._played = True
             try:
-                if self.blocking:
-                    # Blocking mode: play in foreground thread (blocks the evaluate call)
-                    from pathlib import Path
+                from pathlib import Path
 
+                if self.loop:
+                    # Loop mode: play sound repeatedly for specified duration
+                    from reachy_mini_conversation_app.rmscript.sound_player import play_sound_loop
+                    self._stop_event = play_sound_loop(Path(self.sound_file_path), self._duration)
+                elif self.blocking:
+                    # Blocking mode: play in foreground thread (blocks the evaluate call)
                     from reachy_mini_conversation_app.rmscript.sound_player import play_sound_blocking
                     play_sound_blocking(Path(self.sound_file_path))
                 else:
                     # Async mode: play in background thread
-                    from pathlib import Path
-
                     from reachy_mini_conversation_app.rmscript.sound_player import play_sound_async
                     play_sound_async(Path(self.sound_file_path))
             except Exception as e:
@@ -211,3 +216,38 @@ def play_sound_async(file_path: Path) -> bool:
     except Exception as e:
         logger.error(f"Error starting async playback: {e}")
         return False
+
+
+def play_sound_loop(file_path: Path, duration: float) -> threading.Event:
+    """Play a sound file repeatedly for a specified duration.
+
+    Args:
+        file_path: Path to the sound file
+        duration: How long to loop the sound (seconds)
+
+    Returns:
+        Event that can be set to stop playback early
+
+    """
+    import time
+
+    stop_event = threading.Event()
+
+    def _loop() -> None:
+        start_time = time.time()
+        while not stop_event.is_set() and (time.time() - start_time) < duration:
+            # Play sound once
+            play_sound_blocking(file_path)
+            # Check if we should continue looping
+            elapsed = time.time() - start_time
+            if elapsed >= duration:
+                break
+        logger.info(f"Sound loop finished after {time.time() - start_time:.1f}s")
+
+    try:
+        thread = threading.Thread(target=_loop, daemon=True)
+        thread.start()
+        return stop_event
+    except Exception as e:
+        logger.error(f"Error starting loop playback: {e}")
+        return stop_event
