@@ -118,6 +118,7 @@ By default, the app runs in console mode for direct audio interaction. Use the `
 | `--local-vision` | `False` | Use local vision model (SmolVLM2) for periodic image processing instead of gpt-realtime vision. Requires `local_vision` extra to be installed. |
 | `--gradio` | `False` | Launch the Gradio web UI. Without this flag, runs in console mode. Required when running in simulation mode. |
 | `--debug` | `False` | Enable verbose logging for troubleshooting. |
+| `--wireless-version` | `False` | Use GStreamer backend for wireless version of the robot. Requires `reachy_mini_wireless` extra to be installed.
 
 
 ### Examples
@@ -131,6 +132,12 @@ By default, the app runs in console mode for direct audio interaction. Use the `
 
   ```bash
   reachy-mini-conversation-app --local-vision
+  ```
+
+- Run with wireless support (requires `reachy_mini_wireless` extra and daemon started with `--wireless-version`):
+
+  ```bash
+  reachy-mini-conversation-app --wireless-version
   ```
 
 - Disable the camera pipeline (audio-only conversation):
