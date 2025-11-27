@@ -37,7 +37,13 @@ def main() -> None:
     if args.no_camera and args.head_tracker is not None:
         logger.warning("Head tracking is not activated due to --no-camera.")
 
-    robot = ReachyMini()
+    # Initialize robot with appropriate backend
+    if args.wireless_version:
+        logger.info("Using GStreamer backend for wireless operation")
+        robot = ReachyMini(media_backend="gstreamer")
+    else:
+        logger.info("Using default backend")
+        robot = ReachyMini()
 
     # Check if running in simulation mode without --gradio
     if robot.client.get_status()["simulation_enabled"] and not args.gradio:
