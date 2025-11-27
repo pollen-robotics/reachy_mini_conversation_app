@@ -25,6 +25,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--gradio", default=False, action="store_true", help="Open gradio interface")
     parser.add_argument("--debug", default=False, action="store_true", help="Enable debug logging")
+    parser.add_argument(
+        "--wireless-version",
+        default=False,
+        action="store_true",
+        help="Use GStreamer backend for wireless version of the robot",
+    )
     return parser.parse_args()
 
 
