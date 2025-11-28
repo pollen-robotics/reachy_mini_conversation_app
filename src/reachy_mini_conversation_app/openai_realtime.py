@@ -53,7 +53,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
-        return OpenaiRealtimeHandler(self.deps)
+        return OpenaiRealtimeHandler(self.deps, self.gradio_mode)
 
     def resample_audio(self, audio: NDArray[np.int16]) -> NDArray[np.int16]:
         """Resample audio using linear interpolation."""

@@ -39,9 +39,6 @@ def main():
 
 def run(args, robot=None, app_stop_event: threading.Event = None):
     """Run the Reachy Mini conversation app."""
-    # args.gradio = True  # TODO Antoine - force gradio for testing appifying
-    # args.debug = True  # TODO Antoine - force debug for testing
-
     logger = setup_logger(args.debug)
     logger.info("Starting Reachy Mini Conversation App")
 
