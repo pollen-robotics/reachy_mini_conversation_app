@@ -12,6 +12,7 @@ from fastrtc import AdditionalOutputs, audio_to_float32
 from scipy.signal import resample
 
 from reachy_mini import ReachyMini
+from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 
 
@@ -75,6 +76,9 @@ class LocalStream:
     def clear_audio_queue(self) -> None:
         """Flush the player's appsrc to drop any queued audio immediately."""
         logger.info("User intervention: flushing player queue")
+        if self._robot.media.backend == MediaBackend.GSTREAMER:
+            # Directly flush gstreamer audio pipe
+            self._robot.media.audio.clear_player() 
         self.handler.output_queue = asyncio.Queue()
 
     async def record_loop(self) -> None:
@@ -86,7 +90,7 @@ class LocalStream:
             audio_frame = self._robot.media.get_audio_sample()
             if audio_frame is not None:
                 await self.handler.receive((input_sample_rate, audio_frame))
-            await asyncio.sleep(0.01)  # avoid busy loop
+            await asyncio.sleep(0)  # avoid busy loop
 
     async def play_loop(self) -> None:
         """Fetch outputs from the handler: log text and play audio frames."""
