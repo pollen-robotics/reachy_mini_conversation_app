@@ -152,6 +152,7 @@ class ReachyMiniConversationApp(ReachyMiniApp):
     """Reachy Mini Apps entry point for the conversation app."""
 
     custom_app_url = "http://127.0.0.1:7860/"
+    dont_start_webserver = True
 
     def run(self, reachy_mini: ReachyMini, stop_event: threading.Event):
         """Run the Reachy Mini conversation app."""
