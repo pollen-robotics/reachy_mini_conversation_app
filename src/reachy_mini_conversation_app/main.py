@@ -13,16 +13,11 @@ from fastrtc import Stream
 from gradio.utils import get_space
 
 from reachy_mini import ReachyMini, ReachyMiniApp
-from reachy_mini_conversation_app.moves import MovementManager
-from reachy_mini_conversation_app.tools import ToolDependencies
 from reachy_mini_conversation_app.utils import (
     parse_args,
     setup_logger,
     handle_vision_stuff,
 )
-from reachy_mini_conversation_app.console import LocalStream
-from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
-from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
 
 
 def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -39,6 +34,12 @@ def main():
 
 def run(args, robot=None, app_stop_event: threading.Event = None):
     """Run the Reachy Mini conversation app."""
+    from reachy_mini_conversation_app.moves import MovementManager
+    from reachy_mini_conversation_app.tools import ToolDependencies
+    from reachy_mini_conversation_app.console import LocalStream
+    from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
+    from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
+
     logger = setup_logger(args.debug)
     logger.info("Starting Reachy Mini Conversation App")
 
