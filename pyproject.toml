@@ -70,6 +70,7 @@ reachy_mini_conversation_app = [
   "images/*",
   "demos/**/*.txt",
   "prompts_library/*.txt",
+  "profiles/**/*.txt"
 ]
 
 [tool.ruff]
