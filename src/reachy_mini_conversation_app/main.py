@@ -1,11 +1,12 @@
 """Entrypoint for the Reachy Mini conversation app."""
 
+import argparse
 import os
 import sys
 import time
 import asyncio
 import threading
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import gradio as gr
 from fastapi import FastAPI
@@ -26,13 +27,13 @@ def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> L
     return chatbot
 
 
-def main():
+def main() -> None:
     """Entrypoint for the Reachy Mini conversation app."""
     args = parse_args()
     run(args)
 
 
-def run(args, robot=None, app_stop_event: threading.Event = None):
+def run(args: argparse.Namespace, robot: ReachyMini = None, app_stop_event: Optional[threading.Event] = None) -> None:
     """Run the Reachy Mini conversation app."""
     from reachy_mini_conversation_app.moves import MovementManager
     from reachy_mini_conversation_app.console import LocalStream
@@ -118,7 +119,7 @@ def run(args, robot=None, app_stop_event: threading.Event = None):
     if vision_manager:
         vision_manager.start()
 
-    def poll_stop_event():
+    def poll_stop_event() -> None:
         """Poll the stop event to allow graceful shutdown."""
         app_stop_event.wait()
 
@@ -155,7 +156,7 @@ class ReachyMiniConversationApp(ReachyMiniApp):
     custom_app_url = "http://127.0.0.1:7860/"
     dont_start_webserver = True
 
-    def run(self, reachy_mini: ReachyMini, stop_event: threading.Event):
+    def run(self, reachy_mini: ReachyMini, stop_event: threading.Event) -> None:
         """Run the Reachy Mini conversation app."""
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)

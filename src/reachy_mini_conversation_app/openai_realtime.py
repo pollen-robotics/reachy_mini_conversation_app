@@ -61,7 +61,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
         # Debouncing for partial transcripts
         self.partial_transcript_task: asyncio.Task[None] | None = None
-        self.partial_transcript_sequence: int = 0 # sequence counter to prevent stale emissions
+        self.partial_transcript_sequence: int = 0  # sequence counter to prevent stale emissions
         self.partial_debounce_delay = 0.5  # seconds
 
     def copy(self) -> "OpenaiRealtimeHandler":
@@ -74,9 +74,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             await asyncio.sleep(self.partial_debounce_delay)
             # Only emit if this is still the latest partial (by sequence number)
             if self.partial_transcript_sequence == sequence:
-                await self.output_queue.put(
-                    AdditionalOutputs({"role": "user_partial", "content": transcript})
-                )
+                await self.output_queue.put(AdditionalOutputs({"role": "user_partial", "content": transcript}))
                 logger.debug(f"Debounced partial emitted: {transcript}")
         except asyncio.CancelledError:
             logger.debug("Debounced partial cancelled")
@@ -86,7 +84,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         """Start the handler with minimal retries on unexpected websocket closure."""
         openai_api_key = config.OPENAI_API_KEY
         if self.gradio_mode:
-            await self.wait_for_args()
+            await self.wait_for_args()  #  type: ignore
             args = list(self.latest_args)
             textbox_api_key = args[3] if len(args[3]) > 0 else None
             if textbox_api_key is not None:
@@ -140,10 +138,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                     "type": "audio/pcm",
                                     "rate": self.input_sample_rate,
                                 },
-                                "transcription": {
-                                    "model": "gpt-4o-transcribe",
-                                    "language": "en"
-                                },
+                                "transcription": {"model": "gpt-4o-transcribe", "language": "en"},
                                 "turn_detection": {
                                     "type": "server_vad",
                                     "interrupt_response": True,
@@ -157,7 +152,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                 "voice": "cedar",
                             },
                         },
-                        "tools":  get_tool_specs(),  # type: ignore[typeddict-item]
+                        "tools": get_tool_specs(),  # type: ignore[typeddict-item]
                         "tool_choice": "auto",
                     },
                 )
