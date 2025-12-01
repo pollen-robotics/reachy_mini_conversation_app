@@ -35,9 +35,9 @@ def main():
 def run(args, robot=None, app_stop_event: threading.Event = None):
     """Run the Reachy Mini conversation app."""
     from reachy_mini_conversation_app.moves import MovementManager
-    from reachy_mini_conversation_app.tools import ToolDependencies
     from reachy_mini_conversation_app.console import LocalStream
     from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
+    from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
     from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
 
     logger = setup_logger(args.debug)
