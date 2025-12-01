@@ -84,7 +84,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         """Start the handler with minimal retries on unexpected websocket closure."""
         openai_api_key = config.OPENAI_API_KEY
         if self.gradio_mode:
-            await self.wait_for_args()  #  type: ignore
+            await self.wait_for_args()  #  type: ignore[no-untyped-call]
             args = list(self.latest_args)
             textbox_api_key = args[3] if len(args[3]) > 0 else None
             if textbox_api_key is not None:
