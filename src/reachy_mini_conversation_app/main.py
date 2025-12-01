@@ -33,7 +33,7 @@ def main() -> None:
     run(args)
 
 
-def run(args: argparse.Namespace, robot: ReachyMini = None, app_stop_event: Optional[threading.Event] = None) -> None:
+def run(args: argparse.Namespace, robot: ReachyMini = None, app_stop_event: Optional[threading.Event] = None, settings_app=None) -> None:
     """Run the Reachy Mini conversation app."""
     from reachy_mini_conversation_app.moves import MovementManager
     from reachy_mini_conversation_app.console import LocalStream
@@ -106,7 +106,11 @@ def run(args: argparse.Namespace, robot: ReachyMini = None, app_stop_event: Opti
             ui_args={"title": "Talk with Reachy Mini"},
         )
         stream_manager = stream.ui
-        app = FastAPI()
+        if not settings_app:
+            app = FastAPI()
+        else:
+            app = settings_app
+
         app = gr.mount_gradio_app(app, stream.ui, path="/")
     else:
         stream_manager = LocalStream(handler, robot)
@@ -164,7 +168,7 @@ class ReachyMiniConversationApp(ReachyMiniApp):  # type: ignore[misc]
 
         args = parse_args()
         args.gradio = True  # Force gradio for Reachy Mini App integration
-        run(args, robot=reachy_mini, app_stop_event=stop_event)
+        run(args, robot=reachy_mini, app_stop_event=stop_event, settings_app=self.settings_app)
 
 
 if __name__ == "__main__":
