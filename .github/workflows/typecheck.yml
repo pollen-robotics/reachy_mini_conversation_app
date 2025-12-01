@@ -26,4 +26,4 @@ jobs:
         run: uv sync --frozen --group dev --extra all_vision
 
       - name: Run mypy
-        run: uv run mypy --pretty --show-error-codes .
+        run: .venv/bin/mypy --pretty --show-error-codes .

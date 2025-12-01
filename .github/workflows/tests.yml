@@ -60,15 +60,15 @@ jobs:
       # Prefetch HF dataset to avoid download during test collection
       - name: Prefetch HF dataset
         run: |
-          uv run python - <<'PY'
+          .venv/bin/python - <<'PY'
           from huggingface_hub import snapshot_download
           snapshot_download(
               repo_id="pollen-robotics/reachy-mini-emotions-library",
               repo_type="dataset",
               etag_timeout=120,
-              max_workers=4
+              max_workers=4,
           )
           PY
 
       - name: Run tests
-        run: uv run pytest -q
+        run: .venv/bin/pytest -q

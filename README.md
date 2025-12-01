@@ -44,12 +44,16 @@ source .venv/bin/activate
 uv sync
 ```
 
-To include optional vision dependencies:
+> [!NOTE]
+> To reproduce the exact dependency set from this repo's `uv.lock`, run `uv sync` with `--locked` (or `--frozen`). This ensures `uv` installs directly from the lockfile without re-resolving or updating any versions.
+
+To include optional dependencies:
 ```
-uv sync --extra local_vision        # For local PyTorch/Transformers vision
-uv sync --extra yolo_vision         # For YOLO-based vision
-uv sync --extra mediapipe_vision    # For MediaPipe-based vision
-uv sync --extra all_vision          # For all vision features
+uv sync --extra reachy_mini_wireless # For wireless Reachy Mini with GStreamer support
+uv sync --extra local_vision         # For local PyTorch/Transformers vision
+uv sync --extra yolo_vision          # For YOLO-based vision
+uv sync --extra mediapipe_vision     # For MediaPipe-based vision
+uv sync --extra all_vision           # For all vision features
 ```
 
 You can combine extras or include dev dependencies:
@@ -68,6 +72,9 @@ pip install -e .
 Install optional extras depending on the feature set you need:
 
 ```bash
+# Wireless Reachy Mini support
+pip install -e .[reachy_mini_wireless]
+
 # Vision stacks (choose at least one if you plan to run face tracking)
 pip install -e .[local_vision]
 pip install -e .[yolo_vision]
@@ -84,6 +91,7 @@ Some wheels (e.g. PyTorch) are large and require compatible CUDA or CPU buildsâ€
 
 | Extra | Purpose | Notes |
 |-------|---------|-------|
+| `reachy_mini_wireless` | Wireless Reachy Mini with GStreamer support. | Required for wireless versions of Reachy Mini, includes GStreamer dependencies.
 | `local_vision` | Run the local VLM (SmolVLM2) through PyTorch/Transformers. | GPU recommended; ensure compatible PyTorch builds for your platform.
 | `yolo_vision` | YOLOv8 tracking via `ultralytics` and `supervision`. | CPU friendly; supports the `--head-tracker yolo` option.
 | `mediapipe_vision` | Lightweight landmark tracking with MediaPipe. | Works on CPU; enables `--head-tracker mediapipe`.
@@ -155,6 +163,40 @@ By default, the app runs in console mode for direct audio interaction. Use the `
 | `play_emotion` | Play a recorded emotion clip via Hugging Face assets. | Needs `HF_TOKEN` for the recorded emotions dataset. |
 | `stop_emotion` | Clear queued emotions. | Core install only. |
 | `do_nothing` | Explicitly remain idle. | Core install only. |
+
+## Using custom profiles
+Create custom profiles with dedicated instructions and enabled tools! 
+
+Set `REACHY_MINI_CUSTOM_PROFILE=<name>` to load `src/reachy_mini_conversation_app/profiles/<name>/` (see `.env.example`). If unset, the `default` profile is used.
+
+Each profile requires two files: `instructions.txt` (prompt text) and `tools.txt` (list of allowed tools), and optionally contains custom tools implementations.
+
+### Custom instructions
+Write plain-text prompts in `instructions.txt`. To reuse shared prompt pieces, add lines like:
+```
+[passion_for_lobster_jokes]
+[identities/witty_identity]
+```
+Each placeholder pulls the matching file under `src/reachy_mini_conversation_app/prompts/` (nested paths allowed). See `src/reachy_mini_conversation_app/profiles/example/` for a reference layout.
+
+### Enabling tools
+List enabled tools in `tools.txt`, one per line; prefix with `#` to comment out. For example:
+
+```
+play_emotion
+# move_head
+
+# My custom tool defined locally
+sweep_look
+```
+Tools are resolved first from Python files in the profile folder (custom tools), then from the shared library `src/reachy_mini_conversation_app/tools/` (e.g., `dance`, `head_tracking`). 
+
+### Custom tools
+On top of built-in tools found in the shared library, you can implement custom tools specific to your profile by adding Python files in the profile folder. 
+Custom tools must subclass `reachy_mini_conversation_app.tools.core_tools.Tool` (see `profiles/example/sweep_look.py`).
+
+
+
 
 ## Development workflow
 - Install the dev group extras: `uv sync --group dev` or `pip install -e .[dev]`.
