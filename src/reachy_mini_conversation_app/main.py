@@ -33,7 +33,12 @@ def main() -> None:
     run(args)
 
 
-def run(args: argparse.Namespace, robot: ReachyMini = None, app_stop_event: Optional[threading.Event] = None, settings_app=None) -> None:
+def run(
+    args: argparse.Namespace,
+    robot: ReachyMini = None,
+    app_stop_event: Optional[threading.Event] = None,
+    settings_app: Optional[FastAPI] = None,
+) -> None:
     """Run the Reachy Mini conversation app."""
     from reachy_mini_conversation_app.moves import MovementManager
     from reachy_mini_conversation_app.console import LocalStream
