@@ -362,10 +362,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         if not self.connection:
             return
         input_sample_rate, audio_frame = frame
-
-        # Reshape if needed
+        # Make mono if it's stereo
         if audio_frame.ndim == 2:
-            audio_frame = audio_frame.squeeze()
+            audio_frame = audio_frame[:, 0]
 
         # Resample if needed
         if self.input_sample_rate != input_sample_rate:
