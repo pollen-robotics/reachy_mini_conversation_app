@@ -106,6 +106,15 @@ class LocalStream:
                 input_sample_rate, audio_data = handler_output
                 output_sample_rate = self._robot.media.get_output_audio_samplerate()
 
+                # Reshape if needed
+                if audio_data.ndim == 2:
+                    # Scipy channels last convention
+                    if audio_data.shape[1] > audio_data.shape[0]:
+                        audio_data = audio_data.T
+                    # Multiple channels -> Mono channel
+                    if audio_data.shape[1] > 1:
+                        audio_data = audio_data[:, 0]
+
                 # Cast if needed
                 audio_frame = audio_to_float32(audio_data)
 
