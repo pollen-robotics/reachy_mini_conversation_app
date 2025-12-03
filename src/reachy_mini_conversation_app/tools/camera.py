@@ -1,6 +1,9 @@
+import base64
 import asyncio
 import logging
 from typing import Any, Dict
+
+import cv2
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
@@ -55,13 +58,11 @@ class Camera(Tool):
                 if isinstance(vision_result, str)
                 else {"error": "vision returned non-string"}
             )
-        # Return base64 encoded image like main_works.py camera tool
-        import base64
 
-        import cv2
+        # Encode image directly to JPEG bytes without writing to file
+        success, buffer = cv2.imencode('.jpg', frame)
+        if not success:
+            raise RuntimeError("Failed to encode frame as JPEG")
 
-        temp_path = "/tmp/camera_frame.jpg"
-        cv2.imwrite(temp_path, frame)
-        with open(temp_path, "rb") as f:
-            b64_encoded = base64.b64encode(f.read()).decode("utf-8")
+        b64_encoded = base64.b64encode(buffer.tobytes()).decode("utf-8")
         return {"b64_im": b64_encoded}
