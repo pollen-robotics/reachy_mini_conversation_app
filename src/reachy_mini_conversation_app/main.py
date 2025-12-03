@@ -40,6 +40,7 @@ def run(
     settings_app: Optional[FastAPI] = None,
 ) -> None:
     """Run the Reachy Mini conversation app."""
+    # Putting these dependencies here makes the dashboard faster to load when the conversation app is installed
     from reachy_mini_conversation_app.moves import MovementManager
     from reachy_mini_conversation_app.console import LocalStream
     from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
