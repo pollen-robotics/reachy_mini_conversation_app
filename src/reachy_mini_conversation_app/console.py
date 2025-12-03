@@ -106,10 +106,6 @@ class LocalStream:
                 input_sample_rate, audio_data = handler_output
                 output_sample_rate = self._robot.media.get_output_audio_samplerate()
 
-                # Reshape if needed
-                if audio_data.ndim == 2:
-                    audio_data = audio_data.squeeze()
-
                 # Cast if needed
                 audio_frame = audio_to_float32(audio_data)
 
