@@ -724,22 +724,22 @@ class MovementManager:
 
     def stop(self) -> None:
         """Request the worker thread to stop and wait for it to exit.
-        
+
         Before stopping, resets the robot to a neutral position.
         """
         if self._thread is None or not self._thread.is_alive():
             logger.debug("Move worker not running; stop() ignored")
             return
-            
+
         logger.info("Stopping movement manager and resetting to neutral position...")
-        
+
         # Clear any queued moves and stop current move
         self.clear_move_queue()
-        
+
         # Create a simple move to neutral position
         try:
             from reachy_mini_conversation_app.dance_emotion_moves import GotoQueueMove
-            
+
             # Get current position to interpolate from
             try:
                 _, current_antennas = self.current_robot.get_current_joint_positions()
@@ -749,12 +749,12 @@ class MovementManager:
                 # Use default neutral values if we can't read current position
                 current_antennas = (0.0, 0.0)
                 current_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
-            
+
             # Create neutral target pose
             neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
             neutral_antennas = (0.0, 0.0)
             neutral_body_yaw = 0.0
-            
+
             # Create a goto move to neutral with 1.5 second duration
             reset_move = GotoQueueMove(
                 target_head_pose=neutral_head_pose,
@@ -765,19 +765,19 @@ class MovementManager:
                 start_body_yaw=0.0,
                 duration=1.5,
             )
-            
+
             # Queue the reset move
             self.queue_move(reset_move)
-            
+
             # Wait for the reset to complete (duration + small buffer)
             time.sleep(1.8)
-            
+
             logger.info("Reset to neutral position completed")
-            
+
         except Exception as e:
             logger.error(f"Failed to reset to neutral position: {e}")
             # Continue with shutdown even if reset fails
-        
+
         # Now stop the worker thread
         self._stop_event.set()
         if self._thread is not None:
