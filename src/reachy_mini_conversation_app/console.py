@@ -78,14 +78,14 @@ class LocalStream:
         logger.info("User intervention: flushing player queue")
         if self._robot.media.backend == MediaBackend.GSTREAMER:
             # Directly flush gstreamer audio pipe
-            self._robot.media.audio.clear_player() 
+            self._robot.media.audio.clear_player()
         self.handler.output_queue = asyncio.Queue()
 
     async def record_loop(self) -> None:
         """Read mic frames from the recorder and forward them to the handler."""
         input_sample_rate = self._robot.media.get_input_audio_samplerate()
         logger.debug(f"Audio recording started at {input_sample_rate} Hz")
-        
+
         while not self._stop_event.is_set():
             audio_frame = self._robot.media.get_audio_sample()
             if audio_frame is not None:
