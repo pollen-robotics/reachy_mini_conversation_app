@@ -39,11 +39,11 @@ def main() -> None:
 
     # Initialize robot with appropriate backend
     if args.wireless_version:
-        logger.info("Using GStreamer backend for wireless operation")
-        robot = ReachyMini(media_backend="gstreamer")
+        logger.info("Using WebRTC backend for wireless operation")
+        robot = ReachyMini(media_backend="webrtc")
     else:
         logger.info("Using default backend")
-        robot = ReachyMini()
+        robot = ReachyMini(media_backend="default")
 
     # Check if running in simulation mode without --gradio
     if robot.client.get_status()["simulation_enabled"] and not args.gradio:
