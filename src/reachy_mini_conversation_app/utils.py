@@ -29,7 +29,13 @@ def parse_args() -> argparse.Namespace:
         "--wireless-version",
         default=False,
         action="store_true",
-        help="Use GStreamer backend for wireless version of the robot",
+        help="Use WebRTC backend for wireless version of the robot",
+    )
+    parser.add_argument(
+        "--on-device",
+        default=False,
+        action="store_true",
+        help="Use when conversation app is running on the same device as Reachy Mini daemon",
     )
     return parser.parse_args()
 
