@@ -354,9 +354,15 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             return
 
         input_sample_rate, audio_frame = frame
-        # Make mono if it's stereo
+
+        #Reshape if needed
         if audio_frame.ndim == 2:
-            audio_frame = audio_frame[:, 0]
+            # Scipy channels last convention
+            if audio_frame.shape[1] > audio_frame.shape[0]:
+                audio_frame = audio_frame.T
+            # Multiple channels -> Mono channel
+            if audio_frame.shape[1] > 1:
+                audio_frame = audio_frame[:, 0]
 
         # Resample if needed
         if self.input_sample_rate != input_sample_rate:
