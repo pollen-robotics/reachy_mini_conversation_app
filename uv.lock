@@ -970,18 +970,20 @@ sdist = { url = "https://files.pythonhosted.org/packages/a2/55/8f8cab2afd404cf57
 
 [[package]]
 name = "eclipse-zenoh"
-version = "1.6.2"
+version = "1.7.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/c5/3b/15bb190da421536b28de45438ad328925f203b5b274c5e92a7dcc6f7ac14/eclipse_zenoh-1.6.2.tar.gz", hash = "sha256:852b649a9d1c482edb690759311d5322fa10e5388ba6dec507d35151b48ceb35", size = 132916, upload-time = "2025-10-17T20:11:01.322Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3e/de/d533bf1e2bcd6b406ba8d6f0e1f5a521918ae4dd6f0fc34b2e9b3100114b/eclipse_zenoh-1.7.0.tar.gz", hash = "sha256:3934b00e2aaa9f7da1c158b7a04c12e7b3dc2e9f0227ffc6b2cbf6160f3ddfd3", size = 160626, upload-time = "2025-12-04T19:16:05.05Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7e/13/0e6511e1f007686084beff96d960407edc8303a0aac267689087e1be3e11/eclipse_zenoh-1.6.2-cp39-abi3-linux_armv6l.whl", hash = "sha256:b311c5e4626cc2faad367ef0edbb09079dafefc004531f135cafd22af48f362e", size = 9454073, upload-time = "2025-10-17T20:10:46.806Z" },
-    { url = "https://files.pythonhosted.org/packages/1b/84/f36e224fb7eb05927e55ea7cd2ee000f7a9254d194f7ab539627a1635dd3/eclipse_zenoh-1.6.2-cp39-abi3-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:13d0b10c09fbd4233356a38b11cf008112acefda308a4dd4feb3c8e74c674065", size = 17565641, upload-time = "2025-10-17T20:10:49.061Z" },
-    { url = "https://files.pythonhosted.org/packages/e0/7d/98194e5f4f369eb7f49024d7d4536342636bee216f191cbb111c7ee86764/eclipse_zenoh-1.6.2-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:29f081cf6ba5eee7c72606cab1e534e6e6a825c08899529c176d7a6fa1cff6c4", size = 8984387, upload-time = "2025-10-17T20:10:50.736Z" },
-    { url = "https://files.pythonhosted.org/packages/04/17/0b550ec08095471bd099258ea23685f569dba79394fa22dd25c232d75cae/eclipse_zenoh-1.6.2-cp39-abi3-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:c1c332334ec4bceb0856472146684cfb4230e55c0409cba6b369e34c87a5f5cb", size = 9337753, upload-time = "2025-10-17T20:10:52.696Z" },
-    { url = "https://files.pythonhosted.org/packages/9c/bc/9c2196cc742ad0ccdcc9e942bea3d627f70e5a17708ab412e05bbca07180/eclipse_zenoh-1.6.2-cp39-abi3-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:10cf678ed2578b954cf8d1863c897c9d4404d9bac1c9560dfdb9a300bb488e01", size = 10147324, upload-time = "2025-10-17T20:10:55.234Z" },
-    { url = "https://files.pythonhosted.org/packages/dd/81/7ac634430be1fd15aea65d6e849f7d73d0a8cf285dd74e8e39cd7b7ea2e2/eclipse_zenoh-1.6.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:5db633632e3da9c63ae70e219f2a84dca3dcb08125fb9aef9f11602104790afb", size = 9626850, upload-time = "2025-10-17T20:10:56.785Z" },
-    { url = "https://files.pythonhosted.org/packages/29/fe/c5b2e65e0c2800b4e1a02b388e0ddf7c3b71f478757bb6a294c021d49e84/eclipse_zenoh-1.6.2-cp39-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:e7f9bf3849567631caa3bdeecf2edce66461b1ae511f28dfafea6089022d02e1", size = 9487136, upload-time = "2025-10-17T20:10:58.359Z" },
-    { url = "https://files.pythonhosted.org/packages/77/93/4df169108c4313d0f476bb9abd7d76496059e8bfcc3a98168aa26cc73b00/eclipse_zenoh-1.6.2-cp39-abi3-win_amd64.whl", hash = "sha256:f59f75f0d733daf5059843037e63bb62dd5268809d041a150bcfd8f8d62b9b08", size = 7805746, upload-time = "2025-10-17T20:11:00.257Z" },
+    { url = "https://files.pythonhosted.org/packages/83/38/875d7e0e480d66320acc3cfa3239b15305856bea41d469d2a45bf71e6c3a/eclipse_zenoh-1.7.0-cp39-abi3-linux_armv6l.whl", hash = "sha256:d4bcdc4dd8f656f102ca9b0d12d654194db11f85b4db1cc2a9cae514ed51347f", size = 9429917, upload-time = "2025-12-04T19:15:42.224Z" },
+    { url = "https://files.pythonhosted.org/packages/23/81/ceacc39f458c2b9238783e99f7ed93776a9aff43b996d24ea71f449ee979/eclipse_zenoh-1.7.0-cp39-abi3-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:e470bc953cd0b701d1b6d9a5eb513c87af5218f0ea8bdb1357c40114117f3a58", size = 17497415, upload-time = "2025-12-04T19:15:44.568Z" },
+    { url = "https://files.pythonhosted.org/packages/65/1d/063fe5b3860d4e5529bee72e571657b8d7b617f7f202df704270c0524474/eclipse_zenoh-1.7.0-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:37c54adf6ec2d61ebce12e50f70151297ec88c809fa32272c31cd39eccbe20bb", size = 8900373, upload-time = "2025-12-04T19:15:46.638Z" },
+    { url = "https://files.pythonhosted.org/packages/2f/c4/d1d65404da8860f05ab6830fa696029eaacf6848d89c0cc142be08d3338c/eclipse_zenoh-1.7.0-cp39-abi3-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:1dceff9c15a015e317a8c13283c23f76ea1f4cadd433a88cf5e2c371b9acd4c3", size = 9284491, upload-time = "2025-12-04T19:15:48.418Z" },
+    { url = "https://files.pythonhosted.org/packages/64/0a/a4d796ed4ad1cf489649d422a51e18f845928b0e7d87984285d8b884a149/eclipse_zenoh-1.7.0-cp39-abi3-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:f566f5e2aaa8dcbc46ad6af4dc991ff5c52a9548a0b27f0d4dea5d684b0a0a88", size = 10114281, upload-time = "2025-12-04T19:15:50.142Z" },
+    { url = "https://files.pythonhosted.org/packages/d8/9e/3ec55aa9d64c3ceacfe3fe6df690c976ffcd0d7df5dfabde0b70b1d366dd/eclipse_zenoh-1.7.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:4ea0f562dc6390b7a91c7a7a79a948cf1a1fe12a2bf358861663f5d24b97f879", size = 9477534, upload-time = "2025-12-04T19:15:51.941Z" },
+    { url = "https://files.pythonhosted.org/packages/8c/f0/9cebf4dbf680bb0b28c98108fb6c4c9d5f2c66347da1a588bdc2a345b196/eclipse_zenoh-1.7.0-cp39-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:4f06294a6f040f7b8a7f0667b6050a36595cb1d9124d7f0d2d3a8d211f7b0cf1", size = 9437561, upload-time = "2025-12-04T19:15:53.936Z" },
+    { url = "https://files.pythonhosted.org/packages/fd/5f/3067f2ab84e111dc1ba67dd8ed096553808e0693d8f7bbd7f15be582ee37/eclipse_zenoh-1.7.0-cp39-abi3-win_amd64.whl", hash = "sha256:99016058bc88b1a2f99e3ef6036493dea11bec54acff27ecce7f0c0e39a7308a", size = 7945719, upload-time = "2025-12-04T19:15:55.891Z" },
+    { url = "https://files.pythonhosted.org/packages/47/de/af288887aef92a3fc2f92ebe015be38a11bb14bae04c7ce162c49191972c/eclipse_zenoh-1.7.0-pp310-pypy310_pp73-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:8026997f78b1bf0b199c90ffe2e45e156ee6f4f8778f3d8de84b1bef640a85d5", size = 9293623, upload-time = "2025-12-04T19:15:57.364Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/4d/14fec9d0c5b211951bed3e96228d450c5bc1dd57ec9d8d7b9c0420f84a60/eclipse_zenoh-1.7.0-pp310-pypy310_pp73-manylinux_2_28_aarch64.whl", hash = "sha256:317d08cba118295160699267c3af879ac4e309dde7e8d16abf931520b0ffa8e1", size = 9433848, upload-time = "2025-12-04T19:15:59.245Z" },
 ]
 
 [[package]]
@@ -989,7 +991,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.12'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
@@ -2714,7 +2716,7 @@ name = "nvidia-cudnn-cu12"
 version = "9.10.2.21"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12" },
+    { name = "nvidia-cublas-cu12", marker = "sys_platform != 'win32'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ba/51/e123d997aa098c61d029f76663dedbfb9bc8dcf8c60cbd6adbe42f76d049/nvidia_cudnn_cu12-9.10.2.21-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:949452be657fa16687d0930933f032835951ef0892b37d2d53824d1a84dc97a8", size = 706758467, upload-time = "2025-06-06T21:54:08.597Z" },
@@ -2725,7 +2727,7 @@ name = "nvidia-cufft-cu12"
 version = "11.3.3.83"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12" },
+    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform != 'win32'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1f/13/ee4e00f30e676b66ae65b4f08cb5bcbb8392c03f54f2d5413ea99a5d1c80/nvidia_cufft_cu12-11.3.3.83-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:4d2dd21ec0b88cf61b62e6b43564355e5222e4a3fb394cac0db101f2dd0d4f74", size = 193118695, upload-time = "2025-03-07T01:45:27.821Z" },
@@ -2752,9 +2754,9 @@ name = "nvidia-cusolver-cu12"
 version = "11.7.3.90"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12" },
-    { name = "nvidia-cusparse-cu12" },
-    { name = "nvidia-nvjitlink-cu12" },
+    { name = "nvidia-cublas-cu12", marker = "sys_platform != 'win32'" },
+    { name = "nvidia-cusparse-cu12", marker = "sys_platform != 'win32'" },
+    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform != 'win32'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/85/48/9a13d2975803e8cf2777d5ed57b87a0b6ca2cc795f9a4f59796a910bfb80/nvidia_cusolver_cu12-11.7.3.90-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:4376c11ad263152bd50ea295c05370360776f8c3427b30991df774f9fb26c450", size = 267506905, upload-time = "2025-03-07T01:47:16.273Z" },
@@ -2765,7 +2767,7 @@ name = "nvidia-cusparse-cu12"
 version = "12.5.8.93"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12" },
+    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform != 'win32'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c2/f5/e1854cb2f2bcd4280c44736c93550cc300ff4b8c95ebe370d0aa7d2b473d/nvidia_cusparse_cu12-12.5.8.93-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:1ec05d76bbbd8b61b06a80e1eaf8cf4959c3d4ce8e711b65ebd0443bb0ebb13b", size = 288216466, upload-time = "2025-03-07T01:48:13.779Z" },
@@ -3910,7 +3912,7 @@ wheels = [
 [[package]]
 name = "reachy-mini"
 version = "1.1.2"
-source = { git = "https://github.com/pollen-robotics/reachy_mini.git?branch=develop#04b37a6255918d83d2c0e78e4fc7c8172248a1b5" }
+source = { git = "https://github.com/pollen-robotics/reachy_mini.git?branch=487-fix-zenoh-config#7e3e6021297e720a115f7c5099a669bd5be4e6e5" }
 dependencies = [
     { name = "aiohttp" },
     { name = "asgiref" },
@@ -3944,6 +3946,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiortc" },
+    { name = "eclipse-zenoh" },
     { name = "fastrtc" },
     { name = "gradio" },
     { name = "huggingface-hub" },
@@ -3994,6 +3997,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiortc", specifier = ">=1.13.0" },
+    { name = "eclipse-zenoh", specifier = "~=1.7.0" },
     { name = "fastrtc", specifier = ">=0.0.34" },
     { name = "gradio", specifier = ">=5.49.0" },
     { name = "gst-signalling", marker = "extra == 'reachy-mini-wireless'", specifier = ">=1.1.2" },
@@ -4006,7 +4010,7 @@ requires-dist = [
     { name = "opencv-python", specifier = ">=4.12.0.88" },
     { name = "pygobject", marker = "extra == 'reachy-mini-wireless'", specifier = ">=3.42.2,<=3.46.0" },
     { name = "python-dotenv" },
-    { name = "reachy-mini", git = "https://github.com/pollen-robotics/reachy_mini.git?branch=develop" },
+    { name = "reachy-mini", git = "https://github.com/pollen-robotics/reachy_mini.git?branch=487-fix-zenoh-config" },
     { name = "reachy-mini-dances-library" },
     { name = "reachy-mini-toolbox" },
     { name = "supervision", marker = "extra == 'all-vision'" },
