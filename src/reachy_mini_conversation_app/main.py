@@ -9,7 +9,6 @@ from fastapi import FastAPI
 from fastrtc import Stream
 
 from reachy_mini import ReachyMini
-from reachy_mini.io.zenoh_client import ZenohClient
 from reachy_mini_conversation_app.moves import MovementManager
 from reachy_mini_conversation_app.utils import (
     parse_args,
@@ -39,21 +38,22 @@ def main() -> None:
         logger.warning("Head tracking is not activated due to --no-camera.")
 
     # Initialize robot with appropriate backend
-    client = ZenohClient(localhost_only=True)
-    client.wait_for_connection(timeout=5.0)
-    daemon_status = client.get_status()
-    is_wireless_daemon = daemon_status.get("wireless_version", False)
-    client.disconnect()
-    
-    if args.wireless_version:
-        logger.info("Using WebRTC backend for remote wireless operation")
-        robot = ReachyMini(media_backend="webrtc")
-    elif is_wireless_daemon:
-        logger.info("Using GStreamer backend for on-device wireless operation")
+    # TODO: Implement dynamic robot connection detection
+    # Automatically detect and connect to available Reachy Mini robot(s!)
+    # Priority checks (in order):
+    #   1. Reachy Lite connected directly to the host
+    #   2. Reachy Mini daemon running on localhost (same device)
+    #   3. Reachy Mini daemon on local network (same subnet)
+
+    if args.wireless_version and not args.on_device:
+        logger.info("Using WebRTC backend for fully remote wireless version")
+        robot = ReachyMini(media_backend="webrtc", localhost_only=False)
+    elif args.wireless_version and args.on_device:
+        logger.info("Using GStreamer backend for on-device wireless version")
         robot = ReachyMini(media_backend="gstreamer")
     else:
-        logger.info("Using default backend")
-        robot = ReachyMini()
+        logger.info("Using default backend for lite version")
+        robot = ReachyMini(media_backend="default")
 
     # Check if running in simulation mode without --gradio
     if robot.client.get_status()["simulation_enabled"] and not args.gradio:
