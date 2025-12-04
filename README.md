@@ -8,7 +8,7 @@ pinned: false
 short_description: Talk with Reachy Mini !
 tags:
  - reachy_mini
- - reachy_mini_app
+ - reachy_mini_python_app
 ---
 
 # Reachy Mini conversation app
