@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastrtc import Stream
 
 from reachy_mini import ReachyMini
+from reachy_mini.io.zenoh_client import ZenohClient
 from reachy_mini_conversation_app.moves import MovementManager
 from reachy_mini_conversation_app.utils import (
     parse_args,
@@ -38,12 +39,21 @@ def main() -> None:
         logger.warning("Head tracking is not activated due to --no-camera.")
 
     # Initialize robot with appropriate backend
+    client = ZenohClient(localhost_only=True)
+    client.wait_for_connection(timeout=5.0)
+    daemon_status = client.get_status()
+    is_wireless_daemon = daemon_status.get("wireless_version", False)
+    client.disconnect()
+    
     if args.wireless_version:
-        logger.info("Using WebRTC backend for wireless operation")
+        logger.info("Using WebRTC backend for remote wireless operation")
         robot = ReachyMini(media_backend="webrtc")
+    elif is_wireless_daemon:
+        logger.info("Using GStreamer backend for on-device wireless operation")
+        robot = ReachyMini(media_backend="gstreamer")
     else:
         logger.info("Using default backend")
-        robot = ReachyMini(media_backend="gstreamer")
+        robot = ReachyMini()
 
     # Check if running in simulation mode without --gradio
     if robot.client.get_status()["simulation_enabled"] and not args.gradio:
