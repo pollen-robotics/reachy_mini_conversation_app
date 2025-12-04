@@ -43,7 +43,7 @@ def main() -> None:
         robot = ReachyMini(media_backend="webrtc")
     else:
         logger.info("Using default backend")
-        robot = ReachyMini(media_backend="default")
+        robot = ReachyMini(media_backend="gstreamer")
 
     # Check if running in simulation mode without --gradio
     if robot.client.get_status()["simulation_enabled"] and not args.gradio:
