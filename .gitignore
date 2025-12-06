@@ -56,3 +56,15 @@ cache/
 .directory
 .Trash-*
 .nfs*
+
+# Secrets
+src/reachy_mini_conversation_app/secrets.py
+
+# Project-specific exclusions
+docs for gemini/
+src/reachy_mini_conversation_app/gemini_live.py
+src/reachy_mini_conversation_app/laura/
+src/reachy_mini_conversation_app/main_with_arbiter.py
+src/reachy_mini_conversation_app/movement_arbiter.py
+src/reachy_mini_conversation_app/movement_types.py
+src/reachy_mini_conversation_app/moves_integration_patch.py
