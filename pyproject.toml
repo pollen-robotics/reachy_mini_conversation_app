@@ -13,7 +13,7 @@ dependencies = [
     #Media
     "aiortc>=1.13.0",
     "fastrtc>=0.0.34",
-    "gradio>=5.49.0",
+    "gradio==5.50.1.dev1",
     "huggingface_hub>=0.34.4",
     "opencv-python>=4.12.0.88",
 
