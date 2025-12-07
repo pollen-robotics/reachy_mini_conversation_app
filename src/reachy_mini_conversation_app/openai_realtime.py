@@ -72,6 +72,41 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         """Create a copy of the handler."""
         return OpenaiRealtimeHandler(self.deps, self.gradio_mode)
 
+    async def apply_personality(self, profile: str | None) -> str:
+        """Apply a new personality (profile) at runtime if possible.
+
+        - Updates the global config's selected profile for subsequent calls.
+        - If a realtime connection is active, sends a session.update with the
+          freshly resolved instructions so the change takes effect immediately.
+
+        Returns a short status message for UI feedback.
+        """
+        try:
+            # Update the in-process config value (env is not re-read automatically)
+            from reachy_mini_conversation_app.config import config as _config
+
+            _config.REACHY_MINI_CUSTOM_PROFILE = profile
+
+            instructions = get_session_instructions()
+
+            if self.connection is not None:
+                try:
+                    await self.connection.session.update(
+                        session={
+                            "instructions": instructions,
+                        },
+                    )
+                    logger.info("Applied personality: %s (live session updated)", profile or "built-in default")
+                    return "Applied personality. New instructions active."
+                except Exception as e:
+                    logger.warning("Failed to live-update session instructions: %s", e)
+                    # Fall through: instructions will take effect on next reconnect
+            logger.info("Applied personality recorded: %s (will apply on next session)", profile or "built-in default")
+            return "Applied personality. Will take effect on next connection."
+        except Exception as e:
+            logger.error("Error applying personality '%s': %s", profile, e)
+            return f"Failed to apply personality: {e}"
+
     async def _emit_debounced_partial(self, transcript: str, sequence: int) -> None:
         """Emit partial transcript after debounce delay."""
         try:
