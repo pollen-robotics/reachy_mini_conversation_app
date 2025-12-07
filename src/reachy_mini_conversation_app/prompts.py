@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 PROFILES_DIRECTORY = Path(__file__).parent / "profiles"
 PROMPTS_LIBRARY_DIRECTORY = Path(__file__).parent / "prompts"
 INSTRUCTIONS_FILENAME = "instructions.txt"
+VOICE_FILENAME = "voice.txt"
 
 
 def _expand_prompt_includes(content: str) -> str:
@@ -82,3 +83,22 @@ def get_session_instructions() -> str:
     except Exception as e:
         logger.error(f"Failed to load instructions from profile '{profile}': {e}")
         sys.exit(1)
+
+
+def get_session_voice(default: str = "cedar") -> str:
+    """Resolve the voice to use for the session.
+
+    If a custom profile is selected and contains a voice.txt, return its
+    trimmed content; otherwise return the provided default ("cedar").
+    """
+    profile = config.REACHY_MINI_CUSTOM_PROFILE
+    if not profile:
+        return default
+    try:
+        voice_file = PROFILES_DIRECTORY / profile / VOICE_FILENAME
+        if voice_file.exists():
+            voice = voice_file.read_text(encoding="utf-8").strip()
+            return voice or default
+    except Exception:
+        pass
+    return default

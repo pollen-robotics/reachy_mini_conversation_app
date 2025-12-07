@@ -165,7 +165,7 @@ def run(
             s = re.sub(r"[^a-zA-Z0-9_-]", "", s)
             return s
 
-        def _create_personality(name: str, instructions: str, tools_text: str):  # type: ignore[no-untyped-def]
+        def _create_personality(name: str, instructions: str, tools_text: str, voice: str = "cedar"):  # type: ignore[no-untyped-def]
             name_s = _sanitize_name(name)
             if not name_s:
                 return gr.update(), gr.update(), "Please enter a valid name."
@@ -176,6 +176,8 @@ def run(
                 (target_dir / "instructions.txt").write_text(instructions.strip() + "\n", encoding="utf-8")
                 # Write tools.txt
                 (target_dir / "tools.txt").write_text(tools_text.strip() + "\n", encoding="utf-8")
+                # Write voice.txt
+                (target_dir / "voice.txt").write_text((voice or "cedar").strip() + "\n", encoding="utf-8")
 
                 choices = _list_personalities()
                 value = f"user_personalities/{name_s}"
@@ -203,15 +205,11 @@ def run(
         person_name_tb = gr.Textbox(label="Personality name")
         person_instr_ta = gr.TextArea(label="Personality instructions", lines=10)
         tools_txt_ta = gr.TextArea(label="tools.txt", lines=10)
+        voice_dropdown = gr.Dropdown(label="Voice", choices=["cedar"], value="cedar")
+        # Move New personality up, just below Apply
         new_personality_btn = gr.Button("New personality")
         # Convenience: discovered tools (shared + profile-local)
         available_tools_cg = gr.CheckboxGroup(label="Available tools (helper)", choices=[], value=[])
-        load_file_dropdown = gr.Dropdown(label="Custom tool files (*.py)", choices=[], value=None)
-        file_content_ta = gr.TextArea(label="Selected file content", lines=12)
-        new_file_name_tb = gr.Textbox(label="New custom tool filename (e.g., my_tool.py)")
-        create_file_btn = gr.Button("Create file")
-        save_file_btn = gr.Button("Save file")
-        delete_file_btn = gr.Button("Delete file")
         save_btn = gr.Button("Save personality (instructions + tools)")
 
         # Build the streaming UI first
@@ -225,19 +223,14 @@ def run(
                 api_key_textbox,
                 personalities_dropdown,
                 apply_btn,
+                new_personality_btn,
                 status_md,
                 preview_md,
                 person_name_tb,
                 person_instr_ta,
                 tools_txt_ta,
-                new_personality_btn,
+                voice_dropdown,
                 available_tools_cg,
-                load_file_dropdown,
-                file_content_ta,
-                new_file_name_tb,
-                create_file_btn,
-                save_file_btn,
-                delete_file_btn,
                 save_btn,
             ],
             additional_outputs=[chatbot],
@@ -257,6 +250,28 @@ def run(
                 inputs=[personalities_dropdown],
                 outputs=[status_md, preview_md],
             )
+
+            def _read_voice_for(name: str) -> str:  # type: ignore[no-untyped-def]
+                try:
+                    if name == DEFAULT_OPTION:
+                        return "cedar"
+                    vf = _resolve_profile_dir(name) / "voice.txt"
+                    if vf.exists():
+                        v = vf.read_text(encoding="utf-8").strip()
+                        return v or "cedar"
+                except Exception:
+                    pass
+                return "cedar"
+
+            async def _fetch_voices(selected: str):  # type: ignore[no-untyped-def]
+                try:
+                    voices = await handler.get_available_voices()  # type: ignore[attr-defined]
+                    current = _read_voice_for(selected)
+                    if current not in voices:
+                        current = "cedar"
+                    return gr.update(choices=voices, value=current)
+                except Exception:
+                    return gr.update(choices=["cedar"], value="cedar")
 
             def _available_tools_for(selected: str):  # type: ignore[no-untyped-def]
                 # Shared tools list
@@ -306,32 +321,24 @@ def run(
                 all_tools = sorted(set(shared + local))
                 enabled = _parse_enabled_tools(tools_txt)
 
-                # files under profile (py only)
-                files = []
-                if selected != DEFAULT_OPTION:
-                    files = [p.name for p in (profiles_root / selected).glob("*.py")]
-                file_value = files[0] if files else None
-                file_content = ""
-                if file_value:
-                    file_content = (profiles_root / selected / file_value).read_text(encoding="utf-8")
-
                 # Name textbox
                 from pathlib import Path as _P
                 name_for_edit = "" if selected == DEFAULT_OPTION else _P(selected).name
+                # Voice
+                voice_val = _read_voice_for(selected)
 
                 return (
                     instr,
                     tools_txt,
                     gr.update(choices=all_tools, value=[t for t in enabled if t in all_tools]),
-                    gr.update(choices=files, value=file_value),
-                    file_content,
                     name_for_edit,
+                    voice_val,
                 )
 
             personalities_dropdown.change(
                 fn=_load_profile_for_edit,
                 inputs=[personalities_dropdown],
-                outputs=[person_instr_ta, tools_txt_ta, available_tools_cg, load_file_dropdown, file_content_ta, person_name_tb],
+                outputs=[person_instr_ta, tools_txt_ta, available_tools_cg, person_name_tb, voice_dropdown],
             )
 
             # Keep the name field in sync with selection (basename for user profiles)
@@ -361,9 +368,6 @@ def run(
                     shared = [py.stem for py in tools_dir.glob("*.py") if py.stem not in {"__init__", "core_tools"}]
                 except Exception:
                     shared = []
-                # No files yet for a new personality
-                files_dd = gr.update(choices=[], value=None)
-                file_content_val = ""
                 # Update status to guide the user
                 status_text = "Creating a new personality. Fill the fields and click 'Save'."
                 return (
@@ -371,18 +375,17 @@ def run(
                     gr.update(value=instr_val),
                     gr.update(value=tools_txt_val),
                     gr.update(choices=sorted(shared), value=[]),
-                    files_dd,
-                    gr.update(value=file_content_val),
                     status_text,
+                    gr.update(value="cedar"),
                 )
 
             new_personality_btn.click(
                 fn=_new_personality,
                 inputs=[],
-                outputs=[person_name_tb, person_instr_ta, tools_txt_ta, available_tools_cg, load_file_dropdown, file_content_ta, status_md],
+                outputs=[person_name_tb, person_instr_ta, tools_txt_ta, available_tools_cg, status_md, voice_dropdown],
             )
 
-            def _save_personality(name: str, instructions: str, tools_text: str):  # type: ignore[no-untyped-def]
+            def _save_personality(name: str, instructions: str, tools_text: str, voice: str):  # type: ignore[no-untyped-def]
                 name_s = _sanitize_name(name)
                 if not name_s:
                     return gr.update(), gr.update(), "Please enter a valid name."
@@ -393,6 +396,8 @@ def run(
                     (target_dir / "instructions.txt").write_text(instructions.strip() + "\n", encoding="utf-8")
                     # Write tools.txt
                     (target_dir / "tools.txt").write_text(tools_text.strip() + "\n", encoding="utf-8")
+                    # Write voice.txt
+                    (target_dir / "voice.txt").write_text((voice or "cedar").strip() + "\n", encoding="utf-8")
                     # Ensure tools.txt exists (copy from default once)
                     tools_target = target_dir / "tools.txt"
                     if not tools_target.exists():
@@ -409,12 +414,19 @@ def run(
 
             save_btn.click(
                 fn=_save_personality,
-                inputs=[person_name_tb, person_instr_ta, tools_txt_ta],
+                inputs=[person_name_tb, person_instr_ta, tools_txt_ta, voice_dropdown],
                 outputs=[personalities_dropdown, person_instr_ta, status_md],
             ).then(
                 fn=_apply_personality,
                 inputs=[personalities_dropdown],
                 outputs=[status_md, preview_md],
+            )
+
+            # Populate voices at load time, aligned with current selection
+            stream_manager.load(
+                fn=_fetch_voices,
+                inputs=[personalities_dropdown],
+                outputs=[voice_dropdown],
             )
 
             def _sync_tools_from_checks(selected: list[str], current_text: str):  # type: ignore[no-untyped-def]
@@ -430,84 +442,7 @@ def run(
                 outputs=[tools_txt_ta],
             )
 
-            def _refresh_file_content(selected_profile: str, filename: str | None):  # type: ignore[no-untyped-def]
-                if not filename:
-                    return ""
-                path = profiles_root / selected_profile / filename
-                try:
-                    if path.exists():
-                        return path.read_text(encoding="utf-8")
-                except Exception as e:
-                    return f"Error loading file: {e}"
-                return ""
-
-            load_file_dropdown.change(
-                fn=_refresh_file_content,
-                inputs=[personalities_dropdown, load_file_dropdown],
-                outputs=[file_content_ta],
-            )
-
-            def _create_file(selected_profile: str, filename: str):  # type: ignore[no-untyped-def]
-                name = filename.strip()
-                if not name.endswith(".py"):
-                    return gr.update(), "Filename must end with .py"
-                # Always create in user_personalities
-                base = Path(selected_profile).name if selected_profile != DEFAULT_OPTION else (person_name_tb.value or "new_profile")  # type: ignore[attr-defined]
-                target_dir = profiles_root / "user_personalities" / base
-                target_dir.mkdir(parents=True, exist_ok=True)
-                path = target_dir / name
-                if path.exists():
-                    # do nothing
-                    pass
-                else:
-                    path.write_text("# custom tool\n", encoding="utf-8")
-                # refresh list to show new file
-                files = [p.name for p in target_dir.glob("*.py")]
-                return gr.update(choices=files, value=name), f"Created {name}"
-
-            create_file_btn.click(
-                fn=_create_file,
-                inputs=[personalities_dropdown, new_file_name_tb],
-                outputs=[load_file_dropdown, status_md],
-            )
-
-            def _save_file(selected_profile: str, filename: str | None, content: str):  # type: ignore[no-untyped-def]
-                if not filename:
-                    return "No file selected."
-                base = Path(selected_profile).name if selected_profile != DEFAULT_OPTION else (person_name_tb.value or "new_profile")  # type: ignore[attr-defined]
-                target_dir = profiles_root / "user_personalities" / base
-                target_dir.mkdir(parents=True, exist_ok=True)
-                path = target_dir / filename
-                path.write_text(content, encoding="utf-8")
-                return f"Saved {filename}"
-
-            save_file_btn.click(
-                fn=_save_file,
-                inputs=[personalities_dropdown, load_file_dropdown, file_content_ta],
-                outputs=[status_md],
-            )
-
-            def _delete_file(selected_profile: str, filename: str | None):  # type: ignore[no-untyped-def]
-                if not filename:
-                    return gr.update(), "No file selected."
-                # Only delete from user profiles
-                if not selected_profile.startswith("user_personalities/"):
-                    return gr.update(), "Cannot delete from official profile. Save to user profile first."
-                path = profiles_root / selected_profile / filename
-                try:
-                    if path.exists():
-                        path.unlink()
-                    files = [p.name for p in (profiles_root / selected_profile).glob("*.py")]
-                    new_value = files[0] if files else None
-                    return gr.update(choices=files, value=new_value), f"Deleted {filename}"
-                except Exception as e:
-                    return gr.update(), f"Failed to delete: {e}"
-
-            delete_file_btn.click(
-                fn=_delete_file,
-                inputs=[personalities_dropdown, load_file_dropdown],
-                outputs=[load_file_dropdown, status_md],
-            )
+            # Removed custom file management UI and handlers
 
         app = gr.mount_gradio_app(app, stream.ui, path="/")
     else:

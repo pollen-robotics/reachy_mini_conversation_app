@@ -17,7 +17,7 @@ from scipy.signal import resample
 from websockets.exceptions import ConnectionClosedError
 
 from reachy_mini_conversation_app.config import config
-from reachy_mini_conversation_app.prompts import get_session_instructions
+from reachy_mini_conversation_app.prompts import get_session_instructions, get_session_voice
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_tool_specs,
@@ -88,12 +88,14 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             _config.REACHY_MINI_CUSTOM_PROFILE = profile
 
             instructions = get_session_instructions()
+            voice = get_session_voice()
 
             if self.connection is not None:
                 try:
                     await self.connection.session.update(
                         session={
                             "instructions": instructions,
+                            "audio": {"output": {"voice": voice}},
                         },
                     )
                     logger.info("Applied personality: %s (live session updated)", profile or "built-in default")
@@ -191,7 +193,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                     "type": "audio/pcm",
                                     "rate": self.output_sample_rate,
                                 },
-                                "voice": "cedar",
+                                "voice": get_session_voice(),
                             },
                         },
                         "tools": get_tool_specs(),  # type: ignore[typeddict-item]
@@ -478,6 +480,71 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         elapsed_seconds = loop_time - self.start_time
         dt = datetime.now()  # wall-clock
         return f"[{dt.strftime('%Y-%m-%d %H:%M:%S')} | +{elapsed_seconds:.1f}s]"
+
+    async def get_available_voices(self) -> list[str]:
+        """Try to discover available voices for the configured realtime model.
+
+        Attempts to retrieve model metadata from the OpenAI Models API and look
+        for any keys that might contain voice names. Falls back to a curated
+        list known to work with realtime if discovery fails.
+        """
+        # Conservative fallback list with default first
+        fallback = [
+            "cedar",
+            "alloy",
+            "aria",
+            "ballad",
+            "verse",
+            "sage",
+            "coral",
+        ]
+        try:
+            # Best effort discovery; safe-guarded for unexpected shapes
+            model = await self.client.models.retrieve(config.MODEL_NAME)
+            # Try common serialization paths
+            raw = None
+            for attr in ("model_dump", "to_dict"):
+                fn = getattr(model, attr, None)
+                if callable(fn):
+                    try:
+                        raw = fn()
+                        break
+                    except Exception:
+                        pass
+            if raw is None:
+                try:
+                    raw = dict(model)  # type: ignore[arg-type]
+                except Exception:
+                    raw = None
+            # Scan for voice candidates
+            candidates: set[str] = set()
+            def _collect(obj: object) -> None:
+                try:
+                    if isinstance(obj, dict):
+                        for k, v in obj.items():
+                            kl = str(k).lower()
+                            if "voice" in kl and isinstance(v, (list, tuple)):
+                                for item in v:
+                                    if isinstance(item, str):
+                                        candidates.add(item)
+                                    elif isinstance(item, dict) and "name" in item and isinstance(item["name"], str):
+                                        candidates.add(item["name"])
+                            else:
+                                _collect(v)
+                    elif isinstance(obj, (list, tuple)):
+                        for it in obj:
+                            _collect(it)
+                except Exception:
+                    pass
+            if isinstance(raw, dict):
+                _collect(raw)
+            # Ensure default present and stable order
+            voices = sorted(candidates) if candidates else fallback
+            if "cedar" not in voices:
+                voices = ["cedar", *[v for v in voices if v != "cedar"]]
+            return voices
+        except Exception:
+            return fallback
 
     async def send_idle_signal(self, idle_duration: float) -> None:
         """Send an idle signal to the openai server."""
