@@ -83,7 +83,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
     async def start_up(self) -> None:
         """Start the handler with minimal retries on unexpected websocket closure."""
         openai_api_key = config.OPENAI_API_KEY
-        if self.gradio_mode and not openai_api_key or not openai_api_key.strip():
+        if self.gradio_mode and not openai_api_key:
             # api key was not found in .env or in the environment variables
             await self.wait_for_args()  # type: ignore[no-untyped-call]
             args = list(self.latest_args)
@@ -364,7 +364,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             return
         input_sample_rate, audio_frame = frame
 
-        #Reshape if needed
+        # Reshape if needed
         if audio_frame.ndim == 2:
             # Scipy channels last convention
             if audio_frame.shape[1] > audio_frame.shape[0]:
@@ -375,10 +375,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
         # Resample if needed
         if self.input_sample_rate != input_sample_rate:
-            audio_frame = resample(
-                audio_frame,
-                int(len(audio_frame) * self.input_sample_rate / input_sample_rate)
-            )
+            audio_frame = resample(audio_frame, int(len(audio_frame) * self.input_sample_rate / input_sample_rate))
 
         # Cast if needed
         audio_frame = audio_to_int16(audio_frame)
