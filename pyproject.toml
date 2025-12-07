@@ -31,7 +31,8 @@ dependencies = [
 
 [project.optional-dependencies]
 reachy_mini_wireless = [
-  "reachy_mini[gstreamer,wireless-version]",
+  "PyGObject>=3.42.2,<=3.46.0", 
+  "gst-signalling>=1.1.2",
 ]
 local_vision = ["torch", "transformers", "num2words"]
 yolo_vision = ["ultralytics", "supervision"]
