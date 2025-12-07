@@ -4,6 +4,7 @@ import random
 import asyncio
 import logging
 from typing import Any, Final, Tuple, Literal
+from pathlib import Path
 from datetime import datetime
 
 import cv2
@@ -58,6 +59,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.start_time = asyncio.get_event_loop().time()
         self.is_idle_tool_call = False
         self.gradio_mode = gradio_mode
+        # Track how the API key was provided (env vs textbox) and its value
+        self._key_source: Literal["env", "textbox"] = "env"
+        self._provided_api_key: str | None = None
 
         # Debouncing for partial transcripts
         self.partial_transcript_task: asyncio.Task[None] | None = None
@@ -90,6 +94,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             textbox_api_key = args[3] if len(args[3]) > 0 else None
             if textbox_api_key is not None:
                 openai_api_key = textbox_api_key
+                self._key_source = "textbox"
+                self._provided_api_key = textbox_api_key
             else:
                 openai_api_key = config.OPENAI_API_KEY
         else:
@@ -157,6 +163,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         "tool_choice": "auto",
                     },
                 )
+                # If we reached here, the session update succeeded which implies the API key worked.
+                # Persist the key to a newly created .env (copied from .env.example) if needed.
+                self._persist_api_key_if_needed()
             except Exception:
                 logger.exception("Realtime session.update failed; aborting startup")
                 return
@@ -456,3 +465,73 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 "tool_choice": "required",
             },
         )
+
+    def _persist_api_key_if_needed(self) -> None:
+        """Create a .env file and store the API key if provided via Gradio and valid.
+
+        - Only acts when running with Gradio and the key came from the textbox.
+        - Creates `.env` only if it does not already exist.
+        - If `.env.example` exists in any parent directory of CWD, uses that directory as target and
+          copies its contents, overriding the OPENAI_API_KEY line. Otherwise, creates a minimal .env.
+        """
+        try:
+            if not self.gradio_mode:
+                return
+            if self._key_source != "textbox":
+                return
+            key = (self._provided_api_key or "").strip()
+            if not key:
+                return
+
+            # Update the current process environment for downstream consumers
+            try:
+                import os
+
+                os.environ["OPENAI_API_KEY"] = key
+            except Exception:  # best-effort
+                pass
+
+            cwd = Path.cwd()
+            # Search upwards for a .env.example to decide where to place .env
+            target_dir = cwd
+            example_dir: Path | None = None
+            for parent in [cwd, *cwd.parents]:
+                candidate = parent / ".env.example"
+                if candidate.exists():
+                    example_dir = parent
+                    break
+            if example_dir is not None:
+                target_dir = example_dir
+
+            env_path = target_dir / ".env"
+            if env_path.exists():
+                # Respect existing user configuration
+                logger.info(".env already exists at %s; not overwriting.", env_path)
+                return
+
+            example_path = target_dir / ".env.example"
+            content_lines: list[str] = []
+            if example_path.exists():
+                try:
+                    content = example_path.read_text(encoding="utf-8")
+                    content_lines = content.splitlines()
+                except Exception as e:
+                    logger.warning("Failed to read .env.example at %s: %s", example_path, e)
+
+            # Replace or append the OPENAI_API_KEY line
+            replaced = False
+            for i, line in enumerate(content_lines):
+                if line.strip().startswith("OPENAI_API_KEY="):
+                    content_lines[i] = f"OPENAI_API_KEY={key}"
+                    replaced = True
+                    break
+            if not replaced:
+                content_lines.append(f"OPENAI_API_KEY={key}")
+
+            # Ensure file ends with newline
+            final_text = "\n".join(content_lines) + "\n"
+            env_path.write_text(final_text, encoding="utf-8")
+            logger.info("Created %s and stored OPENAI_API_KEY for future runs.", env_path)
+        except Exception as e:
+            # Never crash the app for QoL persistence; just log.
+            logger.warning("Could not persist OPENAI_API_KEY to .env: %s", e)
