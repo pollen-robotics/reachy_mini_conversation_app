@@ -7,6 +7,7 @@ import asyncio
 import argparse
 import threading
 from typing import Any, Dict, List, Optional
+from pathlib import Path
 
 import gradio as gr
 from fastapi import FastAPI
@@ -20,7 +21,6 @@ from reachy_mini_conversation_app.utils import (
     handle_vision_stuff,
 )
 from reachy_mini_conversation_app.config import config
-from pathlib import Path
 
 
 def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -31,7 +31,7 @@ def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> L
 
 def main() -> None:
     """Entrypoint for the Reachy Mini conversation app."""
-    args = parse_args()
+    args, _ = parse_args()
     run(args)
 
 
@@ -183,13 +183,21 @@ def run(
                 value = f"user_personalities/{name_s}"
                 if value not in choices:
                     choices.append(value)
-                return gr.update(choices=[DEFAULT_OPTION, *sorted(choices)], value=value), gr.update(value=instructions), f"Created personality '{name_s}'."
+                return (
+                    gr.update(choices=[DEFAULT_OPTION, *sorted(choices)], value=value),
+                    gr.update(value=instructions),
+                    f"Created personality '{name_s}'.",
+                )
             except FileExistsError:
                 choices = _list_personalities()
                 value = f"user_personalities/{name_s}"
                 if value not in choices:
                     choices.append(value)
-                return gr.update(choices=[DEFAULT_OPTION, *sorted(choices)], value=value), gr.update(value=instructions), f"Personality '{name_s}' already exists."
+                return (
+                    gr.update(choices=[DEFAULT_OPTION, *sorted(choices)], value=value),
+                    gr.update(value=instructions),
+                    f"Personality '{name_s}' already exists.",
+                )
             except Exception as e:
                 return gr.update(), gr.update(), f"Failed to create personality: {e}"
 
@@ -323,6 +331,7 @@ def run(
 
                 # Name textbox
                 from pathlib import Path as _P
+
                 name_for_edit = "" if selected == DEFAULT_OPTION else _P(selected).name
                 # Voice
                 voice_val = _read_voice_for(selected)
@@ -408,7 +417,11 @@ def run(
                     value = f"user_personalities/{name_s}"
                     if value not in choices:
                         choices.append(value)
-                    return gr.update(choices=[DEFAULT_OPTION, *sorted(choices)], value=value), gr.update(value=instructions), f"Saved personality '{name_s}'."
+                    return (
+                        gr.update(choices=[DEFAULT_OPTION, *sorted(choices)], value=value),
+                        gr.update(value=instructions),
+                        f"Saved personality '{name_s}'.",
+                    )
                 except Exception as e:
                     return gr.update(), gr.update(), f"Failed to save personality: {e}"
 
@@ -499,7 +512,7 @@ class ReachyMiniConversationApp(ReachyMiniApp):  # type: ignore[misc]
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        args = parse_args()
+        args, _ = parse_args()
         args.gradio = True  # Force gradio for Reachy Mini App integration
         run(args, robot=reachy_mini, app_stop_event=stop_event, settings_app=self.settings_app)
 
