@@ -3,7 +3,7 @@ import base64
 import random
 import asyncio
 import logging
-from typing import Any, Final, Tuple, Literal
+from typing import Any, Final, Tuple, Literal, Optional
 from pathlib import Path
 from datetime import datetime
 
@@ -12,7 +12,6 @@ import numpy as np
 import gradio as gr
 from openai import AsyncOpenAI
 from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item, audio_to_int16
-from pyparsing import Optional
 from numpy.typing import NDArray
 from scipy.signal import resample
 from websockets.exceptions import ConnectionClosedError
