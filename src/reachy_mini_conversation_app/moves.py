@@ -48,7 +48,6 @@ from reachy_mini.utils import create_head_pose
 from reachy_mini.motion.move import Move
 from reachy_mini.utils.interpolation import (
     compose_world_offset,
-    distance_between_poses,
     linear_pose_interpolation,
 )
 
