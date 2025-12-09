@@ -3911,8 +3911,8 @@ wheels = [
 
 [[package]]
 name = "reachy-mini"
-version = "1.1.2"
-source = { git = "https://github.com/pollen-robotics/reachy_mini.git?branch=487-fix-zenoh-config#7e3e6021297e720a115f7c5099a669bd5be4e6e5" }
+version = "1.1.3"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
     { name = "asgiref" },
@@ -3938,6 +3938,10 @@ dependencies = [
     { name = "sounddevice" },
     { name = "soundfile" },
     { name = "uvicorn", extra = ["standard"] },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a2/9d/fdee812b3eb99c41d0f0420b8ec6f38a2f4e231a7fa5a7c6e7f6983a59c2/reachy_mini-1.1.3.tar.gz", hash = "sha256:29869afbae6fd8b741193f9d7243363ddf1ee3989ed4070364d2d0eaf1b19738", size = 24574456, upload-time = "2025-12-04T15:42:45.782Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b7/03/6b251cdef649abfc5e6055f576278b4ba09b4c02160b218e206709f7d415/reachy_mini-1.1.3-py3-none-any.whl", hash = "sha256:9db256f437c1b7f6dd449a324a78ae9c79a88632dbf442004646493ed6dad6b0", size = 24639873, upload-time = "2025-12-04T15:42:43.114Z" },
 ]
 
 [[package]]
@@ -4010,7 +4014,7 @@ requires-dist = [
     { name = "opencv-python", specifier = ">=4.12.0.88" },
     { name = "pygobject", marker = "extra == 'reachy-mini-wireless'", specifier = ">=3.42.2,<=3.46.0" },
     { name = "python-dotenv" },
-    { name = "reachy-mini", git = "https://github.com/pollen-robotics/reachy_mini.git?branch=487-fix-zenoh-config" },
+    { name = "reachy-mini", specifier = ">=1.1.3" },
     { name = "reachy-mini-dances-library" },
     { name = "reachy-mini-toolbox" },
     { name = "supervision", marker = "extra == 'all-vision'" },

@@ -26,12 +26,9 @@ dependencies = [
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
-    "reachy_mini",
+    "reachy_mini>=1.1.3",
     "eclipse-zenoh~=1.7.0",
 ]
-
-[tool.uv.sources]
-reachy_mini = { git = "https://github.com/pollen-robotics/reachy_mini.git", branch = "487-fix-zenoh-config" }
 
 [project.optional-dependencies]
 reachy_mini_wireless = [
