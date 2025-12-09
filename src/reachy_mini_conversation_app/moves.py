@@ -726,8 +726,7 @@ class MovementManager:
     def stop(self) -> None:
         """Request the worker thread to stop and wait for it to exit.
 
-        Before stopping, resets the robot to a neutral position with duration
-        scaled to the distance from the current position (magic_distance).
+        Before stopping, resets the robot to a neutral position.
         """
         if self._thread is None or not self._thread.is_alive():
             logger.debug("Move worker not running; stop() ignored")
@@ -738,69 +737,31 @@ class MovementManager:
         # Clear any queued moves and stop current move
         self.clear_move_queue()
 
-        # Create a move to neutral position with duration scaled by distance
-        try:
-            from reachy_mini_conversation_app.dance_emotion_moves import GotoQueueMove
-
-            # Get current position to interpolate from
-            # TODO: this whole block of code is the correct thing to do but it's very verbose
-            # and it's used in several places. We should create a "create_goto_move" function for this
-            try:
-                _, current_antennas = self.current_robot.get_current_joint_positions()
-                current_head_pose = self.current_robot.get_current_head_pose()
-            except Exception as e:
-                logger.warning(f"Could not get current position for reset: {e}")
-                # Use default neutral values if we can't read current position
-                current_antennas = (0.0, 0.0)
-                current_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
-
-            # Create neutral target pose
-            neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
-            neutral_antennas = (0.0, 0.0)
-            neutral_body_yaw = 0.0
-
-            # Calculate the magic distance and scale duration accordingly
-            _, _, magic_distance = distance_between_poses(current_head_pose, neutral_head_pose)
-
-            # Duration scaling: 20 ms per magic_mm (same as wake_up)
-            # Add a minimum duration to avoid instant jumps, and a maximum to avoid waiting forever
-            ms_per_magic_mm = 20
-            duration = magic_distance * ms_per_magic_mm / 1000  # convert ms to seconds
-            duration = max(0.2, min(duration, 2.0))  # clamp between 0.2s and 2.0s
-
-            logger.debug(
-                f"Reset to neutral: magic_distance={magic_distance:.2f}mm, duration={duration:.2f}s"
-            )
-
-            # Create a goto move to neutral
-            reset_move = GotoQueueMove(
-                target_head_pose=neutral_head_pose,
-                start_head_pose=current_head_pose,
-                target_antennas=neutral_antennas,
-                start_antennas=current_antennas,
-                target_body_yaw=neutral_body_yaw,
-                start_body_yaw=0.0,
-                duration=duration,
-            )
-
-            # Queue the reset move
-            self.queue_move(reset_move)
-
-            # Wait for the reset to complete (duration + small buffer)
-            time.sleep(duration + 0.3)
-
-            logger.info("Reset to neutral position completed")
-
-        except Exception as e:
-            logger.error(f"Failed to reset to neutral position: {e}")
-            # Continue with shutdown even if reset fails
-
-        # Now stop the worker thread
+        # Stop the worker thread first so it doesn't interfere
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join()
             self._thread = None
         logger.debug("Move worker stopped")
+
+        # Reset to neutral position using goto_target (same approach as wake_up)
+        try:
+            neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
+            neutral_antennas = [0.0, 0.0]
+            neutral_body_yaw = 0.0
+
+            # Use goto_target directly on the robot
+            self.current_robot.goto_target(
+                head=neutral_head_pose,
+                antennas=neutral_antennas,
+                duration=2.0,
+                body_yaw=neutral_body_yaw,
+            )
+
+            logger.info("Reset to neutral position completed")
+
+        except Exception as e:
+            logger.error(f"Failed to reset to neutral position: {e}")
 
     def get_status(self) -> Dict[str, Any]:
         """Return a lightweight status snapshot for observability."""
