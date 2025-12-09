@@ -3753,12 +3753,14 @@ version = "0.1.0"
 source = { directory = "../rmscript" }
 dependencies = [
     { name = "numpy" },
+    { name = "pytest" },
     { name = "reachy-mini" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "numpy", specifier = ">=1.24.0" },
+    { name = "pytest", specifier = ">=9.0.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
     { name = "reachy-mini", specifier = ">=1.0.0" },
