@@ -40,6 +40,7 @@ def run(
     robot: ReachyMini = None,
     app_stop_event: Optional[threading.Event] = None,
     settings_app: Optional[FastAPI] = None,
+    instance_path: Optional[str] = None,
 ) -> None:
     """Run the Reachy Mini conversation app."""
     # Putting these dependencies here makes the dashboard faster to load when the conversation app is installed
@@ -530,7 +531,14 @@ class ReachyMiniConversationApp(ReachyMiniApp):  # type: ignore[misc]
 
         args, _ = parse_args()
         args.gradio = True  # Force gradio for Reachy Mini App integration
-        run(args, robot=reachy_mini, app_stop_event=stop_event, settings_app=self.settings_app)
+        instance_path = self._get_instance_path()
+        run(
+            args,
+            robot=reachy_mini,
+            app_stop_event=stop_event,
+            settings_app=self.settings_app,
+            instance_path=instance_path,
+        )
 
 
 if __name__ == "__main__":

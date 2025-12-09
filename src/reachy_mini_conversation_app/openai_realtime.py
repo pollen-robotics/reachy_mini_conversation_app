@@ -12,12 +12,13 @@ import numpy as np
 import gradio as gr
 from openai import AsyncOpenAI
 from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item, audio_to_int16
+from pyparsing import Optional
 from numpy.typing import NDArray
 from scipy.signal import resample
 from websockets.exceptions import ConnectionClosedError
 
 from reachy_mini_conversation_app.config import config
-from reachy_mini_conversation_app.prompts import get_session_instructions, get_session_voice
+from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_tool_specs,
@@ -34,7 +35,7 @@ OPEN_AI_OUTPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
 class OpenaiRealtimeHandler(AsyncStreamHandler):
     """An OpenAI realtime handler for fastrtc Stream."""
 
-    def __init__(self, deps: ToolDependencies, gradio_mode: bool = False):
+    def __init__(self, deps: ToolDependencies, gradio_mode: bool = False, instance_path: Optional[str] = None):
         """Initialize the handler."""
         super().__init__(
             expected_layout="mono",
@@ -59,6 +60,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.start_time = asyncio.get_event_loop().time()
         self.is_idle_tool_call = False
         self.gradio_mode = gradio_mode
+        self.instance_path = instance_path
         # Track how the API key was provided (env vs textbox) and its value
         self._key_source: Literal["env", "textbox"] = "env"
         self._provided_api_key: str | None = None
@@ -524,6 +526,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     raw = None
             # Scan for voice candidates
             candidates: set[str] = set()
+
             def _collect(obj: object) -> None:
                 try:
                     if isinstance(obj, dict):
@@ -542,6 +545,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                             _collect(it)
                 except Exception:
                     pass
+
             if isinstance(raw, dict):
                 _collect(raw)
             # Ensure default present and stable order
@@ -575,12 +579,12 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         )
 
     def _persist_api_key_if_needed(self) -> None:
-        """Create a .env file and store the API key if provided via Gradio and valid.
+        """Persist the API key into `.env` inside `instance_path/` when appropriate.
 
-        - Only acts when running with Gradio and the key came from the textbox.
-        - Creates `.env` only if it does not already exist.
-        - If `.env.example` exists in any parent directory of CWD, uses that directory as target and
-          copies its contents, overriding the OPENAI_API_KEY line. Otherwise, creates a minimal .env.
+        - Only runs in Gradio mode when key came from the textbox and is non-empty.
+        - Only saves if `self.instance_path` is not None.
+        - Writes `.env` to `instance_path/.env` (does not overwrite if it already exists).
+        - If `instance_path/.env.example` exists, copies its contents while overriding OPENAI_API_KEY.
         """
         try:
             if not self.gradio_mode:
@@ -589,6 +593,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 return
             key = (self._provided_api_key or "").strip()
             if not key:
+                return
+            if self.instance_path is None:
                 return
 
             # Update the current process environment for downstream consumers
@@ -599,18 +605,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             except Exception:  # best-effort
                 pass
 
-            cwd = Path.cwd()
-            # Search upwards for a .env.example to decide where to place .env
-            target_dir = cwd
-            example_dir: Path | None = None
-            for parent in [cwd, *cwd.parents]:
-                candidate = parent / ".env.example"
-                if candidate.exists():
-                    example_dir = parent
-                    break
-            if example_dir is not None:
-                target_dir = example_dir
-
+            target_dir = Path(self.instance_path)
             env_path = target_dir / ".env"
             if env_path.exists():
                 # Respect existing user configuration
