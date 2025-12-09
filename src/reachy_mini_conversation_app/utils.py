@@ -25,6 +25,18 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--gradio", default=False, action="store_true", help="Open gradio interface")
     parser.add_argument("--debug", default=False, action="store_true", help="Enable debug logging")
+    parser.add_argument(
+        "--wireless-version",
+        default=False,
+        action="store_true",
+        help="Use WebRTC backend for wireless version of the robot",
+    )
+    parser.add_argument(
+        "--on-device",
+        default=False,
+        action="store_true",
+        help="Use when conversation app is running on the same device as Reachy Mini daemon",
+    )
     return parser.parse_known_args()
 
 

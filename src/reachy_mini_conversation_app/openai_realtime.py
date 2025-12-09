@@ -400,14 +400,19 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
     # Microphone receive
     async def receive(self, frame: Tuple[int, NDArray[np.int16]]) -> None:
-        """Receive audio frame from the microphone and send it to the openai server.
+        """Receive audio frame from the microphone and send it to the OpenAI server.
+
+        Handles both mono and stereo audio formats, converting to the expected
+        mono format for OpenAI's API. Resamples if the input sample rate differs
+        from the expected rate.
 
         Args:
-            frame: A tuple containing the sample rate and the audio frame.
+            frame: A tuple containing (sample_rate, audio_data).
 
         """
         if not self.connection:
             return
+
         input_sample_rate, audio_frame = frame
 
         # Reshape if needed
@@ -426,6 +431,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         # Cast if needed
         audio_frame = audio_to_int16(audio_frame)
 
+        # Send to OpenAI
         audio_message = base64.b64encode(audio_frame.tobytes()).decode("utf-8")
         await self.connection.input_audio_buffer.append(audio=audio_message)
 
