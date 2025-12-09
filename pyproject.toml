@@ -43,6 +43,9 @@ all_vision = [
   "ultralytics", "supervision",
   "mediapipe>=0.10.14",
 ]
+search_engine = [
+  "ddgs >= 9.9.3",
+]
 
 [dependency-groups]
 dev = [
