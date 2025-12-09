@@ -587,13 +587,17 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         """
         try:
             if not self.gradio_mode:
+                logger.warning("Not in Gradio mode; skipping API key persistence.")
                 return
             if self._key_source != "textbox":
+                logger.info("API key not provided via textbox; skipping persistence.")
                 return
             key = (self._provided_api_key or "").strip()
             if not key:
+                logger.warning("No API key provided via textbox; skipping persistence.")
                 return
             if self.instance_path is None:
+                logger.warning("Instance path is None; cannot persist API key.")
                 return
 
             # Update the current process environment for downstream consumers

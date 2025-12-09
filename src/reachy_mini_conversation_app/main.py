@@ -531,7 +531,7 @@ class ReachyMiniConversationApp(ReachyMiniApp):  # type: ignore[misc]
 
         args, _ = parse_args()
         args.gradio = True  # Force gradio for Reachy Mini App integration
-        instance_path = self._get_instance_path()
+        instance_path = self._get_instance_path().parent
         run(
             args,
             robot=reachy_mini,
