@@ -542,4 +542,9 @@ class ReachyMiniConversationApp(ReachyMiniApp):  # type: ignore[misc]
 
 
 if __name__ == "__main__":
+    # app = ReachyMiniConversationApp()
+    # try:
+    #     app.wrapped_run()
+    # except KeyboardInterrupt:
+    #     app.stop()
     main()
