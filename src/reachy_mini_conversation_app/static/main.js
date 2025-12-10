@@ -103,6 +103,8 @@ function show(el, flag) {
 }
 
 async function init() {
+  const loading = document.getElementById("loading");
+  show(loading, true);
   const statusEl = document.getElementById("status");
   const formPanel = document.getElementById("form-panel");
   const configuredPanel = document.getElementById("configured");
@@ -329,6 +331,9 @@ async function init() {
   } catch (e) {
     // If endpoints are not available, silently skip personality UI
   }
+
+  // Hide loading when initial setup is done (regardless of key presence)
+  show(loading, false);
 }
 
 window.addEventListener("DOMContentLoaded", init);

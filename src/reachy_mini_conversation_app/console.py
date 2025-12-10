@@ -24,7 +24,6 @@ from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
-from reachy_mini_conversation_app.headless_personality import HeadlessPersonalityCLI
 
 
 try:
@@ -69,7 +68,6 @@ class LocalStream:
         self._settings_app: Optional[FastAPI] = settings_app
         self._instance_path: Optional[str] = instance_path
         self._settings_initialized = False
-        self._personality_cli: Optional[HeadlessPersonalityCLI] = None
         self._asyncio_loop = None
 
     # ---- Settings UI (only when API key is missing) ----
@@ -260,14 +258,6 @@ class LocalStream:
                     mount_personality_routes(self._settings_app, self.handler, lambda: self._asyncio_loop)
             except Exception:
                 pass
-            # Start the optional headless personality console on TTY
-            try:
-                self._personality_cli = HeadlessPersonalityCLI(self.handler)
-                self._personality_cli.set_loop(loop)
-                self._personality_cli.start()
-            except Exception:
-                self._personality_cli = None
-
             self._tasks = [
                 asyncio.create_task(self.handler.start_up(), name="openai-handler"),
                 asyncio.create_task(self.record_loop(), name="stream-record-loop"),
@@ -280,12 +270,6 @@ class LocalStream:
             finally:
                 # Ensure handler connection is closed
                 await self.handler.shutdown()
-                # Stop personality console if running
-                try:
-                    if self._personality_cli:
-                        self._personality_cli.stop()
-                except Exception:
-                    pass
 
         asyncio.run(runner())
 
