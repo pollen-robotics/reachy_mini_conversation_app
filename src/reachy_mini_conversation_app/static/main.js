@@ -122,6 +122,11 @@ async function init() {
   const pVoice = document.getElementById("voice-select");
   const pAvail = document.getElementById("tools-available");
 
+  const AUTO_WITH = {
+    dance: ["stop_dance"],
+    play_emotion: ["stop_emotion"],
+  };
+
   statusEl.textContent = "Checking configuration...";
   show(formPanel, false);
   show(configuredPanel, false);
@@ -179,21 +184,75 @@ async function init() {
       pVoice.appendChild(opt);
     }
 
+    function renderToolCheckboxes(available, enabled) {
+      pAvail.innerHTML = "";
+      const enabledSet = new Set(enabled);
+      for (const t of available) {
+        const wrap = document.createElement("div");
+        wrap.className = "chk";
+        const id = `tool-${t}`;
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.id = id;
+        cb.value = t;
+        cb.checked = enabledSet.has(t);
+        const lab = document.createElement("label");
+        lab.htmlFor = id;
+        lab.textContent = t;
+        wrap.appendChild(cb);
+        wrap.appendChild(lab);
+        pAvail.appendChild(wrap);
+      }
+    }
+
+    function getSelectedTools() {
+      const selected = new Set();
+      pAvail.querySelectorAll('input[type="checkbox"]').forEach((el) => {
+        if (el.checked) selected.add(el.value);
+      });
+      // Auto-include dependencies
+      for (const [main, deps] of Object.entries(AUTO_WITH)) {
+        if (selected.has(main)) {
+          for (const d of deps) selected.add(d);
+        }
+      }
+      return Array.from(selected);
+    }
+
+    function syncToolsTextarea() {
+      const selected = getSelectedTools();
+      const comments = pTools.value
+        .split("\n")
+        .filter((ln) => ln.trim().startsWith("#"));
+      const body = selected.join("\n");
+      pTools.value = (comments.join("\n") + (comments.length ? "\n" : "") + body).trim() + "\n";
+    }
+
+    function attachToolHandlers() {
+      pAvail.addEventListener("change", (ev) => {
+        const target = ev.target;
+        if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") return;
+        const name = target.value;
+        // If a main tool toggled, propagate to deps
+        if (AUTO_WITH[name]) {
+          for (const dep of AUTO_WITH[name]) {
+            const depEl = pAvail.querySelector(`input[value="${dep}"]`);
+            if (depEl) depEl.checked = target.checked || depEl.checked;
+          }
+        }
+        syncToolsTextarea();
+      });
+    }
+
     async function loadSelected() {
       const selected = pSelect.value;
       const data = await loadPersonality(selected);
       pInstr.value = data.instructions || "";
       pTools.value = data.tools_text || "";
       pVoice.value = data.voice || "cedar";
-      // Available tools
-      pAvail.innerHTML = "";
-      for (const t of data.available_tools) {
-        const opt = document.createElement("option");
-        opt.value = t;
-        opt.textContent = t;
-        if (data.enabled_tools.includes(t)) opt.selected = true;
-        pAvail.appendChild(opt);
-      }
+      // Available tools as checkboxes
+      renderToolCheckboxes(data.available_tools, data.enabled_tools);
+      attachToolHandlers();
       // Default name field to last segment of selection
       const idx = selected.lastIndexOf("/");
       pName.value = idx >= 0 ? selected.slice(idx + 1) : "";
@@ -205,16 +264,7 @@ async function init() {
     await loadSelected();
     show(personalityPanel, true);
 
-    function syncToolsTextarea() {
-      const selected = Array.from(pAvail.selectedOptions).map((o) => o.value);
-      const comments = pTools.value
-        .split("\n")
-        .filter((ln) => ln.trim().startsWith("#"));
-      const body = selected.join("\n");
-      pTools.value = (comments.join("\n") + (comments.length ? "\n" : "") + body).trim() + "\n";
-    }
-
-    pAvail.addEventListener("change", syncToolsTextarea);
+    // pAvail change handler registered in attachToolHandlers()
 
     pApply.addEventListener("click", async () => {
       pStatus.textContent = "Applying...";
@@ -250,6 +300,8 @@ async function init() {
       pStatus.textContent = "Saving...";
       pStatus.className = "status";
       try {
+        // Ensure tools.txt reflects checkbox selection and auto-includes
+        syncToolsTextarea();
         const res = await savePersonality({
           name,
           instructions: pInstr.value || "",

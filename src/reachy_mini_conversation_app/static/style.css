@@ -71,6 +71,23 @@ button:hover { filter: brightness(1.1); }
 #personality-panel .row:first-of-type {
   grid-template-columns: 140px 1fr auto auto auto;
 }
-#tools-available { height: 140px; }
+#tools-available { max-height: 220px; overflow: auto; padding: 6px; border: 1px solid #2a3550; border-radius: 6px; }
 textarea { resize: vertical; }
 
+/* Checkbox grid for tools */
+.checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px 12px;
+}
+.checkbox-grid .chk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.checkbox-grid input[type="checkbox"] {
+  width: 16px; height: 16px;
+}
+.checkbox-grid label {
+  margin: 0; font-size: 13px; color: var(--text);
+}
