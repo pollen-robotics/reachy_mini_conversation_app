@@ -134,7 +134,8 @@ async function init() {
   }
 
   statusEl.textContent = "";
-  show(formPanel, true);
+  // Only show the API key form if key is missing
+  show(formPanel, !st.has_key);
 
   saveBtn.addEventListener("click", async () => {
     const key = input.value.trim();
