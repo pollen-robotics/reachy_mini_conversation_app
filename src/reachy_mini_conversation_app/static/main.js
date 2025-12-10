@@ -38,16 +38,42 @@ async function loadPersonality(name) {
 }
 
 async function savePersonality(payload) {
-  const resp = await fetch("/personalities/save", {
+  // Try JSON POST first
+  let resp = await fetch("/personalities/save", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!resp.ok) {
-    const data = await resp.json().catch(() => ({}));
-    throw new Error(data.error || "save_failed");
-  }
-  return await resp.json();
+  if (resp.ok) return await resp.json();
+
+  // Fallback to form-encoded POST
+  try {
+    const form = new URLSearchParams();
+    form.set("name", payload.name || "");
+    form.set("instructions", payload.instructions || "");
+    form.set("tools_text", payload.tools_text || "");
+    form.set("voice", payload.voice || "cedar");
+    resp = await fetch("/personalities/save_raw", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+    });
+    if (resp.ok) return await resp.json();
+  } catch {}
+
+  // Fallback to GET (query params)
+  try {
+    const url = new URL("/personalities/save_raw", window.location.origin);
+    url.searchParams.set("name", payload.name || "");
+    url.searchParams.set("instructions", payload.instructions || "");
+    url.searchParams.set("tools_text", payload.tools_text || "");
+    url.searchParams.set("voice", payload.voice || "cedar");
+    resp = await fetch(url, { method: "GET" });
+    if (resp.ok) return await resp.json();
+  } catch {}
+
+  const data = await resp.json().catch(() => ({}));
+  throw new Error(data.error || "save_failed");
 }
 
 async function applyPersonality(name) {

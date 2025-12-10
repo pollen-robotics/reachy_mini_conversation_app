@@ -80,12 +80,74 @@ def mount_personality_routes(app, handler, get_loop: Callable[[], asyncio.Abstra
         }
 
     @app.post("/personalities/save")  # type: ignore[union-attr]
-    def _save(payload: SavePayload):  # type: ignore[no-redef]
-        name_s = _sanitize_name(payload.name)
+    async def _save(request: Request):  # type: ignore[no-redef]
+        # Accept raw JSON only to avoid validation-related 422s
+        try:
+            raw = await request.json()
+        except Exception:
+            raw = {}
+        name = str(raw.get("name", ""))
+        instructions = str(raw.get("instructions", ""))
+        tools_text = str(raw.get("tools_text", ""))
+        voice = str(raw.get("voice", "cedar")) if raw.get("voice") is not None else "cedar"
+
+        name_s = _sanitize_name(name)
         if not name_s:
             return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)
         try:
-            _write_profile(name_s, payload.instructions, payload.tools_text, payload.voice or "cedar")
+            logger.info("Headless save: name=%r voice=%r instr_len=%d tools_len=%d", name_s, voice, len(instructions), len(tools_text))
+            _write_profile(name_s, instructions, tools_text, voice or "cedar")
+            value = f"user_personalities/{name_s}"
+            choices = [DEFAULT_OPTION, *list_personalities()]
+            return {"ok": True, "value": value, "choices": choices}
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    @app.post("/personalities/save_raw")  # type: ignore[union-attr]
+    async def _save_raw(request: Request, name: Optional[str] = None, instructions: Optional[str] = None, tools_text: Optional[str] = None, voice: Optional[str] = None):  # type: ignore[no-redef]
+        # Accept query params, form-encoded, or raw JSON
+        data = {"name": name, "instructions": instructions, "tools_text": tools_text, "voice": voice}
+        # Prefer form if present
+        try:
+            form = await request.form()
+            for k in ("name", "instructions", "tools_text", "voice"):
+                if k in form and form[k] is not None:
+                    data[k] = str(form[k])
+        except Exception:
+            pass
+        # Try JSON
+        try:
+            raw = await request.json()
+            if isinstance(raw, dict):
+                for k in ("name", "instructions", "tools_text", "voice"):
+                    if raw.get(k) is not None:
+                        data[k] = str(raw.get(k))
+        except Exception:
+            pass
+
+        name_s = _sanitize_name(str(data.get("name") or ""))
+        if not name_s:
+            return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)
+        instr = str(data.get("instructions") or "")
+        tools = str(data.get("tools_text") or "")
+        v = str(data.get("voice") or "cedar")
+        try:
+            logger.info("Headless save_raw: name=%r voice=%r instr_len=%d tools_len=%d", name_s, v, len(instr), len(tools))
+            _write_profile(name_s, instr, tools, v)
+            value = f"user_personalities/{name_s}"
+            choices = [DEFAULT_OPTION, *list_personalities()]
+            return {"ok": True, "value": value, "choices": choices}
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    @app.get("/personalities/save_raw")  # type: ignore[union-attr]
+    async def _save_raw_get(name: str, instructions: str = "", tools_text: str = "", voice: str = "cedar"):  # type: ignore[no-redef]
+        name_s = _sanitize_name(name)
+        if not name_s:
+            return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)
+        try:
+            logger.info("Headless save_raw(GET): name=%r voice=%r instr_len=%d tools_len=%d", name_s, voice, len(instructions), len(tools_text))
+            _write_profile(name_s, instructions, tools_text, voice or "cedar")
             value = f"user_personalities/{name_s}"
             choices = [DEFAULT_OPTION, *list_personalities()]
             return {"ok": True, "value": value, "choices": choices}
