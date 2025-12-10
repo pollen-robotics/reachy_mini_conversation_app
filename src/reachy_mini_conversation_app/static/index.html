@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Reachy Mini Conversation – Settings</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="container">
+      <h1>Reachy Mini Conversation</h1>
+      <p class="subtitle">Headless settings</p>
+
+      <div id="configured" class="panel hidden">
+        <p class="ok">OpenAI API key is already configured. Nothing to do.</p>
+      </div>
+
+      <div id="form-panel" class="panel hidden">
+        <p>Enter your OpenAI API key to enable conversation.</p>
+        <label for="api-key">OpenAI API Key</label>
+        <input id="api-key" type="password" placeholder="sk-..." autocomplete="off" />
+        <button id="save-btn">Save</button>
+        <p id="status" class="status"></p>
+      </div>
+    </div>
+
+    <script src="/static/main.js"></script>
+  </body>
+  </html>
+

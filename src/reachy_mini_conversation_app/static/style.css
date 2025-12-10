@@ -1,0 +1,55 @@
+:root {
+  --bg: #0b1320;
+  --panel: #121a2a;
+  --text: #e8efff;
+  --muted: #9fb1d1;
+  --ok: #4caf50;
+  --warn: #ff9800;
+  --error: #e53935;
+  --accent: #1e88e5;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+.container {
+  max-width: 640px;
+  margin: 6vh auto;
+  padding: 24px;
+}
+h1 { margin: 0 0 8px; font-size: 24px; }
+.subtitle { margin: 0 0 24px; color: var(--muted); }
+.panel {
+  background: var(--panel);
+  padding: 16px;
+  border-radius: 8px;
+}
+.hidden { display: none; }
+label { display: block; margin: 8px 0 4px; }
+input[type="password"] {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #2a3550;
+  border-radius: 6px;
+  background: #0f1626;
+  color: var(--text);
+}
+button {
+  margin-top: 12px;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: white;
+  cursor: pointer;
+}
+button:hover { filter: brightness(1.1); }
+.status { margin-top: 10px; color: var(--muted); }
+.status.ok { color: var(--ok); }
+.status.warn { color: var(--warn); }
+.status.error { color: var(--error); }
+

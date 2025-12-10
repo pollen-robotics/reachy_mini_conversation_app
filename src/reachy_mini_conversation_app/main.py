@@ -476,7 +476,13 @@ def run(
 
         app = gr.mount_gradio_app(app, stream.ui, path="/")
     else:
-        stream_manager = LocalStream(handler, robot)
+        # In headless mode, wire settings_app + instance_path to console LocalStream
+        stream_manager = LocalStream(
+            handler,
+            robot,
+            settings_app=settings_app,
+            instance_path=instance_path,
+        )
 
     # Each async service → its own thread/loop
     movement_manager.start()
@@ -522,7 +528,7 @@ class ReachyMiniConversationApp(ReachyMiniApp):  # type: ignore[misc]
     """Reachy Mini Apps entry point for the conversation app."""
 
     custom_app_url = "http://127.0.0.1:7860/"
-    dont_start_webserver = True
+    dont_start_webserver = False
 
     def run(self, reachy_mini: ReachyMini, stop_event: threading.Event) -> None:
         """Run the Reachy Mini conversation app."""
@@ -530,7 +536,7 @@ class ReachyMiniConversationApp(ReachyMiniApp):  # type: ignore[misc]
         asyncio.set_event_loop(loop)
 
         args, _ = parse_args()
-        args.gradio = True  # Force gradio for Reachy Mini App integration
+        # args.gradio = True  # Force gradio for Reachy Mini App integration
         instance_path = self._get_instance_path().parent
         run(
             args,
