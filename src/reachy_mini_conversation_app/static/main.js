@@ -22,6 +22,56 @@ async function saveKey(key) {
   return await resp.json();
 }
 
+// ---------- Personalities API ----------
+async function getPersonalities() {
+  const resp = await fetch("/personalities");
+  if (!resp.ok) throw new Error("list_failed");
+  return await resp.json();
+}
+
+async function loadPersonality(name) {
+  const url = new URL("/personalities/load", window.location.origin);
+  url.searchParams.set("name", name);
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error("load_failed");
+  return await resp.json();
+}
+
+async function savePersonality(payload) {
+  const resp = await fetch("/personalities/save", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(data.error || "save_failed");
+  }
+  return await resp.json();
+}
+
+async function applyPersonality(name) {
+  // Send as query param to avoid any body parsing issues on the server
+  const url = new URL("/personalities/apply", window.location.origin);
+  url.searchParams.set("name", name || "");
+  const resp = await fetch(url, { method: "POST" });
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(data.error || "apply_failed");
+  }
+  return await resp.json();
+}
+
+async function getVoices() {
+  try {
+    const resp = await fetch("/voices");
+    if (!resp.ok) throw new Error("voices_failed");
+    return await resp.json();
+  } catch (e) {
+    return ["cedar"];
+  }
+}
+
 function show(el, flag) {
   el.classList.toggle("hidden", !flag);
 }
@@ -30,18 +80,31 @@ async function init() {
   const statusEl = document.getElementById("status");
   const formPanel = document.getElementById("form-panel");
   const configuredPanel = document.getElementById("configured");
+  const personalityPanel = document.getElementById("personality-panel");
   const saveBtn = document.getElementById("save-btn");
   const input = document.getElementById("api-key");
+
+  // Personality elements
+  const pSelect = document.getElementById("personality-select");
+  const pApply = document.getElementById("apply-personality");
+  const pNew = document.getElementById("new-personality");
+  const pSave = document.getElementById("save-personality");
+  const pName = document.getElementById("personality-name");
+  const pInstr = document.getElementById("instructions-ta");
+  const pTools = document.getElementById("tools-ta");
+  const pStatus = document.getElementById("personality-status");
+  const pVoice = document.getElementById("voice-select");
+  const pAvail = document.getElementById("tools-available");
 
   statusEl.textContent = "Checking configuration...";
   show(formPanel, false);
   show(configuredPanel, false);
+  show(personalityPanel, false);
 
   const st = await fetchStatus();
   if (st.has_key) {
     statusEl.textContent = "";
     show(configuredPanel, true);
-    return;
   }
 
   statusEl.textContent = "";
@@ -68,7 +131,125 @@ async function init() {
       statusEl.className = "status error";
     }
   });
+
+  // Initialize personalities UI
+  try {
+    const list = await getPersonalities();
+    // Populate select
+    pSelect.innerHTML = "";
+    for (const n of list.choices) {
+      const opt = document.createElement("option");
+      opt.value = n;
+      opt.textContent = n;
+      pSelect.appendChild(opt);
+    }
+    const voices = await getVoices();
+    pVoice.innerHTML = "";
+    for (const v of voices) {
+      const opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = v;
+      pVoice.appendChild(opt);
+    }
+
+    async function loadSelected() {
+      const selected = pSelect.value;
+      const data = await loadPersonality(selected);
+      pInstr.value = data.instructions || "";
+      pTools.value = data.tools_text || "";
+      pVoice.value = data.voice || "cedar";
+      // Available tools
+      pAvail.innerHTML = "";
+      for (const t of data.available_tools) {
+        const opt = document.createElement("option");
+        opt.value = t;
+        opt.textContent = t;
+        if (data.enabled_tools.includes(t)) opt.selected = true;
+        pAvail.appendChild(opt);
+      }
+      // Default name field to last segment of selection
+      const idx = selected.lastIndexOf("/");
+      pName.value = idx >= 0 ? selected.slice(idx + 1) : "";
+      pStatus.textContent = `Loaded ${selected}`;
+      pStatus.className = "status";
+    }
+
+    pSelect.addEventListener("change", loadSelected);
+    await loadSelected();
+    show(personalityPanel, true);
+
+    function syncToolsTextarea() {
+      const selected = Array.from(pAvail.selectedOptions).map((o) => o.value);
+      const comments = pTools.value
+        .split("\n")
+        .filter((ln) => ln.trim().startsWith("#"));
+      const body = selected.join("\n");
+      pTools.value = (comments.join("\n") + (comments.length ? "\n" : "") + body).trim() + "\n";
+    }
+
+    pAvail.addEventListener("change", syncToolsTextarea);
+
+    pApply.addEventListener("click", async () => {
+      pStatus.textContent = "Applying...";
+      pStatus.className = "status";
+      try {
+        const res = await applyPersonality(pSelect.value);
+        pStatus.textContent = res.status || "Applied.";
+        pStatus.className = "status ok";
+      } catch (e) {
+        pStatus.textContent = `Failed to apply${e.message ? ": " + e.message : ""}`;
+        pStatus.className = "status error";
+      }
+    });
+
+    pNew.addEventListener("click", () => {
+      pName.value = "";
+      pInstr.value = "# Write your instructions here\n# e.g., Keep responses concise and friendly.";
+      pTools.value = "# tools enabled for this profile\n";
+      // Keep available tools list, clear selection
+      for (const opt of pAvail.options) opt.selected = false;
+      pVoice.value = "cedar";
+      pStatus.textContent = "Fill fields and click Save.";
+      pStatus.className = "status";
+    });
+
+    pSave.addEventListener("click", async () => {
+      const name = (pName.value || "").trim();
+      if (!name) {
+        pStatus.textContent = "Enter a valid name.";
+        pStatus.className = "status warn";
+        return;
+      }
+      pStatus.textContent = "Saving...";
+      pStatus.className = "status";
+      try {
+        const res = await savePersonality({
+          name,
+          instructions: pInstr.value || "",
+          tools_text: pTools.value || "",
+          voice: pVoice.value || "cedar",
+        });
+        // Refresh select choices
+        pSelect.innerHTML = "";
+        for (const n of res.choices) {
+          const opt = document.createElement("option");
+          opt.value = n;
+          opt.textContent = n;
+          if (n === res.value) opt.selected = true;
+          pSelect.appendChild(opt);
+        }
+        pStatus.textContent = "Saved.";
+        pStatus.className = "status ok";
+        // Auto-apply
+        try { await applyPersonality(pSelect.value); } catch {}
+      } catch (e) {
+        pStatus.textContent = "Failed to save.";
+        pStatus.className = "status error";
+      }
+    });
+  } catch (e) {
+    // If endpoints are not available, silently skip personality UI
+  }
 }
 
 window.addEventListener("DOMContentLoaded", init);
-

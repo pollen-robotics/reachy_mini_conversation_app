@@ -69,6 +69,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.partial_transcript_sequence: int = 0  # sequence counter to prevent stale emissions
         self.partial_debounce_delay = 0.5  # seconds
 
+        # Internal lifecycle flags
+        self._shutdown_requested: bool = False
+        self._connected_event: asyncio.Event = asyncio.Event()
+
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
         return OpenaiRealtimeHandler(self.deps, self.gradio_mode, self.instance_path)
@@ -83,29 +87,45 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         Returns a short status message for UI feedback.
         """
         try:
-            # Update the in-process config value (env is not re-read automatically)
-            from reachy_mini_conversation_app.config import config as _config
+            # Update the in-process config value and env
+            from reachy_mini_conversation_app.config import set_custom_profile, config as _config
+            set_custom_profile(profile)
+            logger.info("Set custom profile to %r (config=%r)", profile, getattr(_config, "REACHY_MINI_CUSTOM_PROFILE", None))
 
-            _config.REACHY_MINI_CUSTOM_PROFILE = profile
+            try:
+                instructions = get_session_instructions()
+                voice = get_session_voice()
+            except BaseException as e:  # catch SystemExit from prompt loader without crashing
+                logger.error("Failed to resolve personality content: %s", e)
+                return f"Failed to apply personality: {e}"
 
-            instructions = get_session_instructions()
-            voice = get_session_voice()
-
+            # Attempt a live update first, then force a full restart to ensure it sticks
             if self.connection is not None:
                 try:
                     await self.connection.session.update(
                         session={
+                            "type": "realtime",
                             "instructions": instructions,
                             "audio": {"output": {"voice": voice}},
                         },
                     )
-                    logger.info("Applied personality: %s (live session updated)", profile or "built-in default")
-                    return "Applied personality. New instructions active."
+                    logger.info("Applied personality via live update: %s", profile or "built-in default")
                 except Exception as e:
-                    logger.warning("Failed to live-update session instructions: %s", e)
-                    # Fall through: instructions will take effect on next reconnect
-            logger.info("Applied personality recorded: %s (will apply on next session)", profile or "built-in default")
-            return "Applied personality. Will take effect on next connection."
+                    logger.warning("Live update failed; will restart session: %s", e)
+
+                # Force a real restart to guarantee the new instructions/voice
+                try:
+                    await self._restart_session()
+                    return "Applied personality and restarted realtime session."
+                except Exception as e:
+                    logger.warning("Failed to restart session after apply: %s", e)
+                    return "Applied personality. Will take effect on next connection."
+            else:
+                logger.info(
+                    "Applied personality recorded: %s (no live connection; will apply on next session)",
+                    profile or "built-in default",
+                )
+                return "Applied personality. Will take effect on next connection."
         except Exception as e:
             logger.error("Error applying personality '%s': %s", profile, e)
             return f"Failed to apply personality: {e}"
@@ -169,6 +189,43 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             finally:
                 # never keep a stale reference
                 self.connection = None
+                try:
+                    self._connected_event.clear()
+                except Exception:
+                    pass
+
+    async def _restart_session(self) -> None:
+        """Force-close the current session and start a fresh one in background.
+
+        Does not block the caller while the new session is establishing.
+        """
+        try:
+            if self.connection is not None:
+                try:
+                    await self.connection.close()
+                except Exception:
+                    pass
+                finally:
+                    self.connection = None
+
+            # Ensure we have a client (start_up must have run once)
+            if getattr(self, "client", None) is None:
+                logger.warning("Cannot restart: OpenAI client not initialized yet.")
+                return
+
+            # Fire-and-forget new session and wait briefly for connection
+            try:
+                self._connected_event.clear()
+            except Exception:
+                pass
+            asyncio.create_task(self._run_realtime_session(), name="openai-realtime-restart")
+            try:
+                await asyncio.wait_for(self._connected_event.wait(), timeout=5.0)
+                logger.info("Realtime session restarted and connected.")
+            except asyncio.TimeoutError:
+                logger.warning("Realtime session restart timed out; continuing in background.")
+        except Exception as e:
+            logger.warning("_restart_session failed: %s", e)
 
     async def _run_realtime_session(self) -> None:
         """Establish and manage a single realtime session."""
@@ -202,6 +259,11 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         "tool_choice": "auto",
                     },
                 )
+                logger.info(
+                    "Realtime session initialized with profile=%r voice=%r",
+                    getattr(config, "REACHY_MINI_CUSTOM_PROFILE", None),
+                    get_session_voice(),
+                )
                 # If we reached here, the session update succeeded which implies the API key worked.
                 # Persist the key to a newly created .env (copied from .env.example) if needed.
                 self._persist_api_key_if_needed()
@@ -213,6 +275,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
             # Manage event received from the openai server
             self.connection = conn
+            try:
+                self._connected_event.set()
+            except Exception:
+                pass
             async for event in self.connection:
                 logger.debug(f"OpenAI event: {event.type}")
                 if event.type == "input_audio_buffer.speech_started":
@@ -433,9 +499,13 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         # Cast if needed
         audio_frame = audio_to_int16(audio_frame)
 
-        # Send to OpenAI
-        audio_message = base64.b64encode(audio_frame.tobytes()).decode("utf-8")
-        await self.connection.input_audio_buffer.append(audio=audio_message)
+        # Send to OpenAI (guard against races during reconnect)
+        try:
+            audio_message = base64.b64encode(audio_frame.tobytes()).decode("utf-8")
+            await self.connection.input_audio_buffer.append(audio=audio_message)
+        except Exception as e:
+            logger.debug("Dropping audio frame: connection not ready (%s)", e)
+            return
 
     async def emit(self) -> Tuple[int, NDArray[np.int16]] | AdditionalOutputs | None:
         """Emit audio frame to be played by the speaker."""
@@ -457,6 +527,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
     async def shutdown(self) -> None:
         """Shutdown the handler."""
+        self._shutdown_requested = True
         # Cancel any pending debounce task
         if self.partial_transcript_task and not self.partial_transcript_task.done():
             self.partial_transcript_task.cancel()

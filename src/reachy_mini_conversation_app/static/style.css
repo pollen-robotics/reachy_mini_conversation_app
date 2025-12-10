@@ -29,8 +29,11 @@ h1 { margin: 0 0 8px; font-size: 24px; }
   border-radius: 8px;
 }
 .hidden { display: none; }
-label { display: block; margin: 8px 0 4px; }
-input[type="password"] {
+label { display: block; margin: 8px 0 4px; font-size: 13px; color: var(--muted); }
+input[type="password"],
+input[type="text"],
+select,
+textarea {
   width: 100%;
   padding: 10px 12px;
   border: 1px solid #2a3550;
@@ -52,4 +55,22 @@ button:hover { filter: brightness(1.1); }
 .status.ok { color: var(--ok); }
 .status.warn { color: var(--warn); }
 .status.error { color: var(--error); }
+
+/* Personality layout */
+.row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 10px 16px;
+  align-items: center;
+  margin-top: 10px;
+}
+.row > label { margin: 0; }
+.row > button { margin: 0; }
+
+/* First row: controls inline */
+#personality-panel .row:first-of-type {
+  grid-template-columns: 140px 1fr auto auto auto;
+}
+#tools-available { height: 140px; }
+textarea { resize: vertical; }
 

@@ -44,3 +44,25 @@ class Config:
     logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")
 
 config = Config()
+
+
+def set_custom_profile(profile: str | None) -> None:
+    """Update the selected custom profile at runtime and expose it via env.
+
+    This ensures modules that read `config` and code that inspects the
+    environment see a consistent value.
+    """
+    try:
+        config.REACHY_MINI_CUSTOM_PROFILE = profile  # type: ignore[attr-defined]
+    except Exception:
+        pass
+    try:
+        import os as _os
+
+        if profile:
+            _os.environ["REACHY_MINI_CUSTOM_PROFILE"] = profile
+        else:
+            # Remove to reflect default
+            _os.environ.pop("REACHY_MINI_CUSTOM_PROFILE", None)
+    except Exception:
+        pass

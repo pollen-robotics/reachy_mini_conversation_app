@@ -22,9 +22,38 @@
         <button id="save-btn">Save</button>
         <p id="status" class="status"></p>
       </div>
+
+      <div id="personality-panel" class="panel hidden">
+        <h2>Personality</h2>
+        <div class="row">
+          <label for="personality-select">Select</label>
+          <select id="personality-select"></select>
+          <button id="apply-personality">Apply</button>
+          <button id="new-personality">New</button>
+          <button id="save-personality">Save</button>
+        </div>
+        <div class="row">
+          <label for="personality-name">Name</label>
+          <input id="personality-name" placeholder="my_profile" />
+          <label for="voice-select">Voice</label>
+          <select id="voice-select"></select>
+        </div>
+        <div class="row">
+          <label for="instructions-ta">Instructions</label>
+          <textarea id="instructions-ta" rows="8" placeholder="# Write your instructions here"></textarea>
+        </div>
+        <div class="row">
+          <label for="tools-ta">tools.txt</label>
+          <textarea id="tools-ta" rows="6" placeholder="# tools enabled for this profile"></textarea>
+        </div>
+        <div class="row">
+          <label for="tools-available">Available tools</label>
+          <select id="tools-available" multiple></select>
+        </div>
+        <p id="personality-status" class="status"></p>
+      </div>
     </div>
 
     <script src="/static/main.js"></script>
   </body>
   </html>
-
