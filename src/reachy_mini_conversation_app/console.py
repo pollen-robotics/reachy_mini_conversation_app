@@ -28,7 +28,7 @@ from reachy_mini_conversation_app.headless_personality_ui import mount_personali
 
 try:
     # FastAPI is provided by the Reachy Mini Apps runtime
-    from fastapi import FastAPI
+    from fastapi import FastAPI, Response
     from pydantic import BaseModel
     from fastapi.responses import FileResponse, JSONResponse
     from starlette.staticfiles import StaticFiles
@@ -185,6 +185,11 @@ class LocalStream:
         @self._settings_app.get("/")  # type: ignore[union-attr]
         def _root() -> FileResponse:  # type: ignore[no-redef]
             return FileResponse(str(index_file))
+
+        # GET /favicon.ico -> optional, avoid noisy 404s on some browsers
+        @self._settings_app.get("/favicon.ico")  # type: ignore[union-attr]
+        def _favicon() -> Response:  # type: ignore[no-redef]
+            return Response(status_code=204)
 
         # GET /status -> whether key is set
         @self._settings_app.get("/status")  # type: ignore[union-attr]

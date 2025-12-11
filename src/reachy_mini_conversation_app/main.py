@@ -210,7 +210,7 @@ class ReachyMiniConversationApp(ReachyMiniApp):  # type: ignore[misc]
         asyncio.set_event_loop(loop)
 
         args, _ = parse_args()
-        # args.gradio = True  # Force gradio for Reachy Mini App integration
+        args.head_tracker = "mediapipe"
         instance_path = self._get_instance_path().parent
         run(
             args,
@@ -222,9 +222,8 @@ class ReachyMiniConversationApp(ReachyMiniApp):  # type: ignore[misc]
 
 
 if __name__ == "__main__":
-    # app = ReachyMiniConversationApp()
-    # try:
-    #     app.wrapped_run()
-    # except KeyboardInterrupt:
-    #     app.stop()
-    main()
+    app = ReachyMiniConversationApp()
+    try:
+        app.wrapped_run()
+    except KeyboardInterrupt:
+        app.stop()
