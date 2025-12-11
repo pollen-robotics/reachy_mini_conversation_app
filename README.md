@@ -21,7 +21,7 @@ The app follows a layered architecture connecting the user, AI services, and rob
 ## Installation
 
 > [!IMPORTANT]
-> Before using this app, you need to install [Reachy Mini's SDK](https://github.com/pollen-robotics/reachy_mini/).
+> Before using this app, you need to install [Reachy Mini's SDK](https://github.com/pollen-robotics/reachy_mini/).<br>
 > Windows support is currently experimental and has not been extensively tested. Use with caution.
 
 ### Using uv
