@@ -210,7 +210,7 @@ class ReachyMiniConversationApp(ReachyMiniApp):  # type: ignore[misc]
         asyncio.set_event_loop(loop)
 
         args, _ = parse_args()
-        args.head_tracker = "mediapipe"
+        # args.head_tracker = "mediapipe"
         instance_path = self._get_instance_path().parent
         run(
             args,
