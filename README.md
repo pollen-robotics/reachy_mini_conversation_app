@@ -21,6 +21,7 @@ The app follows a layered architecture connecting the user, AI services, and rob
 ## Installation
 
 > [!IMPORTANT]
+> Before using this app, you need to install [Reachy Mini's SDK](https://github.com/pollen-robotics/reachy_mini/).
 > Windows support is currently experimental and has not been extensively tested. Use with caution.
 
 ### Using uv
@@ -138,6 +139,15 @@ By default, the app runs in console mode for direct audio interaction. Use the `
   ```bash
   reachy-mini-conversation-app --no-camera
   ```
+
+### Troubleshooting
+
+- Timeout error:
+If you get an error like this:
+  ```bash
+  TimeoutError: Timeout while waiting for connection with the server.
+  ```
+It probably means that the Reachy Mini's daemon isn't running. Install [Reachy Mini's SDK](https://github.com/pollen-robotics/reachy_mini/) and start the daemon.
 
 ## LLM tools exposed to the assistant
 
