@@ -37,6 +37,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Use when conversation app is running on the same device as Reachy Mini daemon",
     )
+    parser.add_argument(
+        "--openai",
+        default=False,
+        action="store_true",
+        help="Use OpenAI realtime handler",
+    )
     return parser.parse_args()
 
 

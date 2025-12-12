@@ -14,7 +14,7 @@ from scipy.signal import resample
 from reachy_mini import ReachyMini
 from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
-
+from reachy_mini_conversation_app.gradium_realtime import UnmuteRealtimeHandler
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class LocalStream:
     """LocalStream using Reachy Mini's recorder/player."""
 
-    def __init__(self, handler: OpenaiRealtimeHandler, robot: ReachyMini):
+    def __init__(self, handler: OpenaiRealtimeHandler | UnmuteRealtimeHandler, robot: ReachyMini):
         """Initialize the stream with an OpenAI realtime handler and pipelines."""
         self.handler = handler
         self._robot = robot
@@ -100,10 +100,17 @@ class LocalStream:
             if isinstance(handler_output, AdditionalOutputs):
                 for msg in handler_output.args:
                     content = msg.get("content", "")
+                    role = msg.get("role", "")
                     if isinstance(content, str):
-                        logger.info(
+                        # Log user_partial at DEBUG level, everything else at INFO
+                        if role == "user_partial":
+                            log_function = logger.debug
+                        else:
+                            log_function = logger.info
+
+                        log_function(
                             "role=%s content=%s",
-                            msg.get("role"),
+                            role,
                             content if len(content) < 500 else content[:500] + "…",
                         )
 

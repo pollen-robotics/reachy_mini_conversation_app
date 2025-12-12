@@ -75,6 +75,7 @@ class PlayEmotion(Tool):
             # Add emotion to queue
             movement_manager = deps.movement_manager
             emotion_move = EmotionQueueMove(emotion_name, RECORDED_MOVES)
+            movement_manager.clear_move_queue()
             movement_manager.queue_move(emotion_move)
 
             return {"status": "queued", "emotion": emotion_name}
