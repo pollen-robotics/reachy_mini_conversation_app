@@ -16,6 +16,7 @@ from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.gradium_realtime import UnmuteRealtimeHandler
 
+
 logger = logging.getLogger(__name__)
 
 

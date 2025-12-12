@@ -1,27 +1,23 @@
+import os
 import json
 import base64
 import random
 import asyncio
 import logging
-import sphn
-import os
-from typing import Final, Tuple, Literal, Any
+from typing import Any, Final, Tuple, Literal
 
+import sphn
 import numpy as np
 import websockets
+from unmute import openai_realtime_api_events as events
 from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item, audio_to_int16
 from numpy.typing import NDArray
 from scipy.signal import resample
 from websockets.exceptions import ConnectionClosedError
-
-from reachy_mini_conversation_app.tools.core_tools import (
-    ToolDependencies,
-    ALL_TOOLS
-)
-
-
 from unmute.llm.system_prompt import LandingPageInstructions
-from unmute import openai_realtime_api_events as events
+
+from reachy_mini_conversation_app.tools.core_tools import ALL_TOOLS, ToolDependencies
+
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +122,7 @@ class UnmuteRealtimeHandler(AsyncStreamHandler):
         async with websockets.connect(
             url,
             additional_headers=headers,
-            subprotocols=["realtime"]
+            subprotocols=["realtime"],  # type: ignore
         ) as ws:
 
             self.websocket = ws
@@ -339,6 +335,7 @@ class UnmuteRealtimeHandler(AsyncStreamHandler):
 
         Args:
             frame: A tuple containing the sample rate and the audio frame.
+
         """
         if not self.websocket:
             logger.debug("Websocket is down")
@@ -374,7 +371,7 @@ class UnmuteRealtimeHandler(AsyncStreamHandler):
 
     async def emit(self) -> Tuple[int, NDArray[np.int16]] | AdditionalOutputs | None:
         """Emit audio frame to be played by the speaker."""
-        return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
+        return await wait_for_item(self.output_queue)
 
     async def shutdown(self) -> None:
         """Shutdown the handler."""
