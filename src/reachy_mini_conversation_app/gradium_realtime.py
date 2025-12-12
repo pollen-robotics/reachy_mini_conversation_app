@@ -229,7 +229,7 @@ class UnmuteRealtimeHandler(AsyncStreamHandler):
                         pending_function_calls.clear()
                         pending_words = 0
                         delta_event = events.ConversationItemInputAudioTranscriptionDelta(**data)
-                        logger.info(f"User partial transcript delta: {delta_event.delta}")
+                        logger.debug(f"User partial transcript delta: {delta_event.delta}")
 
                         # Add space before concatenating if we already have content and delta doesn't start with punctuation/space
                         if self.current_user_transcript and delta_event.delta:
@@ -309,10 +309,10 @@ class UnmuteRealtimeHandler(AsyncStreamHandler):
                             pending_function_calls.append((pending_words, call))
 
                     elif event_type == "unmute.response.text.delta.ready":
-                        logger.info("Pending text:  %s", data['delta'])
+                        logger.debug("Pending text:  %s", data['delta'])
                         pending_words += 1
                     elif event_type == "response.text.delta":
-                        logger.info("Text read: %s", data['delta'])
+                        logger.debug("Text read: %s", data['delta'])
                         for idx, (count, call) in enumerate(pending_function_calls):
                             pending_function_calls[idx] = (count - 1, call)
                         while pending_function_calls and pending_function_calls[0][0] <= 0:
