@@ -723,12 +723,44 @@ class MovementManager:
         logger.debug("Move worker started")
 
     def stop(self) -> None:
-        """Request the worker thread to stop and wait for it to exit."""
+        """Request the worker thread to stop and wait for it to exit.
+
+        Before stopping, resets the robot to a neutral position.
+        """
+        if self._thread is None or not self._thread.is_alive():
+            logger.debug("Move worker not running; stop() ignored")
+            return
+
+        logger.info("Stopping movement manager and resetting to neutral position...")
+
+        # Clear any queued moves and stop current move
+        self.clear_move_queue()
+
+        # Stop the worker thread first so it doesn't interfere
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join()
             self._thread = None
         logger.debug("Move worker stopped")
+
+        # Reset to neutral position using goto_target (same approach as wake_up)
+        try:
+            neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
+            neutral_antennas = [0.0, 0.0]
+            neutral_body_yaw = 0.0
+
+            # Use goto_target directly on the robot
+            self.current_robot.goto_target(
+                head=neutral_head_pose,
+                antennas=neutral_antennas,
+                duration=2.0,
+                body_yaw=neutral_body_yaw,
+            )
+
+            logger.info("Reset to neutral position completed")
+
+        except Exception as e:
+            logger.error(f"Failed to reset to neutral position: {e}")
 
     def get_status(self) -> Dict[str, Any]:
         """Return a lightweight status snapshot for observability."""
