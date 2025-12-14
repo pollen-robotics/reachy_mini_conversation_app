@@ -56,37 +56,55 @@
           <span class="chip">Live</span>
         </div>
         <p class="muted">Create lean instruction sets, toggle tools, and apply a voice for your Reachy Mini.</p>
-        <div class="row">
-          <label for="personality-select">Select</label>
-          <select id="personality-select"></select>
-          <button id="apply-personality" class="ghost">Apply</button>
-          <button id="persist-personality" class="ghost">Use on startup</button>
-          <button id="new-personality" class="ghost">New</button>
-          <button id="save-personality">Save</button>
-        </div>
-        <div class="row">
-          <label>Startup personality</label>
-          <div class="startup-row">
-            <span id="startup-label" class="chip">Built-in default</span>
+        <div class="section">
+          <div class="section-heading">
+            <h3>Select & launch</h3>
+            <p class="muted small">Pick a profile and choose what should launch on startup.</p>
+          </div>
+          <div class="row row-top">
+            <label for="personality-select">Select</label>
+            <select id="personality-select"></select>
+            <button id="persist-personality" class="ghost">Use on startup</button>
+            <button id="apply-personality" class="ghost">Apply</button>
+            <button id="new-personality" class="ghost">New</button>
+          </div>
+          <div class="row">
+            <label>Startup personality</label>
+            <div class="startup-row">
+              <span id="startup-label" class="chip">Built-in default</span>
+            </div>
           </div>
         </div>
-        <div class="row">
-          <label for="personality-name">Name</label>
-          <input id="personality-name" placeholder="my_profile" />
-          <label for="voice-select">Voice</label>
-          <select id="voice-select"></select>
-        </div>
-        <div class="row">
-          <label for="instructions-ta">Instructions</label>
-          <textarea id="instructions-ta" rows="8" placeholder="# Write your instructions here"></textarea>
-        </div>
-        <div class="row">
-          <label for="tools-ta">tools.txt</label>
-          <textarea id="tools-ta" rows="6" placeholder="# tools enabled for this profile"></textarea>
-        </div>
-        <div class="row">
-          <label for="tools-available">Available tools</label>
-          <div id="tools-available" class="checkbox-grid"></div>
+
+        <div class="section">
+          <div class="section-heading">
+            <h3>Create / edit</h3>
+            <p class="muted small">Adjust instructions, tools, and voice, then save your profile.</p>
+          </div>
+          <div class="row">
+            <label for="personality-name">Name</label>
+            <input id="personality-name" type="text" class="input-field" placeholder="my_profile" />
+            <label for="voice-select">Voice</label>
+            <select id="voice-select"></select>
+          </div>
+          <div class="row">
+            <label for="instructions-ta">Instructions</label>
+            <textarea id="instructions-ta" rows="8" placeholder="# Write your instructions here"></textarea>
+          </div>
+          <div class="row">
+            <label for="tools-ta">tools.txt</label>
+            <textarea id="tools-ta" rows="6" placeholder="# tools enabled for this profile"></textarea>
+          </div>
+          <div class="row">
+            <label for="tools-available">Available tools</label>
+            <div id="tools-available" class="checkbox-grid"></div>
+          </div>
+          <div class="row row-save">
+            <label></label>
+            <div class="actions">
+              <button id="save-personality">Save</button>
+            </div>
+          </div>
         </div>
         <p id="personality-status" class="status"></p>
       </div>

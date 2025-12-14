@@ -221,8 +221,8 @@ button.ghost:hover { border-color: rgba(94, 240, 193, 0.4); }
 .row > button { margin: 0; }
 
 /* First row: controls inline */
-#personality-panel .row:first-of-type {
-  grid-template-columns: 160px 1fr auto auto auto auto;
+#personality-panel .row-top {
+  grid-template-columns: 160px 1fr auto auto auto;
 }
 
 #tools-available {
@@ -245,6 +245,45 @@ button.ghost:hover { border-color: rgba(94, 240, 193, 0.4); }
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+.row-save .actions {
+  justify-content: flex-start;
+}
+.input-field {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  transition: border 0.15s ease, box-shadow 0.15s ease;
+}
+.input-field:focus {
+  border-color: rgba(94, 240, 193, 0.7);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(94, 240, 193, 0.15);
+}
+.section {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-top: 14px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.section-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  justify-content: space-between;
+}
+.section-heading h3 {
+  margin: 6px 0;
+  font-size: 16px;
+  letter-spacing: -0.1px;
+}
+.section-heading .small {
+  margin: 0;
+  font-size: 12px;
 }
 .checkbox-grid .chk {
   display: flex;
