@@ -141,7 +141,7 @@ class PersonalityUI:
                 pass
             return "cedar"
 
-        async def _fetch_voices(selected: str):
+        async def _fetch_voices(selected: str) -> dict[str, Any]:
             try:
                 voices = await handler.get_available_voices()
                 current = _read_voice_for(selected)
@@ -151,7 +151,7 @@ class PersonalityUI:
             except Exception:
                 return gr.update(choices=["cedar"], value="cedar")
 
-        def _available_tools_for(selected: str):
+        def _available_tools_for(selected: str) -> tuple[list[str], list[str]]:
             shared: list[str] = []
             try:
                 for py in self._tools_dir.glob("*.py"):
@@ -178,7 +178,7 @@ class PersonalityUI:
                 enabled.append(s)
             return enabled
 
-        def _load_profile_for_edit(selected: str):
+        def _load_profile_for_edit(selected: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str]:
             instr = self._read_instructions_for(selected)
             tools_txt = ""
             if selected != self.DEFAULT_OPTION:
@@ -196,7 +196,9 @@ class PersonalityUI:
                 status_text,
             )
 
-        def _new_personality():
+        def _new_personality() -> tuple[
+            dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], str, dict[str, Any]
+        ]:
             try:
                 # Prefill with hints
                 instr_val = """# Write your instructions here\n# e.g., Keep responses concise and friendly."""
@@ -219,7 +221,9 @@ class PersonalityUI:
                     gr.update(),
                 )
 
-        def _save_personality(name: str, instructions: str, tools_text: str, voice: str):
+        def _save_personality(
+            name: str, instructions: str, tools_text: str, voice: str
+        ) -> tuple[dict[str, Any], dict[str, Any], str]:
             name_s = self._sanitize_name(name)
             if not name_s:
                 return gr.update(), gr.update(), "Please enter a valid name."
@@ -242,7 +246,7 @@ class PersonalityUI:
             except Exception as e:
                 return gr.update(), gr.update(), f"Failed to save personality: {e}"
 
-        def _sync_tools_from_checks(selected: list[str], current_text: str):
+        def _sync_tools_from_checks(selected: list[str], current_text: str) -> dict[str, Any]:
             comments = [ln for ln in current_text.splitlines() if ln.strip().startswith("#")]
             body = "\n".join(selected)
             out = ("\n".join(comments) + ("\n" if comments else "") + body).strip() + "\n"

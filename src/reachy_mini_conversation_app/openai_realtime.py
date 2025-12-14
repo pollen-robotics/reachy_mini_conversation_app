@@ -594,7 +594,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         pass
             if raw is None:
                 try:
-                    raw = dict(model)  # type: ignore[arg-type]
+                    raw = dict(model)
                 except Exception:
                     raw = None
             # Scan for voice candidates

@@ -43,6 +43,7 @@ class Config:
     REACHY_MINI_CUSTOM_PROFILE = os.getenv("REACHY_MINI_CUSTOM_PROFILE")
     logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")
 
+
 config = Config()
 
 
@@ -53,7 +54,7 @@ def set_custom_profile(profile: str | None) -> None:
     environment see a consistent value.
     """
     try:
-        config.REACHY_MINI_CUSTOM_PROFILE = profile  # type: ignore[attr-defined]
+        config.REACHY_MINI_CUSTOM_PROFILE = profile
     except Exception:
         pass
     try:

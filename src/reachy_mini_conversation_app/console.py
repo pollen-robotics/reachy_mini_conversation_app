@@ -34,11 +34,11 @@ try:
     from fastapi.responses import FileResponse, JSONResponse
     from starlette.staticfiles import StaticFiles
 except Exception:  # pragma: no cover - only loaded when settings_app is used
-    FastAPI = object  # type: ignore[assignment]
-    FileResponse = object  # type: ignore[assignment]
-    JSONResponse = object  # type: ignore[assignment]
-    StaticFiles = object  # type: ignore[assignment]
-    BaseModel = object  # type: ignore[assignment]
+    FastAPI = object  # type: ignore
+    FileResponse = object  # type: ignore
+    JSONResponse = object  # type: ignore
+    StaticFiles = object  # type: ignore
+    BaseModel = object  # type: ignore
 
 
 logger = logging.getLogger(__name__)
@@ -94,7 +94,7 @@ class LocalStream:
         except Exception:  # best-effort
             pass
         try:
-            config.OPENAI_API_KEY = k  # type: ignore[attr-defined]
+            config.OPENAI_API_KEY = k
         except Exception:
             pass
 
@@ -175,32 +175,32 @@ class LocalStream:
         if hasattr(self._settings_app, "mount"):
             try:
                 # Serve /static/* assets
-                self._settings_app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")  # type: ignore[arg-type]
+                self._settings_app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
             except Exception:
                 pass
 
-        class ApiKeyPayload(BaseModel):  # type: ignore[misc,valid-type]
+        class ApiKeyPayload(BaseModel):
             openai_api_key: str
 
         # GET / -> index.html
-        @self._settings_app.get("/")  # type: ignore[union-attr]
-        def _root() -> FileResponse:  # type: ignore[no-redef]
+        @self._settings_app.get("/")
+        def _root() -> FileResponse:
             return FileResponse(str(index_file))
 
         # GET /favicon.ico -> optional, avoid noisy 404s on some browsers
-        @self._settings_app.get("/favicon.ico")  # type: ignore[union-attr]
-        def _favicon() -> Response:  # type: ignore[no-redef]
+        @self._settings_app.get("/favicon.ico")
+        def _favicon() -> Response:
             return Response(status_code=204)
 
         # GET /status -> whether key is set
-        @self._settings_app.get("/status")  # type: ignore[union-attr]
-        def _status() -> JSONResponse:  # type: ignore[no-redef]
+        @self._settings_app.get("/status")
+        def _status() -> JSONResponse:
             has_key = bool(config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip())
             return JSONResponse({"has_key": has_key})
 
         # GET /ready -> whether backend finished loading tools
-        @self._settings_app.get("/ready")  # type: ignore[union-attr]
-        def _ready() -> JSONResponse:  # type: ignore[no-redef]
+        @self._settings_app.get("/ready")
+        def _ready() -> JSONResponse:
             try:
                 mod = sys.modules.get("reachy_mini_conversation_app.tools.core_tools")
                 ready = bool(getattr(mod, "_TOOLS_INITIALIZED", False)) if mod else False
@@ -209,8 +209,8 @@ class LocalStream:
             return JSONResponse({"ready": ready})
 
         # POST /openai_api_key -> set/persist key
-        @self._settings_app.post("/openai_api_key")  # type: ignore[union-attr]
-        def _set_key(payload: ApiKeyPayload) -> JSONResponse:  # type: ignore[no-redef]
+        @self._settings_app.post("/openai_api_key")
+        def _set_key(payload: ApiKeyPayload) -> JSONResponse:
             key = (payload.openai_api_key or "").strip()
             if not key:
                 return JSONResponse({"ok": False, "error": "empty_key"}, status_code=400)
@@ -242,7 +242,7 @@ class LocalStream:
                     new_key = os.getenv("OPENAI_API_KEY", "").strip()
                     if new_key:
                         try:
-                            config.OPENAI_API_KEY = new_key  # type: ignore[attr-defined]
+                            config.OPENAI_API_KEY = new_key
                         except Exception:
                             pass
             except Exception:
@@ -267,7 +267,7 @@ class LocalStream:
         async def runner() -> None:
             # Capture loop for cross-thread personality actions
             loop = asyncio.get_running_loop()
-            self._asyncio_loop = loop
+            self._asyncio_loop = loop  # type: ignore[assignment]
             # Mount personality routes now that loop and handler are available
             try:
                 if self._settings_app is not None:
