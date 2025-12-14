@@ -8,11 +8,8 @@ avoid coupling and keep responsibilities clear for headless mode.
 """
 
 from __future__ import annotations
-
-from pathlib import Path
 from typing import List
-
-from .config import config
+from pathlib import Path
 
 
 DEFAULT_OPTION = "(built-in default)"
@@ -40,6 +37,7 @@ def _sanitize_name(name: str) -> str:
 
 
 def list_personalities() -> List[str]:
+    """List available personality profile names."""
     names: List[str] = []
     root = _profiles_root()
     try:
@@ -60,10 +58,12 @@ def list_personalities() -> List[str]:
 
 
 def resolve_profile_dir(selection: str) -> Path:
+    """Resolve the directory path for the given profile selection."""
     return _profiles_root() / selection
 
 
 def read_instructions_for(name: str) -> str:
+    """Read the instructions.txt content for the given profile name."""
     try:
         if name == DEFAULT_OPTION:
             df = _prompts_dir() / "default_prompt.txt"
@@ -75,6 +75,7 @@ def read_instructions_for(name: str) -> str:
 
 
 def available_tools_for(selected: str) -> List[str]:
+    """List available tool modules for the given profile selection."""
     shared: List[str] = []
     try:
         for py in _tools_dir().glob("*.py"):

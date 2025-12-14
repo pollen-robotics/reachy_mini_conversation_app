@@ -5,9 +5,8 @@ conversation "personalities" (profiles) so that `main.py` stays lean.
 """
 
 from __future__ import annotations
-
+from typing import Any
 from pathlib import Path
-from typing import Any, List, Optional
 
 import gradio as gr
 
@@ -18,6 +17,7 @@ class PersonalityUI:
     """Container for personality-related Gradio components."""
 
     def __init__(self) -> None:
+        """Initialize the PersonalityUI instance."""
         # Constants and paths
         self.DEFAULT_OPTION = "(built-in default)"
         self._profiles_root = Path(__file__).parent / "profiles"
@@ -198,7 +198,6 @@ class PersonalityUI:
 
         def _new_personality():
             try:
-                choices = self._list_personalities()
                 # Prefill with hints
                 instr_val = """# Write your instructions here\n# e.g., Keep responses concise and friendly."""
                 tools_txt_val = "# tools enabled for this profile\n"
@@ -211,7 +210,14 @@ class PersonalityUI:
                     gr.update(value="cedar"),
                 )
             except Exception:
-                return gr.update(), gr.update(), gr.update(), gr.update(), "Failed to initialize new personality.", gr.update()
+                return (
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                    "Failed to initialize new personality.",
+                    gr.update(),
+                )
 
         def _save_personality(name: str, instructions: str, tools_text: str, voice: str):
             name_s = self._sanitize_name(name)

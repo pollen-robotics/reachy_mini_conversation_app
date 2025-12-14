@@ -7,36 +7,31 @@ callable to avoid cross-thread issues.
 """
 
 from __future__ import annotations
-
 import asyncio
-from pathlib import Path
-from typing import Callable, Dict, List, Optional
-
 import logging
+from typing import Callable, Optional
 
+from fastapi import FastAPI
+
+from .openai_realtime import OpenaiRealtimeHandler
 from .headless_personality import (
     DEFAULT_OPTION,
     _sanitize_name,
-    available_tools_for,
-    list_personalities,
-    read_instructions_for,
-    resolve_profile_dir,
     _write_profile,
+    list_personalities,
+    available_tools_for,
+    resolve_profile_dir,
+    read_instructions_for,
 )
 
 
-def mount_personality_routes(app, handler, get_loop: Callable[[], asyncio.AbstractEventLoop | None]) -> None:
-    """Register personality management endpoints on a FastAPI app.
-
-    Parameters
-    - app: FastAPI instance
-    - handler: OpenaiRealtimeHandler instance used to apply personalities and fetch voices
-    - get_loop: callable returning the asyncio loop running the audio/handler tasks
-    """
-
+def mount_personality_routes(
+    app: FastAPI, handler: OpenaiRealtimeHandler, get_loop: Callable[[], asyncio.AbstractEventLoop | None]
+) -> None:
+    """Register personality management endpoints on a FastAPI app."""
     try:
-        from pydantic import BaseModel
         from fastapi import Request
+        from pydantic import BaseModel
         from fastapi.responses import JSONResponse
     except Exception:  # pragma: no cover - only when settings app not available
         return
@@ -95,7 +90,13 @@ def mount_personality_routes(app, handler, get_loop: Callable[[], asyncio.Abstra
         if not name_s:
             return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)
         try:
-            logger.info("Headless save: name=%r voice=%r instr_len=%d tools_len=%d", name_s, voice, len(instructions), len(tools_text))
+            logger.info(
+                "Headless save: name=%r voice=%r instr_len=%d tools_len=%d",
+                name_s,
+                voice,
+                len(instructions),
+                len(tools_text),
+            )
             _write_profile(name_s, instructions, tools_text, voice or "cedar")
             value = f"user_personalities/{name_s}"
             choices = [DEFAULT_OPTION, *list_personalities()]
@@ -104,7 +105,13 @@ def mount_personality_routes(app, handler, get_loop: Callable[[], asyncio.Abstra
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
     @app.post("/personalities/save_raw")  # type: ignore[union-attr]
-    async def _save_raw(request: Request, name: Optional[str] = None, instructions: Optional[str] = None, tools_text: Optional[str] = None, voice: Optional[str] = None):  # type: ignore[no-redef]
+    async def _save_raw(
+        request: Request,
+        name: Optional[str] = None,
+        instructions: Optional[str] = None,
+        tools_text: Optional[str] = None,
+        voice: Optional[str] = None,
+    ):  # type: ignore[no-redef]
         # Accept query params, form-encoded, or raw JSON
         data = {"name": name, "instructions": instructions, "tools_text": tools_text, "voice": voice}
         # Prefer form if present
@@ -132,7 +139,9 @@ def mount_personality_routes(app, handler, get_loop: Callable[[], asyncio.Abstra
         tools = str(data.get("tools_text") or "")
         v = str(data.get("voice") or "cedar")
         try:
-            logger.info("Headless save_raw: name=%r voice=%r instr_len=%d tools_len=%d", name_s, v, len(instr), len(tools))
+            logger.info(
+                "Headless save_raw: name=%r voice=%r instr_len=%d tools_len=%d", name_s, v, len(instr), len(tools)
+            )
             _write_profile(name_s, instr, tools, v)
             value = f"user_personalities/{name_s}"
             choices = [DEFAULT_OPTION, *list_personalities()]
@@ -146,7 +155,13 @@ def mount_personality_routes(app, handler, get_loop: Callable[[], asyncio.Abstra
         if not name_s:
             return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)
         try:
-            logger.info("Headless save_raw(GET): name=%r voice=%r instr_len=%d tools_len=%d", name_s, voice, len(instructions), len(tools_text))
+            logger.info(
+                "Headless save_raw(GET): name=%r voice=%r instr_len=%d tools_len=%d",
+                name_s,
+                voice,
+                len(instructions),
+                len(tools_text),
+            )
             _write_profile(name_s, instructions, tools_text, voice or "cedar")
             value = f"user_personalities/{name_s}"
             choices = [DEFAULT_OPTION, *list_personalities()]

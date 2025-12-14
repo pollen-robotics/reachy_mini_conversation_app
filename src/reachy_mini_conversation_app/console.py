@@ -10,10 +10,10 @@ app instance's ``.env`` file (if available) and proceed to start streaming.
 """
 
 import os
+import sys
 import time
 import asyncio
 import logging
-import sys
 from typing import List, Optional
 from pathlib import Path
 
@@ -135,7 +135,7 @@ class LocalStream:
                             template_text = packaged.read_text(encoding="utf-8")
                         except Exception:
                             template_text = None
-                lines = (template_text.splitlines() if template_text else [])
+                lines = template_text.splitlines() if template_text else []
             replaced = False
             for i, ln in enumerate(lines):
                 if ln.strip().startswith("OPENAI_API_KEY="):

@@ -7,7 +7,6 @@ import asyncio
 import argparse
 import threading
 from typing import Any, Dict, List, Optional
-from pathlib import Path
 
 import gradio as gr
 from fastapi import FastAPI
@@ -20,7 +19,6 @@ from reachy_mini_conversation_app.utils import (
     setup_logger,
     handle_vision_stuff,
 )
-from reachy_mini_conversation_app.config import config
 
 
 def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -75,13 +73,13 @@ def run(
             logger.info("Using default backend for lite version")
             robot = ReachyMini(media_backend="default")
 
-    # Check if running in simulation mode without --gradio
-    if robot.client.get_status()["simulation_enabled"] and not args.gradio:
-        logger.error(
-            "Simulation mode requires Gradio interface. Please use --gradio flag when running in simulation mode.",
-        )
-        robot.client.disconnect()
-        sys.exit(1)
+    # # Check if running in simulation mode without --gradio
+    # if robot.client.get_status()["simulation_enabled"] and not args.gradio:
+    #     logger.error(
+    #         "Simulation mode requires Gradio interface. Please use --gradio flag when running in simulation mode.",
+    #     )
+    #     robot.client.disconnect()
+    #     sys.exit(1)
 
     camera_worker, _, vision_manager = handle_vision_stuff(args, robot)
 

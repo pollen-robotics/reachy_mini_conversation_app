@@ -88,9 +88,13 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         """
         try:
             # Update the in-process config value and env
-            from reachy_mini_conversation_app.config import set_custom_profile, config as _config
+            from reachy_mini_conversation_app.config import config as _config
+            from reachy_mini_conversation_app.config import set_custom_profile
+
             set_custom_profile(profile)
-            logger.info("Set custom profile to %r (config=%r)", profile, getattr(_config, "REACHY_MINI_CUSTOM_PROFILE", None))
+            logger.info(
+                "Set custom profile to %r (config=%r)", profile, getattr(_config, "REACHY_MINI_CUSTOM_PROFILE", None)
+            )
 
             try:
                 instructions = get_session_instructions()
@@ -161,9 +165,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 # In headless console mode, LocalStream now blocks startup until the key is provided.
                 # However, unit tests may invoke this handler directly with a stubbed client.
                 # To keep tests hermetic without requiring a real key, fall back to a placeholder.
-                logger.warning(
-                    "OPENAI_API_KEY missing. Proceeding with a placeholder (tests/offline)."
-                )
+                logger.warning("OPENAI_API_KEY missing. Proceeding with a placeholder (tests/offline).")
                 openai_api_key = "DUMMY"
 
         self.client = AsyncOpenAI(api_key=openai_api_key)
