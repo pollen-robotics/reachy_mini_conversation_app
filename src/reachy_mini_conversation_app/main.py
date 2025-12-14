@@ -1,7 +1,6 @@
 """Entrypoint for the Reachy Mini conversation app."""
 
 import os
-import sys
 import time
 import asyncio
 import argparse
