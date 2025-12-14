@@ -72,6 +72,40 @@ class LocalStream:
         self._asyncio_loop = None
 
     # ---- Settings UI (only when API key is missing) ----
+    def _read_env_lines(self, env_path: Path) -> list[str]:
+        """Load env file contents or a template as a list of lines."""
+        inst = env_path.parent
+        try:
+            if env_path.exists():
+                try:
+                    return env_path.read_text(encoding="utf-8").splitlines()
+                except Exception:
+                    return []
+            template_text = None
+            ex = inst / ".env.example"
+            if ex.exists():
+                try:
+                    template_text = ex.read_text(encoding="utf-8")
+                except Exception:
+                    template_text = None
+            if template_text is None:
+                try:
+                    cwd_example = Path.cwd() / ".env.example"
+                    if cwd_example.exists():
+                        template_text = cwd_example.read_text(encoding="utf-8")
+                except Exception:
+                    template_text = None
+            if template_text is None:
+                packaged = Path(__file__).parent / ".env.example"
+                if packaged.exists():
+                    try:
+                        template_text = packaged.read_text(encoding="utf-8")
+                    except Exception:
+                        template_text = None
+            return template_text.splitlines() if template_text else []
+        except Exception:
+            return []
+
     def _persist_api_key(self, key: str) -> None:
         """Persist API key to environment and instance ``.env`` if possible.
 
@@ -103,39 +137,7 @@ class LocalStream:
         try:
             inst = Path(self._instance_path)
             env_path = inst / ".env"
-            lines: list[str]
-            if env_path.exists():
-                try:
-                    lines = env_path.read_text(encoding="utf-8").splitlines()
-                except Exception:
-                    lines = []
-            else:
-                # Try instance template first
-                template_text = None
-                ex = inst / ".env.example"
-                if ex.exists():
-                    try:
-                        template_text = ex.read_text(encoding="utf-8")
-                    except Exception:
-                        template_text = None
-                # Fallback to CWD template
-                if template_text is None:
-                    try:
-                        cwd_example = Path.cwd() / ".env.example"
-                        if cwd_example.exists():
-                            template_text = cwd_example.read_text(encoding="utf-8")
-                    except Exception:
-                        template_text = None
-
-                # Fallback to packaged template
-                if template_text is None:
-                    packaged = Path(__file__).parent / ".env.example"
-                    if packaged.exists():
-                        try:
-                            template_text = packaged.read_text(encoding="utf-8")
-                        except Exception:
-                            template_text = None
-                lines = template_text.splitlines() if template_text else []
+            lines = self._read_env_lines(env_path)
             replaced = False
             for i, ln in enumerate(lines):
                 if ln.strip().startswith("OPENAI_API_KEY="):
@@ -157,6 +159,62 @@ class LocalStream:
                 pass
         except Exception as e:
             logger.warning("Failed to persist OPENAI_API_KEY: %s", e)
+
+    def _persist_personality(self, profile: Optional[str]) -> None:
+        """Persist the startup personality to the instance .env and config."""
+        selection = (profile or "").strip() or None
+        try:
+            from reachy_mini_conversation_app.config import set_custom_profile
+
+            set_custom_profile(selection)
+        except Exception:
+            pass
+
+        if not self._instance_path:
+            return
+        try:
+            env_path = Path(self._instance_path) / ".env"
+            lines = self._read_env_lines(env_path)
+            replaced = False
+            for i, ln in enumerate(list(lines)):
+                if ln.strip().startswith("REACHY_MINI_CUSTOM_PROFILE="):
+                    if selection:
+                        lines[i] = f"REACHY_MINI_CUSTOM_PROFILE={selection}"
+                    else:
+                        lines.pop(i)
+                    replaced = True
+                    break
+            if selection and not replaced:
+                lines.append(f"REACHY_MINI_CUSTOM_PROFILE={selection}")
+            if selection is None and not env_path.exists():
+                return
+            final_text = "\n".join(lines) + "\n"
+            env_path.write_text(final_text, encoding="utf-8")
+            logger.info("Persisted startup personality to %s", env_path)
+            try:
+                from dotenv import load_dotenv
+
+                load_dotenv(dotenv_path=str(env_path), override=True)
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning("Failed to persist REACHY_MINI_CUSTOM_PROFILE: %s", e)
+
+    def _read_persisted_personality(self) -> Optional[str]:
+        """Read persisted startup personality from instance .env (if any)."""
+        if not self._instance_path:
+            return None
+        env_path = Path(self._instance_path) / ".env"
+        try:
+            if env_path.exists():
+                for ln in env_path.read_text(encoding="utf-8").splitlines():
+                    if ln.strip().startswith("REACHY_MINI_CUSTOM_PROFILE="):
+                        _, _, val = ln.partition("=")
+                        v = val.strip()
+                        return v or None
+        except Exception:
+            pass
+        return None
 
     def _init_settings_ui_if_needed(self) -> None:
         """Attach minimal settings UI to the settings app.
@@ -231,18 +289,25 @@ class LocalStream:
         self._init_settings_ui_if_needed()
 
         # Try to load an existing instance .env first (covers subsequent runs)
-        if not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()) and self._instance_path:
+        if self._instance_path:
             try:
                 from dotenv import load_dotenv
+                from reachy_mini_conversation_app.config import set_custom_profile
 
                 env_path = Path(self._instance_path) / ".env"
                 if env_path.exists():
                     load_dotenv(dotenv_path=str(env_path), override=True)
-                    # Update config with newly loaded value
+                    # Update config with newly loaded values
                     new_key = os.getenv("OPENAI_API_KEY", "").strip()
                     if new_key:
                         try:
                             config.OPENAI_API_KEY = new_key
+                        except Exception:
+                            pass
+                    new_profile = os.getenv("REACHY_MINI_CUSTOM_PROFILE")
+                    if new_profile is not None:
+                        try:
+                            set_custom_profile(new_profile.strip() or None)
                         except Exception:
                             pass
             except Exception:
@@ -271,7 +336,13 @@ class LocalStream:
             # Mount personality routes now that loop and handler are available
             try:
                 if self._settings_app is not None:
-                    mount_personality_routes(self._settings_app, self.handler, lambda: self._asyncio_loop)
+                    mount_personality_routes(
+                        self._settings_app,
+                        self.handler,
+                        lambda: self._asyncio_loop,
+                        persist_personality=self._persist_personality,
+                        get_persisted_personality=self._read_persisted_personality,
+                    )
             except Exception:
                 pass
             self._tasks = [

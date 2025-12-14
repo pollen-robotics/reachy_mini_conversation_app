@@ -13,6 +13,7 @@ from typing import Callable, Optional
 
 from fastapi import FastAPI
 
+from .config import config
 from .openai_realtime import OpenaiRealtimeHandler
 from .headless_personality import (
     DEFAULT_OPTION,
@@ -26,7 +27,12 @@ from .headless_personality import (
 
 
 def mount_personality_routes(
-    app: FastAPI, handler: OpenaiRealtimeHandler, get_loop: Callable[[], asyncio.AbstractEventLoop | None]
+    app: FastAPI,
+    handler: OpenaiRealtimeHandler,
+    get_loop: Callable[[], asyncio.AbstractEventLoop | None],
+    *,
+    persist_personality: Callable[[Optional[str]], None] | None = None,
+    get_persisted_personality: Callable[[], Optional[str]] | None = None,
 ) -> None:
     """Register personality management endpoints on a FastAPI app."""
     try:
@@ -44,11 +50,33 @@ def mount_personality_routes(
 
     class ApplyPayload(BaseModel):
         name: str
+        persist: Optional[bool] = False
+
+    def _startup_choice() -> str:
+        """Return the persisted startup personality or default."""
+        try:
+            if get_persisted_personality is not None:
+                stored = get_persisted_personality()
+                if stored:
+                    return stored
+            env_val = getattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
+            if env_val:
+                return env_val
+        except Exception:
+            pass
+        return DEFAULT_OPTION
+
+    def _current_choice() -> str:
+        try:
+            cur = getattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
+            return cur or DEFAULT_OPTION
+        except Exception:
+            return DEFAULT_OPTION
 
     @app.get("/personalities")
     def _list() -> dict:  # type: ignore
         choices = [DEFAULT_OPTION, *list_personalities()]
-        return {"choices": choices}
+        return {"choices": choices, "current": _current_choice(), "startup": _startup_choice()}
 
     @app.get("/personalities/load")
     def _load(name: str) -> dict:  # type: ignore
@@ -173,7 +201,10 @@ def mount_personality_routes(
 
     @app.post("/personalities/apply")
     async def _apply(
-        payload: ApplyPayload | None = None, name: str | None = None, request: Optional[Request] = None
+        payload: ApplyPayload | None = None,
+        name: str | None = None,
+        persist: Optional[bool] = None,
+        request: Optional[Request] = None,
     ) -> dict:  # type: ignore
         loop = get_loop()
         if loop is None:
@@ -181,8 +212,10 @@ def mount_personality_routes(
 
         # Accept both JSON payload and query param for convenience
         sel_name: Optional[str] = None
+        persist_flag = bool(persist) if persist is not None else False
         if payload and getattr(payload, "name", None):
             sel_name = payload.name
+            persist_flag = bool(getattr(payload, "persist", False))
         elif name:
             sel_name = name
         elif request is not None:
@@ -190,8 +223,17 @@ def mount_personality_routes(
                 body = await request.json()
                 if isinstance(body, dict) and body.get("name"):
                     sel_name = str(body.get("name"))
+                if isinstance(body, dict) and "persist" in body:
+                    persist_flag = bool(body.get("persist"))
             except Exception:
                 sel_name = None
+        if request is not None:
+            try:
+                q_persist = request.query_params.get("persist")
+                if q_persist is not None:
+                    persist_flag = str(q_persist).lower() in {"1", "true", "yes", "on"}
+            except Exception:
+                pass
         if not sel_name:
             sel_name = DEFAULT_OPTION
 
@@ -204,7 +246,14 @@ def mount_personality_routes(
             logger.info("Headless apply: requested name=%r", sel_name)
             fut = asyncio.run_coroutine_threadsafe(_do_apply(), loop)
             status = fut.result(timeout=10)
-            return {"ok": True, "status": status}
+            persisted_choice = _startup_choice()
+            if persist_flag and persist_personality is not None:
+                try:
+                    persist_personality(None if sel_name == DEFAULT_OPTION else sel_name)
+                    persisted_choice = _startup_choice()
+                except Exception as e:
+                    logger.warning("Failed to persist startup personality: %s", e)
+            return {"ok": True, "status": status, "startup": persisted_choice}
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
 

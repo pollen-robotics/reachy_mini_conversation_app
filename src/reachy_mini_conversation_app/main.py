@@ -74,12 +74,12 @@ def run(
             robot = ReachyMini(media_backend="default")
 
     # Check if running in simulation mode without --gradio
-    if robot.client.get_status()["simulation_enabled"] and not args.gradio:
-        logger.error(
-            "Simulation mode requires Gradio interface. Please use --gradio flag when running in simulation mode.",
-        )
-        robot.client.disconnect()
-        sys.exit(1)
+    # if robot.client.get_status()["simulation_enabled"] and not args.gradio:
+    #     logger.error(
+    #         "Simulation mode requires Gradio interface. Please use --gradio flag when running in simulation mode.",
+    #     )
+    #     robot.client.disconnect()
+    #     sys.exit(1)
 
     camera_worker, _, vision_manager = handle_vision_stuff(args, robot)
 

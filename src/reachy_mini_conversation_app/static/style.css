@@ -222,7 +222,7 @@ button.ghost:hover { border-color: rgba(94, 240, 193, 0.4); }
 
 /* First row: controls inline */
 #personality-panel .row:first-of-type {
-  grid-template-columns: 160px 1fr auto auto auto;
+  grid-template-columns: 160px 1fr auto auto auto auto;
 }
 
 #tools-available {
@@ -239,6 +239,12 @@ button.ghost:hover { border-color: rgba(94, 240, 193, 0.4); }
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
   gap: 10px 14px;
+}
+.startup-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 .checkbox-grid .chk {
   display: flex;

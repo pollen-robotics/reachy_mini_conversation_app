@@ -133,10 +133,13 @@ async function savePersonality(payload) {
   throw new Error(data.error || "save_failed");
 }
 
-async function applyPersonality(name) {
+async function applyPersonality(name, { persist = false } = {}) {
   // Send as query param to avoid any body parsing issues on the server
   const url = new URL("/personalities/apply", window.location.origin);
   url.searchParams.set("name", name || "");
+  if (persist) {
+    url.searchParams.set("persist", "1");
+  }
   url.searchParams.set("_", Date.now().toString());
   const resp = await fetchWithTimeout(url, { method: "POST" }, 5000);
   if (!resp.ok) {
@@ -175,8 +178,10 @@ async function init() {
   // Personality elements
   const pSelect = document.getElementById("personality-select");
   const pApply = document.getElementById("apply-personality");
+  const pPersist = document.getElementById("persist-personality");
   const pNew = document.getElementById("new-personality");
   const pSave = document.getElementById("save-personality");
+  const pStartupLabel = document.getElementById("startup-label");
   const pName = document.getElementById("personality-name");
   const pInstr = document.getElementById("instructions-ta");
   const pTools = document.getElementById("tools-ta");
@@ -240,13 +245,27 @@ async function init() {
 
   // Initialize personalities UI
   try {
+    const choices = Array.isArray(list.choices) ? list.choices : [];
+    const DEFAULT_OPTION = choices[0] || "(built-in default)";
+    const startupChoice = choices.includes(list.startup) ? list.startup : DEFAULT_OPTION;
+    const currentChoice = choices.includes(list.current) ? list.current : startupChoice;
+
+    function setStartupLabel(name) {
+      const display = name && name !== DEFAULT_OPTION ? name : "Built-in default";
+      pStartupLabel.textContent = `Launch on start: ${display}`;
+    }
+
     // Populate select
     pSelect.innerHTML = "";
-    for (const n of list.choices) {
+    for (const n of choices) {
       const opt = document.createElement("option");
       opt.value = n;
       opt.textContent = n;
       pSelect.appendChild(opt);
+    }
+    if (choices.length) {
+      const preferred = choices.includes(startupChoice) ? startupChoice : currentChoice;
+      pSelect.value = preferred;
     }
     const voices = await getVoices();
     pVoice.innerHTML = "";
@@ -256,6 +275,7 @@ async function init() {
       opt.textContent = v;
       pVoice.appendChild(opt);
     }
+    setStartupLabel(startupChoice);
 
     function renderToolCheckboxes(available, enabled) {
       pAvail.innerHTML = "";
@@ -344,10 +364,25 @@ async function init() {
       pStatus.className = "status";
       try {
         const res = await applyPersonality(pSelect.value);
+        if (res.startup) setStartupLabel(res.startup);
         pStatus.textContent = res.status || "Applied.";
         pStatus.className = "status ok";
       } catch (e) {
         pStatus.textContent = `Failed to apply${e.message ? ": " + e.message : ""}`;
+        pStatus.className = "status error";
+      }
+    });
+
+    pPersist.addEventListener("click", async () => {
+      pStatus.textContent = "Saving for startup...";
+      pStatus.className = "status";
+      try {
+        const res = await applyPersonality(pSelect.value, { persist: true });
+        if (res.startup) setStartupLabel(res.startup);
+        pStatus.textContent = res.status || "Saved for startup.";
+        pStatus.className = "status ok";
+      } catch (e) {
+        pStatus.textContent = `Failed to persist${e.message ? ": " + e.message : ""}`;
         pStatus.className = "status error";
       }
     });
@@ -357,7 +392,9 @@ async function init() {
       pInstr.value = "# Write your instructions here\n# e.g., Keep responses concise and friendly.";
       pTools.value = "# tools enabled for this profile\n";
       // Keep available tools list, clear selection
-      for (const opt of pAvail.options) opt.selected = false;
+      pAvail.querySelectorAll('input[type="checkbox"]').forEach((el) => {
+        el.checked = false;
+      });
       pVoice.value = "cedar";
       pStatus.textContent = "Fill fields and click Save.";
       pStatus.className = "status";
