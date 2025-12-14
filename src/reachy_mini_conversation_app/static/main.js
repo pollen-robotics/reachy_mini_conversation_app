@@ -1,10 +1,59 @@
 async function fetchStatus() {
   try {
-    const resp = await fetch("/status");
+    const url = new URL("/status", window.location.origin);
+    url.searchParams.set("_", Date.now().toString());
+    const resp = await fetchWithTimeout(url, {}, 2000);
     if (!resp.ok) throw new Error("status error");
     return await resp.json();
   } catch (e) {
     return { has_key: false, error: true };
+  }
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 2000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+async function waitForStatus(timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      const url = new URL("/status", window.location.origin);
+      url.searchParams.set("_", Date.now().toString());
+      const resp = await fetchWithTimeout(url, {}, 2000);
+      if (resp.ok) return await resp.json();
+    } catch (e) {}
+    if (Date.now() >= deadline) return null;
+    await sleep(500);
+  }
+}
+
+async function waitForPersonalityData(timeoutMs = 15000) {
+  const loadingText = document.querySelector("#loading p");
+  let attempts = 0;
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    attempts += 1;
+    try {
+      const url = new URL("/personalities", window.location.origin);
+      url.searchParams.set("_", Date.now().toString());
+      const resp = await fetchWithTimeout(url, {}, 2000);
+      if (resp.ok) return await resp.json();
+    } catch (e) {}
+
+    if (loadingText) {
+      loadingText.textContent = attempts > 8 ? "Starting backend…" : "Loading…";
+    }
+    if (Date.now() >= deadline) return null;
+    await sleep(500);
   }
 }
 
@@ -24,7 +73,9 @@ async function saveKey(key) {
 
 // ---------- Personalities API ----------
 async function getPersonalities() {
-  const resp = await fetch("/personalities");
+  const url = new URL("/personalities", window.location.origin);
+  url.searchParams.set("_", Date.now().toString());
+  const resp = await fetchWithTimeout(url, {}, 2000);
   if (!resp.ok) throw new Error("list_failed");
   return await resp.json();
 }
@@ -32,18 +83,21 @@ async function getPersonalities() {
 async function loadPersonality(name) {
   const url = new URL("/personalities/load", window.location.origin);
   url.searchParams.set("name", name);
-  const resp = await fetch(url);
+  url.searchParams.set("_", Date.now().toString());
+  const resp = await fetchWithTimeout(url, {}, 3000);
   if (!resp.ok) throw new Error("load_failed");
   return await resp.json();
 }
 
 async function savePersonality(payload) {
   // Try JSON POST first
-  let resp = await fetch("/personalities/save", {
+  const saveUrl = new URL("/personalities/save", window.location.origin);
+  saveUrl.searchParams.set("_", Date.now().toString());
+  let resp = await fetchWithTimeout(saveUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-  });
+  }, 5000);
   if (resp.ok) return await resp.json();
 
   // Fallback to form-encoded POST
@@ -53,11 +107,13 @@ async function savePersonality(payload) {
     form.set("instructions", payload.instructions || "");
     form.set("tools_text", payload.tools_text || "");
     form.set("voice", payload.voice || "cedar");
-    resp = await fetch("/personalities/save_raw", {
+    const url = new URL("/personalities/save_raw", window.location.origin);
+    url.searchParams.set("_", Date.now().toString());
+    resp = await fetchWithTimeout(url, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: form.toString(),
-    });
+    }, 5000);
     if (resp.ok) return await resp.json();
   } catch {}
 
@@ -68,7 +124,8 @@ async function savePersonality(payload) {
     url.searchParams.set("instructions", payload.instructions || "");
     url.searchParams.set("tools_text", payload.tools_text || "");
     url.searchParams.set("voice", payload.voice || "cedar");
-    resp = await fetch(url, { method: "GET" });
+    url.searchParams.set("_", Date.now().toString());
+    resp = await fetchWithTimeout(url, { method: "GET" }, 5000);
     if (resp.ok) return await resp.json();
   } catch {}
 
@@ -80,7 +137,8 @@ async function applyPersonality(name) {
   // Send as query param to avoid any body parsing issues on the server
   const url = new URL("/personalities/apply", window.location.origin);
   url.searchParams.set("name", name || "");
-  const resp = await fetch(url, { method: "POST" });
+  url.searchParams.set("_", Date.now().toString());
+  const resp = await fetchWithTimeout(url, { method: "POST" }, 5000);
   if (!resp.ok) {
     const data = await resp.json().catch(() => ({}));
     throw new Error(data.error || "apply_failed");
@@ -90,7 +148,9 @@ async function applyPersonality(name) {
 
 async function getVoices() {
   try {
-    const resp = await fetch("/voices");
+    const url = new URL("/voices", window.location.origin);
+    url.searchParams.set("_", Date.now().toString());
+    const resp = await fetchWithTimeout(url, {}, 3000);
     if (!resp.ok) throw new Error("voices_failed");
     return await resp.json();
   } catch (e) {
@@ -134,15 +194,11 @@ async function init() {
   show(configuredPanel, false);
   show(personalityPanel, false);
 
-  const st = await fetchStatus();
+  const st = (await waitForStatus()) || { has_key: false };
   if (st.has_key) {
     statusEl.textContent = "";
     show(configuredPanel, true);
   }
-
-  statusEl.textContent = "";
-  // Only show the API key form if key is missing
-  show(formPanel, !st.has_key);
 
   saveBtn.addEventListener("click", async () => {
     const key = input.value.trim();
@@ -155,20 +211,35 @@ async function init() {
     statusEl.className = "status";
     try {
       await saveKey(key);
-      statusEl.textContent = "Saved. The app will start automatically.";
+      statusEl.textContent = "Saved. Reloading…";
       statusEl.className = "status ok";
-      // Optimistically switch to configured state
-      show(formPanel, false);
-      show(configuredPanel, true);
+      window.location.reload();
     } catch (e) {
       statusEl.textContent = "Failed to save key.";
       statusEl.className = "status error";
     }
   });
 
+  if (!st.has_key) {
+    statusEl.textContent = "";
+    show(formPanel, true);
+    show(loading, false);
+    return;
+  }
+
+  // Wait until backend routes are ready before rendering personalities UI
+  const list = (await waitForPersonalityData()) || { choices: [] };
+  statusEl.textContent = "";
+  show(formPanel, false);
+  if (!list.choices.length) {
+    statusEl.textContent = "Personality endpoints not ready yet. Retry shortly.";
+    statusEl.className = "status warn";
+    show(loading, false);
+    return;
+  }
+
   // Initialize personalities UI
   try {
-    const list = await getPersonalities();
     // Populate select
     pSelect.innerHTML = "";
     for (const n of list.choices) {
@@ -329,11 +400,12 @@ async function init() {
       }
     });
   } catch (e) {
-    // If endpoints are not available, silently skip personality UI
+    statusEl.textContent = "UI failed to load. Please refresh.";
+    statusEl.className = "status warn";
+  } finally {
+    // Hide loading when initial setup is done (regardless of key presence)
+    show(loading, false);
   }
-
-  // Hide loading when initial setup is done (regardless of key presence)
-  show(loading, false);
 }
 
 window.addEventListener("DOMContentLoaded", init);

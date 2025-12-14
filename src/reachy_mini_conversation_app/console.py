@@ -13,6 +13,7 @@ import os
 import time
 import asyncio
 import logging
+import sys
 from typing import List, Optional
 from pathlib import Path
 
@@ -196,6 +197,16 @@ class LocalStream:
         def _status() -> JSONResponse:  # type: ignore[no-redef]
             has_key = bool(config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip())
             return JSONResponse({"has_key": has_key})
+
+        # GET /ready -> whether backend finished loading tools
+        @self._settings_app.get("/ready")  # type: ignore[union-attr]
+        def _ready() -> JSONResponse:  # type: ignore[no-redef]
+            try:
+                mod = sys.modules.get("reachy_mini_conversation_app.tools.core_tools")
+                ready = bool(getattr(mod, "_TOOLS_INITIALIZED", False)) if mod else False
+            except Exception:
+                ready = False
+            return JSONResponse({"ready": ready})
 
         # POST /openai_api_key -> set/persist key
         @self._settings_app.post("/openai_api_key")  # type: ignore[union-attr]
