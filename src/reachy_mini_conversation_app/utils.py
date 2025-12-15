@@ -7,7 +7,7 @@ from reachy_mini import ReachyMini
 from reachy_mini_conversation_app.camera_worker import CameraWorker
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args() -> Tuple[argparse.Namespace, list]:  # type: ignore
     """Parse command line arguments."""
     parser = argparse.ArgumentParser("Reachy Mini Conversation App")
     parser.add_argument(
@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Use when conversation app is running on the same device as Reachy Mini daemon",
     )
-    return parser.parse_args()
+    return parser.parse_known_args()
 
 
 def handle_vision_stuff(args: argparse.Namespace, current_robot: ReachyMini) -> Tuple[CameraWorker | None, Any, Any]:

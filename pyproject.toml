@@ -13,7 +13,7 @@ dependencies = [
     #Media
     "aiortc>=1.13.0",
     "fastrtc>=0.0.34",
-    "gradio>=5.49.0",
+    "gradio==5.50.1.dev1",
     "huggingface_hub>=0.34.4",
     "opencv-python>=4.12.0.88",
 
@@ -57,6 +57,9 @@ dev = [
 [project.scripts]
 reachy-mini-conversation-app = "reachy_mini_conversation_app.main:main"
 
+[project.entry-points."reachy_mini_apps"]
+reachy_mini_conversation_app = "reachy_mini_conversation_app.main:ReachyMiniConversationApp"
+
 [tool.setuptools]
 package-dir = { "" = "src" }
 include-package-data = true
@@ -67,8 +70,12 @@ where = ["src"]
 [tool.setuptools.package-data]
 reachy_mini_conversation_app = [
   "images/*",
+  "static/*",
+  ".env.example",
   "demos/**/*.txt",
   "prompts_library/*.txt",
+  "profiles/**/*.txt",
+  "prompts/**/*.txt",
 ]
 
 [tool.ruff]

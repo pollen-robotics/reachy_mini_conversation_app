@@ -156,6 +156,9 @@ class CameraWorker:
                             translation = target_pose[:3, 3]
                             rotation = R.from_matrix(target_pose[:3, :3]).as_euler("xyz", degrees=False)
 
+                            translation *= 0.5  # Scale down translation effect
+                            rotation *= 0.5  # Scale down rotation effect
+
                             # Thread-safe update of face tracking offsets (use pose as-is)
                             with self.face_tracking_lock:
                                 self.face_tracking_offsets = [
@@ -189,7 +192,8 @@ class CameraWorker:
                                     pose_matrix = np.eye(4, dtype=np.float32)
                                     pose_matrix[:3, 3] = current_translation
                                     pose_matrix[:3, :3] = R.from_euler(
-                                        "xyz", current_rotation_euler,
+                                        "xyz",
+                                        current_rotation_euler,
                                     ).as_matrix()
                                     self.interpolation_start_pose = pose_matrix
 
@@ -199,7 +203,9 @@ class CameraWorker:
 
                             # Interpolate between current pose and neutral pose
                             interpolated_pose = linear_pose_interpolation(
-                                self.interpolation_start_pose, neutral_pose, t,
+                                self.interpolation_start_pose,
+                                neutral_pose,
+                                t,
                             )
 
                             # Extract translation and rotation from interpolated pose
@@ -225,7 +231,7 @@ class CameraWorker:
                         # else: Keep current offsets (within 2s delay period)
 
                 # Small sleep to prevent excessive CPU usage (same as main_works.py)
-                time.sleep(0.01)
+                time.sleep(0.04)
 
             except Exception as e:
                 logger.error(f"Camera worker error: {e}")

@@ -61,7 +61,7 @@ class VisionProcessor:
         """Load model and processor onto the selected device."""
         try:
             logger.info(f"Loading SmolVLM2 model on {self.device} (HF_HOME={config.HF_HOME})")
-            self.processor = AutoProcessor.from_pretrained(self.model_path)  # type: ignore[no-untyped-call]
+            self.processor = AutoProcessor.from_pretrained(self.model_path)  # type: ignore
 
             # Select dtype depending on device
             if self.device == "cuda":
@@ -78,7 +78,7 @@ class VisionProcessor:
                 model_kwargs["_attn_implementation"] = "flash_attention_2"
 
             # Load model weights
-            self.model = AutoModelForImageTextToText.from_pretrained(self.model_path, **model_kwargs).to(self.device)  # type: ignore[arg-type]
+            self.model = AutoModelForImageTextToText.from_pretrained(self.model_path, **model_kwargs).to(self.device)  # type: ignore
 
             if self.model is not None:
                 self.model.eval()
@@ -247,7 +247,8 @@ class VisionManager:
                     frame = self.camera.get_latest_frame()
                     if frame is not None:
                         description = self.processor.process_image(
-                            frame, "Briefly describe what you see in one sentence.",
+                            frame,
+                            "Briefly describe what you see in one sentence.",
                         )
 
                         # Only update if we got a valid response

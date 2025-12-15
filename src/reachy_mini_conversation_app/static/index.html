@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Reachy Mini Conversation – Settings</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="ambient"></div>
+    <div id="loading" class="loading">
+      <div class="spinner"></div>
+      <p>Loading…</p>
+    </div>
+    <div class="container">
+      <header class="hero">
+        <div class="pill">Headless control</div>
+        <h1>Reachy Mini Conversation</h1>
+        <p class="subtitle">Configure your OpenAI key and tweak personalities without the full UI.</p>
+      </header>
+
+      <div id="configured" class="panel hidden">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Credentials</p>
+            <h2>API key ready</h2>
+          </div>
+          <span class="chip chip-ok">Connected</span>
+        </div>
+        <p class="muted">OpenAI API key is already configured. You can jump straight to personalities.</p>
+        <button id="change-key-btn" class="ghost">Change API key</button>
+      </div>
+
+      <div id="form-panel" class="panel hidden">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Credentials</p>
+            <h2>Connect OpenAI</h2>
+          </div>
+          <span class="chip">Required</span>
+        </div>
+        <p class="muted">Paste your API key once and we will store it locally for the headless conversation loop.</p>
+        <label for="api-key">OpenAI API Key</label>
+        <input id="api-key" type="password" placeholder="sk-..." autocomplete="off" />
+        <div class="actions">
+          <button id="save-btn">Save key</button>
+          <p id="status" class="status"></p>
+        </div>
+      </div>
+
+      <div id="personality-panel" class="panel hidden">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Profiles</p>
+            <h2>Personality studio</h2>
+          </div>
+          <span class="chip">Live</span>
+        </div>
+        <p class="muted">Create lean instruction sets, toggle tools, and apply a voice for your Reachy Mini.</p>
+        <div class="section">
+          <div class="section-heading">
+            <h3>Select & launch</h3>
+            <p class="muted small">Pick a profile and choose what should launch on startup.</p>
+          </div>
+          <div class="row row-top">
+            <label for="personality-select">Select</label>
+            <select id="personality-select"></select>
+            <button id="persist-personality" class="ghost">Use on startup</button>
+            <button id="apply-personality" class="ghost">Apply</button>
+            <button id="new-personality" class="ghost">New</button>
+          </div>
+          <div class="row">
+            <label>Startup personality</label>
+            <div class="startup-row">
+              <span id="startup-label" class="chip">Built-in default</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-heading">
+            <h3>Create / edit</h3>
+            <p class="muted small">Adjust instructions, tools, and voice, then save your profile.</p>
+          </div>
+          <div class="row">
+            <label for="personality-name">Name</label>
+            <input id="personality-name" type="text" class="input-field" placeholder="my_profile" />
+            <label for="voice-select">Voice</label>
+            <select id="voice-select"></select>
+          </div>
+          <div class="row">
+            <label for="instructions-ta">Instructions</label>
+            <textarea id="instructions-ta" rows="8" placeholder="# Write your instructions here"></textarea>
+          </div>
+          <div class="row">
+            <label for="tools-ta">tools.txt</label>
+            <textarea id="tools-ta" rows="6" placeholder="# tools enabled for this profile"></textarea>
+          </div>
+          <div class="row">
+            <label for="tools-available">Available tools</label>
+            <div id="tools-available" class="checkbox-grid"></div>
+          </div>
+          <div class="row row-save">
+            <label></label>
+            <div class="actions">
+              <button id="save-personality">Save</button>
+            </div>
+          </div>
+        </div>
+        <p id="personality-status" class="status"></p>
+      </div>
+    </div>
+
+    <script src="/static/main.js"></script>
+  </body>
+  </html>

@@ -1,3 +1,16 @@
+---
+title: Reachy Mini Conversation App
+emoji: 🎤
+colorFrom: red
+colorTo: blue
+sdk: static
+pinned: false
+short_description: Talk with Reachy Mini !
+tags:
+ - reachy_mini
+ - reachy_mini_python_app
+---
+
 # Reachy Mini conversation app
 
 Conversational app for the Reachy Mini robot combining OpenAI's realtime APIs, vision pipelines, and choreographed motion libraries.
@@ -199,6 +212,14 @@ Tools are resolved first from Python files in the profile folder (custom tools),
 ### Custom tools
 On top of built-in tools found in the shared library, you can implement custom tools specific to your profile by adding Python files in the profile folder. 
 Custom tools must subclass `reachy_mini_conversation_app.tools.core_tools.Tool` (see `profiles/example/sweep_look.py`).
+
+### Edit personalities from the UI
+When running with `--gradio`, open the “Personality” accordion:
+- Select among available profiles (folders under `src/reachy_mini_conversation_app/profiles/`) or the built‑in default.
+- Click “Apply” to update the current session instructions live.
+- Create a new personality by entering a name and instructions text; it stores files under `profiles/<name>/` and copies `tools.txt` from the `default` profile.
+
+Note: The “Personality” panel updates the conversation instructions. Tool sets are loaded at startup from `tools.txt` and are not hot‑reloaded.
 
 
 
