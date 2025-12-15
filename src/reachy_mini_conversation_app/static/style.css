@@ -163,6 +163,10 @@ textarea:focus {
   outline: none;
   box-shadow: 0 0 0 3px rgba(94, 240, 193, 0.15);
 }
+input.error {
+  border-color: var(--error);
+  box-shadow: 0 0 0 3px rgba(255, 92, 112, 0.15);
+}
 select option {
   background: #0b152a;
   color: var(--text);
