@@ -314,6 +314,12 @@ class LocalStream:
         # Always expose settings UI if a settings app is available
         self._init_settings_ui_if_needed()
 
+        # If we downloaded a key during config initialization, persist it now
+        if config._downloaded_key and config.OPENAI_API_KEY:
+            logger.info("Persisting downloaded API key from HuggingFace")
+            self._persist_api_key(config.OPENAI_API_KEY)
+            config._downloaded_key = False  # Reset flag after persistence
+
         # Try to load an existing instance .env first (covers subsequent runs)
         if self._instance_path:
             try:

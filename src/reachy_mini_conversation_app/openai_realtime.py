@@ -655,6 +655,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         """Persist the API key into `.env` inside `instance_path/` when appropriate.
 
         - Only runs in Gradio mode when key came from the textbox and is non-empty.
+        - OR when key was downloaded from HuggingFace during config initialization.
         - Only saves if `self.instance_path` is not None.
         - Writes `.env` to `instance_path/.env` (does not overwrite if it already exists).
         - If `instance_path/.env.example` exists, copies its contents while overriding OPENAI_API_KEY.
@@ -663,10 +664,19 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             if not self.gradio_mode:
                 logger.warning("Not in Gradio mode; skipping API key persistence.")
                 return
-            if self._key_source != "textbox":
-                logger.info("API key not provided via textbox; skipping persistence.")
+
+            # Check if we should persist a downloaded key from config
+            should_persist_downloaded = config._downloaded_key and config.OPENAI_API_KEY
+
+            if self._key_source != "textbox" and not should_persist_downloaded:
+                logger.info("API key not provided via textbox or downloaded; skipping persistence.")
                 return
-            key = (self._provided_api_key or "").strip()
+
+            # Use provided key from textbox, or fall back to the downloaded key
+            if self._key_source == "textbox":
+                key = (self._provided_api_key or "").strip()
+            else:
+                key = (config.OPENAI_API_KEY or "").strip()
             if not key:
                 logger.warning("No API key provided via textbox; skipping persistence.")
                 return
@@ -712,6 +722,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             final_text = "\n".join(content_lines) + "\n"
             env_path.write_text(final_text, encoding="utf-8")
             logger.info("Created %s and stored OPENAI_API_KEY for future runs.", env_path)
+
+            # Reset the downloaded key flag after successful persistence
+            if config._downloaded_key:
+                config._downloaded_key = False
         except Exception as e:
             # Never crash the app for QoL persistence; just log.
             logger.warning("Could not persist OPENAI_API_KEY to .env: %s", e)
