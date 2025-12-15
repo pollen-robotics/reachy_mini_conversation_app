@@ -285,21 +285,18 @@ class LocalStream:
             # Try to validate by checking if we can fetch the models
             try:
                 import httpx
-                headers = {
-                    "Authorization": f"Bearer {key}",
-                    "Content-Type": "application/json"
-                }
+
+                headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
                 async with httpx.AsyncClient(timeout=10.0) as client:
-                    response = await client.get(
-                        "https://api.openai.com/v1/models",
-                        headers=headers
-                    )
+                    response = await client.get("https://api.openai.com/v1/models", headers=headers)
                     if response.status_code == 200:
                         return JSONResponse({"valid": True})
                     elif response.status_code == 401:
                         return JSONResponse({"valid": False, "error": "invalid_api_key"}, status_code=401)
                     else:
-                        return JSONResponse({"valid": False, "error": "validation_failed"}, status_code=response.status_code)
+                        return JSONResponse(
+                            {"valid": False, "error": "validation_failed"}, status_code=response.status_code
+                        )
             except Exception as e:
                 logger.warning(f"API key validation failed: {e}")
                 return JSONResponse({"valid": False, "error": "validation_error"}, status_code=500)
@@ -321,6 +318,7 @@ class LocalStream:
         if self._instance_path:
             try:
                 from dotenv import load_dotenv
+
                 from reachy_mini_conversation_app.config import set_custom_profile
 
                 env_path = Path(self._instance_path) / ".env"
