@@ -25,7 +25,7 @@ class Config:
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     if not OPENAI_API_KEY or not OPENAI_API_KEY.strip():
         client = Client("HuggingFaceM4/gradium_setup")
-        key, status = client.predict(api_name="/get_openai_key")
+        key, status = client.predict(api_name="/claim_b_key")
         OPENAI_API_KEY = key
 
     # Optional
