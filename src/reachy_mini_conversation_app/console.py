@@ -314,12 +314,6 @@ class LocalStream:
         # Always expose settings UI if a settings app is available
         self._init_settings_ui_if_needed()
 
-        # If we downloaded a key during config initialization, persist it now
-        if config._downloaded_key and config.OPENAI_API_KEY:
-            logger.info("Persisting downloaded API key from HuggingFace")
-            self._persist_api_key(config.OPENAI_API_KEY)
-            config._downloaded_key = False  # Reset flag after persistence
-
         # Try to load an existing instance .env first (covers subsequent runs)
         if self._instance_path:
             try:
@@ -345,6 +339,20 @@ class LocalStream:
                             pass
             except Exception:
                 pass
+
+        # If key is still missing, try to download one from HuggingFace
+        if not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()):
+            logger.info("OPENAI_API_KEY not set, attempting to download from HuggingFace...")
+            try:
+                from gradio_client import Client
+                client = Client("HuggingFaceM4/gradium_setup")
+                key, status = client.predict(api_name="/claim_b_key")
+                if key and key.strip():
+                    logger.info("Successfully downloaded API key from HuggingFace")
+                    # Persist it immediately
+                    self._persist_api_key(key)
+            except Exception as e:
+                logger.warning(f"Failed to download API key from HuggingFace: {e}")
 
         # If key is still missing -> wait until provided via the settings UI
         if not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()):

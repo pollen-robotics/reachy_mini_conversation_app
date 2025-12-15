@@ -2,7 +2,6 @@ import os
 import logging
 
 from dotenv import find_dotenv, load_dotenv
-from gradio_client import Client
 
 
 logger = logging.getLogger(__name__)
@@ -23,15 +22,6 @@ class Config:
 
     # Required
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-    _downloaded_key = False  # Track if we downloaded a key that needs persistence
-    if not OPENAI_API_KEY or not OPENAI_API_KEY.strip():
-        try:
-            client = Client("HuggingFaceM4/gradium_setup")
-            key, status = client.predict(api_name="/claim_b_key")
-            OPENAI_API_KEY = key
-            _downloaded_key = True
-        except Exception as e:
-            logger.warning(f"Failed to download API key from HuggingFace: {e}")
 
     # Optional
     MODEL_NAME = os.getenv("MODEL_NAME", "gpt-realtime")
