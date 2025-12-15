@@ -9,7 +9,7 @@ callable to avoid cross-thread issues.
 from __future__ import annotations
 import asyncio
 import logging
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from fastapi import FastAPI
 
@@ -52,7 +52,7 @@ def mount_personality_routes(
         name: str
         persist: Optional[bool] = False
 
-    def _startup_choice() -> str:
+    def _startup_choice() -> Any:
         """Return the persisted startup personality or default."""
         try:
             if get_persisted_personality is not None:
