@@ -1,7 +1,8 @@
 import os
 import logging
-from gradio_client import Client
+
 from dotenv import find_dotenv, load_dotenv
+from gradio_client import Client
 
 
 logger = logging.getLogger(__name__)
