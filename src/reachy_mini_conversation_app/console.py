@@ -275,6 +275,35 @@ class LocalStream:
             self._persist_api_key(key)
             return JSONResponse({"ok": True})
 
+        # POST /validate_api_key -> validate key without persisting it
+        @self._settings_app.post("/validate_api_key")
+        async def _validate_key(payload: ApiKeyPayload) -> JSONResponse:
+            key = (payload.openai_api_key or "").strip()
+            if not key:
+                return JSONResponse({"valid": False, "error": "empty_key"}, status_code=400)
+
+            # Try to validate by checking if we can fetch the models
+            try:
+                import httpx
+                headers = {
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json"
+                }
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.get(
+                        "https://api.openai.com/v1/models",
+                        headers=headers
+                    )
+                    if response.status_code == 200:
+                        return JSONResponse({"valid": True})
+                    elif response.status_code == 401:
+                        return JSONResponse({"valid": False, "error": "invalid_api_key"}, status_code=401)
+                    else:
+                        return JSONResponse({"valid": False, "error": "validation_failed"}, status_code=response.status_code)
+            except Exception as e:
+                logger.warning(f"API key validation failed: {e}")
+                return JSONResponse({"valid": False, "error": "validation_error"}, status_code=500)
+
         self._settings_initialized = True
 
     def launch(self) -> None:

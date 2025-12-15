@@ -57,6 +57,20 @@ async function waitForPersonalityData(timeoutMs = 15000) {
   }
 }
 
+async function validateKey(key) {
+  const body = { openai_api_key: key };
+  const resp = await fetch("/validate_api_key", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error(data.error || "validation_failed");
+  }
+  return data;
+}
+
 async function saveKey(key) {
   const body = { openai_api_key: key };
   const resp = await fetch("/openai_api_key", {
@@ -173,6 +187,7 @@ async function init() {
   const configuredPanel = document.getElementById("configured");
   const personalityPanel = document.getElementById("personality-panel");
   const saveBtn = document.getElementById("save-btn");
+  const changeKeyBtn = document.getElementById("change-key-btn");
   const input = document.getElementById("api-key");
 
   // Personality elements
@@ -205,22 +220,55 @@ async function init() {
     show(configuredPanel, true);
   }
 
+  // Handler for "Change API key" button
+  changeKeyBtn.addEventListener("click", () => {
+    show(configuredPanel, false);
+    show(formPanel, true);
+    input.value = "";
+    statusEl.textContent = "";
+    statusEl.className = "status";
+  });
+
+  // Remove error styling when user starts typing
+  input.addEventListener("input", () => {
+    input.classList.remove("error");
+  });
+
   saveBtn.addEventListener("click", async () => {
     const key = input.value.trim();
     if (!key) {
       statusEl.textContent = "Please enter a valid key.";
       statusEl.className = "status warn";
+      input.classList.add("error");
       return;
     }
-    statusEl.textContent = "Saving...";
+    statusEl.textContent = "Validating API key...";
     statusEl.className = "status";
+    input.classList.remove("error");
     try {
+      // First validate the key
+      const validation = await validateKey(key);
+      if (!validation.valid) {
+        statusEl.textContent = "Invalid API key. Please check your key and try again.";
+        statusEl.className = "status error";
+        input.classList.add("error");
+        return;
+      }
+
+      // If valid, save it
+      statusEl.textContent = "Key valid! Saving...";
+      statusEl.className = "status ok";
       await saveKey(key);
       statusEl.textContent = "Saved. Reloading…";
       statusEl.className = "status ok";
       window.location.reload();
     } catch (e) {
-      statusEl.textContent = "Failed to save key.";
+      input.classList.add("error");
+      if (e.message === "invalid_api_key") {
+        statusEl.textContent = "Invalid API key. Please check your key and try again.";
+      } else {
+        statusEl.textContent = "Failed to validate/save key. Please try again.";
+      }
       statusEl.className = "status error";
     }
   });
