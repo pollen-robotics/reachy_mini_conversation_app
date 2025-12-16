@@ -156,8 +156,9 @@ class CameraWorker:
                             translation = target_pose[:3, 3]
                             rotation = R.from_matrix(target_pose[:3, :3]).as_euler("xyz", degrees=False)
 
-                            translation *= 0.5  # Scale down translation effect
-                            rotation *= 0.5  # Scale down rotation effect
+                            # Scale down translation and rotation because smaller FOV
+                            translation *= 0.6
+                            rotation *= 0.6
 
                             # Thread-safe update of face tracking offsets (use pose as-is)
                             with self.face_tracking_lock:

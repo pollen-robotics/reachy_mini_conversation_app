@@ -208,7 +208,10 @@ class ReachyMiniConversationApp(ReachyMiniApp):  # type: ignore[misc]
         asyncio.set_event_loop(loop)
 
         args, _ = parse_args()
-        # args.head_tracker = "mediapipe"
+
+        is_wireless = reachy_mini.client.get_status()["wireless_version"]
+        args.head_tracker = None if is_wireless else "mediapipe"
+
         instance_path = self._get_instance_path().parent
         run(
             args,
