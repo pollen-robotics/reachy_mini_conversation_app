@@ -14,9 +14,15 @@ from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item, audio_
 from numpy.typing import NDArray
 from scipy.signal import resample
 from websockets.exceptions import ConnectionClosedError
-from unmute.llm.system_prompt import LandingPageInstructions
+from unmute.llm.system_prompt import GenericToolInstructions
 
-from reachy_mini_conversation_app.tools.core_tools import ALL_TOOLS, ToolDependencies
+from reachy_mini_conversation_app.prompts import get_session_instructions
+from reachy_mini_conversation_app.tools.core_tools import (
+    ToolDependencies,
+    ALL_TOOLS,
+    dispatch_tool_call,
+    get_tool_specs,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -128,11 +134,27 @@ class UnmuteRealtimeHandler(AsyncStreamHandler):
             self.websocket = ws
             logger.info("WebSocket connected to Unmute")
 
+            tool_specs = get_tool_specs()
+            fixed_tool_specs = []
+            for tool_spec in tool_specs:
+                if "function" not in tool_spec:
+                    tool_spec = dict(tool_spec)
+                    tool_spec.pop("type", None)
+                    tool_spec = {
+                        'type': 'function',
+                        'function': tool_spec,
+                    }
+                fixed_tool_specs.append(tool_spec)
+            instructions = GenericToolInstructions(
+                text=get_session_instructions(),
+                tools=fixed_tool_specs,
+            )
+            logger.debug("Sending Instructions to Gradium: %r", instructions)
             # Send session update
             try:
                 session_update = events.SessionUpdate(
                     session=events.SessionConfig(
-                        instructions=LandingPageInstructions(),
+                        instructions=instructions,
                         voice="LFZvm12tW_z0xfGo",
                         allow_recording=False,
                     )
@@ -297,12 +319,57 @@ class UnmuteRealtimeHandler(AsyncStreamHandler):
                         logger.debug("Interrupted by VAD")
 
                     elif event_type == "unmute.response.function_call":
+                        # Legacy function call, used for the on stage demo where we can sync movement
+                        # with speech.
                         if data['name'] in ['play_emotion']:
                             call = (data['name'], data['parameters'])
                             ahead = 5
                             logger.info("Pending function call %s in %d: %r",
                                         call[0], pending_words - ahead, call[1])
                             pending_function_calls.append((pending_words, call))
+
+                    elif event_type == "response.function_call_arguments.done":
+                        # Synchronous function call supporting any function call.
+                        # This will block the text generation and TTS until all function calls have
+                        # been resolved.
+                        tool_name = data["name"]
+                        args_json_str = data["arguments"]
+                        call_id = data["call_id"]
+
+                        try:
+                            tool_result = await dispatch_tool_call(tool_name, args_json_str, self.deps)
+                            logger.debug("Tool '%s' executed successfully", tool_name)
+                            logger.debug("Tool result: %s", tool_result)
+                        except Exception as e:
+                            logger.error("Tool '%s' failed", tool_name)
+                            tool_result = {"error": str(e)}
+
+                        if tool_name == "camera" and "b64_im" in tool_result:
+                            logger.warning("Trying to use camera tool, but not supported yet.")
+                            tool_result = {"error": "Camera tool not supported yet!"}
+
+                        # send the tool result back
+                        if isinstance(call_id, str):
+
+                            result_message = {
+                                'type': "unmute.response.function_call.result",
+                                'call_id': call_id,
+                                'content': json.dumps(tool_result)
+                            }
+                            await self.websocket.send(json.dumps(result_message))
+
+                        await self.output_queue.put(
+                            AdditionalOutputs(
+                                {
+                                    "role": "assistant",
+                                    "content": json.dumps(tool_result),
+                                    "metadata": {"title": f"🛠️ Used tool {tool_name}", "status": "done"},
+                                },
+                            ),
+                        )
+                        # re synchronize the head wobble after a tool call that may have taken some time
+                        if self.deps.head_wobbler is not None:
+                            self.deps.head_wobbler.reset()
 
                     elif event_type == "unmute.response.text.delta.ready":
                         logger.debug("Pending text:  %s", data['delta'])
@@ -332,8 +399,10 @@ class UnmuteRealtimeHandler(AsyncStreamHandler):
 
     async def receive(self, frame: Tuple[int, NDArray[np.float32]]) -> None:
         """Receive audio frame from the microphone and send it to the server.
+
         Args:
             frame: A tuple containing the sample rate and the audio frame.
+
         """
         if not self.websocket:
             logger.debug("Websocket is down")
