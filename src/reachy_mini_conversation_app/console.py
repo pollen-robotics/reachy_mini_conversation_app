@@ -311,9 +311,6 @@ class LocalStream:
         """
         self._stop_event.clear()
 
-        # Always expose settings UI if a settings app is available
-        self._init_settings_ui_if_needed()
-
         # Try to load an existing instance .env first (covers subsequent runs)
         if self._instance_path:
             try:
@@ -353,6 +350,10 @@ class LocalStream:
                     self._persist_api_key(key)
             except Exception as e:
                 logger.warning(f"Failed to download API key from HuggingFace: {e}")
+
+        # Always expose settings UI if a settings app is available
+        # (do this AFTER loading/downloading the key so status endpoint sees the right value)
+        self._init_settings_ui_if_needed()
 
         # If key is still missing -> wait until provided via the settings UI
         if not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()):
