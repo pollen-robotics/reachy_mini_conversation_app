@@ -14,7 +14,7 @@ from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item, audio_
 from numpy.typing import NDArray
 from scipy.signal import resample
 from websockets.exceptions import ConnectionClosedError
-from unmute.llm.system_prompt import LandingPageInstructions
+from unmute.llm.system_prompt import GenericToolInstructions
 
 from reachy_mini_conversation_app.prompts import get_session_instructions
 from reachy_mini_conversation_app.tools.core_tools import (
