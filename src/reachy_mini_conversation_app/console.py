@@ -25,6 +25,7 @@ from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
+from reachy_mini_conversation_app.gradium_realtime import UnmuteRealtimeHandler
 
 
 try:
@@ -49,7 +50,7 @@ class LocalStream:
 
     def __init__(
         self,
-        handler: OpenaiRealtimeHandler,
+        handler: UnmuteRealtimeHandler | OpenaiRealtimeHandler,
         robot: ReachyMini,
         *,
         settings_app: Optional[FastAPI] = None,
@@ -448,10 +449,17 @@ class LocalStream:
             if isinstance(handler_output, AdditionalOutputs):
                 for msg in handler_output.args:
                     content = msg.get("content", "")
+                    role = msg.get("role", "")
                     if isinstance(content, str):
-                        logger.info(
+                        # Log user_partial at DEBUG level, everything else at INFO
+                        if role == "user_partial":
+                            log_function = logger.debug
+                        else:
+                            log_function = logger.info
+
+                        log_function(
                             "role=%s content=%s",
-                            msg.get("role"),
+                            role,
                             content if len(content) < 500 else content[:500] + "…",
                         )
 

@@ -22,6 +22,7 @@ class Config:
 
     # Required
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # The key is downloaded in console.py if needed
+    GRADIUM_API_KEY = os.getenv("GRADIUM_API_KEY")  # The key is downloaded in console.py if needed
 
     # Optional
     MODEL_NAME = os.getenv("MODEL_NAME", "gpt-realtime")
