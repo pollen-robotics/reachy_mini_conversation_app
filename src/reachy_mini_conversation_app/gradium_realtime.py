@@ -55,6 +55,8 @@ class UnmuteRealtimeHandler(AsyncStreamHandler):
         self.output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]" = asyncio.Queue()
 
         self.last_activity_time = asyncio.get_event_loop().time()
+        self.start_time = asyncio.get_event_loop().time()
+        self.is_idle_tool_call = False
 
         # Debouncing for partial transcripts
         self.partial_transcript_task: asyncio.Task[None] | None = None
@@ -367,6 +369,14 @@ class UnmuteRealtimeHandler(AsyncStreamHandler):
                                 },
                             ),
                         )
+
+                        # if this tool call was triggered by an idle signal, don't make the robot speak
+                        # for other tool calls, let the robot reply out loud
+                        if self.is_idle_tool_call:
+                            self.is_idle_tool_call = False
+                        # Note: Gradium/Unmute handles response generation differently
+                        # No need to explicitly call response.create like in OpenAI
+
                         # re synchronize the head wobble after a tool call that may have taken some time
                         if self.deps.head_wobbler is not None:
                             self.deps.head_wobbler.reset()
@@ -438,7 +448,56 @@ class UnmuteRealtimeHandler(AsyncStreamHandler):
 
     async def emit(self) -> Tuple[int, NDArray[np.int16]] | AdditionalOutputs | None:
         """Emit audio frame to be played by the speaker."""
+        # Handle idle
+        idle_duration = asyncio.get_event_loop().time() - self.last_activity_time
+        if idle_duration > 15.0 and self.deps.movement_manager.is_idle():
+            try:
+                await self.send_idle_signal(idle_duration)
+            except Exception as e:
+                logger.warning("Idle signal skipped (connection closed?): %s", e)
+                return None
+
+            self.last_activity_time = asyncio.get_event_loop().time()  # avoid repeated resets
+
         return await wait_for_item(self.output_queue)
+
+    def format_timestamp(self) -> str:
+        """Format current timestamp with date, time, and elapsed seconds."""
+        from datetime import datetime
+        loop_time = asyncio.get_event_loop().time()  # monotonic
+        elapsed_seconds = loop_time - self.start_time
+        dt = datetime.now()  # wall-clock
+        return f"[{dt.strftime('%Y-%m-%d %H:%M:%S')} | +{elapsed_seconds:.1f}s]"
+
+    async def send_idle_signal(self, idle_duration: float) -> None:
+        """Send an idle signal to the server."""
+        logger.debug("Sending idle signal")
+        self.is_idle_tool_call = True
+        timestamp_msg = f"[Idle time update: {self.format_timestamp()} - No activity for {idle_duration:.1f}s] You've been idle for a while. Feel free to get creative - dance, show an emotion, look around, do nothing, or just be yourself!"
+        if not self.websocket:
+            logger.debug("No websocket, cannot send idle signal")
+            return
+
+        # Create a user message event
+        idle_message = {
+            "type": "conversation.item.create",
+            "item": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": timestamp_msg}],
+            },
+        }
+        await self.websocket.send(json.dumps(idle_message))
+
+        # Create a response with function call requirement
+        response_create = {
+            "type": "response.create",
+            "response": {
+                "instructions": "You MUST respond with function calls only - no speech or text. Choose appropriate actions for idle behavior.",
+                "tool_choice": "required",
+            },
+        }
+        await self.websocket.send(json.dumps(response_create))
 
     async def shutdown(self) -> None:
         """Shutdown the handler."""
