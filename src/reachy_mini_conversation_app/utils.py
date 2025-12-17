@@ -63,7 +63,9 @@ def handle_vision_stuff(args: argparse.Namespace, current_robot: ReachyMini) -> 
                 head_tracker = HeadTracker()
 
         # Initialize camera worker
-        camera_worker = CameraWorker(current_robot, head_tracker)
+        # Enable smoothing for wireless version to handle network jitter and latency
+        use_smoothing = args.wireless_version
+        camera_worker = CameraWorker(current_robot, head_tracker, use_smoothing=use_smoothing)
 
         # Initialize vision manager only if local vision is requested
         if args.local_vision:
