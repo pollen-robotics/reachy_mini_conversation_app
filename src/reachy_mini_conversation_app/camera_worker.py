@@ -25,10 +25,17 @@ logger = logging.getLogger(__name__)
 class CameraWorker:
     """Thread-safe camera worker with frame buffering and face tracking."""
 
-    def __init__(self, reachy_mini: ReachyMini, head_tracker: Any = None) -> None:
-        """Initialize."""
+    def __init__(self, reachy_mini: ReachyMini, head_tracker: Any = None, use_smoothing: bool = False) -> None:
+        """Initialize.
+        
+        Args:
+            reachy_mini: ReachyMini robot instance
+            head_tracker: Optional head tracking instance
+            use_smoothing: Enable coordinate smoothing (recommended for wireless/WebRTC)
+        """
         self.reachy_mini = reachy_mini
         self.head_tracker = head_tracker
+        self.use_smoothing = use_smoothing
 
         # Thread-safe frame storage
         self.latest_frame: NDArray[np.uint8] | None = None
@@ -47,6 +54,10 @@ class CameraWorker:
             0.0,
         ]  # x, y, z, roll, pitch, yaw
         self.face_tracking_lock = threading.Lock()
+        
+        # Smoothing for face tracking (only used if use_smoothing=True)
+        self.smoothed_eye_center: NDArray[np.float32] | None = None
+        self.smoothing_alpha = 0.3  # Lower = more smoothing (0.1-0.5 recommended)
 
         # Face tracking timing variables (same as main_works.py)
         self.last_face_detected_time: float | None = None
@@ -136,13 +147,59 @@ class CameraWorker:
                             self.last_face_detected_time = current_time
                             self.interpolation_start_time = None  # Stop any interpolation
 
-                            # Convert normalized coordinates to pixel coordinates
+                            # Apply wireless-specific improvements if enabled
+                            if self.use_smoothing:
+                                # Clamp eye_center to valid range [-1, 1]
+                                # Mediapipe can sometimes return values slightly outside this range
+                                eye_center = np.clip(eye_center, -1.0, 1.0)
+
+                                # Apply exponential smoothing to reduce jitter
+                                if self.smoothed_eye_center is None:
+                                    # Initialize on first detection
+                                    self.smoothed_eye_center = eye_center.copy()
+                                else:
+                                    # Smooth: new_value = alpha * current + (1-alpha) * previous
+                                    self.smoothed_eye_center = (
+                                        self.smoothing_alpha * eye_center + 
+                                        (1.0 - self.smoothing_alpha) * self.smoothed_eye_center
+                                    )
+
+                                # Use smoothed coordinates for tracking
+                                eye_center_to_use = self.smoothed_eye_center
+                                
+                                logger.debug(
+                                    f"Face detected - raw: [{eye_center[0]:.3f}, {eye_center[1]:.3f}], "
+                                    f"smoothed: [{eye_center_to_use[0]:.3f}, {eye_center_to_use[1]:.3f}], "
+                                    f"pixels: [{(eye_center_to_use[0] + 1.0) / 2.0 * frame.shape[1]:.1f}, "
+                                    f"{(eye_center_to_use[1] + 1.0) / 2.0 * frame.shape[0]:.1f}]"
+                                )
+                            else:
+                                # No smoothing - use raw coordinates
+                                eye_center_to_use = eye_center
+                                
+                                logger.debug(
+                                    f"Face detected at normalized: [{eye_center[0]:.3f}, {eye_center[1]:.3f}], "
+                                    f"pixels: [{(eye_center[0] + 1.0) / 2.0 * frame.shape[1]:.1f}, "
+                                    f"{(eye_center[1] + 1.0) / 2.0 * frame.shape[0]:.1f}]"
+                                )
+
+                            # Convert to [0, 1] range for pixel conversion
                             h, w, _ = frame.shape
-                            eye_center_norm = (eye_center + 1) / 2
-                            eye_center_pixels = [
-                                eye_center_norm[0] * w,
-                                eye_center_norm[1] * h,
-                            ]
+                            eye_center_norm = (eye_center_to_use + 1.0) / 2.0
+                            
+                            # Convert to pixel coordinates
+                            if self.use_smoothing:
+                                # Clamp pixel coordinates to valid image bounds
+                                eye_center_pixels = [
+                                    np.clip(eye_center_norm[0] * w, 0, w - 1),
+                                    np.clip(eye_center_norm[1] * h, 0, h - 1),
+                                ]
+                            else:
+                                # No clamping for lite version
+                                eye_center_pixels = [
+                                    eye_center_norm[0] * w,
+                                    eye_center_norm[1] * h,
+                                ]
 
                             # Get the head pose needed to look at the target, but don't perform movement
                             target_pose = self.reachy_mini.look_at_image(
@@ -156,9 +213,17 @@ class CameraWorker:
                             translation = target_pose[:3, 3]
                             rotation = R.from_matrix(target_pose[:3, :3]).as_euler("xyz", degrees=False)
 
-                            # Scale down translation and rotation because smaller FOV
-                            translation *= 0.6
-                            rotation *= 0.6
+                            # Scale down translation and rotation for smoother tracking
+                            # Use more aggressive dampening for wireless to compensate for network jitter
+                            if self.use_smoothing:
+                                translation_scale = 0.4  # More dampening for wireless
+                                rotation_scale = 0.4
+                            else:
+                                translation_scale = 0.6  # Original scaling for lite
+                                rotation_scale = 0.6
+                            
+                            translation *= translation_scale
+                            rotation *= rotation_scale
 
                             # Thread-safe update of face tracking offsets (use pose as-is)
                             with self.face_tracking_lock:
@@ -170,12 +235,10 @@ class CameraWorker:
                                     rotation[1],
                                     rotation[2],  # roll, pitch, yaw
                                 ]
-
-                        # No face detected while tracking enabled - set face lost timestamp
-                        elif self.last_face_detected_time is None or self.last_face_detected_time == current_time:
-                            # Only update if we haven't already set a face lost time
-                            # (current_time check prevents overriding the disable-triggered timestamp)
-                            pass
+                        else:
+                            # No face detected - reset smoothing if enabled
+                            if self.use_smoothing:
+                                self.smoothed_eye_center = None
 
                     # Handle smooth interpolation (works for both face-lost and tracking-disabled cases)
                     if self.last_face_detected_time is not None:
