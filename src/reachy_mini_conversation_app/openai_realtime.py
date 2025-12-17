@@ -72,6 +72,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         # Internal lifecycle flags
         self._shutdown_requested: bool = False
         self._connected_event: asyncio.Event = asyncio.Event()
+        # Queue for background tasks (like web_agent) to report completion
+        self.background_task_queue: asyncio.Queue = asyncio.Queue()
+        self.deps.background_task_queue = self.background_task_queue
 
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
@@ -468,6 +471,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                             AdditionalOutputs({"role": "assistant", "content": f"[error] {msg}"})
                         )
 
+                # Check for completed background tasks (e.g., web_agent)
+                await self._check_background_tasks()
+
     # Microphone receive
     async def receive(self, frame: Tuple[int, NDArray[np.int16]]) -> None:
         """Receive audio frame from the microphone and send it to the OpenAI server.
@@ -628,6 +634,73 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             return voices
         except Exception:
             return fallback
+    async def _check_background_tasks(self) -> None:
+        """Check for completed background tasks and inject results into conversation."""
+        if not self.connection:
+            return
+
+        try:
+            # Non-blocking check for completed tasks
+            result = self.background_task_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            return
+
+        # Handle the completed task
+        task_type = result.get("type", "unknown")
+        logger.info("Background task completed: %s", task_type)
+
+        if task_type == "web_agent_complete":
+            await self._handle_web_agent_complete(result)
+        else:
+            logger.warning("Unknown background task type: %s", task_type)
+
+    async def _handle_web_agent_complete(self, result: dict) -> None:
+        """Handle completed web_agent background task."""
+        objective = result.get("objective", "browser task")
+        status = result.get("status", "unknown")
+
+        if status == "success":
+            response_text = result.get("response", "Task completed")
+            exec_time = result.get("execution_time_seconds", 0)
+            message = (
+                f"[Browser task completed in {exec_time}s]\n"
+                f"Task: {objective[:100]}\n"
+                f"Result: {response_text}"
+            )
+        else:
+            error = result.get("error", "Unknown error")
+            message = (
+                f"[Browser task failed]\n"
+                f"Task: {objective[:100]}\n"
+                f"Error: {error}"
+            )
+
+        # Inject as user message so LLM responds to it
+        await self.connection.conversation.item.create(
+            item={
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": message}],
+            },
+        )
+
+        # Show in UI
+        await self.output_queue.put(
+            AdditionalOutputs(
+                {
+                    "role": "system",
+                    "content": message,
+                    "metadata": {"title": "🌐 Browser Task Complete", "status": "done"},
+                }
+            )
+        )
+
+        # Trigger LLM to respond
+        await self.connection.response.create(
+            response={
+                "instructions": "A background browser task just completed. Summarize the result conversationally.",
+            },
+        )
 
     async def send_idle_signal(self, idle_duration: float) -> None:
         """Send an idle signal to the openai server."""

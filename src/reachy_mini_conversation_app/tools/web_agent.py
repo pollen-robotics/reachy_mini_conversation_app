@@ -16,13 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 class WebAgent(Tool):
-    """Execute browser automation tasks via web-agent service."""
+    """Execute browser automation tasks via web-agent service (async)."""
 
     name = "web_agent"
     description = (
         "Execute browser automation tasks autonomously. Use this when you need to interact with websites: "
         "fill forms, click buttons, navigate pages, extract information, or perform multi-step web workflows. "
-        "Provide a natural language objective and optionally a starting URL."
+        "Provide a natural language objective and optionally a starting URL. "
+        "The task runs in the background and results will be reported when complete."
     )
     parameters_schema = {
         "type": "object",
@@ -190,8 +191,90 @@ class WebAgent(Tool):
         except Exception:
             return str(data)
 
+    async def _run_browser_task(
+        self,
+        queue: asyncio.Queue,
+        objective: str,
+        url: str,
+        wait_timeout: int,
+        config: Dict[str, Any],
+    ) -> None:
+        """Run the browser task in the background and report result via queue."""
+        model_config = {
+            "provider": config["provider"],
+            "model": config["model"],
+            "api_key": config["api_key"],
+        }
+        payload = {
+            "input": objective,
+            "url": url,
+            "wait_timeout": wait_timeout,
+            "model": {
+                "main_model": model_config,
+                "mini_model": model_config,
+                "nano_model": model_config,
+            },
+        }
+
+        result: Dict[str, Any] = {
+            "type": "web_agent_complete",
+            "objective": objective,
+            "url": url,
+        }
+
+        try:
+            start_time = time.time()
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{config['endpoint']}/v1/responses",
+                    json=payload,
+                    timeout=float(config["task_timeout"]),
+                )
+                execution_time = time.time() - start_time
+
+                response.raise_for_status()
+                data = response.json()
+
+                # Extract response text
+                response_text = self._extract_response_text(data)
+
+                logger.info(
+                    "Web agent completed in %.1fs: %s",
+                    execution_time,
+                    response_text[:100] if response_text else "no response",
+                )
+
+                result["status"] = "success"
+                result["response"] = response_text
+                result["execution_time_seconds"] = round(execution_time, 1)
+
+        except httpx.TimeoutException:
+            result["status"] = "error"
+            result["error"] = f"Task timed out after {config['task_timeout']} seconds"
+            logger.error("Web agent task timed out: %s", objective[:50])
+
+        except httpx.HTTPStatusError as e:
+            error_msg = f"API error: {e.response.status_code}"
+            try:
+                error_data = e.response.json()
+                if "error" in error_data:
+                    error_msg = f"{error_msg} - {error_data['error']}"
+            except Exception:
+                pass
+            result["status"] = "error"
+            result["error"] = error_msg
+            logger.error("Web agent HTTP error: %s", error_msg)
+
+        except Exception as e:
+            logger.exception("Web agent task failed")
+            result["status"] = "error"
+            result["error"] = f"Web agent failed: {str(e)}"
+
+        # Put result on queue for the realtime handler to pick up
+        await queue.put(result)
+
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
-        """Execute browser automation task via web-agent."""
+        """Start browser automation task (runs in background)."""
         objective = kwargs.get("objective")
         url = kwargs.get("url", "about:blank")
         wait_timeout = kwargs.get("wait_timeout", 5000)
@@ -207,10 +290,16 @@ class WebAgent(Tool):
                 f"Set the appropriate environment variable (e.g., OPENAI_API_KEY)."
             }
 
-        logger.info("Web agent: objective=%s, url=%s", objective[:100], url)
+        if not deps.background_task_queue:
+            return {
+                "error": "Background task queue not available. "
+                "Cannot run async browser tasks."
+            }
 
+        logger.info("Web agent starting: objective=%s, url=%s", objective[:100], url)
+
+        # Check health and auto-start before spawning background task
         async with httpx.AsyncClient() as client:
-            # Check if service is running
             is_healthy = await self._check_health(client, config["endpoint"])
 
             # Auto-start if not running and path is configured
@@ -232,62 +321,20 @@ class WebAgent(Tool):
                     "Either start it manually or set WEB_AGENT_PATH to enable auto-start."
                 }
 
-            # Build request payload
-            model_config = {
-                "provider": config["provider"],
-                "model": config["model"],
-                "api_key": config["api_key"],
-            }
-            payload = {
-                "input": objective,
-                "url": url,
-                "wait_timeout": wait_timeout,
-                "model": {
-                    "main_model": model_config,
-                    "mini_model": model_config,
-                    "nano_model": model_config,
-                },
-            }
+        # Spawn background task
+        asyncio.create_task(
+            self._run_browser_task(
+                deps.background_task_queue,
+                objective,
+                url,
+                wait_timeout,
+                config,
+            )
+        )
 
-            try:
-                start_time = time.time()
-                response = await client.post(
-                    f"{config['endpoint']}/v1/responses",
-                    json=payload,
-                    timeout=float(config["task_timeout"]),
-                )
-                execution_time = time.time() - start_time
-
-                response.raise_for_status()
-                data = response.json()
-
-                # Extract response text
-                result_text = self._extract_response_text(data)
-
-                logger.info(
-                    "Web agent completed in %.1fs: %s",
-                    execution_time,
-                    result_text[:100] if result_text else "no response",
-                )
-
-                return {
-                    "status": "success",
-                    "response": result_text,
-                    "execution_time_seconds": round(execution_time, 1),
-                    "url": url,
-                }
-
-            except httpx.TimeoutException:
-                return {"error": f"Task timed out after {config['task_timeout']} seconds"}
-            except httpx.HTTPStatusError as e:
-                error_msg = f"API error: {e.response.status_code}"
-                try:
-                    error_data = e.response.json()
-                    if "error" in error_data:
-                        error_msg = f"{error_msg} - {error_data['error']}"
-                except Exception:
-                    pass
-                return {"error": error_msg}
-            except Exception as e:
-                logger.exception("Web agent failed")
-                return {"error": f"Web agent failed: {str(e)}"}
+        # Return immediately - result will be injected into conversation when ready
+        return {
+            "status": "started",
+            "message": f"Working on browser task: {objective[:80]}...",
+            "note": "Results will be reported when the task completes.",
+        }
