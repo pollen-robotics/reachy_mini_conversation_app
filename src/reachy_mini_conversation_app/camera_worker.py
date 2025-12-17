@@ -27,11 +27,12 @@ class CameraWorker:
 
     def __init__(self, reachy_mini: ReachyMini, head_tracker: Any = None, use_smoothing: bool = False) -> None:
         """Initialize.
-        
+
         Args:
             reachy_mini: ReachyMini robot instance
             head_tracker: Optional head tracking instance
             use_smoothing: Enable coordinate smoothing (recommended for wireless/WebRTC)
+
         """
         self.reachy_mini = reachy_mini
         self.head_tracker = head_tracker
@@ -54,7 +55,7 @@ class CameraWorker:
             0.0,
         ]  # x, y, z, roll, pitch, yaw
         self.face_tracking_lock = threading.Lock()
-        
+
         # Smoothing for face tracking (only used if use_smoothing=True)
         self.smoothed_eye_center: NDArray[np.float32] | None = None
         self.smoothing_alpha = 0.3  # Lower = more smoothing (0.1-0.5 recommended)
@@ -160,13 +161,13 @@ class CameraWorker:
                                 else:
                                     # Smooth: new_value = alpha * current + (1-alpha) * previous
                                     self.smoothed_eye_center = (
-                                        self.smoothing_alpha * eye_center + 
+                                        self.smoothing_alpha * eye_center +
                                         (1.0 - self.smoothing_alpha) * self.smoothed_eye_center
                                     )
 
                                 # Use smoothed coordinates for tracking
                                 eye_center_to_use = self.smoothed_eye_center
-                                
+
                                 logger.debug(
                                     f"Face detected - raw: [{eye_center[0]:.3f}, {eye_center[1]:.3f}], "
                                     f"smoothed: [{eye_center_to_use[0]:.3f}, {eye_center_to_use[1]:.3f}], "
@@ -176,7 +177,7 @@ class CameraWorker:
                             else:
                                 # No smoothing - use raw coordinates
                                 eye_center_to_use = eye_center
-                                
+
                                 logger.debug(
                                     f"Face detected at normalized: [{eye_center[0]:.3f}, {eye_center[1]:.3f}], "
                                     f"pixels: [{(eye_center[0] + 1.0) / 2.0 * frame.shape[1]:.1f}, "
@@ -186,7 +187,7 @@ class CameraWorker:
                             # Convert to [0, 1] range for pixel conversion
                             h, w, _ = frame.shape
                             eye_center_norm = (eye_center_to_use + 1.0) / 2.0
-                            
+
                             # Convert to pixel coordinates
                             if self.use_smoothing:
                                 # Clamp pixel coordinates to valid image bounds
@@ -221,7 +222,7 @@ class CameraWorker:
                             else:
                                 translation_scale = 0.6  # Original scaling for lite
                                 rotation_scale = 0.6
-                            
+
                             translation *= translation_scale
                             rotation *= rotation_scale
 
