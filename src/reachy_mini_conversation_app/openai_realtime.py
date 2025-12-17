@@ -286,6 +286,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 if event.type == "input_audio_buffer.speech_started":
                     if hasattr(self, "_clear_queue") and callable(self._clear_queue):
                         self._clear_queue()
+                    self.empty_output_queue()
                     if self.deps.head_wobbler is not None:
                         self.deps.head_wobbler.reset()
                     self.deps.movement_manager.set_listening(True)
@@ -549,6 +550,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 self.connection = None
 
         # Clear any remaining items in the output queue
+        self.empty_output_queue()
+
+    def empty_output_queue(self) -> None:
+        """Empty the output queue."""
         while not self.output_queue.empty():
             try:
                 self.output_queue.get_nowait()
