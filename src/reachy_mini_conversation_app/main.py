@@ -45,6 +45,7 @@ def run(
     from reachy_mini_conversation_app.moves import MovementManager
     from reachy_mini_conversation_app.console import LocalStream
     from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
+    from reachy_mini_conversation_app.gradium_realtime import UnmuteRealtimeHandler
     from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
     from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
 
@@ -109,7 +110,12 @@ def run(
     )
     logger.debug(f"Chatbot avatar images: {chatbot.avatar_images}")
 
-    handler = OpenaiRealtimeHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)
+    if args.openai:
+        logger.info("Using OpenAI realtime handler")
+        handler = OpenaiRealtimeHandler(deps)
+    else:
+        logger.info("Using Gradium realtime handler")
+        handler = UnmuteRealtimeHandler(deps)
 
     stream_manager: gr.Blocks | LocalStream | None = None
 
