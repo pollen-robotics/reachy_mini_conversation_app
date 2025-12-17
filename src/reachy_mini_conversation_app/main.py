@@ -190,6 +190,12 @@ def run(
         if vision_manager:
             vision_manager.stop()
 
+        # Ensure media is explicitly closed before disconnecting
+        try:
+            robot.media.close()
+        except Exception as e:
+            logger.debug(f"Error closing media during shutdown: {e}")
+
         # prevent connection to keep alive some threads
         robot.client.disconnect()
         time.sleep(1)
