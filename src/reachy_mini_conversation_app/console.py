@@ -406,20 +406,31 @@ class LocalStream:
         """Stop the stream and underlying media pipelines.
 
         This method:
+        - Stops audio recording and playback first
         - Sets the stop event to signal async loops to terminate
         - Cancels all pending async tasks (openai-handler, record-loop, play-loop)
-        - Stops audio recording and playback
         """
         logger.info("Stopping LocalStream...")
+
+        # Stop media pipelines FIRST before cancelling async tasks
+        # This ensures clean shutdown before PortAudio cleanup
+        try:
+            self._robot.media.stop_recording()
+        except Exception as e:
+            logger.debug(f"Error stopping recording (may already be stopped): {e}")
+
+        try:
+            self._robot.media.stop_playing()
+        except Exception as e:
+            logger.debug(f"Error stopping playback (may already be stopped): {e}")
+
+        # Now signal async loops to stop
         self._stop_event.set()
 
         # Cancel all running tasks
         for task in self._tasks:
             if not task.done():
                 task.cancel()
-
-        self._robot.media.stop_recording()
-        self._robot.media.stop_playing()
 
     def clear_audio_queue(self) -> None:
         """Flush the player's appsrc to drop any queued audio immediately."""
