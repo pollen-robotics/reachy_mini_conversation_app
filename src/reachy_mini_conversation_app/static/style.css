@@ -213,6 +213,40 @@ button.ghost:hover { border-color: rgba(94, 240, 193, 0.4); }
 .status.warn { color: var(--warn); }
 .status.error { color: var(--error); }
 
+/* Session info display */
+.session-info {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(94, 240, 193, 0.05);
+}
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+}
+.info-row:not(:last-child) {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.info-label {
+  font-size: 13px;
+  color: var(--muted);
+  letter-spacing: 0.2px;
+}
+.info-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-2);
+}
+.info-value.warning {
+  color: var(--warn);
+}
+.info-value.critical {
+  color: var(--error);
+}
+
 /* Personality layout */
 .row {
   display: grid;

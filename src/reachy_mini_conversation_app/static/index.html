@@ -28,6 +28,16 @@
           <span class="chip chip-ok">Connected</span>
         </div>
         <p class="muted">OpenAI API key is already configured. You can jump straight to personalities.</p>
+        <div id="configured-session-info" class="session-info hidden">
+          <div class="info-row">
+            <span class="info-label">Sessions remaining:</span>
+            <span id="configured-sessions-remaining" class="info-value">—</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Key status:</span>
+            <span id="configured-key-status" class="info-value">—</span>
+          </div>
+        </div>
         <button id="change-key-btn" class="ghost">Change API key</button>
       </div>
 
@@ -39,7 +49,24 @@
           </div>
           <span class="chip">Required</span>
         </div>
-        <p class="muted">Paste your API key once and we will store it locally for the headless conversation loop.</p>
+        <p class="muted">Request a temporary key with your order number, or paste your own API key to store it locally.</p>
+        <label for="order-number">Order Number</label>
+        <input id="order-number" type="text" placeholder="Enter your order number..." autocomplete="off" />
+        <div class="actions">
+          <button id="request-key-btn">Get Service Access</button>
+          <p id="request-status" class="status"></p>
+        </div>
+        <div id="session-info" class="session-info hidden">
+          <div class="info-row">
+            <span class="info-label">Sessions remaining:</span>
+            <span id="sessions-remaining" class="info-value">—</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Key status:</span>
+            <span id="key-status" class="info-value">—</span>
+          </div>
+        </div>
+        <div style="margin: 20px 0; text-align: center; color: #666;">— or —</div>
         <label for="api-key">OpenAI API Key</label>
         <input id="api-key" type="password" placeholder="sk-..." autocomplete="off" />
         <div class="actions">

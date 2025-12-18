@@ -179,16 +179,39 @@ function show(el, flag) {
   el.classList.toggle("hidden", !flag);
 }
 
+async function requestEphemeralKey(orderNumber) {
+  const body = { order_number: orderNumber };
+  const resp = await fetch("/request_ephemeral_key", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error(data.error || "request_failed");
+  }
+  return data;
+}
+
 async function init() {
   const loading = document.getElementById("loading");
   show(loading, true);
   const statusEl = document.getElementById("status");
+  const requestStatusEl = document.getElementById("request-status");
   const formPanel = document.getElementById("form-panel");
   const configuredPanel = document.getElementById("configured");
   const personalityPanel = document.getElementById("personality-panel");
   const saveBtn = document.getElementById("save-btn");
+  const requestKeyBtn = document.getElementById("request-key-btn");
   const changeKeyBtn = document.getElementById("change-key-btn");
   const input = document.getElementById("api-key");
+  const orderInput = document.getElementById("order-number");
+  const sessionInfo = document.getElementById("session-info");
+  const sessionsRemaining = document.getElementById("sessions-remaining");
+  const keyStatus = document.getElementById("key-status");
+  const configuredSessionInfo = document.getElementById("configured-session-info");
+  const configuredSessionsRemaining = document.getElementById("configured-sessions-remaining");
+  const configuredKeyStatus = document.getElementById("configured-key-status");
 
   // Personality elements
   const pSelect = document.getElementById("personality-select");
@@ -218,6 +241,43 @@ async function init() {
   if (st.has_key) {
     statusEl.textContent = "";
     show(configuredPanel, true);
+
+    // Check if we have session info from a recent ephemeral key request
+    try {
+      const storedInfo = localStorage.getItem('session_info');
+      if (storedInfo) {
+        const sessionData = JSON.parse(storedInfo);
+        // Only show if it's an ephemeral key and less than 1 hour old
+        const hoursSinceStored = (Date.now() - sessionData.timestamp) / (1000 * 60 * 60);
+        if (sessionData.is_ephemeral && hoursSinceStored < 1) {
+          show(configuredSessionInfo, true);
+
+          // Update sessions remaining with color coding
+          const remaining = sessionData.keys_remaining;
+          configuredSessionsRemaining.textContent = `${remaining} of ${sessionData.keys_total || '?'}`;
+          configuredSessionsRemaining.className = "info-value";
+          if (remaining <= 5) {
+            configuredSessionsRemaining.className = "info-value critical";
+          } else if (remaining <= 20) {
+            configuredSessionsRemaining.className = "info-value warning";
+          }
+
+          // Update key status
+          if (sessionData.is_reused) {
+            configuredKeyStatus.textContent = "Reusing recent key";
+            configuredKeyStatus.className = "info-value";
+          } else {
+            configuredKeyStatus.textContent = "Key created";
+            configuredKeyStatus.className = "info-value";
+          }
+        } else {
+          // Clear old or non-ephemeral data
+          localStorage.removeItem('session_info');
+        }
+      }
+    } catch (e) {
+      // Ignore errors reading from localStorage
+    }
   }
 
   // Handler for "Change API key" button
@@ -232,6 +292,96 @@ async function init() {
   // Remove error styling when user starts typing
   input.addEventListener("input", () => {
     input.classList.remove("error");
+  });
+
+  orderInput.addEventListener("input", () => {
+    orderInput.classList.remove("error");
+  });
+
+  requestKeyBtn.addEventListener("click", async () => {
+    const orderNumber = orderInput.value.trim();
+    if (!orderNumber) {
+      requestStatusEl.textContent = "Please enter your order number.";
+      requestStatusEl.className = "status warn";
+      orderInput.classList.add("error");
+      show(sessionInfo, false);
+      return;
+    }
+    requestStatusEl.textContent = "Requesting access...";
+    requestStatusEl.className = "status";
+    orderInput.classList.remove("error");
+    show(sessionInfo, false);
+    try {
+      const result = await requestEphemeralKey(orderNumber);
+      if (result.success) {
+        // Build success message with session details
+        let message = "Access granted! ";
+
+        if (result.is_reused) {
+          message += "Reusing your recent key. ";
+        } else {
+          message += "New key created. ";
+        }
+
+        message += "Starting service...";
+
+        requestStatusEl.textContent = message;
+        requestStatusEl.className = "status ok";
+
+        // Display session info if available
+        if (result.keys_remaining !== null && result.keys_remaining !== undefined) {
+          show(sessionInfo, true);
+
+          // Update sessions remaining with color coding
+          const remaining = result.keys_remaining;
+          sessionsRemaining.textContent = `${remaining} of ${result.keys_total || '?'}`;
+          sessionsRemaining.className = "info-value";
+          if (remaining <= 5) {
+            sessionsRemaining.className = "info-value critical";
+          } else if (remaining <= 20) {
+            sessionsRemaining.className = "info-value warning";
+          }
+
+          // Update key status
+          if (result.is_reused) {
+            keyStatus.textContent = "Reusing recent key";
+            keyStatus.className = "info-value";
+          } else {
+            keyStatus.textContent = "New key created";
+            keyStatus.className = "info-value";
+          }
+
+          // Store session info in localStorage for display after reload
+          try {
+            localStorage.setItem('session_info', JSON.stringify({
+              keys_remaining: result.keys_remaining,
+              keys_total: result.keys_total,
+              keys_used: result.keys_used,
+              is_reused: result.is_reused,
+              timestamp: Date.now(),
+              is_ephemeral: true  // Mark this as an ephemeral key
+            }));
+          } catch (e) {
+            // localStorage might not be available, ignore
+          }
+        }
+
+        // Wait a moment for the user to see the info before reloading
+        await sleep(2000);
+        // Reload to start the service with the ephemeral key in memory
+        window.location.reload();
+      } else {
+        show(sessionInfo, false);
+        requestStatusEl.textContent = result.error || "Failed to get access. Please check your order number.";
+        requestStatusEl.className = "status error";
+        orderInput.classList.add("error");
+      }
+    } catch (e) {
+      show(sessionInfo, false);
+      orderInput.classList.add("error");
+      requestStatusEl.textContent = e.message || "Failed to request access. Please try again.";
+      requestStatusEl.className = "status error";
+    }
   });
 
   saveBtn.addEventListener("click", async () => {
@@ -259,6 +409,14 @@ async function init() {
       statusEl.textContent = "Key valid! Saving...";
       statusEl.className = "status ok";
       await saveKey(key);
+
+      // Clear any ephemeral session info since user is using their own key
+      try {
+        localStorage.removeItem('session_info');
+      } catch (e) {
+        // Ignore if localStorage isn't available
+      }
+
       statusEl.textContent = "Saved. Reloading…";
       statusEl.className = "status ok";
       window.location.reload();

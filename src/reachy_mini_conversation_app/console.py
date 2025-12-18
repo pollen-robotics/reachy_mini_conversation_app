@@ -19,6 +19,7 @@ from pathlib import Path
 
 from fastrtc import AdditionalOutputs, audio_to_float32
 from scipy.signal import resample
+from gradio_client import Client
 
 from reachy_mini import ReachyMini
 from reachy_mini.media.media_manager import MediaBackend
@@ -301,6 +302,63 @@ class LocalStream:
                 logger.warning(f"API key validation failed: {e}")
                 return JSONResponse({"valid": False, "error": "validation_error"}, status_code=500)
 
+        class OrderPayload(BaseModel):
+            order_number: str
+
+        # POST /request_ephemeral_key -> request ephemeral key from HuggingFace
+        @self._settings_app.post("/request_ephemeral_key")
+        async def _request_ephemeral_key(payload: OrderPayload) -> JSONResponse:
+            order_number = (payload.order_number or "").strip()
+            if not order_number:
+                return JSONResponse({"success": False, "error": "Order number is required"}, status_code=400)
+
+            try:
+                logger.info(f"Requesting ephemeral key from HuggingFace with order number: {order_number}")
+                client = Client("HuggingFaceM4/conversation_setup", verbose=False)
+                key, status = client.predict(order_number=order_number, api_name="/claim_c_key")
+
+                # Parse the result - check the actual response from the space
+                if key and key.strip() and key.startswith("ek_"):
+                    logger.info("Successfully received ephemeral key from HuggingFace")
+                    # Set the key in memory immediately without persisting
+                    try:
+                        os.environ["OPENAI_API_KEY"] = key
+                        config.OPENAI_API_KEY = key
+                    except Exception as e:
+                        logger.warning(f"Failed to set ephemeral key in memory: {e}")
+
+                    # Parse session information from status message
+                    # Status format: "New ephemeral key sent successfully. (5/100 keys sent for this order)"
+                    # or "Reused recent key. (5/100 keys sent for this order)"
+                    is_reused = "Reused" in status if isinstance(status, str) else False
+                    keys_used = None
+                    keys_total = None
+
+                    if isinstance(status, str) and "(" in status and "/" in status:
+                        # Extract numbers from format like "(5/100 keys sent)"
+                        import re
+                        match = re.search(r'\((\d+)/(\d+)', status)
+                        if match:
+                            keys_used = int(match.group(1))
+                            keys_total = int(match.group(2))
+
+                    return JSONResponse({
+                        "success": True,
+                        "message": status,
+                        "is_reused": is_reused,
+                        "keys_used": keys_used,
+                        "keys_total": keys_total,
+                        "keys_remaining": keys_total - keys_used if keys_total and keys_used is not None else None
+                    })
+                else:
+                    error_msg = status if isinstance(status, str) else "No key received"
+                    logger.warning(f"Failed to get ephemeral key: {error_msg}")
+                    return JSONResponse({"success": False, "error": error_msg}, status_code=400)
+
+            except Exception as e:
+                logger.error(f"Error requesting ephemeral key: {e}")
+                return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
         self._settings_initialized = True
 
     def launch(self) -> None:
@@ -336,20 +394,6 @@ class LocalStream:
                             pass
             except Exception:
                 pass
-
-        # If key is still missing, try to download one from HuggingFace
-        if not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()):
-            logger.info("OPENAI_API_KEY not set, attempting to download from HuggingFace...")
-            try:
-                from gradio_client import Client
-                client = Client("HuggingFaceM4/gradium_setup", verbose=False)
-                key, status = client.predict(api_name="/claim_b_key")
-                if key and key.strip():
-                    logger.info("Successfully downloaded API key from HuggingFace")
-                    # Persist it immediately
-                    self._persist_api_key(key)
-            except Exception as e:
-                logger.warning(f"Failed to download API key from HuggingFace: {e}")
 
         # Always expose settings UI if a settings app is available
         # (do this AFTER loading/downloading the key so status endpoint sees the right value)
