@@ -23,3 +23,8 @@ smart_home
 
 # Web-agent browser automation
 web_agent
+
+# Memory system
+search_memory
+update_memory
+list_memory_blocks

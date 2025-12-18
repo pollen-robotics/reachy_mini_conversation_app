@@ -6,3 +6,6 @@ camera
 do_nothing
 head_tracking
 move_head
+search_memory
+update_memory
+list_memory_blocks

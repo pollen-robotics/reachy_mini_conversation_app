@@ -76,6 +76,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.background_task_queue: asyncio.Queue = asyncio.Queue()
         self.deps.background_task_queue = self.background_task_queue
 
+        # Conversation buffer for memory extraction
+        self.conversation_buffer: list[dict[str, str]] = []
+
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
         return OpenaiRealtimeHandler(self.deps, self.gradio_mode, self.instance_path)
@@ -280,6 +283,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
             # Manage event received from the openai server
             self.connection = conn
+            self._background_poller_task = asyncio.create_task(self._background_task_poller())
             try:
                 self._connected_event.set()
             except Exception:
@@ -348,10 +352,16 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
                     await self.output_queue.put(AdditionalOutputs({"role": "user", "content": event.transcript}))
 
+                    # Buffer user transcript for memory extraction
+                    self.conversation_buffer.append({"role": "user", "content": event.transcript})
+
                 # Handle assistant transcription
                 if event.type in ("response.audio_transcript.done", "response.output_audio_transcript.done"):
                     logger.debug(f"Assistant transcript: {event.transcript}")
                     await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": event.transcript}))
+
+                    # Buffer assistant transcript for memory extraction
+                    self.conversation_buffer.append({"role": "assistant", "content": event.transcript})
 
                 # Handle audio delta
                 if event.type in ("response.audio.delta", "response.output_audio.delta"):
@@ -533,9 +543,43 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
         return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
 
+    async def _extract_and_store_memory(self) -> None:
+        """Extract and store conversation facts to memory if enabled."""
+        try:
+            # Check if memory auto-extraction is enabled
+            if not config.MEMORY_AUTO_EXTRACT:
+                logger.debug("Memory auto-extraction disabled, skipping")
+                return
+
+            # Check if we have conversation content
+            if not self.conversation_buffer:
+                logger.debug("No conversation to extract from")
+                return
+
+            # Import and run extractor
+            from reachy_mini_conversation_app.memory import MemoryExtractor
+
+            extractor = MemoryExtractor()
+            await extractor.extract_and_store(self.conversation_buffer)
+
+        except Exception as e:
+            logger.warning("Failed to extract and store memory: %s", e)
+
     async def shutdown(self) -> None:
         """Shutdown the handler."""
         self._shutdown_requested = True
+
+        # Trigger memory extraction if enabled and conversation buffer has content
+        await self._extract_and_store_memory()
+
+        # Cancel background task poller
+        if hasattr(self, '_background_poller_task') and self._background_poller_task:
+            self._background_poller_task.cancel()
+            try:
+                await self._background_poller_task
+            except asyncio.CancelledError:
+                pass
+
         # Cancel any pending debounce task
         if self.partial_transcript_task and not self.partial_transcript_task.done():
             self.partial_transcript_task.cancel()
@@ -634,6 +678,12 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             return voices
         except Exception:
             return fallback
+    async def _background_task_poller(self) -> None:
+        """Periodically check for completed background tasks independent of event loop."""
+        while True:
+            await asyncio.sleep(1.0)  # Check every second
+            await self._check_background_tasks()
+
     async def _check_background_tasks(self) -> None:
         """Check for completed background tasks and inject results into conversation."""
         if not self.connection:

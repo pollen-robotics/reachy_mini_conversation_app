@@ -50,8 +50,13 @@ class WebAgent(Tool):
         """Load configuration from environment variables."""
         endpoint = os.getenv("WEB_AGENT_ENDPOINT", "http://localhost:8080")
         path = os.getenv("WEB_AGENT_PATH")
-        provider = os.getenv("WEB_AGENT_PROVIDER", "openai")
-        model = os.getenv("WEB_AGENT_MODEL", "gpt-4o")
+        provider = os.getenv("WEB_AGENT_PROVIDER", "cerebras")
+        model = os.getenv("WEB_AGENT_MODEL", "zai-glm-4.6")
+
+        # Per-tier model overrides (fall back to base model)
+        main_model = os.getenv("WEB_AGENT_MAIN_MODEL", model)
+        mini_model = os.getenv("WEB_AGENT_MINI_MODEL", model)
+        nano_model = os.getenv("WEB_AGENT_NANO_MODEL", model)
 
         # Get API key based on provider
         api_key = None
@@ -69,7 +74,9 @@ class WebAgent(Tool):
             "endpoint": endpoint.rstrip("/"),
             "path": path,
             "provider": provider,
-            "model": model,
+            "main_model": main_model,
+            "mini_model": mini_model,
+            "nano_model": nano_model,
             "api_key": api_key,
             "task_timeout": int(os.getenv("WEB_AGENT_TASK_TIMEOUT", "300")),
             "startup_timeout": int(os.getenv("WEB_AGENT_STARTUP_TIMEOUT", "120")),
@@ -200,19 +207,16 @@ class WebAgent(Tool):
         config: Dict[str, Any],
     ) -> None:
         """Run the browser task in the background and report result via queue."""
-        model_config = {
-            "provider": config["provider"],
-            "model": config["model"],
-            "api_key": config["api_key"],
-        }
+        provider = config["provider"]
+        api_key = config["api_key"]
         payload = {
             "input": objective,
             "url": url,
             "wait_timeout": wait_timeout,
             "model": {
-                "main_model": model_config,
-                "mini_model": model_config,
-                "nano_model": model_config,
+                "main_model": {"provider": provider, "model": config["main_model"], "api_key": api_key},
+                "mini_model": {"provider": provider, "model": config["mini_model"], "api_key": api_key},
+                "nano_model": {"provider": provider, "model": config["nano_model"], "api_key": api_key},
             },
         }
 
