@@ -342,7 +342,7 @@ class LocalStream:
             logger.info("OPENAI_API_KEY not set, attempting to download from HuggingFace...")
             try:
                 from gradio_client import Client
-                client = Client("HuggingFaceM4/gradium_setup")
+                client = Client("HuggingFaceM4/gradium_setup", verbose=False)
                 key, status = client.predict(api_name="/claim_b_key")
                 if key and key.strip():
                     logger.info("Successfully downloaded API key from HuggingFace")
@@ -438,6 +438,8 @@ class LocalStream:
         if self._robot.media.backend == MediaBackend.GSTREAMER:
             # Directly flush gstreamer audio pipe
             self._robot.media.audio.clear_player()
+        elif self._robot.media.backend == MediaBackend.DEFAULT or self._robot.media.backend == MediaBackend.DEFAULT_NO_VIDEO:
+            self._robot.media.audio.clear_output_buffer()
         self.handler.output_queue = asyncio.Queue()
 
     async def record_loop(self) -> None:
