@@ -112,6 +112,10 @@ Some wheels (e.g. PyTorch) are large and require compatible CUDA or CPU buildsâ€
 | `HF_HOME` | Cache directory for local Hugging Face downloads (only used with `--local-vision` flag, defaults to `./cache`).
 | `HF_TOKEN` | Optional token for Hugging Face models (only used with `--local-vision` flag, falls back to `huggingface-cli login`).
 | `LOCAL_VISION_MODEL` | Hugging Face model path for local vision processing (only used with `--local-vision` flag, defaults to `HuggingFaceTB/SmolVLM2-2.2B-Instruct`).
+| `ANTHROPIC_API_KEY` | Anthropic API key for Claude (only used with `linus` developer profile).
+| `ANTHROPIC_MODEL` | Claude model to use (only used with `linus` profile, defaults to `claude-sonnet-4-20250514`).
+| `GITHUB_TOKEN` | GitHub Personal Access Token with `repo`, `issues`, `pull_requests` scopes (only used with `linus` profile).
+| `GITHUB_DEFAULT_OWNER` | Default GitHub owner/org for repository operations (optional, only used with `linus` profile).
 
 ## Running the app
 

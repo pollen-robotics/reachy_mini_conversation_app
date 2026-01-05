@@ -31,6 +31,14 @@ class Config:
 
     logger.debug(f"Model: {MODEL_NAME}, HF_HOME: {HF_HOME}, Vision Model: {LOCAL_VISION_MODEL}")
 
+    # Anthropic (Claude API) - for Linus developer profile
+    ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+    ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+
+    # GitHub API - for Linus developer profile
+    GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+    GITHUB_DEFAULT_OWNER = os.getenv("GITHUB_DEFAULT_OWNER")
+
     REACHY_MINI_CUSTOM_PROFILE = os.getenv("REACHY_MINI_CUSTOM_PROFILE")
     logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")
 
