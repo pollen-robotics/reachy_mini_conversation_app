@@ -1,0 +1,18 @@
+# Core robot tools
+dance
+stop_dance
+play_emotion
+stop_emotion
+camera
+do_nothing
+head_tracking
+move_head
+
+# Developer tools (Linus profile)
+code
+execute_code
+github_issue
+github_pr_comment
+github_clone
+github_pull
+github_push
