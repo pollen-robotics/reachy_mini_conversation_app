@@ -23,6 +23,12 @@ dependencies = [
     #OpenAI
     "openai>=2.1",
 
+    #Anthropic (Claude API for Linus developer profile)
+    "anthropic>=0.40.0",
+
+    #GitHub API (for Linus developer profile)
+    "PyGithub>=2.1.0",
+
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
