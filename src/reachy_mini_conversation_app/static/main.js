@@ -85,6 +85,32 @@ async function saveKey(key) {
   return await resp.json();
 }
 
+// ---------- Linus Config API ----------
+async function getLinusConfig() {
+  try {
+    const url = new URL("/linus_config", window.location.origin);
+    url.searchParams.set("_", Date.now().toString());
+    const resp = await fetchWithTimeout(url, {}, 2000);
+    if (!resp.ok) return { anthropic_key: "", github_token: "", github_owner: "" };
+    return await resp.json();
+  } catch (e) {
+    return { anthropic_key: "", github_token: "", github_owner: "" };
+  }
+}
+
+async function saveLinusConfig(config) {
+  const resp = await fetch("/linus_config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(data.error || "save_failed");
+  }
+  return await resp.json();
+}
+
 // ---------- Personalities API ----------
 async function getPersonalities() {
   const url = new URL("/personalities", window.location.origin);
@@ -190,6 +216,14 @@ async function init() {
   const changeKeyBtn = document.getElementById("change-key-btn");
   const input = document.getElementById("api-key");
 
+  // Linus config elements
+  const linusPanel = document.getElementById("linus-panel");
+  const anthropicKeyInput = document.getElementById("anthropic-key");
+  const githubTokenInput = document.getElementById("github-token");
+  const githubOwnerInput = document.getElementById("github-owner");
+  const saveLinusBtn = document.getElementById("save-linus-btn");
+  const linusStatus = document.getElementById("linus-status");
+
   // Personality elements
   const pSelect = document.getElementById("personality-select");
   const pApply = document.getElementById("apply-personality");
@@ -213,6 +247,7 @@ async function init() {
   show(formPanel, false);
   show(configuredPanel, false);
   show(personalityPanel, false);
+  show(linusPanel, false);
 
   const st = (await waitForStatus()) || { has_key: false };
   if (st.has_key) {
@@ -279,6 +314,55 @@ async function init() {
     show(loading, false);
     return;
   }
+
+  // Initialize Linus config panel
+  show(linusPanel, true);
+  try {
+    const linusConfig = await getLinusConfig();
+    if (linusConfig.has_anthropic_key) {
+      anthropicKeyInput.placeholder = "••••••••••••••••";
+    }
+    if (linusConfig.has_github_token) {
+      githubTokenInput.placeholder = "••••••••••••••••";
+    }
+    if (linusConfig.github_owner) {
+      githubOwnerInput.value = linusConfig.github_owner;
+    }
+  } catch (e) {
+    // Ignore errors loading linus config
+  }
+
+  saveLinusBtn.addEventListener("click", async () => {
+    linusStatus.textContent = "Saving...";
+    linusStatus.className = "status";
+    try {
+      const config = {};
+      if (anthropicKeyInput.value.trim()) {
+        config.anthropic_key = anthropicKeyInput.value.trim();
+      }
+      if (githubTokenInput.value.trim()) {
+        config.github_token = githubTokenInput.value.trim();
+      }
+      if (githubOwnerInput.value.trim()) {
+        config.github_owner = githubOwnerInput.value.trim();
+      }
+      await saveLinusConfig(config);
+      linusStatus.textContent = "Saved successfully!";
+      linusStatus.className = "status ok";
+      // Update placeholders to indicate keys are saved
+      if (config.anthropic_key) {
+        anthropicKeyInput.value = "";
+        anthropicKeyInput.placeholder = "••••••••••••••••";
+      }
+      if (config.github_token) {
+        githubTokenInput.value = "";
+        githubTokenInput.placeholder = "••••••••••••••••";
+      }
+    } catch (e) {
+      linusStatus.textContent = "Failed to save configuration.";
+      linusStatus.className = "status error";
+    }
+  });
 
   // Wait until backend routes are ready before rendering personalities UI
   const list = (await waitForPersonalityData()) || { choices: [] };

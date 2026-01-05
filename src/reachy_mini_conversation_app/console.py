@@ -216,6 +216,59 @@ class LocalStream:
             pass
         return None
 
+    def _persist_linus_config(
+        self,
+        anthropic_key: str = "",
+        github_token: str = "",
+        github_owner: str = "",
+    ) -> None:
+        """Persist Linus developer profile configuration to .env file."""
+        env_vars = {
+            "ANTHROPIC_API_KEY": anthropic_key.strip() if anthropic_key else None,
+            "GITHUB_TOKEN": github_token.strip() if github_token else None,
+            "GITHUB_DEFAULT_OWNER": github_owner.strip() if github_owner else None,
+        }
+
+        # Update live config
+        for key, value in env_vars.items():
+            if value:
+                try:
+                    os.environ[key] = value
+                    setattr(config, key, value)
+                except Exception:
+                    pass
+
+        if not self._instance_path:
+            return
+
+        try:
+            env_path = Path(self._instance_path) / ".env"
+            lines = self._read_env_lines(env_path)
+
+            for var_name, var_value in env_vars.items():
+                if not var_value:
+                    continue
+                replaced = False
+                for i, ln in enumerate(lines):
+                    if ln.strip().startswith(f"{var_name}="):
+                        lines[i] = f"{var_name}={var_value}"
+                        replaced = True
+                        break
+                if not replaced:
+                    lines.append(f"{var_name}={var_value}")
+
+            final_text = "\n".join(lines) + "\n"
+            env_path.write_text(final_text, encoding="utf-8")
+            logger.info("Persisted Linus config to %s", env_path)
+
+            try:
+                from dotenv import load_dotenv
+                load_dotenv(dotenv_path=str(env_path), override=True)
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning("Failed to persist Linus config: %s", e)
+
     def _init_settings_ui_if_needed(self) -> None:
         """Attach minimal settings UI to the settings app.
 
@@ -300,6 +353,30 @@ class LocalStream:
             except Exception as e:
                 logger.warning(f"API key validation failed: {e}")
                 return JSONResponse({"valid": False, "error": "validation_error"}, status_code=500)
+
+        # GET /linus_config -> get Linus developer profile config status
+        @self._settings_app.get("/linus_config")
+        def _get_linus_config() -> JSONResponse:
+            return JSONResponse({
+                "has_anthropic_key": bool(config.ANTHROPIC_API_KEY and str(config.ANTHROPIC_API_KEY).strip()),
+                "has_github_token": bool(config.GITHUB_TOKEN and str(config.GITHUB_TOKEN).strip()),
+                "github_owner": config.GITHUB_DEFAULT_OWNER or "",
+            })
+
+        class LinusConfigPayload(BaseModel):
+            anthropic_key: str = ""
+            github_token: str = ""
+            github_owner: str = ""
+
+        # POST /linus_config -> save Linus developer profile config
+        @self._settings_app.post("/linus_config")
+        def _set_linus_config(payload: LinusConfigPayload) -> JSONResponse:
+            self._persist_linus_config(
+                anthropic_key=payload.anthropic_key,
+                github_token=payload.github_token,
+                github_owner=payload.github_owner,
+            )
+            return JSONResponse({"ok": True})
 
         self._settings_initialized = True
 
