@@ -48,6 +48,35 @@
         </div>
       </div>
 
+      <div id="linus-panel" class="panel hidden">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Developer Profile</p>
+            <h2>Linus Configuration</h2>
+          </div>
+          <span class="chip">Optional</span>
+        </div>
+        <p class="muted">Configure API keys for the Linus developer profile (code generation and GitHub integration).</p>
+        <div class="section">
+          <div class="row">
+            <label for="anthropic-key">Anthropic API Key</label>
+            <input id="anthropic-key" type="password" placeholder="sk-ant-..." autocomplete="off" />
+          </div>
+          <div class="row">
+            <label for="github-token">GitHub Token</label>
+            <input id="github-token" type="password" placeholder="ghp_..." autocomplete="off" />
+          </div>
+          <div class="row">
+            <label for="github-owner">Default GitHub Owner</label>
+            <input id="github-owner" type="text" placeholder="your-username-or-org" autocomplete="off" />
+          </div>
+          <div class="actions">
+            <button id="save-linus-btn">Save Linus config</button>
+            <p id="linus-status" class="status"></p>
+          </div>
+        </div>
+      </div>
+
       <div id="personality-panel" class="panel hidden">
         <div class="panel-heading">
           <div>
