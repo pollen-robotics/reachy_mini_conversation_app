@@ -217,12 +217,49 @@ On top of built-in tools found in the shared library, you can implement custom t
 Custom tools must subclass `reachy_mini_conversation_app.tools.core_tools.Tool` (see `profiles/example/sweep_look.py`).
 
 ### Edit personalities from the UI
-When running with `--gradio`, open the “Personality” accordion:
+When running with `--gradio`, open the "Personality" accordion:
 - Select among available profiles (folders under `src/reachy_mini_conversation_app/profiles/`) or the built‑in default.
-- Click “Apply” to update the current session instructions live.
+- Click "Apply" to update the current session instructions live.
 - Create a new personality by entering a name and instructions text; it stores files under `profiles/<name>/` and copies `tools.txt` from the `default` profile.
 
-Note: The “Personality” panel updates the conversation instructions. Tool sets are loaded at startup from `tools.txt` and are not hot‑reloaded.
+Note: The "Personality" panel updates the conversation instructions. Tool sets are loaded at startup from `tools.txt` and are not hot‑reloaded.
+
+## Linus Developer Profile
+
+The `linus` profile transforms Reachy Mini into a developer assistant that can generate and execute code, and interact with GitHub.
+
+### Setup
+
+1. Set the profile in your `.env`:
+   ```bash
+   REACHY_MINI_CUSTOM_PROFILE=linus
+   ```
+
+2. Configure the required API keys:
+   ```bash
+   ANTHROPIC_API_KEY=your_anthropic_api_key
+   GITHUB_TOKEN=your_github_token  # Optional, for GitHub features
+   ```
+
+### Developer Tools
+
+| Tool | Description | Confirmation Required |
+|------|-------------|----------------------|
+| `code` | Generate code using Claude API. Saves to `~/reachy_code/`. | No |
+| `execute_code` | Execute generated Python/Shell scripts. | Yes |
+| `github_issue` | Create issues on GitHub repositories. | No |
+| `github_pr_comment` | Comment on pull requests. | No |
+| `github_clone` | Clone repositories to `~/reachy_repos/`. | No |
+| `github_pull` | Pull latest changes from remote. | No |
+| `github_push` | Push local commits to remote. | Yes |
+
+### Example Usage
+
+Ask Linus to:
+- "Write a Python script that calculates Fibonacci numbers"
+- "Create an issue on my-repo about the login bug"
+- "Clone the reachy_mini repository"
+- "Comment on PR #42 with my review"
 
 
 ## Development workflow
