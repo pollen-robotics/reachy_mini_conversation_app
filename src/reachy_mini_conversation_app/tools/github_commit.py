@@ -40,6 +40,7 @@ class GitHubCommitTool(Tool):
         "Commit staged changes in a local repository using semantic-release format. "
         "Use github_add to stage files and github_rm to remove files BEFORE calling this tool. "
         "Supports auto-generating commit messages using OpenAI based on diff analysis. "
+        "Use amend=true to modify the last commit (add staged changes and/or change message). "
         "IMPORTANT: Always ask user for confirmation before calling this tool. "
         "Commit types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert."
     )
@@ -82,6 +83,10 @@ class GitHubCommitTool(Tool):
             "confirmed": {
                 "type": "boolean",
                 "description": "Must be true to confirm commit. Always ask user first.",
+            },
+            "amend": {
+                "type": "boolean",
+                "description": "If true, amend the last commit instead of creating a new one. WARNING: Do not amend commits that have been pushed to remote.",
             },
         },
         "required": ["repo", "confirmed"],
@@ -202,8 +207,9 @@ Example response:
         auto_message = kwargs.get("auto_message", False)
         issue_context = kwargs.get("issue_context")
         confirmed = kwargs.get("confirmed", False)
+        amend = kwargs.get("amend", False)
 
-        logger.info(f"Tool call: github_commit - repo='{repo_name}', type={commit_type}, auto={auto_message}")
+        logger.info(f"Tool call: github_commit - repo='{repo_name}', type={commit_type}, auto={auto_message}, amend={amend}")
 
         # Check confirmation
         if not confirmed:
@@ -252,12 +258,20 @@ Example response:
             staged_output = repo.git.diff("--cached", "--name-only")
             staged_files = [f for f in staged_output.strip().split("\n") if f]
 
-            if not staged_files:
+            # For amend, we can proceed even without staged files (to change the message)
+            if not staged_files and not amend:
                 return {
                     "status": "nothing_to_commit",
                     "message": "No staged changes to commit.",
                     "hint": "Use github_add to stage files first, or github_rm to stage deletions.",
                 }
+
+            # For amend, check that there's a commit to amend
+            if amend:
+                try:
+                    last_commit = repo.head.commit
+                except ValueError:
+                    return {"error": "No commits in repository. Cannot amend."}
 
             # Auto-generate commit message if requested
             if auto_message:
@@ -290,20 +304,33 @@ Example response:
                 breaking=breaking,
             )
 
-            # Create commit
-            commit = repo.index.commit(commit_msg)
-            commit_hash = commit.hexsha[:7]
+            # Create commit or amend
+            if amend:
+                # Use git command directly for amend
+                repo.git.commit("--amend", "-m", commit_msg)
+                commit = repo.head.commit
+                commit_hash = commit.hexsha[:7]
+                action = "amended"
+            else:
+                commit = repo.index.commit(commit_msg)
+                commit_hash = commit.hexsha[:7]
+                action = "created"
 
-            result = {
+            result: Dict[str, Any] = {
                 "status": "success",
-                "message": "Commit created successfully!",
+                "message": f"Commit {action} successfully!",
                 "repo": local_name,
                 "commit_hash": commit_hash,
                 "commit_type": commit_type,
                 "commit_message": commit_msg.split("\n")[0],
-                "files_committed": staged_files,
                 "hint": "Use github_push to push this commit to remote.",
             }
+
+            if staged_files:
+                result["files_committed"] = staged_files
+
+            if amend:
+                result["amended"] = True
 
             if auto_message:
                 result["auto_generated"] = True
