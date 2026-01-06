@@ -114,20 +114,25 @@ class GitHubPushTool(Tool):
             # Check if there are commits to push
             origin = repo.remotes.origin
 
-            # Fetch to compare with remote
-            origin.fetch()
-
-            # Check if ahead of remote
+            # Check if branch has a tracking branch (upstream)
             tracking_branch = repo.active_branch.tracking_branch()
-            if tracking_branch:
-                commits_ahead = list(repo.iter_commits(f"{tracking_branch.name}..HEAD"))
-                if not commits_ahead:
-                    return {
-                        "status": "nothing_to_push",
-                        "message": "No local commits to push.",
-                        "path": str(repo_path),
-                        "branch": current_branch,
-                    }
+            needs_upstream = tracking_branch is None
+
+            if not needs_upstream:
+                # Fetch to compare with remote
+                try:
+                    origin.fetch()
+                    commits_ahead = list(repo.iter_commits(f"{tracking_branch.name}..HEAD"))
+                    if not commits_ahead:
+                        return {
+                            "status": "nothing_to_push",
+                            "message": "No local commits to push.",
+                            "path": str(repo_path),
+                            "branch": current_branch,
+                        }
+                except GitCommandError:
+                    # Remote branch might not exist yet
+                    needs_upstream = True
 
             # Get authenticated URL and temporarily set it
             auth_url = self._get_authenticated_url(repo)
@@ -138,8 +143,12 @@ class GitHubPushTool(Tool):
                 origin.set_url(auth_url)
 
             try:
-                # Push to remote
-                push_info = origin.push()
+                # Push to remote (with --set-upstream if needed)
+                if needs_upstream:
+                    # Push with upstream tracking for new branches
+                    push_info = origin.push(refspec=f"{current_branch}:{current_branch}", set_upstream=True)
+                else:
+                    push_info = origin.push()
 
                 # Check push result
                 if push_info:
@@ -155,12 +164,18 @@ class GitHubPushTool(Tool):
                             "hint": "Use github_pull first to get the latest changes.",
                         }
 
-                return {
+                result = {
                     "status": "success",
                     "message": "Changes pushed successfully!",
                     "path": str(repo_path),
                     "branch": current_branch,
                 }
+
+                if needs_upstream:
+                    result["upstream_set"] = True
+                    result["message"] = f"Branch '{current_branch}' pushed and upstream set!"
+
+                return result
 
             finally:
                 # Restore original URL

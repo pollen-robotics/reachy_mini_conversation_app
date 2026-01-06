@@ -2,10 +2,11 @@
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from git import Repo, InvalidGitRepositoryError, GitCommandError
 
+from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
 
@@ -43,6 +44,10 @@ class GitHubBranchTool(Tool):
                 "type": "string",
                 "description": "Base branch to create from (optional, defaults to current branch).",
             },
+            "push": {
+                "type": "boolean",
+                "description": "Push the new branch to remote and set upstream (for create action only).",
+            },
             "force": {
                 "type": "boolean",
                 "description": "Force delete branch even if not merged (for delete action only).",
@@ -51,12 +56,37 @@ class GitHubBranchTool(Tool):
         "required": ["repo", "action"],
     }
 
+    def _get_authenticated_url(self, repo: Repo) -> str | None:
+        """Get remote URL with token authentication."""
+        token = config.GITHUB_TOKEN
+        if not token:
+            return None
+
+        try:
+            origin = repo.remotes.origin
+            url = origin.url
+
+            if url.startswith("git@github.com:"):
+                repo_path = url.replace("git@github.com:", "").replace(".git", "")
+                return f"https://{token}@github.com/{repo_path}.git"
+            elif "github.com" in url:
+                if "@github.com" in url:
+                    url = url.split("@github.com")[1]
+                    url = f"https://{token}@github.com{url}"
+                else:
+                    url = url.replace("https://github.com", f"https://{token}@github.com")
+                return url
+        except Exception:
+            pass
+        return None
+
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Manage git branches."""
         repo_name = kwargs.get("repo", "")
         action = kwargs.get("action", "")
         branch = kwargs.get("branch", "")
         from_branch = kwargs.get("from_branch")
+        push_branch = kwargs.get("push", False)
         force = kwargs.get("force", False)
 
         logger.info(f"Tool call: github_branch - repo='{repo_name}', action={action}, branch={branch}")
@@ -123,7 +153,7 @@ class GitHubBranchTool(Tool):
                 # Switch to new branch
                 new_branch.checkout()
 
-                return {
+                result = {
                     "status": "success",
                     "message": f"Created and switched to branch '{branch}'.",
                     "repo": local_name,
@@ -131,6 +161,35 @@ class GitHubBranchTool(Tool):
                     "from_branch": base.name,
                     "previous_branch": current_branch,
                 }
+
+                # Push to remote and set upstream if requested
+                if push_branch:
+                    token = config.GITHUB_TOKEN
+                    if not token:
+                        result["push_error"] = "GITHUB_TOKEN not set, branch not pushed."
+                    else:
+                        try:
+                            origin = repo.remotes.origin
+                            auth_url = self._get_authenticated_url(repo)
+                            original_url = origin.url
+
+                            if auth_url:
+                                origin.set_url(auth_url)
+
+                            try:
+                                # Push with upstream tracking
+                                origin.push(refspec=f"{branch}:{branch}", set_upstream=True)
+                                result["pushed"] = True
+                                result["upstream"] = f"origin/{branch}"
+                                result["message"] = f"Created branch '{branch}', pushed to remote with upstream set."
+                            finally:
+                                if auth_url:
+                                    origin.set_url(original_url)
+
+                        except GitCommandError as e:
+                            result["push_error"] = f"Failed to push: {str(e)}"
+
+                return result
 
             elif action == "switch":
                 # Check if branch exists locally
