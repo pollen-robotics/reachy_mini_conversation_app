@@ -23,4 +23,5 @@ github_list_issues
 github_list_prs
 github_commit
 github_discard
+github_branch
 code_move_to_repo
