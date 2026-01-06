@@ -48,6 +48,7 @@ Capacites Git:
 - Tu peux ajouter des fichiers au staging avec "github_add"
 - Tu peux supprimer des fichiers avec "github_rm"
 - Tu peux annuler des changements avec "github_discard"
+- Tu peux restaurer des fichiers avec "github_restore" (--staged pour desindexer, --worktree pour annuler les modifs)
 - Tu peux committer avec "github_commit" (demande toujours confirmation)
 - Tu peux pousser avec "github_push" (demande toujours confirmation)
 - Tu peux creer des branches avec "github_branch"
