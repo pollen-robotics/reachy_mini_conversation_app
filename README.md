@@ -244,15 +244,85 @@ The `linus` profile transforms Reachy Mini into a developer assistant that can g
 
 ### Developer Tools
 
+#### Code Generation & Execution
+
 | Tool | Description | Confirmation Required |
 |------|-------------|----------------------|
 | `code` | Generate code using Claude API. Saves to `~/reachy_code/`. | No |
 | `execute_code` | Execute generated Python/Shell scripts. | Yes |
-| `github_issue` | Create issues on GitHub repositories. | No |
-| `github_pr_comment` | Comment on pull requests. | No |
+| `code_move_to_repo` | Move generated code from `~/reachy_code/` to a repository. | No |
+
+#### Repository Management
+
+| Tool | Description | Confirmation Required |
+|------|-------------|----------------------|
 | `github_clone` | Clone repositories to `~/reachy_repos/`. | No |
 | `github_pull` | Pull latest changes from remote. | No |
 | `github_push` | Push local commits to remote. | Yes |
+| `github_list_repos` | List all locally cloned repositories. | No |
+| `github_exec` | Execute whitelisted commands (npm, pytest, ruff, etc.) in a repo. | No |
+
+#### File Operations
+
+| Tool | Description | Confirmation Required |
+|------|-------------|----------------------|
+| `github_list_files` | List files and directories in a repository. | No |
+| `github_read_file` | Read file content with optional AI analysis (Claude/OpenAI). | No |
+| `github_write_file` | Create or modify files in a repository. | No |
+
+#### Git Status & History
+
+| Tool | Description | Confirmation Required |
+|------|-------------|----------------------|
+| `github_status` | Show repository status (staged, modified, untracked files). | No |
+| `github_diff` | Show file differences (staged, unstaged, between commits). | No |
+| `github_log` | Show commit history with filters (author, date, branch). | No |
+
+#### Staging & Commits
+
+| Tool | Description | Confirmation Required |
+|------|-------------|----------------------|
+| `github_add` | Stage files for commit (git add). | No |
+| `github_rm` | Remove files from repository. | Yes |
+| `github_restore` | Restore files (unstage or discard changes). | Yes (for worktree) |
+| `github_discard` | Discard unstaged changes. | Yes |
+| `github_commit` | Commit staged changes with semantic-release format. Supports auto-generated messages using Claude or OpenAI. | Yes |
+
+#### Branch Management
+
+| Tool | Description | Confirmation Required |
+|------|-------------|----------------------|
+| `github_branch` | Create, switch, list, or delete branches. | No |
+| `github_reset` | Reset commits (soft, mixed, hard modes). | Yes (for hard) |
+| `github_rebase` | Rebase current branch onto another. | Yes |
+
+#### GitHub Issues
+
+| Tool | Description | Confirmation Required |
+|------|-------------|----------------------|
+| `github_issue` | Create issues on GitHub repositories. | No |
+| `github_list_issues` | List issues with filters (state, labels). | No |
+| `github_update_issue` | Update issue title, body, or labels. | No |
+| `github_comment_issue` | Add a comment to an issue. | No |
+| `github_close_issue` | Close an issue. | No |
+
+#### GitHub Pull Requests
+
+| Tool | Description | Confirmation Required |
+|------|-------------|----------------------|
+| `github_create_pr` | Create a pull request. | Yes |
+| `github_list_prs` | List pull requests with filters. | No |
+| `github_update_pr` | Update PR title, body, or base branch. | No |
+| `github_comment_pr` | Add a comment to a pull request. | No |
+| `github_pr_comment` | Comment on pull requests (alias). | No |
+| `github_close_pr` | Close a pull request. | No |
+
+#### CI/CD Integration
+
+| Tool | Description | Confirmation Required |
+|------|-------------|----------------------|
+| `github_pr_checks` | Get CI check status and errors for a PR. | No |
+| `github_ci_logs` | Get GitHub Actions workflow logs. | No |
 
 ### Example Usage
 
@@ -261,6 +331,12 @@ Ask Linus to:
 - "Create an issue on my-repo about the login bug"
 - "Clone the reachy_mini repository"
 - "Comment on PR #42 with my review"
+- "Show me the git status of reachy_mini"
+- "Read and analyze the main.py file"
+- "Create a new branch called feature/new-api"
+- "Commit my changes with an auto-generated message"
+- "Check the CI status of PR #15"
+- "Rebase my branch onto main"
 
 
 ## Development workflow
