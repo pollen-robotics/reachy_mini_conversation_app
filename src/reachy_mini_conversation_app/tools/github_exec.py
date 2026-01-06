@@ -148,9 +148,13 @@ class GitHubExecTool(Tool):
             env = os.environ.copy()
             env.update(env_vars)
 
-            # Execute command
+            # Execute command with bash -l to load .bashrc/.profile
+            # Using bash -l -c to run as login shell (loads ~/.profile, ~/.bashrc)
+            escaped_command = command.replace("'", "'\"'\"'")
+            bash_command = f"bash -l -c '{escaped_command}'"
+
             process = await asyncio.create_subprocess_shell(
-                command,
+                bash_command,
                 cwd=str(repo_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
