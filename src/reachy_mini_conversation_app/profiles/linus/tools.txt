@@ -18,6 +18,7 @@ github_pull
 github_push
 github_status
 github_diff
+github_log
 github_list_files
 github_read_file
 github_list_repos
