@@ -33,4 +33,5 @@ github_close_pr
 github_comment_pr
 github_pr_checks
 github_ci_logs
+github_exec
 code_move_to_repo
