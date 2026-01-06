@@ -93,13 +93,14 @@ class CodeMoveToRepoTool(Tool):
         # Destination
         dest_full = repo_path / dest_path
 
-        # If dest_path is a directory, append the original filename
+        # If dest_path is an existing directory, append the original filename
         if dest_full.exists() and dest_full.is_dir():
             dest_full = dest_full / source_file.name
-        elif not dest_full.suffix:
-            # No extension, treat as directory
+        elif dest_path.endswith("/"):
+            # Explicit directory path (ends with /), create it and use original filename
             dest_full.mkdir(parents=True, exist_ok=True)
             dest_full = dest_full / source_file.name
+        # Otherwise treat dest_path as a file path (even without extension, e.g., .gitignore, Makefile)
 
         # Validate destination is within repo
         try:
