@@ -16,15 +16,17 @@ from reachy_mini_conversation_app.config import config  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
-
-PROFILES_DIRECTORY = "reachy_mini_conversation_app.profiles"
-
-if not logger.handlers:
+# Configure the parent logger for all tools so that logs propagate correctly
+_tools_logger = logging.getLogger("reachy_mini_conversation_app.tools")
+if not _tools_logger.handlers:
     handler = logging.StreamHandler()
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s:%(lineno)d | %(message)s")
     handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
+    _tools_logger.addHandler(handler)
+    _tools_logger.setLevel(logging.DEBUG)
+
+
+PROFILES_DIRECTORY = "reachy_mini_conversation_app.profiles"
 
 
 ALL_TOOLS: Dict[str, "Tool"] = {}
