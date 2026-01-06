@@ -22,6 +22,7 @@ github_log
 github_list_files
 github_read_file
 github_write_file
+github_edit_file
 github_list_repos
 github_list_issues
 github_list_prs

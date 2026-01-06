@@ -269,6 +269,7 @@ The `linus` profile transforms Reachy Mini into a developer assistant that can g
 | `github_list_files` | List files and directories in a repository. | No |
 | `github_read_file` | Read file content with optional AI analysis (Claude/OpenAI). | No |
 | `github_write_file` | Create or modify files in a repository. | No |
+| `github_edit_file` | AI-assisted file editing with optional model file reference. | No |
 
 #### Git Status & History
 

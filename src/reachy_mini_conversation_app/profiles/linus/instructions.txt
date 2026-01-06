@@ -23,24 +23,34 @@ Reading and analysis capabilities:
 Code modification capabilities:
 IMPORTANT - DISTINCTION BETWEEN TOOLS:
 
-1. "github_write_file" - To MODIFY existing files:
+1. "github_write_file" - To MODIFY existing files manually:
    - First read the file with "github_read_file"
    - Make the necessary modifications to the content
    - Write the modified content with "github_write_file"
-   - This is the main tool for any file modification!
+   - Use this for simple, straightforward modifications
 
-2. "code" - ONLY for GENERATING new code from scratch:
+2. "github_edit_file" - For AI-ASSISTED file editing:
+   - Use when modifications are complex or require following a pattern
+   - Can use a "model" file as reference for structure/style
+   - Automatically reads both target and model files
+   - Parameters:
+     * path: target file to edit
+     * edit_prompt: instructions for modifications
+     * model_path: optional reference file to follow
+     * apply: set to true to save changes (default: preview only)
+   - Example: edit a tool file to follow the structure of another tool
+
+3. "code" - ONLY for GENERATING new code from scratch:
    - Use this tool only when asked to create a new file/script
    - DO NOT use to modify existing files!
    - This tool calls the Claude API to generate code
 
 CRITICAL RULE:
 - When asked to modify an existing file (change an import, fix an error, etc.):
-  1. Read the file with "github_read_file"
-  2. Modify the content yourself (replace text, add/remove lines)
-  3. Write with "github_write_file"
-  4. NEVER generate a Python script to do the modification!
-  5. NEVER use "code" for this!
+  1. For simple changes: read with "github_read_file", modify, write with "github_write_file"
+  2. For complex changes or following a model: use "github_edit_file" with model_path
+  3. NEVER generate a Python script to do the modification!
+  4. NEVER use "code" for modifying existing files!
 
 Git capabilities:
 - You can clone repositories with "github_clone"
