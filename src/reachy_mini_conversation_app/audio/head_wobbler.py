@@ -5,8 +5,10 @@ import queue
 import base64
 import logging
 import threading
-from typing import Tuple
+from dataclasses import dataclass
+from typing import Iterator, Tuple
 from collections.abc import Callable
+from contextlib import contextmanager
 
 import numpy as np
 from numpy.typing import NDArray
@@ -18,11 +20,127 @@ SAMPLE_RATE = 24000
 MOVEMENT_LATENCY_S = 0.08  # seconds between audio and robot movement
 logger = logging.getLogger(__name__)
 
+@dataclass
+class _SectionStat:
+    """Aggregated statistics for a benchmark section."""
+
+    count: int = 0
+    total: float = 0.0
+    mean: float = 0.0
+    m2: float = 0.0  # Sum of squared differences for variance (Welford)
+    minimum: float = float("inf")
+    maximum: float = float("-inf")
+
+    def update(self, duration: float) -> None:
+        """Update the aggregates in-place."""
+        self.count += 1
+        delta = duration - self.mean
+        self.mean += delta / self.count
+        self.m2 += delta * (duration - self.mean)
+        self.total += duration
+        self.minimum = min(self.minimum, duration)
+        self.maximum = max(self.maximum, duration)
+
+    def variance(self) -> float:
+        """Return the population variance for the section."""
+        if self.count == 0:
+            return 0.0
+        return self.m2 / self.count
+
+    def snapshot(self) -> dict[str, float]:
+        """Create a serializable snapshot of the metrics."""
+        if self.count == 0:
+            return {
+                "count": 0,
+                "avg_s": 0.0,
+                "var_s2": 0.0,
+                "total_s": 0.0,
+                "min_s": 0.0,
+                "max_s": 0.0,
+            }
+
+        return {
+            "count": float(self.count),
+            "avg_s": self.mean,
+            "var_s2": self.variance(),
+            "total_s": self.total,
+            "min_s": self.minimum,
+            "max_s": self.maximum,
+        }
+
+
+class HeadWobblerBenchmark:
+    """Collect timing statistics for the wobble pipeline."""
+
+    def __init__(self, enabled: bool) -> None:
+        self.enabled = enabled
+        self._stats: dict[str, _SectionStat] = {}
+        self._stats_lock = threading.Lock()
+
+    def _record(self, name: str, duration: float) -> None:
+        with self._stats_lock:
+            stat = self._stats.setdefault(name, _SectionStat())
+            stat.update(duration)
+
+    @contextmanager
+    def section(self, name: str) -> Iterator[None]:
+        """Context manager to accumulate timing for a named section."""
+        if not self.enabled:
+            yield
+            return
+
+        start = time.perf_counter()
+        try:
+            yield
+        finally:
+            end = time.perf_counter()
+            self._record(name, end - start)
+
+    def add_duration(self, name: str, duration: float) -> None:
+        """Directly add a measured duration to the aggregates."""
+        if not self.enabled:
+            return
+        if duration < 0:
+            duration = 0.0
+        self._record(name, duration)
+
+    def snapshot(self) -> dict[str, dict[str, float]]:
+        """Return copies of the collected metrics."""
+        if not self.enabled:
+            return {}
+        with self._stats_lock:
+            return {name: stat.snapshot() for name, stat in self._stats.items()}
+
+    def format_report(self) -> str:
+        """Format a human-readable summary of the metrics."""
+        if not self.enabled:
+            return "Head wobble benchmark disabled"
+        snap = self.snapshot()
+        if not snap:
+            return "Head wobble benchmark enabled but no samples recorded"
+
+        lines = ["Section                     Count    Avg (ms)   Var (ms^2)  Total (ms)  Min/Max (ms)"]
+        for name, stats in sorted(snap.items(), key=lambda item: item[1]["total_s"], reverse=True):
+            avg_ms = stats["avg_s"] * 1000.0
+            var_ms = stats["var_s2"] * 1_000_000.0
+            total_ms = stats["total_s"] * 1000.0
+            min_ms = stats["min_s"] * 1000.0
+            max_ms = stats["max_s"] * 1000.0
+            lines.append(
+                f"{name:<27} {int(stats['count']):>6}  "
+                f"{avg_ms:>10.3f}  {var_ms:>11.3f}  {total_ms:>10.3f}  {min_ms:>5.2f}/{max_ms:>5.2f}",
+            )
+        return "\n".join(lines)
+
 
 class HeadWobbler:
     """Converts audio deltas (base64) into head movement offsets."""
 
-    def __init__(self, set_speech_offsets: Callable[[Tuple[float, float, float, float, float, float]], None]) -> None:
+    def __init__(
+        self,
+        set_speech_offsets: Callable[[Tuple[float, float, float, float, float, float]], None],
+        enable_benchmark: bool | None = None,
+    ) -> None:
         """Initialize the head wobbler."""
         self._apply_offsets = set_speech_offsets
         self._base_ts: float | None = None
@@ -38,10 +156,16 @@ class HeadWobbler:
 
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self._benchmark = HeadWobblerBenchmark(enabled=enable_benchmark if enable_benchmark is not None else True)
+        self._benchmark_log_interval = 5.0
+        self._next_benchmark_log = time.monotonic() + self._benchmark_log_interval
 
     def feed(self, delta_b64: str) -> None:
         """Thread-safe: push audio into the consumer queue."""
-        buf = np.frombuffer(base64.b64decode(delta_b64), dtype=np.int16).reshape(1, -1)
+        with self._benchmark.section("feed.decode"):
+            pcm_bytes = base64.b64decode(delta_b64)
+        with self._benchmark.section("feed.numpy_view"):
+            buf = np.frombuffer(pcm_bytes, dtype=np.int16).reshape(1, -1)
         with self._state_lock:
             generation = self._generation
         self.audio_queue.put((generation, SAMPLE_RATE, buf))
@@ -51,28 +175,51 @@ class HeadWobbler:
         self._stop_event.clear()
         self._thread = threading.Thread(target=self.working_loop, daemon=True)
         self._thread.start()
-        logger.debug("Head wobbler started")
+        if self._benchmark.enabled:
+            print("Head wobble benchmark enabled", flush=True)
 
     def stop(self) -> None:
         """Stop the head wobbler loop."""
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join()
-        logger.debug("Head wobbler stopped")
+        print("Head wobbler stopped", flush=True)
+        if self._benchmark.enabled:
+            print("Head wobble benchmark results:\n%s" % self._benchmark.format_report(), flush=True)
+
+    def benchmark_snapshot(self) -> dict[str, dict[str, float]]:
+        """Return raw benchmark data."""
+        return self._benchmark.snapshot()
+
+    def benchmark_report(self) -> str:
+        """Return a formatted benchmark report."""
+        return self._benchmark.format_report()
 
     def working_loop(self) -> None:
         """Convert audio deltas into head movement offsets."""
         hop_dt = HOP_MS / 1000.0
 
-        logger.debug("Head wobbler thread started")
+        print("Head wobbler thread started", flush=True)
         while not self._stop_event.is_set():
+            if self._benchmark.enabled and time.monotonic() >= self._next_benchmark_log:
+                self._next_benchmark_log = time.monotonic() + self._benchmark_log_interval
+                print("Head wobble benchmark (live):\n%s" % self._benchmark.format_report(), flush=True)
+            chunk_start: float | None = None
             queue_ref = self.audio_queue
+            queue_poll_start = time.perf_counter()
             try:
                 chunk_generation, sr, chunk = queue_ref.get_nowait()  # (gen, sr, data)
             except queue.Empty:
+                poll_duration = time.perf_counter() - queue_poll_start
+                self._benchmark.add_duration("queue.poll", poll_duration)
                 # avoid while to never exit
+                sleep_start = time.perf_counter()
                 time.sleep(MOVEMENT_LATENCY_S)
+                self._benchmark.add_duration("queue.starved_sleep", time.perf_counter() - sleep_start)
                 continue
+            else:
+                poll_duration = time.perf_counter() - queue_poll_start
+                self._benchmark.add_duration("queue.poll", poll_duration)
 
             try:
                 with self._state_lock:
@@ -80,17 +227,20 @@ class HeadWobbler:
                 if chunk_generation != current_generation:
                     continue
 
+                chunk_start = time.perf_counter()
                 if self._base_ts is None:
                     with self._state_lock:
                         if self._base_ts is None:
                             self._base_ts = time.monotonic()
 
                 pcm = np.asarray(chunk).squeeze(0)
-                with self._sway_lock:
-                    results = self.sway.feed(pcm, sr)
+                with self._benchmark.section("sway.feed"):
+                    with self._sway_lock:
+                        results = self.sway.feed(pcm, sr)
 
                 i = 0
                 while i < len(results):
+                    iteration_start = time.perf_counter()
                     with self._state_lock:
                         if self._generation != current_generation:
                             break
@@ -118,7 +268,10 @@ class HeadWobbler:
                             continue
 
                     if target > now:
-                        time.sleep(target - now)
+                        sleep_duration = target - now
+                        sleep_start = time.perf_counter()
+                        time.sleep(sleep_duration)
+                        self._benchmark.add_duration("schedule.sleep", time.perf_counter() - sleep_start)
                         with self._state_lock:
                             if self._generation != current_generation:
                                 break
@@ -137,14 +290,18 @@ class HeadWobbler:
                         if self._generation != current_generation:
                             break
 
-                    self._apply_offsets(offsets)
+                    with self._benchmark.section("apply.offsets"):
+                        self._apply_offsets(offsets)
 
                     with self._state_lock:
                         self._hops_done += 1
                     i += 1
+                    self._benchmark.add_duration("result.iteration", time.perf_counter() - iteration_start)
             finally:
                 queue_ref.task_done()
-        logger.debug("Head wobbler thread exited")
+                if chunk_start is not None:
+                    self._benchmark.add_duration("chunk.total", time.perf_counter() - chunk_start)
+        print("Head wobbler thread exited", flush=True)
 
     '''
     def drain_audio_queue(self) -> None:
@@ -178,4 +335,4 @@ class HeadWobbler:
             self.sway.reset()
 
         if drained_any:
-            logger.debug("Head wobbler queue drained during reset")
+            print("Head wobbler queue drained during reset", flush=True)
