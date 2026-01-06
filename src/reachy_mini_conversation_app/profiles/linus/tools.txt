@@ -16,3 +16,5 @@ github_pr_comment
 github_clone
 github_pull
 github_push
+github_list_files
+github_read_file
