@@ -16,6 +16,8 @@ github_pr_comment
 github_clone
 github_pull
 github_push
+github_status
+github_diff
 github_list_files
 github_read_file
 github_list_repos
