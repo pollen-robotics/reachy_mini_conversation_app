@@ -3,7 +3,6 @@
 import time
 import queue
 import base64
-import logging
 import threading
 from dataclasses import dataclass
 from typing import Iterator, Tuple
@@ -18,7 +17,6 @@ from reachy_mini_conversation_app.audio.speech_tapper import HOP_MS, SwayRollRT
 
 SAMPLE_RATE = 24000
 MOVEMENT_LATENCY_S = 0.08  # seconds between audio and robot movement
-logger = logging.getLogger(__name__)
 
 @dataclass
 class _SectionStat:
@@ -119,16 +117,21 @@ class HeadWobblerBenchmark:
         if not snap:
             return "Head wobble benchmark enabled but no samples recorded"
 
-        lines = ["Section                     Count    Avg (ms)   Var (ms^2)  Total (ms)  Min/Max (ms)"]
+        total_sum = sum(section["total_s"] for section in snap.values())
+        lines = ["Section                     Count    Avg (ms)   Var (ms^2)  Total (ms)   %Total  Min/Max (ms)"]
         for name, stats in sorted(snap.items(), key=lambda item: item[1]["total_s"], reverse=True):
             avg_ms = stats["avg_s"] * 1000.0
             var_ms = stats["var_s2"] * 1_000_000.0
             total_ms = stats["total_s"] * 1000.0
             min_ms = stats["min_s"] * 1000.0
             max_ms = stats["max_s"] * 1000.0
+            pct = (stats["total_s"] / total_sum * 100.0) if total_sum else 0.0
+            indent = "  " * name.count(".")
+            section_name = f"{indent}{name}"
             lines.append(
-                f"{name:<27} {int(stats['count']):>6}  "
-                f"{avg_ms:>10.3f}  {var_ms:>11.3f}  {total_ms:>10.3f}  {min_ms:>5.2f}/{max_ms:>5.2f}",
+                f"{section_name:<27} {int(stats['count']):>6}  "
+                f"{avg_ms:>10.3f}  {var_ms:>11.3f}  {total_ms:>10.3f}  "
+                f"{pct:>6.2f}%  {min_ms:>5.2f}/{max_ms:>5.2f}",
             )
         return "\n".join(lines)
 
@@ -159,6 +162,16 @@ class HeadWobbler:
         self._benchmark = HeadWobblerBenchmark(enabled=enable_benchmark if enable_benchmark is not None else True)
         self._benchmark_log_interval = 5.0
         self._next_benchmark_log = time.monotonic() + self._benchmark_log_interval
+        self._realtime_audio_total = 0.0
+        self._realtime_compute_total = 0.0
+        self._realtime_max_ratio = 0.0
+        self._realtime_overruns = 0
+        self._realtime_chunks = 0
+        self._realtime_slack_total = 0.0
+        self._realtime_deficit_total = 0.0
+        self._realtime_worst_slack = 0.0
+        self._realtime_worst_deficit = 0.0
+        self._realtime_lock = threading.Lock()
 
     def feed(self, delta_b64: str) -> None:
         """Thread-safe: push audio into the consumer queue."""
@@ -185,7 +198,7 @@ class HeadWobbler:
             self._thread.join()
         print("Head wobbler stopped", flush=True)
         if self._benchmark.enabled:
-            print("Head wobble benchmark results:\n%s" % self._benchmark.format_report(), flush=True)
+            print("Head wobble benchmark results:\n%s" % self.benchmark_report(), flush=True)
 
     def benchmark_snapshot(self) -> dict[str, dict[str, float]]:
         """Return raw benchmark data."""
@@ -193,7 +206,52 @@ class HeadWobbler:
 
     def benchmark_report(self) -> str:
         """Return a formatted benchmark report."""
-        return self._benchmark.format_report()
+        base_report = self._benchmark.format_report()
+        status_line = self._realtime_status_line()
+        if status_line:
+            return f"{base_report}\n{status_line}"
+        return base_report
+
+    def _realtime_snapshot(self) -> dict[str, float]:
+        with self._realtime_lock:
+            return {
+                "audio_s": self._realtime_audio_total,
+                "compute_s": self._realtime_compute_total,
+                "max_ratio": self._realtime_max_ratio,
+                "chunks": float(self._realtime_chunks),
+                "overruns": float(self._realtime_overruns),
+                "slack_s": self._realtime_slack_total,
+                "deficit_s": self._realtime_deficit_total,
+                "worst_slack_s": self._realtime_worst_slack,
+                "worst_deficit_s": self._realtime_worst_deficit,
+            }
+
+    def _realtime_status_line(self) -> str:
+        snap = self._realtime_snapshot()
+        chunks = int(snap["chunks"])
+        audio = snap["audio_s"]
+        compute = snap["compute_s"]
+        if chunks == 0 or audio <= 0.0:
+            return ""
+        avg_ratio = compute / audio
+        max_ratio = snap["max_ratio"]
+        overruns = int(snap["overruns"])
+        status = "PASS" if avg_ratio <= 1.0 and max_ratio <= 1.1 else "WARN"
+        detail = (
+            f"avg utilization {avg_ratio * 100.0:.1f}%, "
+            f"peak {max_ratio * 100.0:.1f}%, chunks={chunks}"
+        )
+        if overruns:
+            detail += f", overruns={overruns}"
+        if snap["slack_s"] > 0:
+            avg_slack = (snap["slack_s"] / chunks) * 1000.0
+            detail += f", avg slack {avg_slack:.2f}ms"
+            detail += f", peak slack {snap['worst_slack_s'] * 1000.0:.2f}ms"
+        if snap["deficit_s"] > 0:
+            avg_deficit = (snap["deficit_s"] / overruns) * 1000.0 if overruns else snap["deficit_s"] * 1000.0
+            detail += f", avg deficit {avg_deficit:.2f}ms"
+            detail += f", worst deficit {snap['worst_deficit_s'] * 1000.0:.2f}ms"
+        return f"Realtime status: {status} ({detail})"
 
     def working_loop(self) -> None:
         """Convert audio deltas into head movement offsets."""
@@ -203,8 +261,9 @@ class HeadWobbler:
         while not self._stop_event.is_set():
             if self._benchmark.enabled and time.monotonic() >= self._next_benchmark_log:
                 self._next_benchmark_log = time.monotonic() + self._benchmark_log_interval
-                print("Head wobble benchmark (live):\n%s" % self._benchmark.format_report(), flush=True)
+                print("Head wobble benchmark (live):\n%s" % self.benchmark_report(), flush=True)
             chunk_start: float | None = None
+            chunk_audio_span = 0.0
             queue_ref = self.audio_queue
             queue_poll_start = time.perf_counter()
             try:
@@ -215,7 +274,6 @@ class HeadWobbler:
                 # avoid while to never exit
                 sleep_start = time.perf_counter()
                 time.sleep(MOVEMENT_LATENCY_S)
-                self._benchmark.add_duration("queue.starved_sleep", time.perf_counter() - sleep_start)
                 continue
             else:
                 poll_duration = time.perf_counter() - queue_poll_start
@@ -234,6 +292,7 @@ class HeadWobbler:
                             self._base_ts = time.monotonic()
 
                 pcm = np.asarray(chunk).squeeze(0)
+                chunk_audio_span = float(pcm.shape[-1]) / float(sr) if sr > 0 else 0.0
                 with self._benchmark.section("sway.feed"):
                     with self._sway_lock:
                         results = self.sway.feed(pcm, sr)
@@ -300,7 +359,25 @@ class HeadWobbler:
             finally:
                 queue_ref.task_done()
                 if chunk_start is not None:
-                    self._benchmark.add_duration("chunk.total", time.perf_counter() - chunk_start)
+                    chunk_duration = time.perf_counter() - chunk_start
+                    self._benchmark.add_duration("chunk.total", chunk_duration)
+                    if chunk_audio_span > 0:
+                        ratio = chunk_duration / chunk_audio_span if chunk_audio_span > 0 else 0.0
+                        with self._realtime_lock:
+                            self._realtime_audio_total += chunk_audio_span
+                            self._realtime_compute_total += chunk_duration
+                            self._realtime_chunks += 1
+                            self._realtime_max_ratio = max(self._realtime_max_ratio, ratio)
+                            if ratio > 1.0:
+                                self._realtime_overruns += 1
+                            diff = chunk_audio_span - chunk_duration
+                            if diff >= 0:
+                                self._realtime_slack_total += diff
+                                self._realtime_worst_slack = max(self._realtime_worst_slack, diff)
+                            else:
+                                deficit = -diff
+                                self._realtime_deficit_total += deficit
+                                self._realtime_worst_deficit = max(self._realtime_worst_deficit, deficit)
         print("Head wobbler thread exited", flush=True)
 
     '''
