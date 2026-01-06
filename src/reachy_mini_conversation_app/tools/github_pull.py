@@ -1,9 +1,10 @@
-"""GitHub pull tool."""
+"""GitHub pull tool using GitPython."""
 
-import subprocess
 import logging
 from pathlib import Path
 from typing import Any, Dict
+
+from git import Repo, InvalidGitRepositoryError, GitCommandError
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
@@ -34,7 +35,7 @@ class GitHubPullTool(Tool):
     }
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
-        """Pull latest changes from remote."""
+        """Pull latest changes from remote using GitPython."""
         repo_name = kwargs.get("repo", "")
 
         logger.info(f"Tool call: github_pull - repo='{repo_name}'")
@@ -52,44 +53,61 @@ class GitHubPullTool(Tool):
                 "hint": "Use github_clone to clone the repository first.",
             }
 
-        if not (repo_path / ".git").exists():
+        try:
+            # Open repository with GitPython
+            repo = Repo(repo_path)
+        except InvalidGitRepositoryError:
             return {"error": f"'{repo_path}' is not a git repository."}
 
         try:
-            result = subprocess.run(
-                ["git", "pull", "--ff-only"],
-                capture_output=True,
-                text=True,
-                timeout=60,
-                cwd=repo_path,
-            )
+            # Get current branch
+            current_branch = repo.active_branch.name
 
-            if result.returncode == 0:
-                output = result.stdout.strip()
-                if "Already up to date" in output:
+            # Pull with fast-forward only
+            origin = repo.remotes.origin
+            fetch_info = origin.pull(ff_only=True)
+
+            # Check if there were updates
+            if fetch_info:
+                # Get the first fetch info
+                info = fetch_info[0]
+                if info.flags & info.HEAD_UPTODATE:
                     return {
                         "status": "up_to_date",
                         "message": "Repository is already up to date.",
                         "path": str(repo_path),
+                        "branch": current_branch,
                     }
                 else:
                     return {
                         "status": "success",
                         "message": "Repository updated successfully!",
                         "path": str(repo_path),
-                        "details": output,
+                        "branch": current_branch,
+                        "commit": repo.head.commit.hexsha[:7],
                     }
             else:
-                error_msg = result.stderr.strip()
-                if "conflict" in error_msg.lower():
-                    return {
-                        "error": "Pull failed due to conflicts.",
-                        "hint": "Resolve conflicts manually or reset the repository.",
-                    }
-                return {"error": f"Pull failed: {error_msg}"}
+                return {
+                    "status": "up_to_date",
+                    "message": "Repository is already up to date.",
+                    "path": str(repo_path),
+                    "branch": current_branch,
+                }
 
-        except subprocess.TimeoutExpired:
-            return {"error": "Pull timed out."}
+        except GitCommandError as e:
+            error_msg = str(e)
+            if "conflict" in error_msg.lower():
+                return {
+                    "error": "Pull failed due to conflicts.",
+                    "hint": "Resolve conflicts manually or reset the repository.",
+                }
+            elif "diverged" in error_msg.lower() or "non-fast-forward" in error_msg.lower():
+                return {
+                    "error": "Pull failed: local and remote have diverged.",
+                    "hint": "You may need to merge or rebase manually.",
+                }
+            return {"error": f"Pull failed: {error_msg}"}
+
         except Exception as e:
             logger.exception(f"Error pulling repo: {e}")
             return {"error": f"Failed to pull: {str(e)}"}

@@ -29,6 +29,9 @@ dependencies = [
     #GitHub API (for Linus developer profile)
     "PyGithub>=2.1.0",
 
+    #Git operations (for Linus developer profile)
+    "GitPython>=3.1.0",
+
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",

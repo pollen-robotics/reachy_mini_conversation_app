@@ -116,6 +116,7 @@ Some wheels (e.g. PyTorch) are large and require compatible CUDA or CPU buildsâ€
 | `ANTHROPIC_MODEL` | Claude model to use (only used with `linus` profile, defaults to `claude-sonnet-4-20250514`).
 | `GITHUB_TOKEN` | GitHub Personal Access Token with `repo`, `issues`, `pull_requests` scopes (only used with `linus` profile).
 | `GITHUB_DEFAULT_OWNER` | Default GitHub owner/org for repository operations (optional, only used with `linus` profile).
+| `GITHUB_OWNER_EMAIL` | Email for git commits (optional, defaults to `<owner>@users.noreply.github.com`, only used with `linus` profile).
 
 ## Running the app
 

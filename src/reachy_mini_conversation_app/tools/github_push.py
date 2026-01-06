@@ -1,9 +1,10 @@
-"""GitHub push tool."""
+"""GitHub push tool using GitPython."""
 
-import subprocess
 import logging
 from pathlib import Path
 from typing import Any, Dict
+
+from git import Repo, InvalidGitRepositoryError, GitCommandError
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
@@ -39,8 +40,37 @@ class GitHubPushTool(Tool):
         "required": ["repo", "confirmed"],
     }
 
+    def _get_authenticated_url(self, repo: Repo) -> str | None:
+        """Get remote URL with token authentication."""
+        token = config.GITHUB_TOKEN
+        if not token:
+            return None
+
+        try:
+            origin = repo.remotes.origin
+            url = origin.url
+
+            # Convert SSH or HTTPS URL to authenticated HTTPS
+            if url.startswith("git@github.com:"):
+                # SSH format: git@github.com:owner/repo.git
+                repo_path = url.replace("git@github.com:", "").replace(".git", "")
+                return f"https://{token}@github.com/{repo_path}.git"
+            elif "github.com" in url:
+                # HTTPS format: https://github.com/owner/repo.git
+                # or already has token: https://token@github.com/owner/repo.git
+                if "@github.com" in url:
+                    # Remove existing credentials
+                    url = url.split("@github.com")[1]
+                    url = f"https://{token}@github.com{url}"
+                else:
+                    url = url.replace("https://github.com", f"https://{token}@github.com")
+                return url
+        except Exception:
+            pass
+        return None
+
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
-        """Push local commits to remote."""
+        """Push local commits to remote using GitPython."""
         repo_name = kwargs.get("repo", "")
         confirmed = kwargs.get("confirmed", False)
 
@@ -63,9 +93,6 @@ class GitHubPushTool(Tool):
         if not repo_path.exists():
             return {"error": f"Repository not found at {repo_path}"}
 
-        if not (repo_path / ".git").exists():
-            return {"error": f"'{repo_path}' is not a git repository."}
-
         # Check for token (needed for push)
         token = config.GITHUB_TOKEN
         if not token:
@@ -75,53 +102,89 @@ class GitHubPushTool(Tool):
             }
 
         try:
-            # First check if there are commits to push
-            status_result = subprocess.run(
-                ["git", "status", "-sb"],
-                capture_output=True,
-                text=True,
-                cwd=repo_path,
-            )
+            # Open repository with GitPython
+            repo = Repo(repo_path)
+        except InvalidGitRepositoryError:
+            return {"error": f"'{repo_path}' is not a git repository."}
 
-            if "ahead" not in status_result.stdout:
-                return {
-                    "status": "nothing_to_push",
-                    "message": "No local commits to push.",
-                    "path": str(repo_path),
-                }
+        try:
+            # Get current branch
+            current_branch = repo.active_branch.name
 
-            # Push changes
-            result = subprocess.run(
-                ["git", "push"],
-                capture_output=True,
-                text=True,
-                timeout=60,
-                cwd=repo_path,
-            )
+            # Check if there are commits to push
+            origin = repo.remotes.origin
 
-            if result.returncode == 0:
+            # Fetch to compare with remote
+            origin.fetch()
+
+            # Check if ahead of remote
+            tracking_branch = repo.active_branch.tracking_branch()
+            if tracking_branch:
+                commits_ahead = list(repo.iter_commits(f"{tracking_branch.name}..HEAD"))
+                if not commits_ahead:
+                    return {
+                        "status": "nothing_to_push",
+                        "message": "No local commits to push.",
+                        "path": str(repo_path),
+                        "branch": current_branch,
+                    }
+
+            # Get authenticated URL and temporarily set it
+            auth_url = self._get_authenticated_url(repo)
+            original_url = origin.url
+
+            if auth_url:
+                # Temporarily change remote URL to authenticated version
+                origin.set_url(auth_url)
+
+            try:
+                # Push to remote
+                push_info = origin.push()
+
+                # Check push result
+                if push_info:
+                    info = push_info[0]
+                    if info.flags & info.ERROR:
+                        error_msg = info.summary if hasattr(info, "summary") else "Push failed"
+                        if token:
+                            error_msg = error_msg.replace(token, "***")
+                        return {"error": f"Push failed: {error_msg}"}
+                    elif info.flags & info.REJECTED:
+                        return {
+                            "error": "Push rejected. Remote has changes not present locally.",
+                            "hint": "Use github_pull first to get the latest changes.",
+                        }
+
                 return {
                     "status": "success",
                     "message": "Changes pushed successfully!",
                     "path": str(repo_path),
+                    "branch": current_branch,
                 }
-            else:
-                error_msg = result.stderr.strip()
-                # Hide token from error messages
-                if token:
-                    error_msg = error_msg.replace(token, "***")
 
-                if "rejected" in error_msg.lower():
-                    return {
-                        "error": "Push rejected. Remote has changes not present locally.",
-                        "hint": "Use github_pull first to get the latest changes.",
-                    }
-                elif "permission" in error_msg.lower() or "403" in error_msg:
-                    return {"error": "Permission denied. Check your GITHUB_TOKEN permissions."}
-                return {"error": f"Push failed: {error_msg}"}
+            finally:
+                # Restore original URL
+                if auth_url:
+                    origin.set_url(original_url)
 
-        except subprocess.TimeoutExpired:
-            return {"error": "Push timed out."}
+        except GitCommandError as e:
+            error_msg = str(e)
+            # Hide token from error messages
+            if token:
+                error_msg = error_msg.replace(token, "***")
+
+            if "rejected" in error_msg.lower():
+                return {
+                    "error": "Push rejected. Remote has changes not present locally.",
+                    "hint": "Use github_pull first to get the latest changes.",
+                }
+            elif "permission" in error_msg.lower() or "403" in error_msg:
+                return {"error": "Permission denied. Check your GITHUB_TOKEN permissions."}
+            return {"error": f"Push failed: {error_msg}"}
+
         except Exception as e:
+            error_msg = str(e)
+            if token:
+                error_msg = error_msg.replace(token, "***")
             logger.exception(f"Error pushing repo: {e}")
-            return {"error": f"Failed to push: {str(e)}"}
+            return {"error": f"Failed to push: {error_msg}"}

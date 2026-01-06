@@ -1,10 +1,12 @@
-"""GitHub commit tool with semantic-release format."""
+"""GitHub commit tool with semantic-release format using GitPython."""
 
-import subprocess
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from git import Repo, InvalidGitRepositoryError, GitCommandError
+
+from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
 
@@ -106,7 +108,7 @@ class GitHubCommitTool(Tool):
         return full_message
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
-        """Stage and commit changes."""
+        """Stage and commit changes using GitPython."""
         repo_name = kwargs.get("repo", "")
         commit_type = kwargs.get("type", "")
         scope = kwargs.get("scope")
@@ -143,40 +145,43 @@ class GitHubCommitTool(Tool):
         if not repo_path.exists():
             return {"error": f"Repository not found: {local_name}"}
 
-        if not (repo_path / ".git").exists():
+        try:
+            # Open repository with GitPython
+            repo = Repo(repo_path)
+        except InvalidGitRepositoryError:
             return {"error": f"'{local_name}' is not a git repository."}
 
         try:
-            # Stage files
+            # Configure git user if GITHUB_DEFAULT_OWNER is set
+            owner = config.GITHUB_DEFAULT_OWNER
+            email = config.GITHUB_OWNER_EMAIL or (f"{owner}@users.noreply.github.com" if owner else None)
+            if owner:
+                with repo.config_writer() as git_config:
+                    # Set user.name if not already set
+                    try:
+                        repo.config_reader().get_value("user", "name")
+                    except Exception:
+                        git_config.set_value("user", "name", owner)
+
+                    # Set user.email if not already set
+                    try:
+                        repo.config_reader().get_value("user", "email")
+                    except Exception:
+                        if email:
+                            git_config.set_value("user", "email", email)
+
+            # Stage files using GitPython
             for file in files:
                 if file == ".":
-                    # Stage all changes
-                    result = subprocess.run(
-                        ["git", "add", "-A"],
-                        capture_output=True,
-                        text=True,
-                        cwd=repo_path,
-                    )
+                    # Stage all changes (including untracked files)
+                    repo.git.add(A=True)
                 else:
-                    result = subprocess.run(
-                        ["git", "add", file],
-                        capture_output=True,
-                        text=True,
-                        cwd=repo_path,
-                    )
+                    repo.index.add([file])
 
-                if result.returncode != 0:
-                    return {"error": f"Failed to stage '{file}': {result.stderr.strip()}"}
+            # Get list of staged files using git diff --cached --name-only
+            staged_output = repo.git.diff("--cached", "--name-only")
+            staged_files = [f for f in staged_output.strip().split("\n") if f]
 
-            # Check if there are staged changes
-            status_result = subprocess.run(
-                ["git", "diff", "--cached", "--name-only"],
-                capture_output=True,
-                text=True,
-                cwd=repo_path,
-            )
-
-            staged_files = [f for f in status_result.stdout.strip().split("\n") if f]
             if not staged_files:
                 return {
                     "status": "nothing_to_commit",
@@ -193,28 +198,9 @@ class GitHubCommitTool(Tool):
                 breaking=breaking,
             )
 
-            # Create commit
-            result = subprocess.run(
-                ["git", "commit", "-m", commit_msg],
-                capture_output=True,
-                text=True,
-                cwd=repo_path,
-            )
-
-            if result.returncode != 0:
-                error_msg = result.stderr.strip()
-                if "nothing to commit" in error_msg.lower():
-                    return {"status": "nothing_to_commit", "message": "No changes to commit."}
-                return {"error": f"Commit failed: {error_msg}"}
-
-            # Get commit hash
-            hash_result = subprocess.run(
-                ["git", "rev-parse", "--short", "HEAD"],
-                capture_output=True,
-                text=True,
-                cwd=repo_path,
-            )
-            commit_hash = hash_result.stdout.strip()
+            # Create commit using GitPython
+            commit = repo.index.commit(commit_msg)
+            commit_hash = commit.hexsha[:7]
 
             return {
                 "status": "success",
@@ -227,6 +213,11 @@ class GitHubCommitTool(Tool):
                 "hint": "Use github_push to push this commit to remote.",
             }
 
+        except GitCommandError as e:
+            error_msg = str(e)
+            if "nothing to commit" in error_msg.lower():
+                return {"status": "nothing_to_commit", "message": "No changes to commit."}
+            return {"error": f"Git command failed: {error_msg}"}
         except Exception as e:
             logger.exception(f"Error creating commit: {e}")
             return {"error": f"Failed to create commit: {str(e)}"}

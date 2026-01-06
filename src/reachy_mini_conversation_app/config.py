@@ -38,6 +38,7 @@ class Config:
     # GitHub API - for Linus developer profile
     GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
     GITHUB_DEFAULT_OWNER = os.getenv("GITHUB_DEFAULT_OWNER")
+    GITHUB_OWNER_EMAIL = os.getenv("GITHUB_OWNER_EMAIL")
 
     REACHY_MINI_CUSTOM_PROFILE = os.getenv("REACHY_MINI_CUSTOM_PROFILE")
     logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")

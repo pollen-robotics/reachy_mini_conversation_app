@@ -1,9 +1,10 @@
-"""GitHub repository clone tool."""
+"""GitHub repository clone tool using GitPython."""
 
-import subprocess
 import logging
 from pathlib import Path
 from typing import Any, Dict
+
+from git import Repo, GitCommandError
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
@@ -49,8 +50,15 @@ class GitHubCloneTool(Tool):
             "or set GITHUB_DEFAULT_OWNER in environment."
         )
 
+    def _get_clone_url(self, full_repo: str) -> str:
+        """Build clone URL with token if available."""
+        token = config.GITHUB_TOKEN
+        if token:
+            return f"https://{token}@github.com/{full_repo}.git"
+        return f"https://github.com/{full_repo}.git"
+
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
-        """Clone a GitHub repository."""
+        """Clone a GitHub repository using GitPython."""
         repo_name = kwargs.get("repo", "")
         branch = kwargs.get("branch")
 
@@ -81,54 +89,54 @@ class GitHubCloneTool(Tool):
                 "hint": "Use github_pull to update it, or delete the folder to re-clone.",
             }
 
-        # Build clone URL (use token for private repos if available)
+        # Build clone URL
+        clone_url = self._get_clone_url(full_repo)
         token = config.GITHUB_TOKEN
-        if token:
-            clone_url = f"https://{token}@github.com/{full_repo}.git"
-        else:
-            clone_url = f"https://github.com/{full_repo}.git"
-
-        # Build command
-        cmd = ["git", "clone"]
-        if branch:
-            cmd.extend(["--branch", branch])
-        cmd.extend(["--depth", "1"])  # Shallow clone for speed
-        cmd.append(clone_url)
-        cmd.append(str(local_path))
 
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=120,  # 2 minute timeout
-                cwd=REPOS_DIR,
-            )
+            # Clone using GitPython
+            clone_kwargs: Dict[str, Any] = {
+                "depth": 1,  # Shallow clone for speed
+            }
+            if branch:
+                clone_kwargs["branch"] = branch
 
-            if result.returncode == 0:
-                logger.info(f"Cloned {full_repo} to {local_path}")
-                return {
-                    "status": "success",
-                    "message": f"Repository cloned successfully!",
-                    "repo": full_repo,
-                    "path": str(local_path),
-                    "branch": branch or "default",
-                }
+            repo = Repo.clone_from(clone_url, local_path, **clone_kwargs)
+
+            # Configure git user if GITHUB_DEFAULT_OWNER is set
+            owner = config.GITHUB_DEFAULT_OWNER
+            email = config.GITHUB_OWNER_EMAIL or (f"{owner}@users.noreply.github.com" if owner else None)
+            if owner:
+                with repo.config_writer() as git_config:
+                    git_config.set_value("user", "name", owner)
+                    if email:
+                        git_config.set_value("user", "email", email)
+
+            logger.info(f"Cloned {full_repo} to {local_path}")
+            return {
+                "status": "success",
+                "message": "Repository cloned successfully!",
+                "repo": full_repo,
+                "path": str(local_path),
+                "branch": branch or "default",
+            }
+
+        except GitCommandError as e:
+            error_msg = str(e)
+            # Hide token from error messages
+            if token:
+                error_msg = error_msg.replace(token, "***")
+
+            if "not found" in error_msg.lower() or "404" in error_msg:
+                return {"error": f"Repository '{full_repo}' not found or not accessible."}
+            elif "authentication" in error_msg.lower() or "403" in error_msg:
+                return {"error": "Authentication failed. Check your GITHUB_TOKEN."}
             else:
-                error_msg = result.stderr.strip()
-                # Hide token from error messages
-                if token:
-                    error_msg = error_msg.replace(token, "***")
+                return {"error": f"Clone failed: {error_msg}"}
 
-                if "not found" in error_msg.lower() or "404" in error_msg:
-                    return {"error": f"Repository '{full_repo}' not found or not accessible."}
-                elif "authentication" in error_msg.lower():
-                    return {"error": "Authentication failed. Check your GITHUB_TOKEN."}
-                else:
-                    return {"error": f"Clone failed: {error_msg}"}
-
-        except subprocess.TimeoutExpired:
-            return {"error": "Clone timed out. The repository may be too large."}
         except Exception as e:
+            error_msg = str(e)
+            if token:
+                error_msg = error_msg.replace(token, "***")
             logger.exception(f"Error cloning repo: {e}")
-            return {"error": f"Failed to clone repository: {str(e)}"}
+            return {"error": f"Failed to clone repository: {error_msg}"}
