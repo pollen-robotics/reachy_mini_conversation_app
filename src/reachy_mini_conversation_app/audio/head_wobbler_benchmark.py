@@ -9,6 +9,31 @@ from dataclasses import dataclass
 from typing import Iterator
 
 
+DISPLAY_NAMES: dict[str, str] = {
+    "chunk.total": "chunk.total",
+    "chunk.main_calc.sway_feed": "(main calc) sway.feed",
+    "chunk.communicate.apply_offsets": "(communicate) apply.offsets",
+    "chunk.slack.sleep": "(slack) sleep",
+    "chunk.logic.rest": "(rest) logic",
+    "queue.wait": "queue.wait",
+    "receive.total": "receive.audio",
+    "receive.decode": "decode",
+    "receive.numpy_view": "numpy_view",
+}
+
+PARENT_SECTIONS: dict[str, str | None] = {
+    "chunk.total": None,
+    "chunk.main_calc.sway_feed": "chunk.total",
+    "chunk.communicate.apply_offsets": "chunk.total",
+    "chunk.slack.sleep": "chunk.total",
+    "chunk.logic.rest": "chunk.total",
+    "queue.wait": None,
+    "receive.total": None,
+    "receive.decode": "receive.total",
+    "receive.numpy_view": "receive.total",
+}
+
+
 @dataclass
 class _SectionStat:
     """Aggregated statistics for a benchmark section."""
@@ -98,20 +123,22 @@ class _TimingCollector:
         if not snap:
             return "Head wobble benchmark enabled but no samples recorded"
 
-        total_sum = sum(section["total_s"] for section in snap.values())
-        lines = ["Section                     Count    Avg (ms)   Var (ms^2)  Total (ms)   %Total  Min/Max (ms)"]
+        lines = [
+            "Section                     Count    Avg (ms)   Var (ms^2)  Total (ms)  Parent%  Min/Max (ms)",
+        ]
         for name, stats in sorted(snap.items(), key=lambda item: item[1]["total_s"], reverse=True):
-            parts = name.split(".")
-            indent = "  " * (len(parts) - 1)
-            display = f"{indent}{name}"
+            parent = PARENT_SECTIONS.get(name)
+            parent_total = snap[parent]["total_s"] if parent and parent in snap else stats["total_s"]
+            pct = (stats["total_s"] / parent_total * 100.0) if parent_total else 0.0
+            indent = "  " if parent else ""
+            display = DISPLAY_NAMES.get(name, name)
             avg_ms = stats["avg_s"] * 1000.0
             var_ms = stats["var_s2"] * 1_000_000.0
             total_ms = stats["total_s"] * 1000.0
             min_ms = stats["min_s"] * 1000.0
             max_ms = stats["max_s"] * 1000.0
-            pct = (stats["total_s"] / total_sum * 100.0) if total_sum else 0.0
             lines.append(
-                f"{display:<27} {int(stats['count']):>6}  "
+                f"{indent}{display:<25} {int(stats['count']):>6}  "
                 f"{avg_ms:>10.3f}  {var_ms:>11.3f}  {total_ms:>10.3f}  "
                 f"{pct:>6.2f}%  {min_ms:>5.2f}/{max_ms:>5.2f}",
             )
@@ -125,17 +152,19 @@ class _ChunkCounters:
         self._chunks = 0
         self._offsets_sent = 0
         self._offsets_total = 0
+        self._drops = 0
         self._lock = threading.Lock()
 
-    def record(self, processed_offsets: int, total_offsets: int) -> None:
+    def record(self, processed_offsets: int, total_offsets: int, drops: int) -> None:
         with self._lock:
             self._chunks += 1
             self._offsets_sent += processed_offsets
             self._offsets_total += total_offsets
+            self._drops += drops
 
-    def summary(self) -> tuple[int, int, int]:
+    def summary(self) -> tuple[int, int, int, int]:
         with self._lock:
-            return self._chunks, self._offsets_sent, self._offsets_total
+            return self._chunks, self._offsets_sent, self._offsets_total, self._drops
 
 
 class HeadWobblerDiagnostics:
@@ -161,8 +190,8 @@ class HeadWobblerDiagnostics:
     def benchmark_report(self) -> str:
         hop_info = f"HOP_DT={self._hop_ms / 1000.0:.4f}s ({self._hop_ms:.1f} ms per offset)"
         timer_report = self._timing.format_report()
-        chunks, offsets_sent, offsets_total = self._chunk_counters.summary()
-        footer = f"Chunks={chunks}, offsets_sent/total={offsets_sent}/{offsets_total}"
+        chunks, offsets_sent, offsets_total, drops = self._chunk_counters.summary()
+        footer = f"Chunks={chunks}, offsets_sent/total={offsets_sent}/{offsets_total}, drops={drops}"
         return f"{hop_info}\n{timer_report}\n{footer}"
 
     def next_chunk_index(self) -> int:
@@ -171,8 +200,8 @@ class HeadWobblerDiagnostics:
             self._chunk_counter += 1
             return idx
 
-    def record_chunk(self, processed_offsets: int, total_offsets: int) -> None:
-        self._chunk_counters.record(processed_offsets, total_offsets)
+    def record_chunk(self, processed_offsets: int, total_offsets: int, drops: int) -> None:
+        self._chunk_counters.record(processed_offsets, total_offsets, drops)
 
     def chunk_summary(
         self,

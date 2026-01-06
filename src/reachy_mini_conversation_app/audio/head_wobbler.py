@@ -45,14 +45,14 @@ class HeadWobbler:
         self._benchmark = HeadWobblerDiagnostics(HOP_MS, enable_diag)
         self._benchmark_log_interval = 5.0
         self._next_benchmark_log = time.monotonic() + self._benchmark_log_interval
-        self._chunk_counter = 0
 
     def feed(self, delta_b64: str) -> None:
         """Thread-safe: push audio into the consumer queue."""
-        with self._benchmark.section("feed.decode"):
-            pcm_bytes = base64.b64decode(delta_b64)
-        with self._benchmark.section("feed.numpy_view"):
-            buf = np.frombuffer(pcm_bytes, dtype=np.int16).reshape(1, -1)
+        with self._benchmark.section("receive.total"):
+            with self._benchmark.section("receive.decode"):
+                pcm_bytes = base64.b64decode(delta_b64)
+            with self._benchmark.section("receive.numpy_view"):
+                buf = np.frombuffer(pcm_bytes, dtype=np.int16).reshape(1, -1)
         with self._state_lock:
             generation = self._generation
         self.audio_queue.put((generation, SAMPLE_RATE, buf))
@@ -90,7 +90,8 @@ class HeadWobbler:
 
             queue_ref = self.audio_queue
             try:
-                chunk_generation, sr, chunk = queue_ref.get(timeout=hop_dt / 2.0)
+                with self._benchmark.section("queue.wait"):
+                    chunk_generation, sr, chunk = queue_ref.get(timeout=hop_dt / 2.0)
             except queue.Empty:
                 continue
 
@@ -101,6 +102,7 @@ class HeadWobbler:
             drop_count = 0
             len_results = 0
             chunk_processed = False
+            chunk_measured = 0.0
 
             # Here we have a chunk to process
             try:
@@ -117,11 +119,14 @@ class HeadWobbler:
                                 self._base_ts = time.monotonic()
 
                     pcm = np.asarray(chunk).squeeze(0)
-                    # Each chunk is ~250 ms of audio, so with a 10 ms hop we generally get ~25 offsets per sway call.
+                    # Each chunk batches roughly 250 ms of audio (6000 samples @ 24 kHz), so a 10 ms hop yields ~25 offsets.
                     chunk_audio_span = float(pcm.shape[-1]) / float(sr) if sr > 0 else 0.0
-                    with self._benchmark.section("chunk.sway.feed"):
-                        with self._sway_lock:
-                            results = self.sway.feed(pcm, sr)
+                    sway_start = time.perf_counter()
+                    with self._sway_lock:
+                        results = self.sway.feed(pcm, sr)
+                    sway_duration = time.perf_counter() - sway_start
+                    chunk_measured += sway_duration
+                    self._benchmark.add_duration("chunk.main_calc.sway_feed", sway_duration)
                     len_results = len(results)
 
                     i = 0
@@ -158,11 +163,13 @@ class HeadWobbler:
                                 continue
 
                         if target > now:
-                            # We're ahead of schedule, so wait until the hop should be applied.
+                            # We're ahead of schedule (pure slack), so wait until the hop should be applied.
                             sleep_duration = target - now
                             sleep_start = time.perf_counter()
                             time.sleep(sleep_duration)
-                            self._benchmark.add_duration("chunk.schedule.sleep", time.perf_counter() - sleep_start)
+                            sleep_duration = time.perf_counter() - sleep_start
+                            chunk_measured += sleep_duration
+                            self._benchmark.add_duration("chunk.slack.sleep", sleep_duration)
                             with self._state_lock:
                                 if self._generation != current_generation:
                                     chunk_processed = False
@@ -183,19 +190,25 @@ class HeadWobbler:
                                 chunk_processed = False
                                 break
 
-                        with self._benchmark.section("chunk.apply.offsets"):
-                            self._apply_offsets(offsets)
+                        apply_start = time.perf_counter()
+                        self._apply_offsets(offsets)
+                        apply_duration = time.perf_counter() - apply_start
+                        chunk_measured += apply_duration
+                        self._benchmark.add_duration("chunk.communicate.apply_offsets", apply_duration)
 
                         with self._state_lock:
                             self._hops_done += 1
                         processed_results += 1
                         i += 1
-                        self._benchmark.add_duration("chunk.result.iteration", time.perf_counter() - iteration_start)
             finally:
                 queue_ref.task_done()
                 chunk_duration = time.perf_counter() - chunk_wall_start
                 if chunk_processed:
-                    self._benchmark.record_chunk(processed_results, len_results)
+                    logic_duration = chunk_duration - chunk_measured
+                    if logic_duration < 0:
+                        logic_duration = 0.0
+                    self._benchmark.add_duration("chunk.logic.rest", logic_duration)
+                    self._benchmark.record_chunk(processed_results, len_results, drop_count)
                 print(
                     self._benchmark.chunk_summary(
                         chunk_index,
