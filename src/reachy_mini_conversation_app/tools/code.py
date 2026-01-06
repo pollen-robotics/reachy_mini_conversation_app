@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 # Directory to store generated code
 CODE_OUTPUT_DIR = Path.home() / "reachy_code"
+REPOS_DIR = Path.home() / "reachy_repos"
 
 
 class CodeTool(Tool):
@@ -26,7 +27,7 @@ class CodeTool(Tool):
     description = (
         "Generate code using Claude AI. "
         "Use this tool when the user asks you to write, create, or generate code. "
-        "The generated code will be saved to a file and you can offer to execute it."
+        "Can save to ~/reachy_code/ (default) or directly to a repository in ~/reachy_repos/."
     )
     parameters_schema = {
         "type": "object",
@@ -43,6 +44,18 @@ class CodeTool(Tool):
                 "type": "string",
                 "description": "Optional filename for the generated code (without extension)",
             },
+            "repo": {
+                "type": "string",
+                "description": "Repository name to write to (folder in ~/reachy_repos/). If set, writes directly to repo.",
+            },
+            "path": {
+                "type": "string",
+                "description": "Path within the repo (e.g., 'src/utils/helper.py'). Required if repo is set.",
+            },
+            "overwrite": {
+                "type": "boolean",
+                "description": "If true, overwrite existing file in repo. Default: false",
+            },
         },
         "required": ["question"],
     }
@@ -52,8 +65,11 @@ class CodeTool(Tool):
         question = kwargs.get("question", "")
         language = kwargs.get("language", "python")
         filename = kwargs.get("filename")
+        repo = kwargs.get("repo")
+        repo_path_str = kwargs.get("path")
+        overwrite = kwargs.get("overwrite", False)
 
-        logger.info(f"Tool call: code - question='{question[:50]}...', language={language}")
+        logger.info(f"Tool call: code - question='{question[:50]}...', language={language}, repo={repo}")
 
         # Check for API key
         api_key = config.ANTHROPIC_API_KEY
@@ -63,8 +79,37 @@ class CodeTool(Tool):
                 "Please set it in your .env file to use code generation."
             }
 
-        # Create output directory if it doesn't exist
-        CODE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        # Validate repo parameters
+        if repo and not repo_path_str:
+            return {"error": "Path within repo is required when repo is specified."}
+
+        # Check repo exists if specified
+        if repo:
+            local_name = repo.split("/")[-1] if "/" in repo else repo
+            repo_dir = REPOS_DIR / local_name
+            if not repo_dir.exists():
+                return {
+                    "error": f"Repository not found: {local_name}",
+                    "hint": "Use github_clone to clone the repository first.",
+                }
+
+            # Check destination
+            dest_file = repo_dir / repo_path_str
+            if dest_file.exists() and not overwrite:
+                return {
+                    "error": f"File already exists: {repo_path_str}",
+                    "hint": "Set overwrite=true to replace it.",
+                }
+
+            # Validate path is within repo
+            try:
+                dest_file.resolve().relative_to(repo_dir.resolve())
+            except ValueError:
+                return {"error": "Invalid path: cannot write outside the repository."}
+
+        # Create output directory if it doesn't exist (for non-repo mode)
+        if not repo:
+            CODE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
         # Build the prompt for Claude
         system_prompt = (
@@ -94,32 +139,59 @@ class CodeTool(Tool):
             # Clean up code if it's wrapped in markdown code blocks
             code_content = self._extract_code_from_markdown(code_content)
 
-            # Generate filename
-            if not filename:
-                filename = self._generate_filename(question)
-
-            # Add extension based on language
-            extension = self._get_extension(language)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            full_filename = f"{timestamp}_{filename}.{extension}"
-            filepath = CODE_OUTPUT_DIR / full_filename
-
-            # Save code to file
-            filepath.write_text(code_content, encoding="utf-8")
-
-            logger.info(f"Code saved to {filepath}")
-
             # Generate a brief explanation
             explanation = self._generate_explanation(code_content, language)
 
-            return {
-                "status": "success",
-                "message": f"Code generated and saved to {filepath}",
-                "filepath": str(filepath),
-                "language": language,
-                "explanation": explanation,
-                "lines": len(code_content.splitlines()),
-            }
+            # Save to repo or to reachy_code
+            if repo:
+                # Write directly to repo
+                local_name = repo.split("/")[-1] if "/" in repo else repo
+                repo_dir = REPOS_DIR / local_name
+                dest_file = repo_dir / repo_path_str
+
+                # Create parent directories if needed
+                dest_file.parent.mkdir(parents=True, exist_ok=True)
+
+                # Write file
+                dest_file.write_text(code_content, encoding="utf-8")
+
+                logger.info(f"Code saved to {dest_file}")
+
+                return {
+                    "status": "success",
+                    "message": f"Code generated and saved to {repo_path_str} in {local_name}",
+                    "filepath": str(dest_file),
+                    "repo": local_name,
+                    "relative_path": repo_path_str,
+                    "language": language,
+                    "explanation": explanation,
+                    "lines": len(code_content.splitlines()),
+                    "hint": "Use github_add to stage the file, then github_commit to commit.",
+                }
+            else:
+                # Save to reachy_code (original behavior)
+                if not filename:
+                    filename = self._generate_filename(question)
+
+                extension = self._get_extension(language)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                full_filename = f"{timestamp}_{filename}.{extension}"
+                filepath = CODE_OUTPUT_DIR / full_filename
+
+                filepath.write_text(code_content, encoding="utf-8")
+
+                logger.info(f"Code saved to {filepath}")
+
+                return {
+                    "status": "success",
+                    "message": f"Code generated and saved to {filepath}",
+                    "filepath": str(filepath),
+                    "filename": full_filename,
+                    "language": language,
+                    "explanation": explanation,
+                    "lines": len(code_content.splitlines()),
+                    "hint": "Use code_move_to_repo to move this file to a repository.",
+                }
 
         except anthropic.AuthenticationError:
             return {"error": "Invalid ANTHROPIC_API_KEY. Please check your API key."}
