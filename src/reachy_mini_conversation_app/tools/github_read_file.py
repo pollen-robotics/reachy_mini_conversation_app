@@ -1,9 +1,13 @@
-"""GitHub read file tool."""
+"""GitHub read file tool with optional AI analysis."""
 
 import logging
 from pathlib import Path
 from typing import Any, Dict
 
+import anthropic
+import openai
+
+from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
 
@@ -28,13 +32,24 @@ TEXT_EXTENSIONS = {
     ".makefile", ".cmake",
 }
 
+# Default analysis prompts
+DEFAULT_ANALYSIS_PROMPT = (
+    "Analyze this code file and provide:\n"
+    "1. A brief summary of what the code does\n"
+    "2. Key functions/classes and their purpose\n"
+    "3. Any potential issues or improvements\n"
+    "4. Dependencies used\n"
+    "Be concise but thorough."
+)
+
 
 class GitHubReadFileTool(Tool):
-    """Read a file from a cloned repository."""
+    """Read a file from a cloned repository with optional AI analysis."""
 
     name = "github_read_file"
     description = (
         "Read the contents of a file from a cloned GitHub repository. "
+        "Optionally analyze the file using Claude or OpenAI. "
         "Use this to view source code, configuration files, or documentation."
     )
     parameters_schema = {
@@ -56,18 +71,102 @@ class GitHubReadFileTool(Tool):
                 "type": "integer",
                 "description": "Optional ending line number (1-indexed)",
             },
+            "analyze": {
+                "type": "boolean",
+                "description": "If true, analyze the file content using AI. Default: false",
+            },
+            "analyzer": {
+                "type": "string",
+                "enum": ["claude", "openai"],
+                "description": "AI model to use for analysis: 'claude' or 'openai'. Default: 'claude'",
+            },
+            "analysis_prompt": {
+                "type": "string",
+                "description": "Custom prompt for the analysis. If not provided, uses a default code analysis prompt.",
+            },
         },
         "required": ["repo", "path"],
     }
 
+    async def _analyze_with_claude(
+        self, content: str, file_path: str, prompt: str
+    ) -> Dict[str, Any]:
+        """Analyze file content using Claude."""
+        api_key = config.ANTHROPIC_API_KEY
+        if not api_key:
+            return {"error": "ANTHROPIC_API_KEY is not configured."}
+
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+            model = config.ANTHROPIC_MODEL or "claude-sonnet-4-20250514"
+
+            user_message = f"File: {file_path}\n\n```\n{content}\n```\n\n{prompt}"
+
+            message = client.messages.create(
+                model=model,
+                max_tokens=2048,
+                messages=[{"role": "user", "content": user_message}],
+            )
+
+            return {
+                "analyzer": "claude",
+                "model": model,
+                "analysis": message.content[0].text,
+            }
+
+        except anthropic.AuthenticationError:
+            return {"error": "Invalid ANTHROPIC_API_KEY."}
+        except anthropic.RateLimitError:
+            return {"error": "Claude rate limit exceeded. Try again later."}
+        except Exception as e:
+            logger.exception(f"Claude analysis error: {e}")
+            return {"error": f"Claude analysis failed: {str(e)}"}
+
+    async def _analyze_with_openai(
+        self, content: str, file_path: str, prompt: str
+    ) -> Dict[str, Any]:
+        """Analyze file content using OpenAI."""
+        api_key = config.OPENAI_API_KEY
+        if not api_key:
+            return {"error": "OPENAI_API_KEY is not configured."}
+
+        try:
+            client = openai.OpenAI(api_key=api_key)
+            model = config.OPENAI_MODEL or "gpt-4o"
+
+            user_message = f"File: {file_path}\n\n```\n{content}\n```\n\n{prompt}"
+
+            response = client.chat.completions.create(
+                model=model,
+                max_tokens=2048,
+                messages=[{"role": "user", "content": user_message}],
+            )
+
+            return {
+                "analyzer": "openai",
+                "model": model,
+                "analysis": response.choices[0].message.content,
+            }
+
+        except openai.AuthenticationError:
+            return {"error": "Invalid OPENAI_API_KEY."}
+        except openai.RateLimitError:
+            return {"error": "OpenAI rate limit exceeded. Try again later."}
+        except Exception as e:
+            logger.exception(f"OpenAI analysis error: {e}")
+            return {"error": f"OpenAI analysis failed: {str(e)}"}
+
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
-        """Read a file from a repository."""
+        """Read a file from a repository with optional AI analysis."""
         repo_name = kwargs.get("repo", "")
         file_path = kwargs.get("path", "")
         start_line = kwargs.get("start_line")
         end_line = kwargs.get("end_line")
+        analyze = kwargs.get("analyze", False)
+        analyzer = kwargs.get("analyzer", "claude")
+        analysis_prompt = kwargs.get("analysis_prompt", DEFAULT_ANALYSIS_PROMPT)
 
-        logger.info(f"Tool call: github_read_file - repo='{repo_name}', path='{file_path}'")
+        logger.info(f"Tool call: github_read_file - repo='{repo_name}', path='{file_path}', analyze={analyze}")
 
         if not repo_name:
             return {"error": "Repository name is required."}
@@ -135,7 +234,7 @@ class GitHubReadFileTool(Tool):
                 content = content[:max_chars]
                 truncated = True
 
-            return {
+            result: Dict[str, Any] = {
                 "status": "success",
                 "repo": local_name,
                 "path": file_path,
@@ -144,6 +243,25 @@ class GitHubReadFileTool(Tool):
                 "truncated": truncated,
                 "content": content,
             }
+
+            # Perform AI analysis if requested
+            if analyze:
+                if analyzer == "openai":
+                    analysis_result = await self._analyze_with_openai(
+                        content, file_path, analysis_prompt
+                    )
+                else:
+                    # Default to Claude
+                    analysis_result = await self._analyze_with_claude(
+                        content, file_path, analysis_prompt
+                    )
+
+                if "error" in analysis_result:
+                    result["analysis_error"] = analysis_result["error"]
+                else:
+                    result["analysis"] = analysis_result
+
+            return result
 
         except UnicodeDecodeError:
             return {"error": "Cannot read file: not a text file or unknown encoding."}
