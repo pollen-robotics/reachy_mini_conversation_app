@@ -267,13 +267,10 @@ class HeadWobbler:
             queue_ref = self.audio_queue
             queue_poll_start = time.perf_counter()
             try:
-                chunk_generation, sr, chunk = queue_ref.get_nowait()  # (gen, sr, data)
+                chunk_generation, sr, chunk = queue_ref.get(timeout=hop_dt / 2.0)  # the timeout throttles the loop
             except queue.Empty:
                 poll_duration = time.perf_counter() - queue_poll_start
                 self._benchmark.add_duration("queue.poll", poll_duration)
-                # avoid while to never exit
-                sleep_start = time.perf_counter()
-                time.sleep(MOVEMENT_LATENCY_S)
                 continue
             else:
                 poll_duration = time.perf_counter() - queue_poll_start
