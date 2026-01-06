@@ -26,6 +26,8 @@ github_close_issue
 github_comment_issue
 github_commit
 github_discard
+github_reset
+github_rebase
 github_branch
 github_create_pr
 github_update_pr
