@@ -1,11 +1,13 @@
-"""GitHub commit tool with semantic-release format using GitPython and OpenAI."""
+"""GitHub commit tool with semantic-release format using GitPython and AI."""
 
+import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import anthropic
+import openai
 from git import Repo, InvalidGitRepositoryError, GitCommandError
-from openai import OpenAI
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
@@ -39,7 +41,7 @@ class GitHubCommitTool(Tool):
     description = (
         "Commit staged changes in a local repository using semantic-release format. "
         "Use github_add to stage files and github_rm to remove files BEFORE calling this tool. "
-        "Supports auto-generating commit messages using OpenAI based on diff analysis. "
+        "Supports auto-generating commit messages using Claude or OpenAI based on diff analysis. "
         "Use amend=true to modify the last commit (add staged changes and/or change message). "
         "IMPORTANT: Always ask user for confirmation before calling this tool. "
         "Commit types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert."
@@ -74,7 +76,12 @@ class GitHubCommitTool(Tool):
             },
             "auto_message": {
                 "type": "boolean",
-                "description": "If true, auto-generate commit message using OpenAI based on diff analysis.",
+                "description": "If true, auto-generate commit message using AI based on diff analysis.",
+            },
+            "analyzer": {
+                "type": "string",
+                "enum": ["claude", "openai"],
+                "description": "AI provider for auto_message: 'claude' (default) or 'openai'.",
             },
             "issue_context": {
                 "type": "string",
@@ -116,25 +123,19 @@ class GitHubCommitTool(Tool):
 
         return full_message
 
-    def _generate_commit_message(
+    def _build_prompt(
         self,
         diff: str,
         staged_files: List[str],
         issue_context: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Generate commit message using OpenAI based on diff analysis."""
-        if not config.OPENAI_API_KEY:
-            return {"error": "OPENAI_API_KEY not configured for auto-message generation."}
+    ) -> str:
+        """Build the prompt for commit message generation."""
+        # Truncate diff if too long
+        max_diff_length = 8000
+        if len(diff) > max_diff_length:
+            diff = diff[:max_diff_length] + "\n... (diff truncated)"
 
-        try:
-            client = OpenAI(api_key=config.OPENAI_API_KEY)
-
-            # Truncate diff if too long
-            max_diff_length = 8000
-            if len(diff) > max_diff_length:
-                diff = diff[:max_diff_length] + "\n... (diff truncated)"
-
-            prompt = f"""Analyze the following git diff and generate a semantic-release commit message.
+        prompt = f"""Analyze the following git diff and generate a semantic-release commit message.
 
 ## Staged files:
 {', '.join(staged_files)}
@@ -144,13 +145,13 @@ class GitHubCommitTool(Tool):
 {diff}
 ```
 """
-            if issue_context:
-                prompt += f"""
+        if issue_context:
+            prompt += f"""
 ## Issue context:
 {issue_context}
 """
 
-            prompt += """
+        prompt += """
 ## Instructions:
 Generate a commit message following semantic-release conventions.
 Return ONLY a JSON object with these fields:
@@ -163,34 +164,90 @@ Return ONLY a JSON object with these fields:
 Example response:
 {"type": "feat", "scope": "auth", "message": "add OAuth2 login support", "body": null, "breaking": false}
 """
+        return prompt
 
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant that generates semantic-release commit messages. Always respond with valid JSON only."},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.3,
-                max_tokens=500,
-            )
+    def _parse_response(self, content: str) -> Dict[str, Any]:
+        """Parse AI response and extract commit message fields."""
+        content = content.strip()
+        # Remove markdown code blocks if present
+        if content.startswith("```"):
+            content = content.split("\n", 1)[1]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
 
-            import json
-            content = response.choices[0].message.content.strip()
-            # Remove markdown code blocks if present
-            if content.startswith("```"):
-                content = content.split("\n", 1)[1]
-                if content.endswith("```"):
-                    content = content[:-3]
-                content = content.strip()
+        result = json.loads(content)
+        return {
+            "type": result.get("type", "chore"),
+            "scope": result.get("scope"),
+            "message": result.get("message", "update code"),
+            "body": result.get("body"),
+            "breaking": result.get("breaking", False),
+        }
 
-            result = json.loads(content)
-            return {
-                "type": result.get("type", "chore"),
-                "scope": result.get("scope"),
-                "message": result.get("message", "update code"),
-                "body": result.get("body"),
-                "breaking": result.get("breaking", False),
-            }
+    def _generate_with_claude(
+        self,
+        prompt: str,
+    ) -> Dict[str, Any]:
+        """Generate commit message using Claude."""
+        api_key = config.ANTHROPIC_API_KEY
+        if not api_key:
+            return {"error": "ANTHROPIC_API_KEY not configured for auto-message generation."}
+
+        masked_key = f"{api_key[:8]}...{api_key[-4:]}" if len(api_key) > 12 else "***"
+        logger.debug(f"Using Anthropic API key: {masked_key}")
+
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-haiku-4-20250514",
+            max_tokens=500,
+            messages=[
+                {"role": "user", "content": prompt},
+            ],
+            system="You are a helpful assistant that generates semantic-release commit messages. Always respond with valid JSON only.",
+        )
+        return self._parse_response(response.content[0].text)
+
+    def _generate_with_openai(
+        self,
+        prompt: str,
+    ) -> Dict[str, Any]:
+        """Generate commit message using OpenAI."""
+        api_key = config.OPENAI_API_KEY
+        if not api_key:
+            return {"error": "OPENAI_API_KEY not configured for auto-message generation."}
+
+        # Debug: show key details to compare with curl
+        masked_key = f"{api_key[:12]}...{api_key[-4:]}" if len(api_key) > 16 else "***"
+        logger.info(f"OpenAI API key: {masked_key} (length={len(api_key)})")
+
+        client = openai.OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that generates semantic-release commit messages. Always respond with valid JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
+            max_tokens=500,
+        )
+        return self._parse_response(response.choices[0].message.content)
+
+    def _generate_commit_message(
+        self,
+        diff: str,
+        staged_files: List[str],
+        issue_context: Optional[str] = None,
+        analyzer: str = "claude",
+    ) -> Dict[str, Any]:
+        """Generate commit message using AI based on diff analysis."""
+        try:
+            prompt = self._build_prompt(diff, staged_files, issue_context)
+
+            if analyzer == "openai":
+                return self._generate_with_openai(prompt)
+            else:
+                return self._generate_with_claude(prompt)
 
         except Exception as e:
             logger.exception(f"Error generating commit message: {e}")
@@ -205,11 +262,12 @@ Example response:
         body = kwargs.get("body")
         breaking = kwargs.get("breaking", False)
         auto_message = kwargs.get("auto_message", False)
+        analyzer = kwargs.get("analyzer", "claude")
         issue_context = kwargs.get("issue_context")
         confirmed = kwargs.get("confirmed", False)
         amend = kwargs.get("amend", False)
 
-        logger.info(f"Tool call: github_commit - repo='{repo_name}', type={commit_type}, auto={auto_message}, amend={amend}")
+        logger.info(f"Tool call: github_commit - repo='{repo_name}', type={commit_type}, auto={auto_message}, analyzer={analyzer}, amend={amend}")
 
         # Check confirmation
         if not confirmed:
@@ -276,7 +334,7 @@ Example response:
             # Auto-generate commit message if requested
             if auto_message:
                 diff = repo.git.diff("--cached")
-                generated = self._generate_commit_message(diff, staged_files, issue_context)
+                generated = self._generate_commit_message(diff, staged_files, issue_context, analyzer)
 
                 if "error" in generated:
                     return generated
