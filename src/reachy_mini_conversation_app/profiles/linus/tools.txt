@@ -24,8 +24,10 @@ github_list_prs
 github_update_issue
 github_close_issue
 github_comment_issue
+github_add
 github_commit
 github_discard
+github_rm
 github_reset
 github_rebase
 github_branch

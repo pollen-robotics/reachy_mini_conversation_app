@@ -33,11 +33,12 @@ COMMIT_TYPES = {
 
 
 class GitHubCommitTool(Tool):
-    """Stage and commit changes with semantic-release format."""
+    """Commit staged changes with semantic-release format."""
 
     name = "github_commit"
     description = (
-        "Stage files (add/remove) and create a commit in a local repository using semantic-release format. "
+        "Commit staged changes in a local repository using semantic-release format. "
+        "Use github_add to stage files and github_rm to remove files BEFORE calling this tool. "
         "Supports auto-generating commit messages using OpenAI based on diff analysis. "
         "IMPORTANT: Always ask user for confirmation before calling this tool. "
         "Commit types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert."
@@ -48,16 +49,6 @@ class GitHubCommitTool(Tool):
             "repo": {
                 "type": "string",
                 "description": "Repository name (the folder name in ~/reachy_repos/)",
-            },
-            "files": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "List of files to stage (relative paths). Use '.' to stage all changes.",
-            },
-            "remove_files": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "List of files to remove from git (git rm). Use for deleted files.",
             },
             "type": {
                 "type": "string",
@@ -201,15 +192,13 @@ Example response:
             return {"error": f"Failed to generate commit message: {str(e)}"}
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
-        """Stage and commit changes using GitPython."""
+        """Commit staged changes using GitPython."""
         repo_name = kwargs.get("repo", "")
         commit_type = kwargs.get("type")
         scope = kwargs.get("scope")
         message = kwargs.get("message")
         body = kwargs.get("body")
         breaking = kwargs.get("breaking", False)
-        files: List[str] = kwargs.get("files", [])
-        remove_files: List[str] = kwargs.get("remove_files", [])
         auto_message = kwargs.get("auto_message", False)
         issue_context = kwargs.get("issue_context")
         confirmed = kwargs.get("confirmed", False)
@@ -225,10 +214,6 @@ Example response:
 
         if not repo_name:
             return {"error": "Repository name is required."}
-
-        # Check if we have files to stage or message requirements
-        if not files and not remove_files:
-            return {"error": "At least one file must be specified (files or remove_files)."}
 
         if not auto_message and (not commit_type or not message):
             return {
@@ -263,37 +248,6 @@ Example response:
                         if email:
                             git_config.set_value("user", "email", email)
 
-            # Remove files (git rm)
-            removed_files = []
-            for file in remove_files:
-                try:
-                    repo.index.remove([file], working_tree=True)
-                    removed_files.append(file)
-                except GitCommandError as e:
-                    # File might already be deleted, try to remove from index only
-                    try:
-                        repo.index.remove([file], working_tree=False)
-                        removed_files.append(file)
-                    except Exception:
-                        logger.warning(f"Could not remove file {file}: {e}")
-
-            # Stage files (git add)
-            for file in files:
-                if file == ".":
-                    repo.git.add(A=True)
-                else:
-                    # Check if file exists, if not it might be deleted
-                    file_path = repo_path / file
-                    if file_path.exists():
-                        repo.index.add([file])
-                    else:
-                        # File was deleted, remove from index
-                        try:
-                            repo.index.remove([file], working_tree=False)
-                            removed_files.append(file)
-                        except Exception:
-                            pass
-
             # Get staged files
             staged_output = repo.git.diff("--cached", "--name-only")
             staged_files = [f for f in staged_output.strip().split("\n") if f]
@@ -301,8 +255,8 @@ Example response:
             if not staged_files:
                 return {
                     "status": "nothing_to_commit",
-                    "message": "No changes to commit.",
-                    "hint": "Make sure you've made changes and specified the correct files.",
+                    "message": "No staged changes to commit.",
+                    "hint": "Use github_add to stage files first, or github_rm to stage deletions.",
                 }
 
             # Auto-generate commit message if requested
@@ -350,9 +304,6 @@ Example response:
                 "files_committed": staged_files,
                 "hint": "Use github_push to push this commit to remote.",
             }
-
-            if removed_files:
-                result["files_removed"] = removed_files
 
             if auto_message:
                 result["auto_generated"] = True
