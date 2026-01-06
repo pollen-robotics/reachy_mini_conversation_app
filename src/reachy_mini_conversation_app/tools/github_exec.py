@@ -55,7 +55,7 @@ class GitHubExecTool(Tool):
         "Execute a shell command in a local repository directory. "
         "Useful for running tests, builds, linting, or other development commands. "
         "Commands are executed in the repository's root directory. "
-        "IMPORTANT: For safety, only common development commands are allowed."
+        "Common dev commands are allowed by default. Other commands require confirmed=true."
     )
     parameters_schema = {
         "type": "object",
@@ -77,38 +77,47 @@ class GitHubExecTool(Tool):
                 "description": "Additional environment variables to set",
                 "additionalProperties": {"type": "string"},
             },
+            "confirmed": {
+                "type": "boolean",
+                "description": "Required for non-whitelisted commands. Always ask user first for unknown commands.",
+            },
         },
         "required": ["repo", "command"],
     }
 
-    def _is_command_allowed(self, command: str) -> tuple[bool, str]:
-        """Check if command is allowed."""
+    def _check_command(self, command: str) -> tuple[str, str]:
+        """
+        Check command safety status.
+        Returns: (status, reason)
+        - status: "allowed" (whitelisted), "blocked" (dangerous), "requires_confirmation" (not whitelisted)
+        """
         cmd_lower = command.lower().strip()
 
-        # Check for blocked patterns
+        # Check for blocked patterns (always blocked, even with confirmation)
         for pattern in BLOCKED_PATTERNS:
             if pattern in cmd_lower:
-                return False, f"Blocked pattern detected: {pattern}"
+                return "blocked", f"Dangerous pattern detected: {pattern}"
 
         # Get the base command (first word)
         try:
             parts = shlex.split(command)
             if not parts:
-                return False, "Empty command"
+                return "blocked", "Empty command"
             base_cmd = parts[0].split("/")[-1]  # Handle full paths
         except ValueError:
-            return False, "Invalid command syntax"
+            return "blocked", "Invalid command syntax"
 
         # Check if base command is in whitelist
         if base_cmd in ALLOWED_COMMANDS:
-            return True, ""
+            return "allowed", ""
 
         # Check for compound commands with allowed base
         for allowed in ALLOWED_COMMANDS:
             if cmd_lower.startswith(allowed + " "):
-                return True, ""
+                return "allowed", ""
 
-        return False, f"Command '{base_cmd}' not in allowed list. Allowed: {', '.join(sorted(ALLOWED_COMMANDS))}"
+        # Not in whitelist, but can be run with confirmation
+        return "requires_confirmation", f"Command '{base_cmd}' is not in the whitelist"
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Execute a command in a repository."""
@@ -116,20 +125,32 @@ class GitHubExecTool(Tool):
         command = kwargs.get("command", "")
         timeout = min(kwargs.get("timeout", 300), 600)
         env_vars: Dict[str, str] = kwargs.get("env", {})
+        confirmed = kwargs.get("confirmed", False)
 
-        logger.info(f"Tool call: github_exec - repo='{repo_name}', command='{command}'")
+        logger.info(f"Tool call: github_exec - repo='{repo_name}', command='{command}', confirmed={confirmed}")
 
         if not repo_name:
             return {"error": "Repository name is required."}
         if not command:
             return {"error": "Command is required."}
 
-        # Check if command is allowed
-        allowed, reason = self._is_command_allowed(command)
-        if not allowed:
+        # Check command safety
+        status, reason = self._check_command(command)
+
+        if status == "blocked":
+            # Dangerous commands are always blocked
             return {
-                "error": f"Command not allowed: {reason}",
-                "hint": "Only common development commands are permitted for safety.",
+                "error": f"Command blocked: {reason}",
+                "hint": "This command pattern is blocked for safety reasons.",
+            }
+
+        if status == "requires_confirmation" and not confirmed:
+            # Non-whitelisted commands need confirmation
+            return {
+                "status": "confirmation_required",
+                "message": f"{reason}. User confirmation required to execute.",
+                "command": command,
+                "hint": "Ask the user for confirmation, then set confirmed=true to execute.",
             }
 
         # Repository path
