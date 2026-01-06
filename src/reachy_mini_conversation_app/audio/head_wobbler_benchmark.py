@@ -1,12 +1,11 @@
 """Benchmark helpers for the head wobbler."""
 
 from __future__ import annotations
-
-import threading
 import time
+import threading
+from typing import Iterator, ContextManager
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Iterator
 
 
 DISPLAY_NAMES: dict[str, str] = {
@@ -93,17 +92,22 @@ class _TimingCollector:
             stat = self._stats.setdefault(name, _SectionStat())
             stat.update(duration)
 
-    @contextmanager
-    def section(self, name: str) -> Iterator[None]:
-        if not self.enabled:
-            yield
-            return
+    def section(self, name: str) -> ContextManager[None]:
+        """Return a context manager that records elapsed time for `name`."""
 
-        start = time.perf_counter()
-        try:
-            yield
-        finally:
-            self._record(name, time.perf_counter() - start)
+        @contextmanager
+        def _section() -> Iterator[None]:
+            if not self.enabled:
+                yield
+                return
+
+            start = time.perf_counter()
+            try:
+                yield
+            finally:
+                self._record(name, time.perf_counter() - start)
+
+        return _section()
 
     def add_duration(self, name: str, duration: float) -> None:
         if not self.enabled:
@@ -171,6 +175,7 @@ class HeadWobblerDiagnostics:
     """Wrapper exposing benchmark utilities to the head wobbler."""
 
     def __init__(self, hop_ms: float, enabled: bool) -> None:
+        """Store hop size and configure subordinate trackers."""
         self.enabled = enabled
         self._hop_ms = hop_ms
         self._timing = _TimingCollector(enabled)
@@ -178,16 +183,20 @@ class HeadWobblerDiagnostics:
         self._chunk_lock = threading.Lock()
         self._chunk_counters = _ChunkCounters()
 
-    def section(self, name: str) -> Iterator[None]:
+    def section(self, name: str) -> ContextManager[None]:
+        """Get a context manager that times the named section."""
         return self._timing.section(name)
 
     def add_duration(self, name: str, duration: float) -> None:
+        """Accumulate `duration` seconds under the named section."""
         self._timing.add_duration(name, duration)
 
     def snapshot(self) -> dict[str, dict[str, float]]:
+        """Return a copy of the current section statistics."""
         return self._timing.snapshot()
 
     def benchmark_report(self) -> str:
+        """Format the full benchmark report plus chunk counters."""
         hop_info = f"HOP_DT={self._hop_ms / 1000.0:.4f}s ({self._hop_ms:.1f} ms per offset)"
         timer_report = self._timing.format_report()
         chunks, offsets_sent, offsets_total, drops = self._chunk_counters.summary()
@@ -195,12 +204,14 @@ class HeadWobblerDiagnostics:
         return f"{hop_info}\n{timer_report}\n{footer}"
 
     def next_chunk_index(self) -> int:
+        """Return a monotonically increasing chunk identifier."""
         with self._chunk_lock:
             idx = self._chunk_counter
             self._chunk_counter += 1
             return idx
 
     def record_chunk(self, processed_offsets: int, total_offsets: int, drops: int) -> None:
+        """Update aggregate counts for offsets sent/available/dropped."""
         self._chunk_counters.record(processed_offsets, total_offsets, drops)
 
     def chunk_summary(
@@ -213,6 +224,7 @@ class HeadWobblerDiagnostics:
         drops: int,
         processed: bool,
     ) -> str:
+        """Format a single chunk summary line."""
         audio_ms = audio_span * 1000.0
         duration_ms = duration * 1000.0
         ratio_pct = (duration / audio_span * 100.0) if audio_span > 0 else 0.0

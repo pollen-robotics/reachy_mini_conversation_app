@@ -132,7 +132,6 @@ class HeadWobbler:
                     i = 0
                     chunk_processed = True
                     while i < len_results:
-                        iteration_start = time.perf_counter()
                         with self._state_lock:
                             if self._generation != current_generation:
                                 chunk_processed = False
