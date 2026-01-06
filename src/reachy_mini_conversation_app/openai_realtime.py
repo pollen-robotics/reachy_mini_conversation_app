@@ -73,6 +73,11 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self._shutdown_requested: bool = False
         self._connected_event: asyncio.Event = asyncio.Event()
 
+        # Session renewal: OpenAI Realtime has a 60-minute max session duration
+        self._session_start_time: float = 0.0
+        self._session_max_duration: float = 55 * 60  # Renew at 55 minutes (before 60-min limit)
+        self._session_renewal_task: asyncio.Task[None] | None = None
+
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
         return OpenaiRealtimeHandler(self.deps, self.gradio_mode, self.instance_path)
@@ -202,6 +207,14 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         Does not block the caller while the new session is establishing.
         """
         try:
+            # Cancel any existing renewal task
+            if self._session_renewal_task and not self._session_renewal_task.done():
+                self._session_renewal_task.cancel()
+                try:
+                    await self._session_renewal_task
+                except asyncio.CancelledError:
+                    pass
+
             if self.connection is not None:
                 try:
                     await self.connection.close()
@@ -228,6 +241,27 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 logger.warning("Realtime session restart timed out; continuing in background.")
         except Exception as e:
             logger.warning("_restart_session failed: %s", e)
+
+    async def _session_renewal_loop(self) -> None:
+        """Background task to renew the session before the 60-minute limit."""
+        try:
+            while not self._shutdown_requested:
+                elapsed = asyncio.get_event_loop().time() - self._session_start_time
+                remaining = self._session_max_duration - elapsed
+
+                if remaining <= 0:
+                    logger.info("Session approaching 60-minute limit (elapsed: %.1f min), renewing...", elapsed / 60)
+                    await self._restart_session()
+                    return  # New session will start its own renewal task
+
+                # Sleep until renewal time (check every minute to handle clock drift)
+                sleep_time = min(remaining, 60)
+                await asyncio.sleep(sleep_time)
+        except asyncio.CancelledError:
+            logger.debug("Session renewal task cancelled")
+            raise
+        except Exception as e:
+            logger.warning("Session renewal loop error: %s", e)
 
     async def _run_realtime_session(self) -> None:
         """Establish and manage a single realtime session."""
@@ -274,6 +308,13 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 return
 
             logger.info("Realtime session updated successfully")
+
+            # Track session start time and start renewal task
+            self._session_start_time = asyncio.get_event_loop().time()
+            self._session_renewal_task = asyncio.create_task(
+                self._session_renewal_loop(), name="openai-session-renewal"
+            )
+            logger.info("Session renewal task started (will renew at 55 minutes)")
 
             # Manage event received from the openai server
             self.connection = conn
@@ -530,6 +571,15 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
     async def shutdown(self) -> None:
         """Shutdown the handler."""
         self._shutdown_requested = True
+
+        # Cancel session renewal task
+        if self._session_renewal_task and not self._session_renewal_task.done():
+            self._session_renewal_task.cancel()
+            try:
+                await self._session_renewal_task
+            except asyncio.CancelledError:
+                pass
+
         # Cancel any pending debounce task
         if self.partial_transcript_task and not self.partial_transcript_task.done():
             self.partial_transcript_task.cancel()
