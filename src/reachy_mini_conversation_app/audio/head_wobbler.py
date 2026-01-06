@@ -15,7 +15,14 @@ from reachy_mini_conversation_app.audio.head_wobbler_benchmark import HeadWobble
 
 
 SAMPLE_RATE = 24000
-MOVEMENT_LATENCY_S = 0.08  # seconds between audio and robot movement
+MOVEMENT_LATENCY_S = 0.2  # seconds between audio and robot movement
+BENCHMARK_ON = False
+
+
+def _bench_print(message: str) -> None:
+    """Print helper for benchmark messages."""
+    if BENCHMARK_ON:
+        print(message, flush=True)
 
 
 class HeadWobbler:
@@ -42,7 +49,7 @@ class HeadWobbler:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         enable_diag = enable_benchmark if enable_benchmark is not None else True
-        self._benchmark = HeadWobblerDiagnostics(HOP_MS, enable_diag)
+        self._benchmark = HeadWobblerDiagnostics(HOP_MS, enable_diag and BENCHMARK_ON)
         self._benchmark_log_interval = 5.0
         self._next_benchmark_log = time.monotonic() + self._benchmark_log_interval
 
@@ -63,7 +70,7 @@ class HeadWobbler:
         self._thread = threading.Thread(target=self.working_loop, daemon=True)
         self._thread.start()
         if self._benchmark.enabled:
-            print("Head wobble benchmark enabled", flush=True)
+            _bench_print("Head wobble benchmark enabled")
 
     def stop(self) -> None:
         """Stop the head wobbler loop."""
@@ -72,7 +79,7 @@ class HeadWobbler:
             self._thread.join()
         print("Head wobbler stopped", flush=True)
         if self._benchmark.enabled:
-            print("Head wobble benchmark results:\n%s" % self.benchmark_report(), flush=True)
+            _bench_print("Head wobble benchmark results:\n%s" % self.benchmark_report())
 
     def benchmark_report(self) -> str:
         """Return a formatted benchmark report."""
@@ -83,11 +90,11 @@ class HeadWobbler:
         hop_dt = HOP_MS / 1000.0
         sleep_guard = 0.002  # OS timer granularity (sec); avoid oversleeping by this margin
 
-        print("Head wobbler thread started", flush=True)
+        _bench_print("Head wobbler thread started")
         while not self._stop_event.is_set():
             if self._benchmark.enabled and time.monotonic() >= self._next_benchmark_log:
                 self._next_benchmark_log = time.monotonic() + self._benchmark_log_interval
-                print("Head wobble benchmark (live):\n%s" % self.benchmark_report(), flush=True)
+                _bench_print("Head wobble benchmark (live):\n%s" % self.benchmark_report())
 
             queue_ref = self.audio_queue
             try:
@@ -211,7 +218,7 @@ class HeadWobbler:
                         logic_duration = 0.0
                     self._benchmark.add_duration("chunk.logic.rest", logic_duration)
                     self._benchmark.record_chunk(processed_results, len_results, drop_count)
-                print(
+                _bench_print(
                     self._benchmark.chunk_summary(
                         chunk_index,
                         chunk_audio_span,
@@ -221,10 +228,9 @@ class HeadWobbler:
                         drop_count,
                         chunk_processed,
                     ),
-                    flush=True,
                 )
             # Here we finished processing the chunk
-        print("Head wobbler thread exited", flush=True)
+        _bench_print("Head wobbler thread exited")
 
     '''
     def drain_audio_queue(self) -> None:
@@ -258,4 +264,4 @@ class HeadWobbler:
             self.sway.reset()
 
         if drained_any:
-            print("Head wobbler queue drained during reset", flush=True)
+            _bench_print("Head wobbler queue drained during reset")
