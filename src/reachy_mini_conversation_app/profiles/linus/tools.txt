@@ -21,8 +21,14 @@ github_read_file
 github_list_repos
 github_list_issues
 github_list_prs
+github_update_issue
+github_close_issue
+github_comment_issue
 github_commit
 github_discard
 github_branch
 github_create_pr
+github_update_pr
+github_close_pr
+github_comment_pr
 code_move_to_repo
