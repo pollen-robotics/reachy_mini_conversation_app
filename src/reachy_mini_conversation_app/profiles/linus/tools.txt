@@ -31,4 +31,5 @@ github_create_pr
 github_update_pr
 github_close_pr
 github_comment_pr
+github_pr_checks
 code_move_to_repo
