@@ -81,6 +81,7 @@ class HeadWobbler:
     def working_loop(self) -> None:
         """Convert audio deltas into head movement offsets."""
         hop_dt = HOP_MS / 1000.0
+        sleep_guard = 0.002  # OS timer granularity (sec); avoid oversleeping by this margin
 
         print("Head wobbler thread started", flush=True)
         while not self._stop_event.is_set():
@@ -163,16 +164,18 @@ class HeadWobbler:
 
                         if target > now:
                             # We're ahead of schedule (pure slack), so wait until the hop should be applied.
-                            sleep_duration = target - now
-                            sleep_start = time.perf_counter()
-                            time.sleep(sleep_duration)
-                            sleep_duration = time.perf_counter() - sleep_start
-                            chunk_measured += sleep_duration
-                            self._benchmark.add_duration("chunk.slack.sleep", sleep_duration)
-                            with self._state_lock:
-                                if self._generation != current_generation:
-                                    chunk_processed = False
-                                    break
+                            slack = target - now
+                            if slack > sleep_guard:
+                                sleep_duration = slack - sleep_guard
+                                sleep_start = time.perf_counter()
+                                time.sleep(sleep_duration)
+                                sleep_duration = time.perf_counter() - sleep_start
+                                chunk_measured += sleep_duration
+                                self._benchmark.add_duration("chunk.slack.sleep", sleep_duration)
+                                with self._state_lock:
+                                    if self._generation != current_generation:
+                                        chunk_processed = False
+                                        break
 
                         r = results[i]
                         offsets = (
