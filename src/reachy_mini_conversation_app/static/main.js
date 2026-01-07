@@ -57,26 +57,24 @@ async function waitForPersonalityData(timeoutMs = 15000) {
   }
 }
 
-async function validateKey(key) {
-  const body = { openai_api_key: key };
-  const resp = await fetch("/validate_api_key", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    throw new Error(data.error || "validation_failed");
+// ---------- Configuration API ----------
+async function getConfig() {
+  try {
+    const url = new URL("/config", window.location.origin);
+    url.searchParams.set("_", Date.now().toString());
+    const resp = await fetchWithTimeout(url, {}, 3000);
+    if (!resp.ok) return { variables: [] };
+    return await resp.json();
+  } catch (e) {
+    return { variables: [] };
   }
-  return data;
 }
 
-async function saveKey(key) {
-  const body = { openai_api_key: key };
-  const resp = await fetch("/openai_api_key", {
+async function setConfigValue(key, value) {
+  const resp = await fetch(`/config/${encodeURIComponent(key)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ value, persist: true }),
   });
   if (!resp.ok) {
     const data = await resp.json().catch(() => ({}));
@@ -85,28 +83,13 @@ async function saveKey(key) {
   return await resp.json();
 }
 
-// ---------- Linus Config API ----------
-async function getLinusConfig() {
-  try {
-    const url = new URL("/linus_config", window.location.origin);
-    url.searchParams.set("_", Date.now().toString());
-    const resp = await fetchWithTimeout(url, {}, 2000);
-    if (!resp.ok) return { anthropic_key: "", github_token: "", github_owner: "" };
-    return await resp.json();
-  } catch (e) {
-    return { anthropic_key: "", github_token: "", github_owner: "" };
-  }
-}
-
-async function saveLinusConfig(config) {
-  const resp = await fetch("/linus_config", {
+async function reloadConfig() {
+  const resp = await fetch("/config/reload", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(config),
   });
   if (!resp.ok) {
     const data = await resp.json().catch(() => ({}));
-    throw new Error(data.error || "save_failed");
+    throw new Error(data.error || "reload_failed");
   }
   return await resp.json();
 }
@@ -208,21 +191,14 @@ function show(el, flag) {
 async function init() {
   const loading = document.getElementById("loading");
   show(loading, true);
-  const statusEl = document.getElementById("status");
-  const formPanel = document.getElementById("form-panel");
-  const configuredPanel = document.getElementById("configured");
   const personalityPanel = document.getElementById("personality-panel");
-  const saveBtn = document.getElementById("save-btn");
-  const changeKeyBtn = document.getElementById("change-key-btn");
-  const input = document.getElementById("api-key");
 
-  // Linus config elements
-  const linusPanel = document.getElementById("linus-panel");
-  const anthropicKeyInput = document.getElementById("anthropic-key");
-  const githubTokenInput = document.getElementById("github-token");
-  const githubOwnerInput = document.getElementById("github-owner");
-  const saveLinusBtn = document.getElementById("save-linus-btn");
-  const linusStatus = document.getElementById("linus-status");
+  // Config panel elements
+  const configPanel = document.getElementById("config-panel");
+  const configVarsContainer = document.getElementById("config-vars-container");
+  const saveConfigBtn = document.getElementById("save-config-btn");
+  const reloadConfigBtn = document.getElementById("reload-config-btn");
+  const configStatus = document.getElementById("config-status");
 
   // Personality elements
   const pSelect = document.getElementById("personality-select");
@@ -243,134 +219,131 @@ async function init() {
     play_emotion: ["stop_emotion"],
   };
 
-  statusEl.textContent = "Checking configuration...";
-  show(formPanel, false);
-  show(configuredPanel, false);
   show(personalityPanel, false);
-  show(linusPanel, false);
+  show(configPanel, true);
 
-  const st = (await waitForStatus()) || { has_key: false };
-  if (st.has_key) {
-    statusEl.textContent = "";
-    show(configuredPanel, true);
-  }
+  // Store current config values for saving
+  let configInputs = {};
 
-  // Handler for "Change API key" button
-  changeKeyBtn.addEventListener("click", () => {
-    show(configuredPanel, false);
-    show(formPanel, true);
-    input.value = "";
-    statusEl.textContent = "";
-    statusEl.className = "status";
-  });
+  function renderConfigVars(variables) {
+    configVarsContainer.innerHTML = "";
+    configInputs = {};
 
-  // Remove error styling when user starts typing
-  input.addEventListener("input", () => {
-    input.classList.remove("error");
-  });
+    for (const v of variables) {
+      const row = document.createElement("div");
+      row.className = "row";
 
-  saveBtn.addEventListener("click", async () => {
-    const key = input.value.trim();
-    if (!key) {
-      statusEl.textContent = "Please enter a valid key.";
-      statusEl.className = "status warn";
-      input.classList.add("error");
-      return;
-    }
-    statusEl.textContent = "Validating API key...";
-    statusEl.className = "status";
-    input.classList.remove("error");
-    try {
-      // First validate the key
-      const validation = await validateKey(key);
-      if (!validation.valid) {
-        statusEl.textContent = "Invalid API key. Please check your key and try again.";
-        statusEl.className = "status error";
-        input.classList.add("error");
-        return;
-      }
+      const label = document.createElement("label");
+      label.htmlFor = `config-${v.key}`;
+      label.textContent = v.key;
+      label.title = v.description;
 
-      // If valid, save it
-      statusEl.textContent = "Key valid! Saving...";
-      statusEl.className = "status ok";
-      await saveKey(key);
-      statusEl.textContent = "Saved. Reloading…";
-      statusEl.className = "status ok";
-      window.location.reload();
-    } catch (e) {
-      input.classList.add("error");
-      if (e.message === "invalid_api_key") {
-        statusEl.textContent = "Invalid API key. Please check your key and try again.";
+      const inputWrapper = document.createElement("div");
+      inputWrapper.className = "input-wrapper";
+
+      const inp = document.createElement("input");
+      inp.id = `config-${v.key}`;
+      inp.type = v.is_secret ? "password" : "text";
+      inp.autocomplete = "off";
+      inp.dataset.key = v.key;
+      inp.dataset.isSecret = v.is_secret ? "true" : "false";
+
+      if (v.is_set) {
+        if (v.is_secret) {
+          inp.placeholder = v.value || "••••••••";
+        } else {
+          inp.value = v.value || "";
+        }
       } else {
-        statusEl.textContent = "Failed to validate/save key. Please try again.";
+        inp.placeholder = v.description;
       }
-      statusEl.className = "status error";
+
+      // Status indicator
+      const statusIndicator = document.createElement("span");
+      statusIndicator.className = v.is_set ? "indicator indicator-set" : "indicator indicator-unset";
+      statusIndicator.title = v.is_set ? "Configured" : "Not set";
+
+      inputWrapper.appendChild(inp);
+      inputWrapper.appendChild(statusIndicator);
+
+      row.appendChild(label);
+      row.appendChild(inputWrapper);
+      configVarsContainer.appendChild(row);
+
+      configInputs[v.key] = inp;
+    }
+  }
+
+  try {
+    const configData = await getConfig();
+    renderConfigVars(configData.variables || []);
+  } catch (e) {
+    configStatus.textContent = "Failed to load configuration.";
+    configStatus.className = "status error";
+  }
+
+  saveConfigBtn.addEventListener("click", async () => {
+    configStatus.textContent = "Saving...";
+    configStatus.className = "status";
+
+    let savedCount = 0;
+    let errorCount = 0;
+
+    for (const [key, inp] of Object.entries(configInputs)) {
+      const value = inp.value.trim();
+      // Only save if user entered a value (don't overwrite with empty for secrets)
+      if (value) {
+        try {
+          await setConfigValue(key, value);
+          savedCount++;
+          // Clear the input and update placeholder for secrets
+          if (inp.dataset.isSecret === "true") {
+            inp.value = "";
+            inp.placeholder = value.slice(0, 4) + "..." + value.slice(-4);
+          }
+          // Update indicator
+          const indicator = inp.parentElement.querySelector(".indicator");
+          if (indicator) {
+            indicator.className = "indicator indicator-set";
+            indicator.title = "Configured";
+          }
+        } catch (e) {
+          errorCount++;
+        }
+      }
+    }
+
+    if (errorCount > 0) {
+      configStatus.textContent = `Saved ${savedCount}, ${errorCount} failed.`;
+      configStatus.className = "status warn";
+    } else if (savedCount > 0) {
+      configStatus.textContent = `Saved ${savedCount} value(s).`;
+      configStatus.className = "status ok";
+    } else {
+      configStatus.textContent = "No changes to save.";
+      configStatus.className = "status";
     }
   });
 
-  if (!st.has_key) {
-    statusEl.textContent = "";
-    show(formPanel, true);
-    show(loading, false);
-    return;
-  }
-
-  // Initialize Linus config panel
-  show(linusPanel, true);
-  try {
-    const linusConfig = await getLinusConfig();
-    if (linusConfig.has_anthropic_key) {
-      anthropicKeyInput.placeholder = "••••••••••••••••";
-    }
-    if (linusConfig.has_github_token) {
-      githubTokenInput.placeholder = "••••••••••••••••";
-    }
-    if (linusConfig.github_owner) {
-      githubOwnerInput.value = linusConfig.github_owner;
-    }
-  } catch (e) {
-    // Ignore errors loading linus config
-  }
-
-  saveLinusBtn.addEventListener("click", async () => {
-    linusStatus.textContent = "Saving...";
-    linusStatus.className = "status";
+  reloadConfigBtn.addEventListener("click", async () => {
+    configStatus.textContent = "Reloading...";
+    configStatus.className = "status";
     try {
-      const config = {};
-      if (anthropicKeyInput.value.trim()) {
-        config.anthropic_key = anthropicKeyInput.value.trim();
-      }
-      if (githubTokenInput.value.trim()) {
-        config.github_token = githubTokenInput.value.trim();
-      }
-      if (githubOwnerInput.value.trim()) {
-        config.github_owner = githubOwnerInput.value.trim();
-      }
-      await saveLinusConfig(config);
-      linusStatus.textContent = "Saved successfully!";
-      linusStatus.className = "status ok";
-      // Update placeholders to indicate keys are saved
-      if (config.anthropic_key) {
-        anthropicKeyInput.value = "";
-        anthropicKeyInput.placeholder = "••••••••••••••••";
-      }
-      if (config.github_token) {
-        githubTokenInput.value = "";
-        githubTokenInput.placeholder = "••••••••••••••••";
-      }
+      const result = await reloadConfig();
+      renderConfigVars(result.variables || []);
+      configStatus.textContent = "Configuration reloaded.";
+      configStatus.className = "status ok";
     } catch (e) {
-      linusStatus.textContent = "Failed to save configuration.";
-      linusStatus.className = "status error";
+      configStatus.textContent = "Failed to reload configuration.";
+      configStatus.className = "status error";
     }
   });
 
   // Wait until backend routes are ready before rendering personalities UI
   const list = (await waitForPersonalityData()) || { choices: [] };
-  statusEl.textContent = "";
-  show(formPanel, false);
   if (!list.choices.length) {
-    statusEl.textContent = "Personality endpoints not ready yet. Retry shortly.";
-    statusEl.className = "status warn";
+    configStatus.textContent = "Personality endpoints not ready yet. Retry shortly.";
+    configStatus.className = "status warn";
     show(loading, false);
     return;
   }
@@ -569,8 +542,8 @@ async function init() {
       }
     });
   } catch (e) {
-    statusEl.textContent = "UI failed to load. Please refresh.";
-    statusEl.className = "status warn";
+    configStatus.textContent = "UI failed to load. Please refresh.";
+    configStatus.className = "status warn";
   } finally {
     // Hide loading when initial setup is done (regardless of key presence)
     show(loading, false);

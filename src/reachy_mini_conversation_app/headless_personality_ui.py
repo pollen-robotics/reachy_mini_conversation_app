@@ -374,6 +374,26 @@ def mount_personality_routes(
             })
         return {"variables": variables}
 
+    @app.post("/config/reload")
+    def _reload_config() -> dict:  # type: ignore
+        """Reload configuration from .env file."""
+        try:
+            reload_config()
+            # Return updated config
+            variables = []
+            for env_key, config_attr, is_secret, description in CONFIG_VARS:
+                value = getattr(config, config_attr, None)
+                variables.append({
+                    "key": env_key,
+                    "value": _mask_secret(value, is_secret),
+                    "is_set": value is not None and value != "",
+                    "is_secret": is_secret,
+                    "description": description,
+                })
+            return {"ok": True, "message": "Configuration reloaded", "variables": variables}
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
+
     @app.get("/config/{key}")
     def _get_config_key(key: str) -> dict:  # type: ignore
         """Get a specific configuration variable."""
@@ -473,23 +493,3 @@ def mount_personality_routes(
             "cleared": True,
             "persisted": persisted,
         }
-
-    @app.post("/config/reload")
-    def _reload_config() -> dict:  # type: ignore
-        """Reload configuration from .env file."""
-        try:
-            reload_config()
-            # Return updated config
-            variables = []
-            for env_key, config_attr, is_secret, description in CONFIG_VARS:
-                value = getattr(config, config_attr, None)
-                variables.append({
-                    "key": env_key,
-                    "value": _mask_secret(value, is_secret),
-                    "is_set": value is not None and value != "",
-                    "is_secret": is_secret,
-                    "description": description,
-                })
-            return {"ok": True, "message": "Configuration reloaded", "variables": variables}
-        except Exception as e:
-            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore

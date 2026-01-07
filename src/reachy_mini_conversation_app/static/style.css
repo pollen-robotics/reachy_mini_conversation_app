@@ -308,6 +308,42 @@ button.ghost:hover { border-color: rgba(94, 240, 193, 0.4); }
   margin: 0; font-size: 13px; color: var(--text);
 }
 
+/* Config panel */
+.input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.input-wrapper input {
+  flex: 1;
+  padding-right: 36px;
+}
+.indicator {
+  position: absolute;
+  right: 12px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  pointer-events: none;
+}
+.indicator-set {
+  background: var(--ok);
+  box-shadow: 0 0 8px rgba(76, 224, 179, 0.5);
+}
+.indicator-unset {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+#config-vars-container .row {
+  margin-top: 10px;
+}
+#config-vars-container .row label {
+  font-size: 12px;
+  font-family: monospace;
+  color: var(--text);
+  opacity: 0.9;
+}
+
 @media (max-width: 760px) {
   .hero h1 { font-size: 26px; }
   .row { grid-template-columns: 1fr; }
