@@ -59,41 +59,41 @@ def run(
         )
 
     if robot is None:
-            try:
-                robot_kwargs = {}
-                if args.robot_name is not None:
-                    robot_kwargs["robot_name"] = args.robot_name
+        try:
+            robot_kwargs = {}
+            if args.robot_name is not None:
+                robot_kwargs["robot_name"] = args.robot_name
 
-                logger.info("Initializing ReachyMini (SDK will auto-detect appropriate backend)")
-                robot = ReachyMini(**robot_kwargs)
+            logger.info("Initializing ReachyMini (SDK will auto-detect appropriate backend)")
+            robot = ReachyMini(**robot_kwargs)
 
-            except TimeoutError as e:
-                logger.error(
-                    "Connection timeout: Failed to connect to Reachy Mini daemon. "
-                    f"Details: {e}"
-                )
-                log_connection_troubleshooting(logger, args.robot_name)
-                sys.exit(1)
+        except TimeoutError as e:
+            logger.error(
+                "Connection timeout: Failed to connect to Reachy Mini daemon. "
+                f"Details: {e}"
+            )
+            log_connection_troubleshooting(logger, args.robot_name)
+            sys.exit(1)
 
-            except ConnectionError as e:
-                logger.error(
-                    "Connection failed: Unable to establish connection to Reachy Mini. "
-                    f"Details: {e}"
-                )
-                log_connection_troubleshooting(logger, args.robot_name)
-                sys.exit(1)
+        except ConnectionError as e:
+            logger.error(
+                "Connection failed: Unable to establish connection to Reachy Mini. "
+                f"Details: {e}"
+            )
+            log_connection_troubleshooting(logger, args.robot_name)
+            sys.exit(1)
 
-            except Exception as e:
-                logger.error(
-                    f"Unexpected error during robot initialization: {type(e).__name__}: {e}"
-                )
-                logger.error("Please check your configuration and try again.")
-                sys.exit(1)
+        except Exception as e:
+            logger.error(
+                f"Unexpected error during robot initialization: {type(e).__name__}: {e}"
+            )
+            logger.error("Please check your configuration and try again.")
+            sys.exit(1)
 
     # Check if running in simulation mode without --gradio
     if robot.client.get_status()["simulation_enabled"] and not args.gradio:
         logger.error(
-            "Simulation mode requires Gradio interface. Please use --gradio flag when running in simulation mode.",
+            "Simulation mode requires Gradio interface. Please use --gradio flag when running in simulation mode."
         )
         robot.client.disconnect()
         sys.exit(1)
