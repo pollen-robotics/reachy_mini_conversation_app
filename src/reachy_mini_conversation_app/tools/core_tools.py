@@ -57,6 +57,7 @@ class ToolDependencies:
     vision_manager: Any | None = None
     head_wobbler: Any | None = None  # HeadWobbler for audio-reactive motion
     motion_duration_s: float = 1.0
+    background_task_manager: Any | None = None  # BackgroundTaskManager for async tasks
 
 
 # Tool base class
@@ -67,11 +68,15 @@ class Tool(abc.ABC):
       - name: str
       - description: str
       - parameters_schema: Dict[str, Any]  # JSON Schema
+
+    Optional:
+      - supports_background: bool  # Whether tool can run in background (default: False)
     """
 
     name: str
     description: str
     parameters_schema: Dict[str, Any]
+    supports_background: bool = False  # Override in subclass to enable background execution
 
     def spec(self) -> Dict[str, Any]:
         """Return the function spec for LLM consumption."""
