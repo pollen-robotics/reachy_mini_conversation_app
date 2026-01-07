@@ -52,26 +52,42 @@ def run(
     logger.info("Starting Reachy Mini Conversation App")
 
     if args.no_camera and args.head_tracker is not None:
-        logger.warning("Head tracking is not activated due to --no-camera.")
-
-    if robot is None:
-        # Initialize robot with appropriate backend
-        # TODO: Implement dynamic robot connection detection
-        # Automatically detect and connect to available Reachy Mini robot(s!)
-        # Priority checks (in order):
-        #   1. Reachy Lite connected directly to the host
-        #   2. Reachy Mini daemon running on localhost (same device)
-        #   3. Reachy Mini daemon on local network (same subnet)
-
-        if args.wireless_version and not args.on_device:
-            logger.info("Using WebRTC backend for fully remote wireless version")
-            robot = ReachyMini(media_backend="webrtc", localhost_only=False)
-        elif args.wireless_version and args.on_device:
-            logger.info("Using GStreamer backend for on-device wireless version")
-            robot = ReachyMini(media_backend="gstreamer")
-        else:
-            logger.info("Using default backend for lite version")
-            robot = ReachyMini(media_backend="default")
+            logger.warning(
+                "Head tracking disabled: --no-camera flag is set. "
+                "Remove --no-camera to enable head tracking."
+            )
+        
+        if robot is None:
+            try:
+                robot_kwargs = {}
+                if args.robot_name is not None:
+                    robot_kwargs["robot_name"] = args.robot_name
+                
+                logger.info("Initializing ReachyMini (SDK will auto-detect appropriate backend)")
+                robot = ReachyMini(**robot_kwargs)
+                
+            except TimeoutError as e:
+                logger.error(
+                    "Connection timeout: Failed to connect to Reachy Mini daemon. "
+                    f"Details: {e}"
+                )
+                log_connection_troubleshooting(logger, args.robot_name)
+                sys.exit(1)
+                
+            except ConnectionError as e:
+                logger.error(
+                    "Connection failed: Unable to establish connection to Reachy Mini. "
+                    f"Details: {e}"
+                )
+                log_connection_troubleshooting(logger, args.robot_name)
+                sys.exit(1)
+                
+            except Exception as e:
+                logger.error(
+                    f"Unexpected error during robot initialization: {type(e).__name__}: {e}"
+                )
+                logger.error("Please check your configuration and try again.")
+                sys.exit(1)
 
     # Check if running in simulation mode without --gradio
     if robot.client.get_status()["simulation_enabled"] and not args.gradio:
