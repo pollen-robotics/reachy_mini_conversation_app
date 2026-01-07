@@ -118,6 +118,6 @@ def log_connection_troubleshooting(logger: logging.Logger, robot_name: Optional[
             "--robot-name <name>"
         )
 
-    logger.error("  3. For wireless: check network connectivity and firewall")
-    logger.error("  4. Review daemon logs: journalctl -u reachy-mini-daemon -n 50")
-    logger.error("  5. Restart daemon: sudo systemctl restart reachy-mini-daemon")
+    logger.error("  3. For wireless: check network connectivity")
+    logger.error("  4. Review daemon logs")
+    logger.error("  5. Restart the daemon")
