@@ -47,3 +47,8 @@ github_ci_logs
 github_exec
 code_move_to_repo
 commit_rules
+
+# Background task management
+task_status
+task_cancel
+background_demo
