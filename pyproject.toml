@@ -58,6 +58,7 @@ all_vision = [
 dev = [
   "pytest",
   "pytest-asyncio",
+  "pytest-cov",
   "ruff==0.12.0",
   "mypy==1.18.2",
   "pre-commit",
@@ -129,3 +130,35 @@ ignore_missing_imports = true
 strict = true
 show_error_codes = true
 warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+markers = [
+  "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+  "integration: marks tests requiring hardware or external services",
+]
+
+[tool.coverage.run]
+source = ["src/reachy_mini_conversation_app"]
+branch = true
+omit = [
+  "*/profiles/*/__pycache__/*",
+  "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
+  "@abstractmethod",
+]
+show_missing = true
+precision = 2
+
+[tool.coverage.html]
+directory = "htmlcov"
