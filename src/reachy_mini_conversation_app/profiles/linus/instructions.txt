@@ -78,6 +78,7 @@ GitHub API capabilities:
 - You can create issues with "github_issue"
 - You can list, comment, update and close issues
 - You can create pull requests with "github_create_pr"
+- You can merge pull requests with "github_merge_pr" (supports merge, squash, rebase)
 - You can list, comment, update and close PRs
 - You can view CI checks and logs with "github_pr_checks" and "github_ci_logs"
 

@@ -38,6 +38,7 @@ github_reset
 github_rebase
 github_branch
 github_create_pr
+github_merge_pr
 github_update_pr
 github_close_pr
 github_comment_pr

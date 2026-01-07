@@ -312,6 +312,7 @@ The `linus` profile transforms Reachy Mini into a developer assistant that can g
 | Tool | Description | Confirmation Required |
 |------|-------------|----------------------|
 | `github_create_pr` | Create a pull request. | Yes |
+| `github_merge_pr` | Merge a pull request (supports merge, squash, rebase). | Yes |
 | `github_list_prs` | List pull requests with filters. | No |
 | `github_update_pr` | Update PR title, body, or base branch. | No |
 | `github_comment_pr` | Add a comment to a pull request. | No |
