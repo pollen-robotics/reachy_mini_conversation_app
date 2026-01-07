@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 import weakref
 from dataclasses import dataclass, field
@@ -52,7 +53,7 @@ class BackgroundTask:
     progress_message: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
-    started_at: float = field(default_factory=lambda: asyncio.get_event_loop().time())
+    started_at: float = field(default_factory=time.monotonic)
     completed_at: Optional[float] = None
     _task: Optional[asyncio.Task[None]] = field(default=None, repr=False)
 
@@ -173,7 +174,7 @@ class BackgroundTaskManager:
             result = await coroutine
             bg_task.result = result
             bg_task.status = TaskStatus.COMPLETED
-            bg_task.completed_at = asyncio.get_event_loop().time()
+            bg_task.completed_at = time.monotonic()
 
             # Build completion message
             message = self._summarize_result(result)
@@ -181,7 +182,7 @@ class BackgroundTaskManager:
 
         except asyncio.CancelledError:
             bg_task.status = TaskStatus.CANCELLED
-            bg_task.completed_at = asyncio.get_event_loop().time()
+            bg_task.completed_at = time.monotonic()
             message = f"Task '{bg_task.name}' was cancelled."
             logger.info(f"Background task cancelled: {bg_task.name} (id={bg_task.id})")
             raise
@@ -189,7 +190,7 @@ class BackgroundTaskManager:
         except Exception as e:
             bg_task.error = str(e)
             bg_task.status = TaskStatus.FAILED
-            bg_task.completed_at = asyncio.get_event_loop().time()
+            bg_task.completed_at = time.monotonic()
             message = f"Task '{bg_task.name}' failed: {e}"
             logger.error(f"Background task failed: {bg_task.name} (id={bg_task.id}): {e}")
 
@@ -354,7 +355,7 @@ class BackgroundTaskManager:
         Returns:
             Number of tasks removed
         """
-        now = asyncio.get_event_loop().time()
+        now = time.monotonic()
         to_remove = []
 
         for task_id, task in self._tasks.items():
@@ -382,7 +383,7 @@ class BackgroundTaskManager:
         for task in self._tasks.values():
             counts[task.status.value] += 1
             if task.status == TaskStatus.RUNNING:
-                elapsed = asyncio.get_event_loop().time() - task.started_at
+                elapsed = time.monotonic() - task.started_at
                 running.append({
                     "id": task.id,
                     "name": task.name,

@@ -1,7 +1,7 @@
 """Task status tool - check status of background tasks."""
 
-import asyncio
 import logging
+import time
 from typing import Any, Dict
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
@@ -46,7 +46,7 @@ class TaskStatusTool(Tool):
             if not task:
                 return {"error": f"Task {task_id} not found."}
 
-            elapsed = asyncio.get_event_loop().time() - task.started_at
+            elapsed = time.monotonic() - task.started_at
             result: Dict[str, Any] = {
                 "task_id": task.id,
                 "name": task.name,
@@ -80,7 +80,7 @@ class TaskStatusTool(Tool):
 
         tasks_info = []
         for task in running:
-            elapsed = asyncio.get_event_loop().time() - task.started_at
+            elapsed = time.monotonic() - task.started_at
             task_info: Dict[str, Any] = {
                 "task_id": task.id,
                 "name": task.name,
