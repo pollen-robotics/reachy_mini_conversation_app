@@ -103,11 +103,11 @@ def setup_logger(debug: bool) -> logging.Logger:
         logging.getLogger("aioice").setLevel(logging.WARNING)
     return logger
 
-def log_connection_troubleshooting(logger, robot_name: Optional[str]) -> None:
+def log_connection_troubleshooting(logger: logging.Logger, robot_name: Optional[str]) -> None:
     """Log troubleshooting steps for connection issues."""
     logger.error("Troubleshooting steps:")
     logger.error("  1. Verify reachy-mini-daemon is running")
-    
+
     if robot_name is not None:
         logger.error(
             f"  2. Daemon must be started with: --robot-name '{robot_name}'"
@@ -117,7 +117,7 @@ def log_connection_troubleshooting(logger, robot_name: Optional[str]) -> None:
             "  2. If daemon uses --robot-name, add the same flag here: "
             "--robot-name <name>"
         )
-    
+
     logger.error("  3. For wireless: check network connectivity and firewall")
     logger.error("  4. Review daemon logs: journalctl -u reachy-mini-daemon -n 50")
     logger.error("  5. Restart daemon: sudo systemctl restart reachy-mini-daemon")

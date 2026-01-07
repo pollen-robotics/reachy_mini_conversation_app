@@ -18,6 +18,7 @@ from reachy_mini_conversation_app.utils import (
     parse_args,
     setup_logger,
     handle_vision_stuff,
+    log_connection_troubleshooting,
 )
 
 
@@ -52,20 +53,20 @@ def run(
     logger.info("Starting Reachy Mini Conversation App")
 
     if args.no_camera and args.head_tracker is not None:
-            logger.warning(
-                "Head tracking disabled: --no-camera flag is set. "
-                "Remove --no-camera to enable head tracking."
-            )
-        
-        if robot is None:
+        logger.warning(
+            "Head tracking disabled: --no-camera flag is set. "
+            "Remove --no-camera to enable head tracking."
+        )
+
+    if robot is None:
             try:
                 robot_kwargs = {}
                 if args.robot_name is not None:
                     robot_kwargs["robot_name"] = args.robot_name
-                
+
                 logger.info("Initializing ReachyMini (SDK will auto-detect appropriate backend)")
                 robot = ReachyMini(**robot_kwargs)
-                
+
             except TimeoutError as e:
                 logger.error(
                     "Connection timeout: Failed to connect to Reachy Mini daemon. "
@@ -73,7 +74,7 @@ def run(
                 )
                 log_connection_troubleshooting(logger, args.robot_name)
                 sys.exit(1)
-                
+
             except ConnectionError as e:
                 logger.error(
                     "Connection failed: Unable to establish connection to Reachy Mini. "
@@ -81,7 +82,7 @@ def run(
                 )
                 log_connection_troubleshooting(logger, args.robot_name)
                 sys.exit(1)
-                
+
             except Exception as e:
                 logger.error(
                     f"Unexpected error during robot initialization: {type(e).__name__}: {e}"
