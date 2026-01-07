@@ -11,7 +11,7 @@ from numpy.typing import NDArray
 # Tunables
 SR = 16_000
 FRAME_MS = 20
-HOP_MS = 10
+HOP_MS = 50
 
 SWAY_MASTER = 1.5
 SENS_DB_OFFSET = +4.0
