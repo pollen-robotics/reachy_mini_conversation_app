@@ -216,7 +216,7 @@ button.ghost:hover { border-color: rgba(94, 240, 193, 0.4); }
 /* Personality layout */
 .row {
   display: grid;
-  grid-template-columns: 160px 1fr;
+  grid-template-columns: 185px 1fr;
   gap: 12px 18px;
   align-items: center;
   margin-top: 12px;
