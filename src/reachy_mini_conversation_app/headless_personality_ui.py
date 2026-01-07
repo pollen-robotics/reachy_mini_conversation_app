@@ -56,9 +56,9 @@ def mount_personality_routes(
 ) -> None:
     """Register personality management endpoints on a FastAPI app."""
     try:
-        from fastapi import Request
-        from pydantic import BaseModel
+        from fastapi import Request, Body
         from fastapi.responses import JSONResponse
+        from pydantic import BaseModel
     except Exception:  # pragma: no cover - only when settings app not available
         return
 
@@ -123,29 +123,25 @@ def mount_personality_routes(
         }
 
     @app.post("/personalities/save")
-    async def _save(request: Request) -> dict:  # type: ignore
-        # Accept raw JSON only to avoid validation-related 422s
-        try:
-            raw = await request.json()
-        except Exception:
-            raw = {}
-        name = str(raw.get("name", ""))
-        instructions = str(raw.get("instructions", ""))
-        tools_text = str(raw.get("tools_text", ""))
-        voice = str(raw.get("voice", "cedar")) if raw.get("voice") is not None else "cedar"
-
+    def _save(
+        name: str = Body(..., embed=True),
+        instructions: str = Body("", embed=True),
+        tools_text: str = Body("", embed=True),
+        voice: Optional[str] = Body("cedar", embed=True),
+    ) -> dict:  # type: ignore
         name_s = _sanitize_name(name)
         if not name_s:
             return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)  # type: ignore
+        v = voice or "cedar"
         try:
             logger.info(
                 "Headless save: name=%r voice=%r instr_len=%d tools_len=%d",
                 name_s,
-                voice,
+                v,
                 len(instructions),
                 len(tools_text),
             )
-            _write_profile(name_s, instructions, tools_text, voice or "cedar")
+            _write_profile(name_s, instructions, tools_text, v)
             value = f"user_personalities/{name_s}"
             choices = [DEFAULT_OPTION, *list_personalities()]
             return {"ok": True, "value": value, "choices": choices}
@@ -153,44 +149,21 @@ def mount_personality_routes(
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
 
     @app.post("/personalities/save_raw")
-    async def _save_raw(
-        request: Request,
-        name: Optional[str] = None,
-        instructions: Optional[str] = None,
-        tools_text: Optional[str] = None,
-        voice: Optional[str] = None,
+    def _save_raw(
+        name: str = Body(..., embed=True),
+        instructions: str = Body("", embed=True),
+        tools_text: str = Body("", embed=True),
+        voice: Optional[str] = Body("cedar", embed=True),
     ) -> dict:  # type: ignore
-        # Accept query params, form-encoded, or raw JSON
-        data = {"name": name, "instructions": instructions, "tools_text": tools_text, "voice": voice}
-        # Prefer form if present
-        try:
-            form = await request.form()
-            for k in ("name", "instructions", "tools_text", "voice"):
-                if k in form and form[k] is not None:
-                    data[k] = str(form[k])
-        except Exception:
-            pass
-        # Try JSON
-        try:
-            raw = await request.json()
-            if isinstance(raw, dict):
-                for k in ("name", "instructions", "tools_text", "voice"):
-                    if raw.get(k) is not None:
-                        data[k] = str(raw.get(k))
-        except Exception:
-            pass
-
-        name_s = _sanitize_name(str(data.get("name") or ""))
+        name_s = _sanitize_name(name)
         if not name_s:
             return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)  # type: ignore
-        instr = str(data.get("instructions") or "")
-        tools = str(data.get("tools_text") or "")
-        v = str(data.get("voice") or "cedar")
+        v = voice or "cedar"
         try:
             logger.info(
-                "Headless save_raw: name=%r voice=%r instr_len=%d tools_len=%d", name_s, v, len(instr), len(tools)
+                "Headless save_raw: name=%r voice=%r instr_len=%d tools_len=%d", name_s, v, len(instructions), len(tools_text)
             )
-            _write_profile(name_s, instr, tools, v)
+            _write_profile(name_s, instructions, tools_text, v)
             value = f"user_personalities/{name_s}"
             choices = [DEFAULT_OPTION, *list_personalities()]
             return {"ok": True, "value": value, "choices": choices}
@@ -410,7 +383,11 @@ def mount_personality_routes(
         return JSONResponse({"error": f"Unknown config key: {key}"}, status_code=404)  # type: ignore
 
     @app.post("/config/{key}")
-    async def _set_config_key(key: str, request: Request) -> dict:  # type: ignore
+    def _set_config_key(
+        key: str,
+        value: Optional[str] = Body(None, embed=True),
+        persist: bool = Body(True, embed=True),
+    ) -> dict:  # type: ignore
         """Set a configuration variable."""
         # Find the config variable
         config_info = None
@@ -424,26 +401,10 @@ def mount_personality_routes(
 
         env_key, config_attr, is_secret, description = config_info
 
-        # Get the value from request
-        value = None
-        try:
-            body = await request.json()
-            value = body.get("value")
-        except Exception:
-            # Try query params
-            value = request.query_params.get("value")
-
         # Update runtime config
         _update_runtime_config(env_key, value)
 
         # Update .env file for persistence
-        persist = True
-        try:
-            body = await request.json()
-            persist = body.get("persist", True)
-        except Exception:
-            pass
-
         persisted = False
         if persist:
             persisted = _update_env_file(env_key, value)
@@ -458,7 +419,7 @@ def mount_personality_routes(
         }
 
     @app.delete("/config/{key}")
-    async def _delete_config_key(key: str, request: Request) -> dict:  # type: ignore
+    def _delete_config_key(key: str, persist: bool = True) -> dict:  # type: ignore
         """Remove a configuration variable."""
         # Find the config variable
         config_info = None
@@ -476,13 +437,6 @@ def mount_personality_routes(
         _update_runtime_config(env_key, None)
 
         # Update .env file
-        persist = True
-        try:
-            body = await request.json()
-            persist = body.get("persist", True)
-        except Exception:
-            pass
-
         persisted = False
         if persist:
             persisted = _update_env_file(env_key, None)
