@@ -389,6 +389,203 @@ Ask Linus to:
 - "Rebase my branch onto main"
 
 
+
+
+## Creating Custom Tools
+
+This section explains how to create custom tools for the conversation app, including support for background execution.
+
+### Basic Tool Structure
+
+All tools must subclass `Tool` from `reachy_mini_conversation_app.tools.core_tools`:
+
+```python
+from typing import Any, Dict
+from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
+
+class MyCustomTool(Tool):
+    """Description visible to the LLM."""
+
+    name = "my_tool"
+    description = "What this tool does - the LLM uses this to decide when to call it."
+    parameters_schema = {
+        "type": "object",
+        "properties": {
+            "param1": {
+                "type": "string",
+                "description": "Description of the parameter",
+            },
+            "optional_param": {
+                "type": "integer",
+                "description": "An optional parameter with default",
+            },
+        },
+        "required": ["param1"],
+    }
+
+    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
+        """Execute the tool - must be async."""
+        param1 = kwargs.get("param1", "")
+        optional_param = kwargs.get("optional_param", 10)
+
+        # Your tool logic here
+        result = f"Processed {param1}"
+
+        # Return a dict - the LLM will vocalize this
+        return {
+            "status": "success",
+            "message": result,
+        }
+```
+
+### Tool Dependencies
+
+The `ToolDependencies` dataclass provides access to robot systems:
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `reachy_mini` | `ReachyMini` | Robot instance for direct control |
+| `movement_manager` | `MovementManager` | Queue movements, set listening state |
+| `camera_worker` | `CameraWorker \| None` | Get camera frames |
+| `vision_manager` | `VisionManager \| None` | Process images with vision models |
+| `head_wobbler` | `HeadWobbler \| None` | Audio-reactive head motion |
+| `motion_duration_s` | `float` | Default motion duration |
+| `background_task_manager` | `BackgroundTaskManager \| None` | Manage background tasks |
+
+### Background Task Execution
+
+For long-running operations (API calls, file downloads, builds), use background execution to avoid blocking the conversation.
+
+#### Enabling Background Support
+
+1. Set `supports_background = True` on your tool class
+2. Add a `background` parameter to your schema
+3. Use `BackgroundTaskManager` to run the task asynchronously
+
+```python
+from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
+from reachy_mini_conversation_app.background_tasks import BackgroundTaskManager
+
+class MyLongRunningTool(Tool):
+    name = "my_long_task"
+    description = "A tool that takes time to complete."
+    supports_background = True  # Enable background support
+
+    parameters_schema = {
+        "type": "object",
+        "properties": {
+            "input": {"type": "string", "description": "Input data"},
+            "background": {
+                "type": "boolean",
+                "description": "Run in background (default: true for long operations)",
+            },
+        },
+        "required": ["input"],
+    }
+
+    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
+        input_data = kwargs.get("input", "")
+        background = kwargs.get("background", True)
+
+        if background:
+            manager = BackgroundTaskManager.get_instance()
+            task = await manager.start_task(
+                name="my_long_task",
+                description=f"Processing {input_data}",
+                coroutine=self._do_work(input_data),
+            )
+            return {
+                "status": "started",
+                "task_id": task.id,
+                "message": f"Task started in background. I'll notify you when done.",
+            }
+
+        # Synchronous execution
+        return await self._do_work(input_data)
+
+    async def _do_work(self, input_data: str) -> Dict[str, Any]:
+        """The actual work - runs in background or synchronously."""
+        import asyncio
+        await asyncio.sleep(10)  # Simulate long operation
+        return {
+            "status": "success",
+            "message": f"Completed processing {input_data}",
+        }
+```
+
+#### Progress Tracking
+
+For tasks where progress can be measured, enable progress tracking:
+
+```python
+async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
+    manager = BackgroundTaskManager.get_instance()
+
+    task = await manager.start_task(
+        name="download_task",
+        description="Downloading large file",
+        coroutine=self._download_with_progress(),
+        with_progress=True,  # Enable progress tracking
+    )
+
+    return {"status": "started", "task_id": task.id}
+
+async def _download_with_progress(self) -> Dict[str, Any]:
+    manager = BackgroundTaskManager.get_instance()
+    running_tasks = manager.get_running_tasks()
+
+    # Find our task ID
+    task_id = None
+    for task in running_tasks:
+        if task.name == "download_task":
+            task_id = task.id
+            break
+
+    # Update progress as work proceeds
+    for i in range(10):
+        await asyncio.sleep(1)
+        if task_id:
+            await manager.update_progress(
+                task_id,
+                progress=(i + 1) / 10,
+                message=f"Downloaded {(i + 1) * 10}%",
+            )
+
+    return {"status": "success", "message": "Download complete"}
+```
+
+### Background Task Tools
+
+Three built-in tools help users interact with background tasks:
+
+| Tool | Description |
+|------|-------------|
+| `task_status` | Check status of running background tasks |
+| `task_cancel` | Cancel a running task (requires confirmation) |
+| `background_demo` | Demo tool for testing background execution |
+
+### Best Practices
+
+1. **Return user-friendly messages**: The LLM vocalizes your return values
+2. **Handle errors gracefully**: Return `{"error": "message"}` for failures
+3. **Use async/await**: All tool methods must be async
+4. **Require confirmation for destructive actions**: Add a `confirmed` parameter
+5. **Background for long operations**: Anything > 5 seconds should support background mode
+6. **Log important actions**: Use `logging.getLogger(__name__)`
+
+### Tool Registration
+
+Tools are auto-discovered when:
+1. They subclass `Tool`
+2. The module is imported (via `tools.txt` in your profile)
+
+Add your tool to `profiles/<your_profile>/tools.txt`:
+```
+# My custom tools
+my_tool
+my_long_task
+```
+
 ## Development workflow
 - Install the dev group extras: `uv sync --group dev` or `pip install -e .[dev]`.
 - Run formatting and linting: `ruff check .`.
