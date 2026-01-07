@@ -9,11 +9,31 @@ callable to avoid cross-thread issues.
 from __future__ import annotations
 import asyncio
 import logging
+import os
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from fastapi import FastAPI
 
-from .config import config
+from .config import config, reload_config
+
+
+# Configuration variables that can be managed via the UI
+# Format: (env_var_name, config_attr_name, is_secret, description)
+CONFIG_VARS = [
+    ("OPENAI_API_KEY", "OPENAI_API_KEY", True, "OpenAI API key (required for voice)"),
+    ("MODEL_NAME", "MODEL_NAME", False, "OpenAI model name"),
+    ("HF_TOKEN", "HF_TOKEN", True, "Hugging Face token (optional, for vision)"),
+    ("HF_HOME", "HF_HOME", False, "Hugging Face cache directory"),
+    ("LOCAL_VISION_MODEL", "LOCAL_VISION_MODEL", False, "Local vision model path"),
+    ("ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY", True, "Anthropic API key (for Linus profile)"),
+    ("ANTHROPIC_MODEL", "ANTHROPIC_MODEL", False, "Anthropic model name"),
+    ("GITHUB_TOKEN", "GITHUB_TOKEN", True, "GitHub token (for Linus profile)"),
+    ("GITHUB_DEFAULT_OWNER", "GITHUB_DEFAULT_OWNER", False, "Default GitHub owner/org"),
+    ("GITHUB_OWNER_EMAIL", "GITHUB_OWNER_EMAIL", False, "Email for git commits"),
+    ("REACHY_MINI_CUSTOM_PROFILE", "REACHY_MINI_CUSTOM_PROFILE", False, "Custom profile name"),
+]
+
 from .openai_realtime import OpenaiRealtimeHandler
 from .headless_personality import (
     DEFAULT_OPTION,
@@ -274,3 +294,202 @@ def mount_personality_routes(
             return fut.result(timeout=10)
         except Exception:
             return ["cedar"]
+
+    # ========== Configuration Management Endpoints ==========
+
+    def _mask_secret(value: str | None, is_secret: bool) -> str | None:
+        """Mask secret values for display."""
+        if value is None or not value:
+            return None
+        if not is_secret:
+            return value
+        if len(value) <= 8:
+            return "***"
+        return f"{value[:4]}...{value[-4:]}"
+
+    def _get_env_file_path() -> Path | None:
+        """Find the .env file path."""
+        from dotenv import find_dotenv
+        dotenv_path = find_dotenv(usecwd=True)
+        return Path(dotenv_path) if dotenv_path else None
+
+    def _update_env_file(key: str, value: str | None) -> bool:
+        """Update or add a key in the .env file."""
+        env_path = _get_env_file_path()
+        if env_path is None:
+            # Create a new .env in the current directory
+            env_path = Path.cwd() / ".env"
+
+        try:
+            lines = []
+            key_found = False
+
+            if env_path.exists():
+                with open(env_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        stripped = line.strip()
+                        if stripped.startswith(f"{key}=") or stripped.startswith(f"{key} ="):
+                            key_found = True
+                            if value is not None and value != "":
+                                lines.append(f"{key}={value}\n")
+                            # If value is None or empty, we remove the line
+                        else:
+                            lines.append(line)
+
+            if not key_found and value is not None and value != "":
+                lines.append(f"{key}={value}\n")
+
+            with open(env_path, "w", encoding="utf-8") as f:
+                f.writelines(lines)
+
+            return True
+        except Exception as e:
+            logger.error(f"Failed to update .env file: {e}")
+            return False
+
+    def _update_runtime_config(key: str, value: str | None) -> None:
+        """Update config and environment at runtime."""
+        # Update environment variable
+        if value is not None and value != "":
+            os.environ[key] = value
+        else:
+            os.environ.pop(key, None)
+
+        # Update config object
+        if hasattr(config, key):
+            setattr(config, key, value if value else None)
+
+    @app.get("/config")
+    def _get_config() -> dict:  # type: ignore
+        """Get all configuration variables with masked secrets."""
+        variables = []
+        for env_key, config_attr, is_secret, description in CONFIG_VARS:
+            value = getattr(config, config_attr, None)
+            variables.append({
+                "key": env_key,
+                "value": _mask_secret(value, is_secret),
+                "is_set": value is not None and value != "",
+                "is_secret": is_secret,
+                "description": description,
+            })
+        return {"variables": variables}
+
+    @app.get("/config/{key}")
+    def _get_config_key(key: str) -> dict:  # type: ignore
+        """Get a specific configuration variable."""
+        for env_key, config_attr, is_secret, description in CONFIG_VARS:
+            if env_key == key:
+                value = getattr(config, config_attr, None)
+                return {
+                    "key": env_key,
+                    "value": _mask_secret(value, is_secret),
+                    "is_set": value is not None and value != "",
+                    "is_secret": is_secret,
+                    "description": description,
+                }
+        return JSONResponse({"error": f"Unknown config key: {key}"}, status_code=404)  # type: ignore
+
+    @app.post("/config/{key}")
+    async def _set_config_key(key: str, request: Request) -> dict:  # type: ignore
+        """Set a configuration variable."""
+        # Find the config variable
+        config_info = None
+        for env_key, config_attr, is_secret, description in CONFIG_VARS:
+            if env_key == key:
+                config_info = (env_key, config_attr, is_secret, description)
+                break
+
+        if config_info is None:
+            return JSONResponse({"error": f"Unknown config key: {key}"}, status_code=404)  # type: ignore
+
+        env_key, config_attr, is_secret, description = config_info
+
+        # Get the value from request
+        value = None
+        try:
+            body = await request.json()
+            value = body.get("value")
+        except Exception:
+            # Try query params
+            value = request.query_params.get("value")
+
+        # Update runtime config
+        _update_runtime_config(env_key, value)
+
+        # Update .env file for persistence
+        persist = True
+        try:
+            body = await request.json()
+            persist = body.get("persist", True)
+        except Exception:
+            pass
+
+        persisted = False
+        if persist:
+            persisted = _update_env_file(env_key, value)
+
+        current_value = getattr(config, config_attr, None)
+        return {
+            "ok": True,
+            "key": env_key,
+            "value": _mask_secret(current_value, is_secret),
+            "is_set": current_value is not None and current_value != "",
+            "persisted": persisted,
+        }
+
+    @app.delete("/config/{key}")
+    async def _delete_config_key(key: str, request: Request) -> dict:  # type: ignore
+        """Remove a configuration variable."""
+        # Find the config variable
+        config_info = None
+        for env_key, config_attr, is_secret, description in CONFIG_VARS:
+            if env_key == key:
+                config_info = (env_key, config_attr, is_secret, description)
+                break
+
+        if config_info is None:
+            return JSONResponse({"error": f"Unknown config key: {key}"}, status_code=404)  # type: ignore
+
+        env_key, config_attr, _, _ = config_info
+
+        # Clear runtime config
+        _update_runtime_config(env_key, None)
+
+        # Update .env file
+        persist = True
+        try:
+            body = await request.json()
+            persist = body.get("persist", True)
+        except Exception:
+            pass
+
+        persisted = False
+        if persist:
+            persisted = _update_env_file(env_key, None)
+
+        return {
+            "ok": True,
+            "key": env_key,
+            "cleared": True,
+            "persisted": persisted,
+        }
+
+    @app.post("/config/reload")
+    def _reload_config() -> dict:  # type: ignore
+        """Reload configuration from .env file."""
+        try:
+            reload_config()
+            # Return updated config
+            variables = []
+            for env_key, config_attr, is_secret, description in CONFIG_VARS:
+                value = getattr(config, config_attr, None)
+                variables.append({
+                    "key": env_key,
+                    "value": _mask_secret(value, is_secret),
+                    "is_set": value is not None and value != "",
+                    "is_secret": is_secret,
+                    "description": description,
+                })
+            return {"ok": True, "message": "Configuration reloaded", "variables": variables}
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
