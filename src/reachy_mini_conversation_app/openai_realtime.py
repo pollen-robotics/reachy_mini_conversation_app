@@ -23,6 +23,7 @@ from reachy_mini_conversation_app.tools.core_tools import (
     get_tool_specs,
     dispatch_tool_call,
 )
+from reachy_mini_conversation_app.background_tasks import BackgroundTaskManager
 
 
 logger = logging.getLogger(__name__)
@@ -322,6 +323,14 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 self._connected_event.set()
             except Exception:
                 pass
+
+            # Set up background task manager with connection reference
+            BackgroundTaskManager.get_instance().set_connection(
+                connection=conn,
+                output_queue=self.output_queue,
+                loop=asyncio.get_event_loop(),
+            )
+            logger.debug("BackgroundTaskManager connection set")
             async for event in self.connection:
                 logger.debug(f"OpenAI event: {event.type}")
                 if event.type == "input_audio_buffer.speech_started":
@@ -555,6 +564,12 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         # sends to the stream the stuff put in the output queue by the openai event handler
         # This is called periodically by the fastrtc Stream
 
+        # Check for background task completions (silent notification queue)
+        try:
+            await self._check_background_completions()
+        except Exception as e:
+            logger.debug("Background completion check skipped: %s", e)
+
         # Handle idle
         idle_duration = asyncio.get_event_loop().time() - self.last_activity_time
         if idle_duration > 15.0 and self.deps.movement_manager.is_idle():
@@ -571,6 +586,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
     async def shutdown(self) -> None:
         """Shutdown the handler."""
         self._shutdown_requested = True
+
+        # Clear background task manager connection
+        BackgroundTaskManager.get_instance().clear_connection()
 
         # Cancel session renewal task
         if self._session_renewal_task and not self._session_renewal_task.done():
@@ -678,6 +696,64 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             return voices
         except Exception:
             return fallback
+
+    async def _check_background_completions(self) -> None:
+        """Check for completed background tasks and inject notifications.
+
+        Uses the silent notification queue pattern - notifications are delivered
+        when the robot is available (not speaking).
+        """
+        if not self.connection:
+            return
+
+        manager = BackgroundTaskManager.get_instance()
+
+        # Process all pending notifications (non-blocking)
+        while True:
+            notification = manager.get_pending_notification()
+            if notification is None:
+                break
+
+            try:
+                # Build message for the LLM
+                status_text = notification.status.value
+                message = f"[Background task {status_text}: {notification.task_name}] {notification.message}"
+
+                logger.info(f"Injecting background task notification: {notification.task_name} ({status_text})")
+
+                # Inject as user message (similar to idle signal pattern)
+                await self.connection.conversation.item.create(
+                    item={
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": message}],
+                    },
+                )
+
+                # Trigger response to announce the result
+                await self.connection.response.create(
+                    response={
+                        "instructions": "A background task has completed. Announce the result concisely to the user in speech.",
+                    },
+                )
+
+                # Also emit to UI
+                await self.output_queue.put(
+                    AdditionalOutputs(
+                        {
+                            "role": "system",
+                            "content": f"Background task '{notification.task_name}' {status_text}",
+                            "metadata": {
+                                "task_id": notification.task_id,
+                                "status": status_text,
+                            },
+                        },
+                    ),
+                )
+
+            except Exception as e:
+                logger.error(f"Failed to inject background task notification: {e}")
+                break
 
     async def send_idle_signal(self, idle_duration: float) -> None:
         """Send an idle signal to the openai server."""
