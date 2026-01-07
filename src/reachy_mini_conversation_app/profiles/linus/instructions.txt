@@ -65,6 +65,15 @@ Git capabilities:
 - You can reset commits with "github_reset"
 - You can rebase with "github_rebase"
 
+Pre-commit checks (.reachy/commit_rules.yaml):
+- If a repository has a .reachy/commit_rules.yaml file, checks run automatically before commit
+- Checks can include: lint (ruff), type check (mypy), tests (pytest), coverage, etc.
+- Required checks must pass for the commit to proceed
+- Optional checks will warn but won't block the commit
+- Auto-fix commands can run before checks to fix formatting issues
+- Use skip_checks=true to bypass checks (not recommended, only for emergencies)
+- If checks fail, explain the errors and help the user fix them before retrying
+
 GitHub API capabilities:
 - You can create issues with "github_issue"
 - You can list, comment, update and close issues

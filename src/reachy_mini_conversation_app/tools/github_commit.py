@@ -11,6 +11,11 @@ from git import Repo, InvalidGitRepositoryError, GitCommandError
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
+from reachy_mini_conversation_app.tools.commit_rules import (
+    load_commit_rules,
+    run_pre_commit_checks,
+    format_check_results,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -43,6 +48,8 @@ class GitHubCommitTool(Tool):
         "Use github_add to stage files and github_rm to remove files BEFORE calling this tool. "
         "Supports auto-generating commit messages using Claude or OpenAI based on diff analysis. "
         "Use amend=true to modify the last commit (add staged changes and/or change message). "
+        "If the repo has a .reachy/commit_rules.yaml file, pre-commit checks will run automatically. "
+        "Use skip_checks=true to bypass pre-commit checks (not recommended). "
         "IMPORTANT: Always ask user for confirmation before calling this tool. "
         "Commit types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert."
     )
@@ -94,6 +101,10 @@ class GitHubCommitTool(Tool):
             "amend": {
                 "type": "boolean",
                 "description": "If true, amend the last commit instead of creating a new one. WARNING: Do not amend commits that have been pushed to remote.",
+            },
+            "skip_checks": {
+                "type": "boolean",
+                "description": "If true, skip pre-commit checks defined in .reachy/commit_rules.yaml. Not recommended.",
             },
         },
         "required": ["repo", "confirmed"],
@@ -266,8 +277,9 @@ Example response:
         issue_context = kwargs.get("issue_context")
         confirmed = kwargs.get("confirmed", False)
         amend = kwargs.get("amend", False)
+        skip_checks = kwargs.get("skip_checks", False)
 
-        logger.info(f"Tool call: github_commit - repo='{repo_name}', type={commit_type}, auto={auto_message}, analyzer={analyzer}, amend={amend}")
+        logger.info(f"Tool call: github_commit - repo='{repo_name}', type={commit_type}, auto={auto_message}, analyzer={analyzer}, amend={amend}, skip_checks={skip_checks}")
 
         # Check confirmation
         if not confirmed:
@@ -362,6 +374,29 @@ Example response:
                 breaking=breaking,
             )
 
+            # Run pre-commit checks if .reachy/commit_rules.yaml exists
+            checks_passed_summary = None
+            if not skip_checks:
+                rules = load_commit_rules(repo_path)
+                if rules and rules.pre_commit:
+                    logger.info(f"Running {len(rules.pre_commit)} pre-commit checks...")
+                    check_results = run_pre_commit_checks(repo_path, rules)
+
+                    if not check_results["passed"]:
+                        # Required checks failed - block commit
+                        return {
+                            "status": "checks_failed",
+                            "message": "Pre-commit checks failed. Commit blocked.",
+                            "repo": local_name,
+                            "checks": check_results["checks"],
+                            "summary": check_results["summary"],
+                            "formatted_results": format_check_results(check_results),
+                            "hint": "Fix the failing checks and try again, or use skip_checks=true to bypass (not recommended).",
+                        }
+                    else:
+                        checks_passed_summary = check_results["summary"]
+                        logger.info(f"All pre-commit checks passed: {checks_passed_summary}")
+
             # Create commit or amend
             if amend:
                 # Use git command directly for amend
@@ -392,6 +427,12 @@ Example response:
 
             if auto_message:
                 result["auto_generated"] = True
+
+            if checks_passed_summary:
+                result["pre_commit_checks"] = checks_passed_summary
+
+            if skip_checks:
+                result["checks_skipped"] = True
 
             return result
 

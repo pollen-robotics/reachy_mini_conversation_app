@@ -287,7 +287,7 @@ The `linus` profile transforms Reachy Mini into a developer assistant that can g
 | `github_rm` | Remove files from repository. | Yes |
 | `github_restore` | Restore files (unstage or discard changes). | Yes (for worktree) |
 | `github_discard` | Discard unstaged changes. | Yes |
-| `github_commit` | Commit staged changes with semantic-release format. Supports auto-generated messages using Claude or OpenAI. | Yes |
+| `github_commit` | Commit staged changes with semantic-release format. Supports auto-generated messages and pre-commit checks via `.reachy/commit_rules.yaml`. | Yes |
 
 #### Branch Management
 
@@ -324,6 +324,54 @@ The `linus` profile transforms Reachy Mini into a developer assistant that can g
 |------|-------------|----------------------|
 | `github_pr_checks` | Get CI check status and errors for a PR. | No |
 | `github_ci_logs` | Get GitHub Actions workflow logs. | No |
+
+### Pre-commit Checks
+
+Linus can enforce code quality checks before committing by reading a `.reachy/commit_rules.yaml` file in the repository. This works similarly to how Claude Code reads `.claude/` configuration.
+
+#### Setup
+
+Create a `.reachy/commit_rules.yaml` file in your repository:
+
+```yaml
+# Pre-commit checks - all must pass before committing
+pre_commit:
+  - name: lint
+    command: ruff check .
+    required: true
+
+  - name: format_check
+    command: ruff format --check .
+    required: true
+
+  - name: type_check
+    command: mypy src/
+    required: false  # Warning only, won't block commit
+
+  - name: tests
+    command: pytest
+    required: true
+
+  - name: coverage
+    command: pytest --cov=src --cov-fail-under=80
+    required: false
+
+# Auto-fix commands (run before checks if enabled)
+auto_fix:
+  enabled: true
+  commands:
+    - ruff check --fix .
+    - ruff format .
+```
+
+#### Behavior
+
+- When `github_commit` is called, Linus checks for `.reachy/commit_rules.yaml`
+- If present, all `pre_commit` checks run before the commit
+- `required: true` checks must pass or the commit is blocked
+- `required: false` checks warn but allow the commit
+- `auto_fix` commands run first to auto-correct issues (if enabled)
+- Use `skip_checks=true` to bypass checks (not recommended)
 
 ### Example Usage
 
