@@ -16,7 +16,7 @@ from reachy_mini_conversation_app.audio.head_wobbler_benchmark import HeadWobble
 
 SAMPLE_RATE = 24000
 MOVEMENT_LATENCY_S = 0.2  # seconds between audio and robot movement
-BENCHMARK_ON = False
+BENCHMARK_ON = True
 
 
 def _bench_print(message: str) -> None:
@@ -39,7 +39,6 @@ class HeadWobbler:
         self._hops_done: int = 0
 
         self.audio_queue: "queue.Queue[Tuple[int, int, NDArray[np.int16]]]" = queue.Queue()
-        self.sway = SwayRollRT()
 
         # Synchronization primitives
         self._state_lock = threading.Lock()
@@ -50,6 +49,7 @@ class HeadWobbler:
         self._thread: threading.Thread | None = None
         enable_diag = enable_benchmark if enable_benchmark is not None else True
         self._benchmark = HeadWobblerDiagnostics(HOP_MS, enable_diag and BENCHMARK_ON)
+        self.sway = SwayRollRT(benchmark=self._benchmark if self._benchmark.enabled else None)
         self._benchmark_log_interval = 5.0
         self._next_benchmark_log = time.monotonic() + self._benchmark_log_interval
 
@@ -130,11 +130,11 @@ class HeadWobbler:
                     # Each chunk batches roughly 250 ms of audio (6000 samples @ 24 kHz), so a 10 ms hop yields ~25 offsets.
                     chunk_audio_span = float(pcm.shape[-1]) / float(sr) if sr > 0 else 0.0
                     sway_start = time.perf_counter()
-                    with self._sway_lock:
-                        results = self.sway.feed(pcm, sr)
+                    with self._benchmark.section("chunk.main_calc.sway_feed"):
+                        with self._sway_lock:
+                            results = self.sway.feed(pcm, sr)
                     sway_duration = time.perf_counter() - sway_start
                     chunk_measured += sway_duration
-                    self._benchmark.add_duration("chunk.main_calc.sway_feed", sway_duration)
                     len_results = len(results)
 
                     i = 0

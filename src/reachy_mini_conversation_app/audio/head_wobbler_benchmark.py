@@ -8,18 +8,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 
-DISPLAY_NAMES: dict[str, str] = {
-    "chunk.total": "chunk.total",
-    "chunk.main_calc.sway_feed": "(main calc) sway.feed",
-    "chunk.communicate.apply_offsets": "(communicate) apply.offsets",
-    "chunk.slack.sleep": "(slack) sleep",
-    "chunk.logic.rest": "(rest) logic",
-    "queue.wait": "queue.wait",
-    "receive.total": "receive.audio",
-    "receive.decode": "decode",
-    "receive.numpy_view": "numpy_view",
-}
-
 PARENT_SECTIONS: dict[str, str | None] = {
     "chunk.total": None,
     "chunk.main_calc.sway_feed": "chunk.total",
@@ -30,6 +18,13 @@ PARENT_SECTIONS: dict[str, str | None] = {
     "receive.total": None,
     "receive.decode": "receive.total",
     "receive.numpy_view": "receive.total",
+    "sway.feed.total": None,
+    "sway.feed.convert": "sway.feed.total",
+    "sway.feed.resample": "sway.feed.total",
+    "sway.feed.hop_processing": "sway.feed.total",
+    "sway.feed.hop.frame": "sway.feed.hop_processing",
+    "sway.feed.hop.vad_env": "sway.feed.hop_processing",
+    "sway.feed.hop.oscillators": "sway.feed.hop_processing",
 }
 
 
@@ -135,14 +130,13 @@ class _TimingCollector:
             parent_total = snap[parent]["total_s"] if parent and parent in snap else stats["total_s"]
             pct = (stats["total_s"] / parent_total * 100.0) if parent_total else 0.0
             indent = "  " if parent else ""
-            display = DISPLAY_NAMES.get(name, name)
             avg_ms = stats["avg_s"] * 1000.0
             var_ms = stats["var_s2"] * 1_000_000.0
             total_ms = stats["total_s"] * 1000.0
             min_ms = stats["min_s"] * 1000.0
             max_ms = stats["max_s"] * 1000.0
             lines.append(
-                f"{indent}{display:<25} {int(stats['count']):>6}  "
+                f"{indent}{name:<25} {int(stats['count']):>6}  "
                 f"{avg_ms:>10.3f}  {var_ms:>11.3f}  {total_ms:>10.3f}  "
                 f"{pct:>6.2f}%  {min_ms:>5.2f}/{max_ms:>5.2f}",
             )

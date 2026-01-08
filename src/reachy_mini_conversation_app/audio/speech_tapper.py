@@ -3,10 +3,12 @@ import math
 from typing import Any, Dict, List
 from itertools import islice
 from collections import deque
+from contextlib import nullcontext
 
 import numpy as np
 from numpy.typing import NDArray
 
+from reachy_mini_conversation_app.audio.head_wobbler_benchmark import HeadWobblerDiagnostics
 
 # Tunables
 SR = 16_000
@@ -116,11 +118,12 @@ class SwayRollRT:
         rt.feed(pcm_int16_or_float, sr) -> List[dict]
     """
 
-    def __init__(self, rng_seed: int = 7):
+    def __init__(self, rng_seed: int = 7, benchmark: HeadWobblerDiagnostics | None = None):
         """Initialize state."""
         self._seed = int(rng_seed)
         self.samples: deque[float] = deque(maxlen=10 * SR)  # sliding window for VAD/env
         self.carry: NDArray[np.float32] = np.zeros(0, dtype=np.float32)
+        self._benchmark = benchmark
 
         self.vad_on = False
         self.vad_above = 0
@@ -159,110 +162,125 @@ class SwayRollRT:
             sr:  sample rate of `pcm` (None -> assume SR).
 
         """
-        sr_in = SR if sr is None else int(sr)
-        x = _to_float32_mono(pcm)
-        if x.size == 0:
-            return []
-        if sr_in != SR:
-            x = _resample_linear(x, sr_in, SR)
+        section = self._benchmark.section if self._benchmark else None
+        total_ctx = section("sway.feed.total") if section else nullcontext()
+
+        with total_ctx:
+            sr_in = SR if sr is None else int(sr)
+            convert_ctx = section("sway.feed.convert") if section else nullcontext()
+            with convert_ctx:
+                x = _to_float32_mono(pcm)
             if x.size == 0:
                 return []
+            if sr_in != SR:
+                resample_ctx = section("sway.feed.resample") if section else nullcontext()
+                with resample_ctx:
+                    x = _resample_linear(x, sr_in, SR)
+                if x.size == 0:
+                    return []
 
-        # append to carry and consume fixed HOP chunks
-        if self.carry.size:
-            self.carry = np.concatenate([self.carry, x])
-        else:
-            self.carry = x
-
-        out: List[Dict[str, float]] = []
-
-        while self.carry.size >= HOP:
-            hop = self.carry[:HOP]
-            remaining: NDArray[np.float32] = self.carry[HOP:]
-            self.carry = remaining
-
-            # keep sliding window for VAD/env computation
-            # (deque accepts any iterable; list() for small HOP is fine)
-            self.samples.extend(hop.tolist())
-            if len(self.samples) < FRAME:
-                self.t += HOP_MS / 1000.0
-                continue
-
-            frame = np.fromiter(
-                islice(self.samples, len(self.samples) - FRAME, len(self.samples)),
-                dtype=np.float32,
-                count=FRAME,
-            )
-            db = _rms_dbfs(frame)
-
-            # VAD with hysteresis + attack/release
-            if db >= VAD_DB_ON:
-                self.vad_above += 1
-                self.vad_below = 0
-                if not self.vad_on and self.vad_above >= ATTACK_FR:
-                    self.vad_on = True
-            elif db <= VAD_DB_OFF:
-                self.vad_below += 1
-                self.vad_above = 0
-                if self.vad_on and self.vad_below >= RELEASE_FR:
-                    self.vad_on = False
-
-            if self.vad_on:
-                self.sway_up = min(SWAY_ATTACK_FR, self.sway_up + 1)
-                self.sway_down = 0
+            # append to carry and consume fixed HOP chunks
+            if self.carry.size:
+                self.carry = np.concatenate([self.carry, x])
             else:
-                self.sway_down = min(SWAY_RELEASE_FR, self.sway_down + 1)
-                self.sway_up = 0
+                self.carry = x
 
-            up = self.sway_up / SWAY_ATTACK_FR
-            down = 1.0 - (self.sway_down / SWAY_RELEASE_FR)
-            target = up if self.vad_on else down
-            self.sway_env += ENV_FOLLOW_GAIN * (target - self.sway_env)
-            # clamp
-            if self.sway_env < 0.0:
-                self.sway_env = 0.0
-            elif self.sway_env > 1.0:
-                self.sway_env = 1.0
+            out: List[Dict[str, float]] = []
+            hop_ctx = section("sway.feed.hop_processing") if section else nullcontext()
+            with hop_ctx:
+                while self.carry.size >= HOP:
+                    hop = self.carry[:HOP]
+                    remaining: NDArray[np.float32] = self.carry[HOP:]
+                    self.carry = remaining
 
-            loud = _loudness_gain(db) * SWAY_MASTER
-            env = self.sway_env
-            self.t += HOP_MS / 1000.0
+                    # keep sliding window for VAD/env computation
+                    # (deque accepts any iterable; list() for small HOP is fine)
+                    self.samples.extend(hop.tolist())
+                    if len(self.samples) < FRAME:
+                        self.t += HOP_MS / 1000.0
+                        continue
 
-            # oscillators
-            pitch = (
-                math.radians(SWAY_A_PITCH_DEG)
-                * loud
-                * env
-                * math.sin(2 * math.pi * SWAY_F_PITCH * self.t + self.phase_pitch)
-            )
-            yaw = (
-                math.radians(SWAY_A_YAW_DEG)
-                * loud
-                * env
-                * math.sin(2 * math.pi * SWAY_F_YAW * self.t + self.phase_yaw)
-            )
-            roll = (
-                math.radians(SWAY_A_ROLL_DEG)
-                * loud
-                * env
-                * math.sin(2 * math.pi * SWAY_F_ROLL * self.t + self.phase_roll)
-            )
-            x_mm = SWAY_A_X_MM * loud * env * math.sin(2 * math.pi * SWAY_F_X * self.t + self.phase_x)
-            y_mm = SWAY_A_Y_MM * loud * env * math.sin(2 * math.pi * SWAY_F_Y * self.t + self.phase_y)
-            z_mm = SWAY_A_Z_MM * loud * env * math.sin(2 * math.pi * SWAY_F_Z * self.t + self.phase_z)
+                    frame_ctx = section("sway.feed.hop.frame") if section else nullcontext()
+                    with frame_ctx:
+                        frame = np.fromiter(
+                            islice(self.samples, len(self.samples) - FRAME, len(self.samples)),
+                            dtype=np.float32,
+                            count=FRAME,
+                        )
+                        db = _rms_dbfs(frame)
 
-            out.append(
-                {
-                    "pitch_rad": pitch,
-                    "yaw_rad": yaw,
-                    "roll_rad": roll,
-                    "pitch_deg": math.degrees(pitch),
-                    "yaw_deg": math.degrees(yaw),
-                    "roll_deg": math.degrees(roll),
-                    "x_mm": x_mm,
-                    "y_mm": y_mm,
-                    "z_mm": z_mm,
-                },
-            )
+                    vad_ctx = section("sway.feed.hop.vad_env") if section else nullcontext()
+                    with vad_ctx:
+                        # VAD with hysteresis + attack/release
+                        if db >= VAD_DB_ON:
+                            self.vad_above += 1
+                            self.vad_below = 0
+                            if not self.vad_on and self.vad_above >= ATTACK_FR:
+                                self.vad_on = True
+                        elif db <= VAD_DB_OFF:
+                            self.vad_below += 1
+                            self.vad_above = 0
+                            if self.vad_on and self.vad_below >= RELEASE_FR:
+                                self.vad_on = False
 
-        return out
+                        if self.vad_on:
+                            self.sway_up = min(SWAY_ATTACK_FR, self.sway_up + 1)
+                            self.sway_down = 0
+                        else:
+                            self.sway_down = min(SWAY_RELEASE_FR, self.sway_down + 1)
+                            self.sway_up = 0
+
+                        up = self.sway_up / SWAY_ATTACK_FR
+                        down = 1.0 - (self.sway_down / SWAY_RELEASE_FR)
+                        target = up if self.vad_on else down
+                        self.sway_env += ENV_FOLLOW_GAIN * (target - self.sway_env)
+                        # clamp
+                        if self.sway_env < 0.0:
+                            self.sway_env = 0.0
+                        elif self.sway_env > 1.0:
+                            self.sway_env = 1.0
+
+                        loud = _loudness_gain(db) * SWAY_MASTER
+                        env = self.sway_env
+                        self.t += HOP_MS / 1000.0
+
+                    osc_ctx = section("sway.feed.hop.oscillators") if section else nullcontext()
+                    with osc_ctx:
+                        # oscillators
+                        pitch = (
+                            math.radians(SWAY_A_PITCH_DEG)
+                            * loud
+                            * env
+                            * math.sin(2 * math.pi * SWAY_F_PITCH * self.t + self.phase_pitch)
+                        )
+                        yaw = (
+                            math.radians(SWAY_A_YAW_DEG)
+                            * loud
+                            * env
+                            * math.sin(2 * math.pi * SWAY_F_YAW * self.t + self.phase_yaw)
+                        )
+                        roll = (
+                            math.radians(SWAY_A_ROLL_DEG)
+                            * loud
+                            * env
+                            * math.sin(2 * math.pi * SWAY_F_ROLL * self.t + self.phase_roll)
+                        )
+                        x_mm = SWAY_A_X_MM * loud * env * math.sin(2 * math.pi * SWAY_F_X * self.t + self.phase_x)
+                        y_mm = SWAY_A_Y_MM * loud * env * math.sin(2 * math.pi * SWAY_F_Y * self.t + self.phase_y)
+                        z_mm = SWAY_A_Z_MM * loud * env * math.sin(2 * math.pi * SWAY_F_Z * self.t + self.phase_z)
+
+                        out.append(
+                            {
+                                "pitch_rad": pitch,
+                                "yaw_rad": yaw,
+                                "roll_rad": roll,
+                                "pitch_deg": math.degrees(pitch),
+                                "yaw_deg": math.degrees(yaw),
+                                "roll_deg": math.degrees(roll),
+                                "x_mm": x_mm,
+                                "y_mm": y_mm,
+                                "z_mm": z_mm,
+                            },
+                        )
+
+            return out
