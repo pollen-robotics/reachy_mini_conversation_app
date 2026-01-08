@@ -106,7 +106,15 @@ class BackgroundTaskManager:
         """
         self._connection_ref = weakref.ref(connection)
         self._output_queue_ref = weakref.ref(output_queue)
-        self._loop = loop or asyncio.get_event_loop()
+        # Use provided loop, try to get running loop, or fall back to creating a new one
+        if loop is not None:
+            self._loop = loop
+        else:
+            try:
+                self._loop = asyncio.get_running_loop()
+            except RuntimeError:
+                # No running event loop - this can happen during setup
+                self._loop = asyncio.new_event_loop()
         logger.debug("BackgroundTaskManager: connection set")
 
     def clear_connection(self) -> None:

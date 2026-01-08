@@ -1,6 +1,7 @@
 """Unit tests for the background_demo tool."""
 
 import asyncio
+from typing import Any
 from unittest.mock import MagicMock, patch, AsyncMock
 
 import pytest
@@ -61,9 +62,8 @@ class TestBackgroundDemoToolExecution:
         """Test background_demo runs synchronously when background=False."""
         tool = BackgroundDemoTool()
 
-        with patch.object(tool, "_run_demo", new_callable=AsyncMock) as mock_run:
-            mock_run.return_value = {"status": "success", "duration": 1, "message": "Done"}
-
+        mock_run = AsyncMock(return_value={"status": "success", "duration": 1, "message": "Done"})
+        with patch.object(tool, "_run_demo", mock_run):
             result = await tool(mock_deps, duration=1, background=False)
 
         assert result["status"] == "success"
@@ -78,7 +78,15 @@ class TestBackgroundDemoToolExecution:
         mock_task.id = "test-task-123"
 
         mock_manager = MagicMock()
-        mock_manager.start_task = AsyncMock(return_value=mock_task)
+
+        # Capture and close the coroutine passed to start_task to avoid warning
+        async def capture_start_task(**kwargs: Any) -> MagicMock:
+            coro = kwargs.get("coroutine")
+            if coro is not None:
+                coro.close()  # Close the coroutine to prevent warning
+            return mock_task
+
+        mock_manager.start_task = AsyncMock(side_effect=capture_start_task)
 
         with patch(
             "reachy_mini_conversation_app.tools.background_demo.BackgroundTaskManager.get_instance",
@@ -96,9 +104,8 @@ class TestBackgroundDemoToolExecution:
         """Test background_demo uses default duration of 5."""
         tool = BackgroundDemoTool()
 
-        with patch.object(tool, "_run_demo", new_callable=AsyncMock) as mock_run:
-            mock_run.return_value = {"status": "success"}
-
+        mock_run = AsyncMock(return_value={"status": "success"})
+        with patch.object(tool, "_run_demo", mock_run):
             await tool(mock_deps, background=False)
 
         mock_run.assert_called_once_with(5, with_progress=False)
@@ -108,9 +115,8 @@ class TestBackgroundDemoToolExecution:
         """Test background_demo uses default for invalid duration."""
         tool = BackgroundDemoTool()
 
-        with patch.object(tool, "_run_demo", new_callable=AsyncMock) as mock_run:
-            mock_run.return_value = {"status": "success"}
-
+        mock_run = AsyncMock(return_value={"status": "success"})
+        with patch.object(tool, "_run_demo", mock_run):
             await tool(mock_deps, duration=-1, background=False)
 
         mock_run.assert_called_once_with(5, with_progress=False)
@@ -120,9 +126,8 @@ class TestBackgroundDemoToolExecution:
         """Test background_demo caps duration at 60 seconds."""
         tool = BackgroundDemoTool()
 
-        with patch.object(tool, "_run_demo", new_callable=AsyncMock) as mock_run:
-            mock_run.return_value = {"status": "success"}
-
+        mock_run = AsyncMock(return_value={"status": "success"})
+        with patch.object(tool, "_run_demo", mock_run):
             await tool(mock_deps, duration=120, background=False)
 
         mock_run.assert_called_once_with(60, with_progress=False)
@@ -136,7 +141,18 @@ class TestBackgroundDemoToolExecution:
         mock_task.id = "test-task-456"
 
         mock_manager = MagicMock()
-        mock_manager.start_task = AsyncMock(return_value=mock_task)
+
+        # Capture and close the coroutine passed to start_task to avoid warning
+        captured_kwargs: dict[str, Any] = {}
+
+        async def capture_start_task(**kwargs: Any) -> MagicMock:
+            captured_kwargs.update(kwargs)
+            coro = kwargs.get("coroutine")
+            if coro is not None:
+                coro.close()
+            return mock_task
+
+        mock_manager.start_task = AsyncMock(side_effect=capture_start_task)
 
         with patch(
             "reachy_mini_conversation_app.tools.background_demo.BackgroundTaskManager.get_instance",
@@ -146,8 +162,7 @@ class TestBackgroundDemoToolExecution:
 
         assert result["with_progress"] is True
         mock_manager.start_task.assert_called_once()
-        call_kwargs = mock_manager.start_task.call_args[1]
-        assert call_kwargs["with_progress"] is True
+        assert captured_kwargs["with_progress"] is True
 
 
 class TestBackgroundDemoRunDemo:
@@ -158,7 +173,8 @@ class TestBackgroundDemoRunDemo:
         """Test _run_demo without progress tracking."""
         tool = BackgroundDemoTool()
 
-        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        mock_sleep = AsyncMock()
+        with patch("reachy_mini_conversation_app.tools.background_demo.asyncio.sleep", mock_sleep):
             result = await tool._run_demo(2, with_progress=False)
 
         assert result["status"] == "success"
@@ -178,11 +194,12 @@ class TestBackgroundDemoRunDemo:
         mock_manager.get_running_tasks.return_value = [mock_task]
         mock_manager.update_progress = AsyncMock()
 
+        mock_sleep = AsyncMock()
         with patch(
             "reachy_mini_conversation_app.tools.background_demo.BackgroundTaskManager.get_instance",
             return_value=mock_manager,
         ):
-            with patch("asyncio.sleep", new_callable=AsyncMock):
+            with patch("reachy_mini_conversation_app.tools.background_demo.asyncio.sleep", mock_sleep):
                 result = await tool._run_demo(3, with_progress=True)
 
         assert result["status"] == "success"
@@ -195,7 +212,8 @@ class TestBackgroundDemoRunDemo:
         """Test _run_demo returns completion message."""
         tool = BackgroundDemoTool()
 
-        with patch("asyncio.sleep", new_callable=AsyncMock):
+        mock_sleep = AsyncMock()
+        with patch("reachy_mini_conversation_app.tools.background_demo.asyncio.sleep", mock_sleep):
             result = await tool._run_demo(5, with_progress=False)
 
         assert "message" in result

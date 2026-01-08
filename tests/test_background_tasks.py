@@ -132,7 +132,8 @@ class TestBackgroundTaskManager:
 
         assert manager1 is not manager2
 
-    def test_set_connection(self) -> None:
+    @pytest.mark.asyncio
+    async def test_set_connection(self) -> None:
         """Test setting connection references."""
         manager = BackgroundTaskManager.get_instance()
         mock_connection = MagicMock()
@@ -143,7 +144,8 @@ class TestBackgroundTaskManager:
         assert manager.connection is mock_connection
         assert manager.output_queue is mock_queue
 
-    def test_clear_connection(self) -> None:
+    @pytest.mark.asyncio
+    async def test_clear_connection(self) -> None:
         """Test clearing connection references."""
         manager = BackgroundTaskManager.get_instance()
         mock_connection = MagicMock()
@@ -170,8 +172,11 @@ class TestBackgroundTaskManager:
         """Test that start_task creates a running task."""
         manager = BackgroundTaskManager.get_instance()
 
+        started = asyncio.Event()
+
         async def dummy_coroutine() -> dict:
-            await asyncio.sleep(0.1)
+            started.set()
+            await asyncio.sleep(10)  # Long sleep, we'll cancel
             return {"status": "success"}
 
         task = await manager.start_task(
@@ -179,6 +184,9 @@ class TestBackgroundTaskManager:
             description="Test description",
             coroutine=dummy_coroutine(),
         )
+
+        # Wait for coroutine to actually start
+        await asyncio.wait_for(started.wait(), timeout=1.0)
 
         assert task.id is not None
         assert len(task.id) == 8  # UUID truncated to 8 chars
@@ -188,7 +196,7 @@ class TestBackgroundTaskManager:
         assert task.progress is None
         assert task._task is not None
 
-        # Cleanup
+        # Cancel and await the task properly
         task._task.cancel()
         try:
             await task._task
@@ -200,8 +208,11 @@ class TestBackgroundTaskManager:
         """Test that start_task with progress tracking sets progress to 0."""
         manager = BackgroundTaskManager.get_instance()
 
+        started = asyncio.Event()
+
         async def dummy_coroutine() -> dict:
-            await asyncio.sleep(0.1)
+            started.set()
+            await asyncio.sleep(10)
             return {}
 
         task = await manager.start_task(
@@ -211,9 +222,12 @@ class TestBackgroundTaskManager:
             with_progress=True,
         )
 
+        # Wait for coroutine to start
+        await asyncio.wait_for(started.wait(), timeout=1.0)
+
         assert task.progress == 0.0
 
-        # Cleanup
+        # Cancel and await the task properly
         task._task.cancel()
         try:
             await task._task
@@ -343,8 +357,11 @@ class TestBackgroundTaskManager:
         """Test updating task progress."""
         manager = BackgroundTaskManager.get_instance()
 
+        started = asyncio.Event()
+
         async def progress_coroutine() -> dict:
-            await asyncio.sleep(1)
+            started.set()
+            await asyncio.sleep(10)
             return {}
 
         task = await manager.start_task(
@@ -354,6 +371,9 @@ class TestBackgroundTaskManager:
             with_progress=True,
         )
 
+        # Wait for coroutine to start
+        await asyncio.wait_for(started.wait(), timeout=1.0)
+
         # Update progress
         result = await manager.update_progress(task.id, 0.5, "Halfway there")
 
@@ -361,7 +381,7 @@ class TestBackgroundTaskManager:
         assert task.progress == 0.5
         assert task.progress_message == "Halfway there"
 
-        # Cleanup
+        # Cancel and await the task properly
         task._task.cancel()
         try:
             await task._task
@@ -373,8 +393,11 @@ class TestBackgroundTaskManager:
         """Test that progress values are clamped to 0.0-1.0."""
         manager = BackgroundTaskManager.get_instance()
 
+        started = asyncio.Event()
+
         async def dummy() -> dict:
-            await asyncio.sleep(1)
+            started.set()
+            await asyncio.sleep(10)
             return {}
 
         task = await manager.start_task(
@@ -384,6 +407,9 @@ class TestBackgroundTaskManager:
             with_progress=True,
         )
 
+        # Wait for coroutine to start
+        await asyncio.wait_for(started.wait(), timeout=1.0)
+
         # Test clamping high value
         await manager.update_progress(task.id, 1.5)
         assert task.progress == 1.0
@@ -392,7 +418,7 @@ class TestBackgroundTaskManager:
         await manager.update_progress(task.id, -0.5)
         assert task.progress == 0.0
 
-        # Cleanup
+        # Cancel and await the task properly
         task._task.cancel()
         try:
             await task._task
@@ -404,8 +430,11 @@ class TestBackgroundTaskManager:
         """Test that update_progress fails for tasks not tracking progress."""
         manager = BackgroundTaskManager.get_instance()
 
+        started = asyncio.Event()
+
         async def dummy() -> dict:
-            await asyncio.sleep(1)
+            started.set()
+            await asyncio.sleep(10)
             return {}
 
         task = await manager.start_task(
@@ -415,10 +444,13 @@ class TestBackgroundTaskManager:
             with_progress=False,
         )
 
+        # Wait for coroutine to start
+        await asyncio.wait_for(started.wait(), timeout=1.0)
+
         result = await manager.update_progress(task.id, 0.5)
         assert result is False
 
-        # Cleanup
+        # Cancel and await the task properly
         task._task.cancel()
         try:
             await task._task
