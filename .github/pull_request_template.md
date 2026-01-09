@@ -28,8 +28,6 @@
 - [ ] Profiles or custom tools
 
 ### Dependencies & config
-- [ ] Updated `pyproject.toml` if deps/extras changed
-- [ ] Regenerated `uv.lock` if deps changed
 - [ ] Updated `.env.example` if new config vars added
 
 ## Notes
