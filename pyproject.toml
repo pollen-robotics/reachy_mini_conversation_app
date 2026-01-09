@@ -14,7 +14,7 @@ dependencies = [
     "aiortc>=1.13.0",
     "fastrtc>=0.0.34",
     "gradio==5.50.1.dev1",
-    "huggingface_hub>=0.34.4",
+    "huggingface_hub==1.3.0",
     "opencv-python>=4.12.0.88",
 
     #Environment variables
@@ -26,7 +26,7 @@ dependencies = [
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
-    "reachy_mini>=1.2.7",
+    "reachy_mini @ git+https://github.com/pollen-robotics/reachy_mini.git@bump-up-huggingface-hub",
     "eclipse-zenoh~=1.7.0",
     "gradio_client>=1.13.3",
 ]
