@@ -12,9 +12,9 @@ requires-python = ">=3.10"
 dependencies = [
     #Media
     "aiortc>=1.13.0",
-    "fastrtc>=0.0.34",
-    "gradio==5.50.1.dev1",
-    "huggingface_hub==1.3.0",
+    "fastrtc>=0.0.33",
+    "gradio>=5.49.0",
+    "huggingface_hub>=0.34.4",
     "opencv-python>=4.12.0.88",
 
     #Environment variables
@@ -26,40 +26,28 @@ dependencies = [
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
-    "reachy_mini @ git+https://github.com/pollen-robotics/reachy_mini.git@bump-up-huggingface-hub",
-    "eclipse-zenoh~=1.7.0",
-    "gradio_client>=1.13.3",
+    "reachy_mini>=1.0.0.rc4",
 ]
 
 [project.optional-dependencies]
-reachy_mini_wireless = [
-  "PyGObject>=3.42.2,<=3.46.0", 
-  "gst-signalling>=1.1.2",
-]
 local_vision = ["torch", "transformers", "num2words"]
 yolo_vision = ["ultralytics", "supervision"]
-mediapipe_vision = ["mediapipe==0.10.14"]
+mediapipe_vision = ["mediapipe>=0.10.14"]
 all_vision = [
-  "torch", "transformers", "num2words",
-  "ultralytics", "supervision",
-  "mediapipe==0.10.14",
+  "reachy_mini_conversation_app[local_vision]",
+  "reachy_mini_conversation_app[yolo_vision]",
+  "reachy_mini_conversation_app[mediapipe_vision]",
 ]
 
 [dependency-groups]
 dev = [
   "pytest",
-  "pytest-asyncio",
   "ruff==0.12.0",
   "mypy==1.18.2",
-  "pre-commit",
-  "types-requests",
 ]
 
 [project.scripts]
 reachy-mini-conversation-app = "reachy_mini_conversation_app.main:main"
-
-[project.entry-points."reachy_mini_apps"]
-reachy_mini_conversation_app = "reachy_mini_conversation_app.main:ReachyMiniConversationApp"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
@@ -69,15 +57,7 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-reachy_mini_conversation_app = [
-  "images/*",
-  "static/*",
-  ".env.example",
-  "demos/**/*.txt",
-  "prompts_library/*.txt",
-  "profiles/**/*.txt",
-  "prompts/**/*.txt",
-]
+reachy_mini_conversation_app = ["images/*"]
 
 [tool.ruff]
 line-length = 119
