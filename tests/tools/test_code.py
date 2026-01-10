@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from anthropic.types import TextBlock
 
 from reachy_mini_conversation_app.tools.code import CodeTool
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
@@ -148,7 +149,7 @@ class TestCodeToolExecution:
         tool = CodeTool()
 
         mock_message = MagicMock()
-        mock_message.content = [MagicMock(text="def hello():\n    print('Hello, world!')")]
+        mock_message.content = [TextBlock(type="text", text="def hello():\n    print('Hello, world!')")]
 
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_message
@@ -176,7 +177,7 @@ class TestCodeToolExecution:
         repo_dir.mkdir()
 
         mock_message = MagicMock()
-        mock_message.content = [MagicMock(text="def hello():\n    print('Hello!')")]
+        mock_message.content = [TextBlock(type="text", text="def hello():\n    print('Hello!')")]
 
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_message
@@ -407,7 +408,7 @@ class TestCodeToolWithFilename:
         tool = CodeTool()
 
         mock_message = MagicMock()
-        mock_message.content = [MagicMock(text="print('hello')")]
+        mock_message.content = [TextBlock(type="text", text="print('hello')")]
 
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_message
@@ -437,7 +438,7 @@ class TestCodeToolWithFilename:
         (repo_dir / "existing.py").write_text("# old content")
 
         mock_message = MagicMock()
-        mock_message.content = [MagicMock(text="# new content")]
+        mock_message.content = [TextBlock(type="text", text="# new content")]
 
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_message

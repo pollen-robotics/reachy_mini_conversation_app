@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from anthropic.types import TextBlock
 
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.github_edit_file import GitHubEditFileTool
@@ -177,7 +178,7 @@ class TestGitHubEditFileToolExecution:
         target_file.write_text("def hello():\n    pass")
 
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="def hello():\n    print('Hello')")]
+        mock_response.content = [TextBlock(type="text", text="def hello():\n    print('Hello')")]
 
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_response
@@ -214,7 +215,7 @@ class TestGitHubEditFileToolExecution:
         target_file.write_text("def hello():\n    pass")
 
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="def hello():\n    print('Hello')")]
+        mock_response.content = [TextBlock(type="text", text="def hello():\n    print('Hello')")]
 
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_response
@@ -282,7 +283,7 @@ class TestGitHubEditFileToolExecution:
         (repo_path / "model.py").write_text("def example():\n    '''Docstring'''\n    pass")
 
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="def hello():\n    '''Hello docstring'''\n    pass")]
+        mock_response.content = [TextBlock(type="text", text="def hello():\n    '''Hello docstring'''\n    pass")]
 
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_response
@@ -315,7 +316,7 @@ class TestGitHubEditFileToolExecution:
 
         # AI returns response wrapped in markdown code block
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="```python\ndef hello():\n    print('hi')\n```")]
+        mock_response.content = [TextBlock(type="text", text="```python\ndef hello():\n    print('hi')\n```")]
 
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_response
@@ -373,7 +374,7 @@ class TestGitHubEditFileToolExecution:
         (repo_path / "target.py").write_text("content")
 
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="edited content")]
+        mock_response.content = [TextBlock(type="text", text="edited content")]
 
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_response
@@ -581,7 +582,7 @@ class TestGitHubEditFileAPIErrors:
         (repo_path / "model.py").write_text("def model(): '''Docstring'''\n    pass")
 
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="def hello():\n    '''Hello'''\n    pass")]
+        mock_response.content = [TextBlock(type="text", text="def hello():\n    '''Hello'''\n    pass")]
 
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_response
@@ -613,7 +614,7 @@ class TestGitHubEditFileAPIErrors:
         (model_repo_path / "example.py").write_text("def example(): pass")
 
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="def hello(): pass")]
+        mock_response.content = [TextBlock(type="text", text="def hello(): pass")]
 
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_response
@@ -641,7 +642,7 @@ class TestGitHubEditFileAPIErrors:
         tool = GitHubEditFileTool()
 
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="def hello(): print('hi')")]
+        mock_response.content = [TextBlock(type="text", text="def hello(): print('hi')")]
 
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_response
@@ -670,7 +671,7 @@ class TestGitHubEditFileAPIErrors:
 
         # AI returns code block with content after closing tag or no closing tag
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="```python\ndef hello(): pass")]  # No closing ```
+        mock_response.content = [TextBlock(type="text", text="```python\ndef hello(): pass")]  # No closing ```
 
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_response

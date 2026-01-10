@@ -2,6 +2,7 @@
 
 import sys
 import time
+from typing import Any, Generator
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -17,7 +18,7 @@ class MockOutOfMemoryError(Exception):
 
 # Mock heavy dependencies before importing the module
 @pytest.fixture(autouse=True)
-def mock_heavy_imports():
+def mock_heavy_imports() -> Generator[dict[str, Any], None, None]:
     """Mock torch, cv2, and transformers before importing processors."""
     # Create mock modules
     mock_torch = MagicMock()
@@ -57,7 +58,7 @@ def mock_heavy_imports():
 class TestVisionConfig:
     """Tests for VisionConfig dataclass."""
 
-    def test_default_values(self, mock_heavy_imports: dict) -> None:
+    def test_default_values(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test VisionConfig has sensible defaults."""
         from reachy_mini_conversation_app.vision.processors import VisionConfig
 
@@ -70,7 +71,7 @@ class TestVisionConfig:
         assert config.retry_delay == 1.0
         assert config.device_preference == "auto"
 
-    def test_custom_values(self, mock_heavy_imports: dict) -> None:
+    def test_custom_values(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test VisionConfig with custom values."""
         from reachy_mini_conversation_app.vision.processors import VisionConfig
 
@@ -96,7 +97,7 @@ class TestVisionConfig:
 class TestVisionProcessorInit:
     """Tests for VisionProcessor initialization."""
 
-    def test_init_with_default_config(self, mock_heavy_imports: dict) -> None:
+    def test_init_with_default_config(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test VisionProcessor initializes with default config."""
         from reachy_mini_conversation_app.vision.processors import VisionProcessor
 
@@ -107,7 +108,7 @@ class TestVisionProcessorInit:
         assert processor.model is None
         assert processor._initialized is False
 
-    def test_init_with_custom_config(self, mock_heavy_imports: dict) -> None:
+    def test_init_with_custom_config(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test VisionProcessor initializes with custom config."""
         from reachy_mini_conversation_app.vision.processors import (
             VisionConfig,
@@ -124,7 +125,7 @@ class TestVisionProcessorInit:
 class TestVisionProcessorDetermineDevice:
     """Tests for VisionProcessor._determine_device method."""
 
-    def test_determine_device_cpu_preference(self, mock_heavy_imports: dict) -> None:
+    def test_determine_device_cpu_preference(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test device determination with cpu preference."""
         from reachy_mini_conversation_app.vision.processors import (
             VisionConfig,
@@ -135,7 +136,7 @@ class TestVisionProcessorDetermineDevice:
         processor = VisionProcessor(vision_config=config)
         assert processor.device == "cpu"
 
-    def test_determine_device_cuda_available(self, mock_heavy_imports: dict) -> None:
+    def test_determine_device_cuda_available(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test device determination with cuda available."""
         mock_heavy_imports["torch"].cuda.is_available.return_value = True
         mock_heavy_imports["torch"].backends.mps.is_available.return_value = False
@@ -152,7 +153,7 @@ class TestVisionProcessorDetermineDevice:
         processor = proc_module.VisionProcessor(vision_config=config)
         assert processor.device == "cuda"
 
-    def test_determine_device_cuda_not_available(self, mock_heavy_imports: dict) -> None:
+    def test_determine_device_cuda_not_available(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test device determination when cuda requested but not available."""
         mock_heavy_imports["torch"].cuda.is_available.return_value = False
         mock_heavy_imports["torch"].backends.mps.is_available.return_value = False
@@ -166,7 +167,7 @@ class TestVisionProcessorDetermineDevice:
         processor = VisionProcessor(vision_config=config)
         assert processor.device == "cpu"
 
-    def test_determine_device_auto_fallback_cpu(self, mock_heavy_imports: dict) -> None:
+    def test_determine_device_auto_fallback_cpu(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test auto device selection falls back to cpu."""
         mock_heavy_imports["torch"].cuda.is_available.return_value = False
         mock_heavy_imports["torch"].backends.mps.is_available.return_value = False
@@ -184,7 +185,7 @@ class TestVisionProcessorDetermineDevice:
 class TestVisionProcessorInitialize:
     """Tests for VisionProcessor.initialize method."""
 
-    def test_initialize_success(self, mock_heavy_imports: dict) -> None:
+    def test_initialize_success(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test successful model initialization."""
         from reachy_mini_conversation_app.vision.processors import VisionProcessor
 
@@ -209,7 +210,7 @@ class TestVisionProcessorInitialize:
                 assert processor.processor is not None
                 assert processor.model is not None
 
-    def test_initialize_failure(self, mock_heavy_imports: dict) -> None:
+    def test_initialize_failure(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test model initialization failure."""
         from reachy_mini_conversation_app.vision.processors import VisionProcessor
 
@@ -227,7 +228,7 @@ class TestVisionProcessorInitialize:
 class TestVisionProcessorProcessImage:
     """Tests for VisionProcessor.process_image method."""
 
-    def test_process_image_not_initialized(self, mock_heavy_imports: dict) -> None:
+    def test_process_image_not_initialized(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test process_image returns error when not initialized."""
         from reachy_mini_conversation_app.vision.processors import VisionProcessor
 
@@ -238,7 +239,7 @@ class TestVisionProcessorProcessImage:
 
         assert result == "Vision model not initialized"
 
-    def test_process_image_success(self, mock_heavy_imports: dict) -> None:
+    def test_process_image_success(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test successful image processing."""
         from reachy_mini_conversation_app.vision.processors import VisionProcessor
 
@@ -270,7 +271,7 @@ class TestVisionProcessorProcessImage:
 
                 assert "test description" in result.lower()
 
-    def test_process_image_encode_failure(self, mock_heavy_imports: dict) -> None:
+    def test_process_image_encode_failure(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test process_image handles encode failure."""
         mock_heavy_imports["cv2"].imencode.return_value = (False, None)
 
@@ -296,7 +297,7 @@ class TestVisionProcessorProcessImage:
 
                 assert result == "Failed to encode image"
 
-    def test_process_image_max_retries_exceeded(self, mock_heavy_imports: dict) -> None:
+    def test_process_image_max_retries_exceeded(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test process_image returns error after max retries."""
         mock_heavy_imports["cv2"].imencode.return_value = (
             True,
@@ -335,7 +336,7 @@ class TestVisionProcessorProcessImage:
 class TestVisionProcessorExtractResponse:
     """Tests for VisionProcessor._extract_response method."""
 
-    def test_extract_response_assistant_marker(self, mock_heavy_imports: dict) -> None:
+    def test_extract_response_assistant_marker(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test response extraction with assistant marker."""
         from reachy_mini_conversation_app.vision.processors import VisionProcessor
 
@@ -345,7 +346,7 @@ class TestVisionProcessorExtractResponse:
 
         assert result == "This is the response."
 
-    def test_extract_response_assistant_colon_marker(self, mock_heavy_imports: dict) -> None:
+    def test_extract_response_assistant_colon_marker(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test response extraction with Assistant: marker."""
         from reachy_mini_conversation_app.vision.processors import VisionProcessor
 
@@ -355,7 +356,7 @@ class TestVisionProcessorExtractResponse:
 
         assert result == "The answer is 42."
 
-    def test_extract_response_response_marker(self, mock_heavy_imports: dict) -> None:
+    def test_extract_response_response_marker(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test response extraction with Response: marker."""
         from reachy_mini_conversation_app.vision.processors import VisionProcessor
 
@@ -365,7 +366,7 @@ class TestVisionProcessorExtractResponse:
 
         assert result == "Here is my answer."
 
-    def test_extract_response_double_newline(self, mock_heavy_imports: dict) -> None:
+    def test_extract_response_double_newline(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test response extraction with double newline."""
         from reachy_mini_conversation_app.vision.processors import VisionProcessor
 
@@ -375,7 +376,7 @@ class TestVisionProcessorExtractResponse:
 
         assert result == "Second part here."
 
-    def test_extract_response_fallback(self, mock_heavy_imports: dict) -> None:
+    def test_extract_response_fallback(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test response extraction fallback to full text."""
         from reachy_mini_conversation_app.vision.processors import VisionProcessor
 
@@ -389,7 +390,7 @@ class TestVisionProcessorExtractResponse:
 class TestVisionProcessorGetModelInfo:
     """Tests for VisionProcessor.get_model_info method."""
 
-    def test_get_model_info_not_initialized(self, mock_heavy_imports: dict) -> None:
+    def test_get_model_info_not_initialized(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test get_model_info when not initialized."""
         from reachy_mini_conversation_app.vision.processors import VisionProcessor
 
@@ -401,7 +402,7 @@ class TestVisionProcessorGetModelInfo:
         assert "device" in info
         assert "model_path" in info
 
-    def test_get_model_info_cuda_available(self, mock_heavy_imports: dict) -> None:
+    def test_get_model_info_cuda_available(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test get_model_info with CUDA available."""
         mock_heavy_imports["torch"].cuda.is_available.return_value = True
         mock_props = MagicMock()
@@ -420,7 +421,7 @@ class TestVisionProcessorGetModelInfo:
 class TestVisionManagerInit:
     """Tests for VisionManager initialization."""
 
-    def test_init_success(self, mock_heavy_imports: dict) -> None:
+    def test_init_success(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test VisionManager initializes successfully."""
         from reachy_mini_conversation_app.vision.processors import VisionManager
 
@@ -443,7 +444,7 @@ class TestVisionManagerInit:
                 assert manager.processor is not None
                 assert manager._thread is None
 
-    def test_init_failure(self, mock_heavy_imports: dict) -> None:
+    def test_init_failure(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test VisionManager raises on initialization failure."""
         from reachy_mini_conversation_app.vision.processors import VisionManager
 
@@ -460,7 +461,7 @@ class TestVisionManagerInit:
 class TestVisionManagerStartStop:
     """Tests for VisionManager start/stop methods."""
 
-    def test_start_creates_thread(self, mock_heavy_imports: dict) -> None:
+    def test_start_creates_thread(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test start creates worker thread."""
         from reachy_mini_conversation_app.vision.processors import VisionManager
 
@@ -487,7 +488,7 @@ class TestVisionManagerStartStop:
                 finally:
                     manager.stop()
 
-    def test_stop_joins_thread(self, mock_heavy_imports: dict) -> None:
+    def test_stop_joins_thread(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test stop joins worker thread."""
         from reachy_mini_conversation_app.vision.processors import VisionManager
 
@@ -517,7 +518,7 @@ class TestVisionManagerStartStop:
 class TestVisionManagerGetStatus:
     """Tests for VisionManager.get_status method."""
 
-    def test_get_status(self, mock_heavy_imports: dict) -> None:
+    def test_get_status(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test get_status returns expected structure."""
         from reachy_mini_conversation_app.vision.processors import VisionManager
 
@@ -546,7 +547,7 @@ class TestVisionManagerGetStatus:
 class TestInitializeVisionManager:
     """Tests for initialize_vision_manager function."""
 
-    def test_initialize_success(self, mock_heavy_imports: dict) -> None:
+    def test_initialize_success(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test successful vision manager initialization."""
         from reachy_mini_conversation_app.vision.processors import (
             VisionManager,
@@ -576,7 +577,7 @@ class TestInitializeVisionManager:
                         assert isinstance(result, VisionManager)
                         mock_download.assert_called_once()
 
-    def test_initialize_failure(self, mock_heavy_imports: dict) -> None:
+    def test_initialize_failure(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test vision manager initialization failure."""
         from reachy_mini_conversation_app.vision.processors import initialize_vision_manager
 
@@ -595,7 +596,7 @@ class TestInitializeVisionManager:
 class TestVisionProcessorAdditional:
     """Additional tests for device branches and OOM/cleanup behavior."""
 
-    def test_determine_device_mps_preference_and_auto(self, mock_heavy_imports: dict) -> None:
+    def test_determine_device_mps_preference_and_auto(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test that mps is selected when requested or available under auto."""
         # Enable MPS in the mocked torch
         mock_heavy_imports["torch"].backends.mps.is_available.return_value = True
@@ -613,7 +614,7 @@ class TestVisionProcessorAdditional:
         p2 = VisionProcessor(vision_config=cfg2)
         assert p2.device == "mps"
 
-    def test_process_image_cuda_oom_retries_then_failure(self, mock_heavy_imports: dict) -> None:
+    def test_process_image_cuda_oom_retries_then_failure(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Simulate torch.cuda.OutOfMemoryError during generation and ensure final OOM message."""
         # Make CUDA available and set OOM exception class
         mock_heavy_imports["torch"].cuda.is_available.return_value = True
@@ -632,7 +633,7 @@ class TestVisionProcessorAdditional:
         mock_processor.tokenizer.eos_token_id = 0
 
         # Model that raises OOM when generate is called
-        def raise_oom(*args, **kwargs):
+        def raise_oom(*args: Any, **kwargs: Any) -> None:
             raise mock_heavy_imports["torch"].cuda.OutOfMemoryError("OOM")
 
         mock_model = MagicMock()
@@ -658,7 +659,7 @@ class TestVisionProcessorAdditional:
 
                 assert "out of memory" in result.lower()
 
-    def test_process_image_mps_calls_empty_cache(self, mock_heavy_imports: dict) -> None:
+    def test_process_image_mps_calls_empty_cache(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Ensure torch.mps.empty_cache() is called when device is mps after generation."""
         # Enable MPS and ensure a callable empty_cache exists
         mock_heavy_imports["torch"].backends.mps.is_available.return_value = True
@@ -703,7 +704,7 @@ class TestVisionProcessorAdditional:
 class TestVisionProcessorEdgeCases:
     """Tests for edge cases and missing branch coverage."""
 
-    def test_initialize_model_is_none(self, mock_heavy_imports: dict) -> None:
+    def test_initialize_model_is_none(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test initialize when model.to() returns None."""
         from reachy_mini_conversation_app.vision.processors import VisionProcessor
 
@@ -726,7 +727,7 @@ class TestVisionProcessorEdgeCases:
                 assert result is True
                 assert processor.model is None
 
-    def test_process_image_cuda_clears_cache(self, mock_heavy_imports: dict) -> None:
+    def test_process_image_cuda_clears_cache(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test that CUDA cache is cleared after processing."""
         mock_heavy_imports["torch"].cuda.is_available.return_value = True
         mock_heavy_imports["torch"].backends.mps.is_available.return_value = False
@@ -764,7 +765,7 @@ class TestVisionProcessorEdgeCases:
                 assert "test response" in result.lower()
                 assert mock_heavy_imports["torch"].cuda.empty_cache.called
 
-    def test_process_image_oom_non_cuda_device(self, mock_heavy_imports: dict) -> None:
+    def test_process_image_oom_non_cuda_device(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test OOM handling when device is not CUDA."""
         mock_heavy_imports["torch"].cuda.is_available.return_value = False
         mock_heavy_imports["torch"].backends.mps.is_available.return_value = False
@@ -774,7 +775,7 @@ class TestVisionProcessorEdgeCases:
             VisionProcessor,
         )
 
-        def raise_oom(*args, **kwargs):
+        def raise_oom(*args: Any, **kwargs: Any) -> None:
             raise mock_heavy_imports["torch"].cuda.OutOfMemoryError("OOM")
 
         mock_processor = MagicMock()
@@ -801,7 +802,7 @@ class TestVisionProcessorEdgeCases:
 
                 assert "out of memory" in result.lower()
 
-    def test_extract_response_marker_empty_result(self, mock_heavy_imports: dict) -> None:
+    def test_extract_response_marker_empty_result(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test response extraction when marker produces empty result."""
         from reachy_mini_conversation_app.vision.processors import VisionProcessor
 
@@ -813,7 +814,7 @@ class TestVisionProcessorEdgeCases:
         # Should fall back to full text
         assert result == "assistant"
 
-    def test_process_image_zero_retries(self, mock_heavy_imports: dict) -> None:
+    def test_process_image_zero_retries(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test process_image with zero max_retries (branch 101->exit)."""
         from reachy_mini_conversation_app.vision.processors import (
             VisionConfig,
@@ -839,14 +840,14 @@ class TestVisionProcessorEdgeCases:
                 image = np.zeros((8, 8, 3), dtype=np.uint8)
                 result = processor.process_image(image)
 
-                # With zero retries, the for loop doesn't execute and returns None
-                assert result is None
+                # With zero retries, the for loop doesn't execute and returns an error message
+                assert result == "Vision processing failed unexpectedly"
 
 
 class TestVisionManagerEdgeCases:
     """Tests for VisionManager edge cases."""
 
-    def test_stop_without_start(self, mock_heavy_imports: dict) -> None:
+    def test_stop_without_start(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test stop when thread was never started."""
         from reachy_mini_conversation_app.vision.processors import VisionManager
 
@@ -869,7 +870,7 @@ class TestVisionManagerEdgeCases:
 
                 assert manager._stop_event.is_set()
 
-    def test_working_loop_no_frame(self, mock_heavy_imports: dict) -> None:
+    def test_working_loop_no_frame(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test working loop when camera returns no frame."""
         from reachy_mini_conversation_app.vision.processors import (
             VisionConfig,
@@ -902,7 +903,7 @@ class TestVisionManagerEdgeCases:
                 # Should have called get_latest_frame but not processed anything
                 assert mock_camera.get_latest_frame.called
 
-    def test_working_loop_invalid_response(self, mock_heavy_imports: dict) -> None:
+    def test_working_loop_invalid_response(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test working loop with invalid vision response."""
         from reachy_mini_conversation_app.vision.processors import (
             VisionConfig,
@@ -940,7 +941,7 @@ class TestVisionManagerEdgeCases:
                 assert manager._last_processed_time == 0.0
 
     def test_working_loop_exception_handling(
-        self, mock_heavy_imports: dict, caplog: pytest.LogCaptureFixture
+        self, mock_heavy_imports: dict[str, Any], caplog: pytest.LogCaptureFixture
     ) -> None:
         """Test working loop handles exceptions gracefully."""
         from reachy_mini_conversation_app.vision.processors import (
@@ -973,7 +974,7 @@ class TestVisionManagerEdgeCases:
                 # Should have logged the error
                 assert "error" in caplog.text.lower() or "Camera error" in str(mock_camera.get_latest_frame.side_effect)
 
-    def test_working_loop_valid_response(self, mock_heavy_imports: dict) -> None:
+    def test_working_loop_valid_response(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test working loop with valid vision response."""
         from reachy_mini_conversation_app.vision.processors import (
             VisionConfig,
@@ -1010,7 +1011,7 @@ class TestVisionManagerEdgeCases:
                 # Should have updated last_processed_time
                 assert manager._last_processed_time > 0
 
-    def test_working_loop_interval_not_elapsed(self, mock_heavy_imports: dict) -> None:
+    def test_working_loop_interval_not_elapsed(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test working loop skips processing when interval hasn't elapsed (branch 246->261)."""
         from reachy_mini_conversation_app.vision.processors import (
             VisionConfig,

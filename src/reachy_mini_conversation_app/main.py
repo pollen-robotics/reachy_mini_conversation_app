@@ -36,7 +36,7 @@ def main() -> None:
 
 def run(
     args: argparse.Namespace,
-    robot: ReachyMini = None,
+    robot: Optional[ReachyMini] = None,
     app_stop_event: Optional[threading.Event] = None,
     settings_app: Optional[FastAPI] = None,
     instance_path: Optional[str] = None,
@@ -184,10 +184,11 @@ def run(
     def poll_stop_event() -> None:
         """Poll the stop event to allow graceful shutdown.
 
-        Note: This function is only called when app_stop_event is truthy (line 178),
+        Note: This function is only called when app_stop_event is truthy (line 180),
         so we can safely wait on it without checking.
         """
-        app_stop_event.wait()  # type: ignore[union-attr]
+        assert app_stop_event is not None  # Guaranteed by caller check
+        app_stop_event.wait()
         logger.info("App stop event detected, shutting down...")
         try:
             stream_manager.close()
@@ -221,7 +222,7 @@ def run(
         logger.info("Shutdown complete.")
 
 
-class ReachyMiniConversationApp(ReachyMiniApp):  # type: ignore[misc]
+class ReachyMiniConversationApp(ReachyMiniApp):
     """Reachy Mini Apps entry point for the conversation app."""
 
     custom_app_url = "http://0.0.0.0:7860/"

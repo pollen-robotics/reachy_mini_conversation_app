@@ -63,6 +63,7 @@ dev = [
   "mypy==1.18.2",
   "pre-commit",
   "types-requests",
+  "types-pyyaml>=6.0.12.20250915",
 ]
 
 [project.scripts]
@@ -125,7 +126,8 @@ line-ending = "auto"
 
 [tool.mypy]
 python_version = "3.12"
-files = ["src/"]
+files = ["src/", "tests/"]
+mypy_path = "stubs"
 ignore_missing_imports = true
 strict = true
 show_error_codes = true

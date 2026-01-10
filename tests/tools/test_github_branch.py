@@ -58,6 +58,7 @@ class TestGitHubBranchToolHelpers:
             mock_config.GITHUB_TOKEN = "ghp_test123"
             result = tool._get_authenticated_url(mock_repo)
 
+        assert result is not None
         assert "ghp_test123@github.com" in result
         assert "owner/repo" in result
 
@@ -98,6 +99,7 @@ class TestGitHubBranchToolHelpers:
             mock_config.GITHUB_TOKEN = "ghp_newtoken"
             result = tool._get_authenticated_url(mock_repo)
 
+        assert result is not None
         assert "ghp_newtoken@github.com" in result
         assert "oldtoken" not in result
 

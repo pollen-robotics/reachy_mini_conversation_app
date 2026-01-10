@@ -85,7 +85,10 @@ class GitHubResetTool(Tool):
             current_branch = repo.active_branch.name
             current_commit = repo.head.commit
             current_sha = current_commit.hexsha[:8]
-            current_message = current_commit.message.strip().split("\n")[0][:50]
+            msg = current_commit.message
+            if isinstance(msg, bytes):
+                msg = msg.decode("utf-8", errors="replace")
+            current_message = msg.strip().split("\n")[0][:50]
 
             # Get commits that will be reset
             try:
@@ -96,7 +99,10 @@ class GitHubResetTool(Tool):
                     "hint": "Use a commit SHA, 'HEAD~N', branch name, or tag.",
                 }
 
-            target_message = target_commit.message.strip().split("\n")[0][:50]
+            target_msg = target_commit.message
+            if isinstance(target_msg, bytes):
+                target_msg = target_msg.decode("utf-8", errors="replace")
+            target_message = target_msg.strip().split("\n")[0][:50]
 
             # Count commits being reset
             commits_to_reset = list(repo.iter_commits(f"{target}..HEAD"))
@@ -148,8 +154,13 @@ class GitHubResetTool(Tool):
                 result["warning"] = "All changes have been permanently discarded."
 
             # List reset commits
+            def get_commit_msg(commit_message: str | bytes) -> str:
+                if isinstance(commit_message, bytes):
+                    commit_message = commit_message.decode("utf-8", errors="replace")
+                return commit_message.strip().split("\n")[0][:50]
+
             result["reset_commits"] = [
-                {"sha": c.hexsha[:8], "message": c.message.strip().split("\n")[0][:50]}
+                {"sha": c.hexsha[:8], "message": get_commit_msg(c.message)}
                 for c in commits_to_reset[:10]  # Limit to 10
             ]
             if num_commits > 10:

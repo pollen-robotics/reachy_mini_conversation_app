@@ -90,7 +90,7 @@ def test_reset_during_inflight_chunk_keeps_worker(monkeypatch: Any) -> None:
 
     original_feed = wobbler.sway.feed
 
-    def blocking_feed(pcm, sr):  # type: ignore[no-untyped-def]
+    def blocking_feed(pcm: Any, sr: Any) -> Any:
         ready.set()
         release.wait(timeout=2.0)
         return original_feed(pcm, sr)
@@ -311,11 +311,12 @@ class TestHeadWobblerReset:
         """Test reset calls sway.reset()."""
         callback = MagicMock()
         wobbler = HeadWobbler(set_speech_offsets=callback)
-        wobbler.sway.reset = MagicMock()
+        mock_reset = MagicMock()
+        object.__setattr__(wobbler.sway, "reset", mock_reset)
 
         wobbler.reset()
 
-        wobbler.sway.reset.assert_called_once()
+        mock_reset.assert_called_once()
 
 
 class TestHeadWobblerWorkingLoop:
@@ -428,7 +429,7 @@ class TestHeadWobblerIntegration:
                 assert abs(yaw) < 0.5
         finally:
             wobbler.stop()
-    def test_generation_mismatch_during_processing(self):
+    def test_generation_mismatch_during_processing(self) -> None:
         """Test when generation changes mid-processing."""
         wobbler, captured = _start_wobbler()
         try:
@@ -444,7 +445,7 @@ class TestHeadWobblerIntegration:
         finally:
             wobbler.stop()
 
-    def test_base_ts_initialization_race_condition(self):
+    def test_base_ts_initialization_race_condition(self) -> None:
         """Test _base_ts initialization when None twice."""
         wobbler, captured = _start_wobbler()
         try:
@@ -458,7 +459,7 @@ class TestHeadWobblerIntegration:
         finally:
             wobbler.stop()
 
-    def test_lag_hops_handling(self):
+    def test_lag_hops_handling(self) -> None:
         """Test handling of lagged hops."""
         wobbler, captured = _start_wobbler()
         try:
@@ -472,7 +473,7 @@ class TestHeadWobblerIntegration:
         finally:
             wobbler.stop()
 
-    def test_stop_during_queue_empty(self):
+    def test_stop_during_queue_empty(self) -> None:
         """Test stop signal during queue.Empty."""
         wobbler, captured = _start_wobbler()
         time.sleep(0.05)
@@ -480,7 +481,7 @@ class TestHeadWobblerIntegration:
         assert wobbler._thread is not None
         assert wobbler._stop_event.is_set()
 
-    def test_empty_audio_chunk(self):
+    def test_empty_audio_chunk(self) -> None:
         """Test empty audio chunks."""
         wobbler, captured = _start_wobbler()
         try:
@@ -491,7 +492,7 @@ class TestHeadWobblerIntegration:
         finally:
             wobbler.stop()
 
-    def test_silent_audio(self):
+    def test_silent_audio(self) -> None:
         """Test silent (zero) audio."""
         wobbler, captured = _start_wobbler()
         try:
@@ -832,15 +833,16 @@ class TestHeadWobblerIntegration:
                 return self
 
             def __exit__(self, *args: Any) -> None:
-                return original_lock.__exit__(*args)
+                original_lock.__exit__(*args)
 
             def acquire(self, *args: Any, **kwargs: Any) -> bool:
-                return original_lock.acquire(*args, **kwargs)
+                result: bool = original_lock.acquire(*args, **kwargs)
+                return result
 
             def release(self) -> None:
-                return original_lock.release()
+                original_lock.release()
 
-        wobbler._state_lock = RaceConditionLock()  # type: ignore[assignment]
+        object.__setattr__(wobbler, "_state_lock", RaceConditionLock())
 
         # Prepare audio and run the actual working_loop code path
         audio_chunk = np.zeros((1, 2400), dtype=np.int16)
@@ -901,15 +903,16 @@ class TestHeadWobblerIntegration:
                 return self
 
             def __exit__(self, *args: Any) -> None:
-                return original_lock.__exit__(*args)
+                original_lock.__exit__(*args)
 
             def acquire(self, *args: Any, **kwargs: Any) -> bool:
-                return original_lock.acquire(*args, **kwargs)
+                result: bool = original_lock.acquire(*args, **kwargs)
+                return result
 
             def release(self) -> None:
-                return original_lock.release()
+                original_lock.release()
 
-        wobbler._state_lock = InnerLoopRaceLock()  # type: ignore[assignment]
+        object.__setattr__(wobbler, "_state_lock", InnerLoopRaceLock())
 
         # Prepare audio and run working_loop
         audio_chunk = np.zeros((1, 2400), dtype=np.int16)
@@ -969,22 +972,23 @@ class TestHeadWobblerIntegration:
                 return self
 
             def __exit__(self, *args: Any) -> None:
-                return original_lock.__exit__(*args)
+                original_lock.__exit__(*args)
 
             def acquire(self, *args: Any, **kwargs: Any) -> bool:
-                return original_lock.acquire(*args, **kwargs)
+                result: bool = original_lock.acquire(*args, **kwargs)
+                return result
 
             def release(self) -> None:
-                return original_lock.release()
+                original_lock.release()
 
-        wobbler._state_lock = Line136Lock()  # type: ignore[assignment]
+        object.__setattr__(wobbler, "_state_lock", Line136Lock())
 
         # Only 1 result to keep the lock sequence simple
         mock_result = {
             "x_mm": 1.0, "y_mm": 2.0, "z_mm": 3.0,
             "roll_rad": 0.1, "pitch_rad": 0.2, "yaw_rad": 0.3
         }
-        wobbler.sway.feed = MagicMock(return_value=[mock_result])
+        object.__setattr__(wobbler.sway, "feed", MagicMock(return_value=[mock_result]))
 
         audio_chunk = np.zeros((1, 2400), dtype=np.int16)
         wobbler.audio_queue.put((0, SAMPLE_RATE, audio_chunk))

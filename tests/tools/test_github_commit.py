@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from anthropic.types import TextBlock
 from git import GitCommandError, InvalidGitRepositoryError
 
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
@@ -630,7 +631,7 @@ class TestGenerateWithClaude:
         tool = GitHubCommitTool()
 
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text='{"type": "feat", "message": "add feature"}')]
+        mock_response.content = [TextBlock(type="text", text='{"type": "feat", "message": "add feature"}')]
 
         with patch("reachy_mini_conversation_app.tools.github_commit.config") as mock_config:
             mock_config.ANTHROPIC_API_KEY = "sk-ant-test123"
@@ -696,7 +697,7 @@ class TestGenerateCommitMessage:
         tool = GitHubCommitTool()
 
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text='{"type": "feat", "message": "test"}')]
+        mock_response.content = [TextBlock(type="text", text='{"type": "feat", "message": "test"}')]
 
         with patch("reachy_mini_conversation_app.tools.github_commit.config") as mock_config:
             mock_config.ANTHROPIC_API_KEY = "sk-ant-test"
@@ -785,7 +786,7 @@ class TestGitHubCommitToolAutoMessage:
         mock_repo.index = mock_index
 
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text='{"type": "feat", "message": "auto generated message"}')]
+        mock_response.content = [TextBlock(type="text", text='{"type": "feat", "message": "auto generated message"}')]
 
         with patch("reachy_mini_conversation_app.tools.github_commit.REPOS_DIR", repos_dir):
             with patch("reachy_mini_conversation_app.tools.github_commit.Repo", return_value=mock_repo):

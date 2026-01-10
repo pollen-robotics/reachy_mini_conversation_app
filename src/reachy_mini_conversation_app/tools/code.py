@@ -7,6 +7,7 @@ from pathlib import Path
 from datetime import datetime
 
 import anthropic
+from anthropic.types import TextBlock
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
@@ -133,7 +134,8 @@ class CodeTool(Tool):
             )
 
             # Extract code from response
-            code_content = message.content[0].text
+            first_block = message.content[0]
+            code_content = first_block.text if isinstance(first_block, TextBlock) else str(first_block)
 
             # Clean up code if it's wrapped in markdown code blocks
             code_content = self._extract_code_from_markdown(code_content)
@@ -206,7 +208,7 @@ class CodeTool(Tool):
         pattern = r"```(?:\w+)?\n(.*?)```"
         matches = re.findall(pattern, content, re.DOTALL)
         if matches:
-            return matches[0].strip()
+            return str(matches[0]).strip()
         return content.strip()
 
     def _generate_filename(self, question: str) -> str:

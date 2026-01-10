@@ -269,7 +269,8 @@ class TestDanceQueueMoveEvaluate:
             move = DanceQueueMove("test_dance")
             result = move.evaluate(0.5)
 
-            assert result[0] is neutral_pose
+            # Use array equality (not identity) since .astype() creates a copy
+            np.testing.assert_array_equal(result[0], neutral_pose)
             np.testing.assert_array_equal(result[1], np.array([0.0, 0.0]))
             assert result[2] == 0.0
 
@@ -407,7 +408,8 @@ class TestEmotionQueueMoveEvaluate:
             move = EmotionQueueMove("happy", mock_recorded_moves)
             result = move.evaluate(0.5)
 
-            assert result[0] is neutral_pose
+            # Use array equality (not identity) since .astype() creates a copy
+            np.testing.assert_array_equal(result[0], neutral_pose)
             np.testing.assert_array_equal(result[1], np.array([0.0, 0.0]))
             assert result[2] == 0.0
 
@@ -546,6 +548,7 @@ class TestGotoQueueMoveEvaluate:
             assert args[2] == 0.0  # t_clamped
 
             # Antennas at t=0 should be start values
+            assert result[1] is not None
             np.testing.assert_array_almost_equal(result[1], np.array([0.0, 0.0]))
             assert result[2] == 0.0  # body_yaw at t=0
 
@@ -588,6 +591,7 @@ class TestGotoQueueMoveEvaluate:
             assert args[2] == 1.0  # t_clamped
 
             # Antennas at t=duration should be target values
+            assert result[1] is not None
             np.testing.assert_array_almost_equal(result[1], np.array([1.0, 1.0]))
             assert result[2] == 1.0  # body_yaw at t=duration
 
@@ -631,6 +635,7 @@ class TestGotoQueueMoveEvaluate:
             assert args[2] == 0.5  # t_clamped
 
             # Antennas at midpoint
+            assert result[1] is not None
             np.testing.assert_array_almost_equal(result[1], np.array([0.5, 0.5]))
             assert result[2] == 0.5  # body_yaw at midpoint
 
@@ -752,7 +757,9 @@ class TestGotoQueueMoveEvaluate:
             result = move.evaluate(0.5)
 
             # Should return target values on error
+            assert result[0] is not None
             assert result[0].dtype == np.float64
+            assert result[1] is not None
             np.testing.assert_array_almost_equal(
                 result[1], np.array([0.5, 0.6], dtype=np.float64)
             )

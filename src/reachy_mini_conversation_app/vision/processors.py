@@ -40,8 +40,8 @@ class VisionProcessor:
         self.vision_config = vision_config or VisionConfig()
         self.model_path = self.vision_config.model_path
         self.device = self._determine_device()
-        self.processor = None
-        self.model = None
+        self.processor: AutoProcessor | None = None
+        self.model: AutoModelForImageTextToText | None = None
         self._initialized = False
 
     def _determine_device(self) -> str:
@@ -61,7 +61,7 @@ class VisionProcessor:
         """Load model and processor onto the selected device."""
         try:
             logger.info(f"Loading SmolVLM2 model on {self.device} (HF_HOME={config.HF_HOME})")
-            self.processor = AutoProcessor.from_pretrained(self.model_path)  # type: ignore
+            self.processor = AutoProcessor.from_pretrained(self.model_path)
 
             # Select dtype depending on device
             if self.device == "cuda":
@@ -78,7 +78,7 @@ class VisionProcessor:
                 model_kwargs["_attn_implementation"] = "flash_attention_2"
 
             # Load model weights
-            self.model = AutoModelForImageTextToText.from_pretrained(self.model_path, **model_kwargs).to(self.device)  # type: ignore
+            self.model = AutoModelForImageTextToText.from_pretrained(self.model_path, **model_kwargs).to(self.device)
 
             if self.model is not None:
                 self.model.eval()
@@ -176,6 +176,9 @@ class VisionProcessor:
                     time.sleep(self.vision_config.retry_delay)
                 else:
                     return f"Vision processing error after {self.vision_config.max_retries} attempts"
+
+        # This should never be reached but satisfies mypy
+        return "Vision processing failed unexpectedly"
 
     def _extract_response(self, full_text: str) -> str:
         """Extract the assistant's response from the full generated text."""

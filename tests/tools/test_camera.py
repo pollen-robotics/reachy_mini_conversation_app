@@ -1,10 +1,12 @@
 """Unit tests for the camera tool."""
 
 import base64
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 from reachy_mini_conversation_app.tools.camera import Camera
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
@@ -58,7 +60,7 @@ class TestCameraToolExecution:
         )
 
     @pytest.fixture
-    def sample_frame(self) -> np.ndarray:
+    def sample_frame(self) -> NDArray[Any]:
         """Create a sample frame for testing."""
         return np.zeros((480, 640, 3), dtype=np.uint8)
 
@@ -108,6 +110,7 @@ class TestCameraToolExecution:
     @pytest.mark.asyncio
     async def test_camera_no_frame_returns_error(self, mock_deps: ToolDependencies) -> None:
         """Test that no frame available returns error."""
+        assert mock_deps.camera_worker is not None
         mock_deps.camera_worker.get_latest_frame.return_value = None
         tool = Camera()
 
@@ -118,9 +121,10 @@ class TestCameraToolExecution:
 
     @pytest.mark.asyncio
     async def test_camera_returns_base64_image(
-        self, mock_deps: ToolDependencies, sample_frame: np.ndarray
+        self, mock_deps: ToolDependencies, sample_frame: NDArray[Any]
     ) -> None:
         """Test that camera returns base64 encoded image."""
+        assert mock_deps.camera_worker is not None
         mock_deps.camera_worker.get_latest_frame.return_value = sample_frame
         tool = Camera()
 
@@ -139,9 +143,10 @@ class TestCameraToolExecution:
 
     @pytest.mark.asyncio
     async def test_camera_encoding_failure_raises(
-        self, mock_deps: ToolDependencies, sample_frame: np.ndarray
+        self, mock_deps: ToolDependencies, sample_frame: NDArray[Any]
     ) -> None:
         """Test that encoding failure raises RuntimeError."""
+        assert mock_deps.camera_worker is not None
         mock_deps.camera_worker.get_latest_frame.return_value = sample_frame
         tool = Camera()
 
@@ -153,9 +158,10 @@ class TestCameraToolExecution:
 
     @pytest.mark.asyncio
     async def test_camera_with_vision_manager(
-        self, mock_deps: ToolDependencies, sample_frame: np.ndarray
+        self, mock_deps: ToolDependencies, sample_frame: NDArray[Any]
     ) -> None:
         """Test camera with vision manager processes image."""
+        assert mock_deps.camera_worker is not None
         mock_deps.camera_worker.get_latest_frame.return_value = sample_frame
 
         # Add vision manager
@@ -172,9 +178,10 @@ class TestCameraToolExecution:
 
     @pytest.mark.asyncio
     async def test_camera_vision_manager_returns_error(
-        self, mock_deps: ToolDependencies, sample_frame: np.ndarray
+        self, mock_deps: ToolDependencies, sample_frame: NDArray[Any]
     ) -> None:
         """Test camera handles vision manager error."""
+        assert mock_deps.camera_worker is not None
         mock_deps.camera_worker.get_latest_frame.return_value = sample_frame
 
         mock_vision = MagicMock()
@@ -190,9 +197,10 @@ class TestCameraToolExecution:
 
     @pytest.mark.asyncio
     async def test_camera_vision_manager_returns_non_string(
-        self, mock_deps: ToolDependencies, sample_frame: np.ndarray
+        self, mock_deps: ToolDependencies, sample_frame: NDArray[Any]
     ) -> None:
         """Test camera handles vision manager non-string result."""
+        assert mock_deps.camera_worker is not None
         mock_deps.camera_worker.get_latest_frame.return_value = sample_frame
 
         mock_vision = MagicMock()
@@ -208,11 +216,12 @@ class TestCameraToolExecution:
 
     @pytest.mark.asyncio
     async def test_camera_logs_question(
-        self, mock_deps: ToolDependencies, sample_frame: np.ndarray, caplog: pytest.LogCaptureFixture
+        self, mock_deps: ToolDependencies, sample_frame: NDArray[Any], caplog: pytest.LogCaptureFixture
     ) -> None:
         """Test that camera logs the question."""
         import logging
 
+        assert mock_deps.camera_worker is not None
         mock_deps.camera_worker.get_latest_frame.return_value = sample_frame
         tool = Camera()
 
@@ -228,9 +237,10 @@ class TestCameraToolExecution:
 
     @pytest.mark.asyncio
     async def test_camera_truncates_long_question_in_log(
-        self, mock_deps: ToolDependencies, sample_frame: np.ndarray
+        self, mock_deps: ToolDependencies, sample_frame: NDArray[Any]
     ) -> None:
         """Test that long questions are truncated in logs."""
+        assert mock_deps.camera_worker is not None
         mock_deps.camera_worker.get_latest_frame.return_value = sample_frame
         tool = Camera()
 

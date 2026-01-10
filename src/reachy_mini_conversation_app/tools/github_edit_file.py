@@ -6,6 +6,7 @@ from pathlib import Path
 
 import openai
 import anthropic
+from anthropic.types import TextBlock
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
@@ -149,7 +150,9 @@ Return the complete modified file content now:
                 ],
                 system="You are an expert code editor. Output only the modified file content, no explanations.",
             )
-            return {"content": response.content[0].text}
+            first_block = response.content[0]
+            content_text = first_block.text if isinstance(first_block, TextBlock) else str(first_block)
+            return {"content": content_text}
         except Exception as e:
             logger.exception(f"Claude API error: {e}")
             return {"error": f"Claude API error: {str(e)}"}

@@ -58,10 +58,11 @@ logger = logging.getLogger(__name__)
 CONTROL_LOOP_FREQUENCY_HZ = 100.0  # Hz - Target frequency for the movement control loop
 
 # Type definitions
-FullBodyPose = Tuple[NDArray[np.float32], Tuple[float, float], float]  # (head_pose_4x4, antennas, body_yaw)
+# Using np.floating[Any] to allow both float32 and float64 arrays
+FullBodyPose = Tuple[NDArray[np.floating[Any]], Tuple[float, float], float]  # (head_pose_4x4, antennas, body_yaw)
 
 
-class BreathingMove(Move):  # type: ignore
+class BreathingMove(Move):
     """Breathing move with interpolation to neutral and then continuous breathing patterns."""
 
     def __init__(
@@ -120,7 +121,9 @@ class BreathingMove(Move):  # type: ignore
 
             # Gentle z-axis breathing
             z_offset = self.breathing_z_amplitude * np.sin(2 * np.pi * self.breathing_frequency * breathing_time)
-            head_pose = create_head_pose(x=0, y=0, z=z_offset, roll=0, pitch=0, yaw=0, degrees=True, mm=False)
+            head_pose = create_head_pose(x=0, y=0, z=z_offset, roll=0, pitch=0, yaw=0, degrees=True, mm=False).astype(
+                np.float64
+            )
 
             # Antenna sway (opposite directions)
             antenna_sway = self.antenna_sway_amplitude * np.sin(2 * np.pi * self.antenna_frequency * breathing_time)
@@ -533,21 +536,21 @@ class MovementManager:
         # When a primary move is playing, sample it and cache the resulting pose
         if self.state.current_move is not None and self.state.move_start_time is not None:
             move_time = current_time - self.state.move_start_time
-            head, antennas, body_yaw = self.state.current_move.evaluate(move_time)
+            head_result, antennas_result, body_yaw_result = self.state.current_move.evaluate(move_time)
 
-            if head is None:
-                head = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
-            if antennas is None:
-                antennas = np.array([0.0, 0.0])
-            if body_yaw is None:
-                body_yaw = 0.0
+            # Provide defaults for None values
+            head_pose: NDArray[np.floating[Any]] = (
+                head_result if head_result is not None else create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
+            )
+            antennas_arr = antennas_result if antennas_result is not None else np.array([0.0, 0.0])
+            body_yaw_val = body_yaw_result if body_yaw_result is not None else 0.0
 
-            antennas_tuple = (float(antennas[0]), float(antennas[1]))
-            head_copy = head.copy()
+            antennas_tuple = (float(antennas_arr[0]), float(antennas_arr[1]))
+            head_copy = head_pose.copy()
             primary_full_body_pose = (
                 head_copy,
                 antennas_tuple,
-                float(body_yaw),
+                float(body_yaw_val),
             )
 
             self.state.last_primary_pose = clone_full_body_pose(primary_full_body_pose)

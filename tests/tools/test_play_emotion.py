@@ -1,5 +1,7 @@
 """Unit tests for the play_emotion tool."""
 
+import builtins
+from typing import Any, Callable
 from unittest.mock import MagicMock
 
 import pytest
@@ -122,11 +124,11 @@ class TestPlayEmotionToolExecution:
         """Test play_emotion queues the emotion move."""
         from reachy_mini_conversation_app.tools import play_emotion
 
-        if not play_emotion.EMOTION_AVAILABLE:
+        if not play_emotion.EMOTION_AVAILABLE or play_emotion._RECORDED_MOVES is None:
             pytest.skip("Emotion library not available")
 
         # Get a valid emotion name
-        available_emotions = play_emotion.RECORDED_MOVES.list_moves()
+        available_emotions = play_emotion._RECORDED_MOVES.list_moves()
         if not available_emotions:
             pytest.skip("No emotions available")
 
@@ -144,11 +146,11 @@ class TestPlayEmotionToolExecution:
         """Test play_emotion handles exceptions gracefully."""
         from reachy_mini_conversation_app.tools import play_emotion
 
-        if not play_emotion.EMOTION_AVAILABLE:
+        if not play_emotion.EMOTION_AVAILABLE or play_emotion._RECORDED_MOVES is None:
             pytest.skip("Emotion library not available")
 
         # Get a valid emotion name
-        available_emotions = play_emotion.RECORDED_MOVES.list_moves()
+        available_emotions = play_emotion._RECORDED_MOVES.list_moves()
         if not available_emotions:
             pytest.skip("No emotions available")
 
@@ -175,10 +177,10 @@ class TestEmotionAvailability:
         assert isinstance(play_emotion.EMOTION_AVAILABLE, bool)
 
     def test_recorded_moves_exists(self) -> None:
-        """Test RECORDED_MOVES exists."""
+        """Test _RECORDED_MOVES exists."""
         from reachy_mini_conversation_app.tools import play_emotion
 
-        assert hasattr(play_emotion, "RECORDED_MOVES")
+        assert hasattr(play_emotion, "_RECORDED_MOVES")
         # Could be RecordedMoves object or None depending on library availability
 
 
@@ -207,14 +209,14 @@ class TestPlayEmotionImportFailure:
                     del sys.modules[name]
 
             # Mock the import to fail
-            original_import = __builtins__["__import__"]
+            original_import: Callable[..., Any] = builtins.__import__
 
-            def mock_import(name: str, *args: object, **kwargs: object) -> object:
+            def mock_import(name: str, *args: Any, **kwargs: Any) -> Any:
                 if "recorded_move" in name or "dance_emotion_moves" in name:
                     raise ImportError(f"Mocked import error for {name}")
                 return original_import(name, *args, **kwargs)
 
-            __builtins__["__import__"] = mock_import
+            builtins.__import__ = mock_import
 
             try:
                 # Reimport the module
@@ -224,10 +226,10 @@ class TestPlayEmotionImportFailure:
 
                 # Check that EMOTION_AVAILABLE is False
                 assert play_emotion_module.EMOTION_AVAILABLE is False
-                assert play_emotion_module.RECORDED_MOVES is None
+                assert play_emotion_module._RECORDED_MOVES is None
                 assert "not available" in caplog.text.lower()
             finally:
-                __builtins__["__import__"] = original_import
+                builtins.__import__ = original_import
         finally:
             # Restore original modules
             for name, module in saved_modules.items():
@@ -281,15 +283,15 @@ class TestGetAvailableEmotionsAndDescriptions:
         if not play_emotion.EMOTION_AVAILABLE:
             pytest.skip("Emotion library not available")
 
-        original_recorded = play_emotion.RECORDED_MOVES
+        original_recorded = play_emotion._RECORDED_MOVES
 
         # Mock RECORDED_MOVES to raise exception
         mock_moves = MagicMock()
         mock_moves.list_moves.side_effect = RuntimeError("Test error")
-        play_emotion.RECORDED_MOVES = mock_moves
+        play_emotion._RECORDED_MOVES = mock_moves
 
         try:
             result = play_emotion.get_available_emotions_and_descriptions()
             assert "Error" in result
         finally:
-            play_emotion.RECORDED_MOVES = original_recorded
+            play_emotion._RECORDED_MOVES = original_recorded

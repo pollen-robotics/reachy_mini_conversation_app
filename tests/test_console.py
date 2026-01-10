@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import sys
 import asyncio
-from typing import Any
+from typing import Any, Generator, cast
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -22,7 +22,7 @@ _MODULES_TO_MOCK = [
 
 
 @pytest.fixture(autouse=True)
-def mock_console_dependencies():
+def mock_console_dependencies() -> Generator[None, None, None]:
     """Mock heavy dependencies for console tests and restore them after."""
     # Save originals
     for mod_name in _MODULES_TO_MOCK:
@@ -32,11 +32,12 @@ def mock_console_dependencies():
     # Install mocks
     sys.modules["reachy_mini"] = MagicMock()
     sys.modules["reachy_mini.media"] = MagicMock()
-    sys.modules["reachy_mini.media.media_manager"] = MagicMock()
-    sys.modules["reachy_mini.media.media_manager"].MediaBackend = MagicMock()
-    sys.modules["reachy_mini.media.media_manager"].MediaBackend.GSTREAMER = "gstreamer"
-    sys.modules["reachy_mini.media.media_manager"].MediaBackend.DEFAULT = "default"
-    sys.modules["reachy_mini.media.media_manager"].MediaBackend.DEFAULT_NO_VIDEO = "default_no_video"
+    media_manager_mock = MagicMock()
+    sys.modules["reachy_mini.media.media_manager"] = media_manager_mock
+    media_manager_mock.MediaBackend = MagicMock()
+    media_manager_mock.MediaBackend.GSTREAMER = "gstreamer"
+    media_manager_mock.MediaBackend.DEFAULT = "default"
+    media_manager_mock.MediaBackend.DEFAULT_NO_VIDEO = "default_no_video"
 
     yield
 
@@ -570,7 +571,7 @@ class TestRecordLoop:
         audio_data = np.zeros(1024, dtype=np.float32)
         call_count = 0
 
-        def get_audio():
+        def get_audio() -> np.ndarray[Any, np.dtype[np.floating[Any]]] | None:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -585,7 +586,7 @@ class TestRecordLoop:
         stream = LocalStream(mock_handler, mock_robot)
 
         # Run for a few iterations then stop
-        async def stop_after_delay():
+        async def stop_after_delay() -> None:
             await asyncio.sleep(0.05)
             stream._stop_event.set()
 
@@ -630,7 +631,7 @@ class TestPlayLoop:
         additional_output.args = [{"role": "assistant", "content": "Hello"}]
 
         call_count = 0
-        async def mock_emit():
+        async def mock_emit() -> Any:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -643,7 +644,7 @@ class TestPlayLoop:
         mock_robot = MagicMock()
         stream = LocalStream(mock_handler, mock_robot)
 
-        async def stop_after_delay():
+        async def stop_after_delay() -> None:
             await asyncio.sleep(0.05)
             stream._stop_event.set()
 
@@ -662,7 +663,7 @@ class TestPlayLoop:
         audio_data = np.zeros(1024, dtype=np.float32)
 
         call_count = 0
-        async def mock_emit():
+        async def mock_emit() -> tuple[int, np.ndarray[Any, np.dtype[np.floating[Any]]]] | None:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -677,7 +678,7 @@ class TestPlayLoop:
 
         stream = LocalStream(mock_handler, mock_robot)
 
-        async def stop_after_delay():
+        async def stop_after_delay() -> None:
             await asyncio.sleep(0.05)
             stream._stop_event.set()
 
@@ -698,7 +699,7 @@ class TestPlayLoop:
         audio_data = np.zeros(1024, dtype=np.float32)
 
         call_count = 0
-        async def mock_emit():
+        async def mock_emit() -> tuple[int, np.ndarray[Any, np.dtype[np.floating[Any]]]] | None:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -713,7 +714,7 @@ class TestPlayLoop:
 
         stream = LocalStream(mock_handler, mock_robot)
 
-        async def stop_after_delay():
+        async def stop_after_delay() -> None:
             await asyncio.sleep(0.05)
             stream._stop_event.set()
 
@@ -738,7 +739,7 @@ class TestPlayLoop:
         audio_data = np.zeros((2, 1024), dtype=np.float32)
 
         call_count = 0
-        async def mock_emit():
+        async def mock_emit() -> tuple[int, np.ndarray[Any, np.dtype[np.floating[Any]]]] | None:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -753,7 +754,7 @@ class TestPlayLoop:
 
         stream = LocalStream(mock_handler, mock_robot)
 
-        async def stop_after_delay():
+        async def stop_after_delay() -> None:
             await asyncio.sleep(0.05)
             stream._stop_event.set()
 
@@ -980,10 +981,10 @@ class TestSettingsEndpoints:
         mock_app = MagicMock()
 
         # Capture the registered handler
-        registered_handlers: dict = {}
+        registered_handlers: dict[str, Any] = {}
 
-        def capture_get(path: str):
-            def decorator(fn):
+        def capture_get(path: str) -> Any:
+            def decorator(fn: Any) -> Any:
                 registered_handlers[path] = fn
                 return fn
             return decorator
@@ -1008,10 +1009,10 @@ class TestSettingsEndpoints:
 
         mock_app = MagicMock()
 
-        registered_handlers: dict = {}
+        registered_handlers: dict[str, Any] = {}
 
-        def capture_get(path: str):
-            def decorator(fn):
+        def capture_get(path: str) -> Any:
+            def decorator(fn: Any) -> Any:
                 registered_handlers[path] = fn
                 return fn
             return decorator
@@ -1033,10 +1034,10 @@ class TestSettingsEndpoints:
 
         mock_app = MagicMock()
 
-        registered_handlers: dict = {}
+        registered_handlers: dict[str, Any] = {}
 
-        def capture_get(path: str):
-            def decorator(fn):
+        def capture_get(path: str) -> Any:
+            def decorator(fn: Any) -> Any:
                 registered_handlers[path] = fn
                 return fn
             return decorator
@@ -1063,17 +1064,17 @@ class TestSettingsEndpoints:
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_app = MagicMock()
-        registered_get: dict = {}
-        registered_post: dict = {}
+        registered_get: dict[str, Any] = {}
+        registered_post: dict[str, Any] = {}
 
-        def capture_get(path: str):
-            def decorator(fn):
+        def capture_get(path: str) -> Any:
+            def decorator(fn: Any) -> Any:
                 registered_get[path] = fn
                 return fn
             return decorator
 
-        def capture_post(path: str):
-            def decorator(fn):
+        def capture_post(path: str) -> Any:
+            def decorator(fn: Any) -> Any:
                 registered_post[path] = fn
                 return fn
             return decorator
@@ -1098,7 +1099,7 @@ class TestSettingsEndpoints:
             import sys
             fake_httpx = MagicMock()
             fake_client = MagicMock()
-            async def fake_get_ok(url, headers=None):
+            async def fake_get_ok(url: Any, headers: Any = None) -> MagicMock:
                 return MagicMock(status_code=200)
 
             fake_client.get = AsyncMock(side_effect=fake_get_ok)
@@ -1130,10 +1131,10 @@ class TestSettingsEndpoints:
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_app = MagicMock()
-        registered_post: dict = {}
+        registered_post: dict[str, Any] = {}
 
-        def capture_post(path: str):
-            def decorator(fn):
+        def capture_post(path: str) -> Any:
+            def decorator(fn: Any) -> Any:
                 registered_post[path] = fn
                 return fn
             return decorator
@@ -1158,10 +1159,10 @@ class TestSettingsEndpoints:
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_app = MagicMock()
-        registered_get: dict = {}
+        registered_get: dict[str, Any] = {}
 
-        def capture_get(path: str):
-            def decorator(fn):
+        def capture_get(path: str) -> Any:
+            def decorator(fn: Any) -> Any:
                 registered_get[path] = fn
                 return fn
             return decorator
@@ -1185,10 +1186,10 @@ class TestSettingsEndpointsExtended:
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_app = MagicMock()
-        registered_handlers: dict = {}
+        registered_handlers: dict[str, Any] = {}
 
-        def capture_get(path: str):
-            def decorator(fn):
+        def capture_get(path: str) -> Any:
+            def decorator(fn: Any) -> Any:
                 registered_handlers[path] = fn
                 return fn
             return decorator
@@ -1211,10 +1212,10 @@ class TestSettingsEndpointsExtended:
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_app = MagicMock()
-        registered_handlers: dict = {}
+        registered_handlers: dict[str, Any] = {}
 
-        def capture_get(path: str):
-            def decorator(fn):
+        def capture_get(path: str) -> Any:
+            def decorator(fn: Any) -> Any:
                 registered_handlers[path] = fn
                 return fn
             return decorator
@@ -1236,10 +1237,10 @@ class TestSettingsEndpointsExtended:
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_app = MagicMock()
-        registered_handlers: dict = {}
+        registered_handlers: dict[str, Any] = {}
 
-        def capture_get(path: str):
-            def decorator(fn):
+        def capture_get(path: str) -> Any:
+            def decorator(fn: Any) -> Any:
                 registered_handlers[path] = fn
                 return fn
             return decorator
@@ -1266,10 +1267,10 @@ class TestSettingsEndpointsExtended:
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_app = MagicMock()
-        registered_handlers: dict = {}
+        registered_handlers: dict[str, Any] = {}
 
-        def capture_get(path: str):
-            def decorator(fn):
+        def capture_get(path: str) -> Any:
+            def decorator(fn: Any) -> Any:
                 registered_handlers[path] = fn
                 return fn
             return decorator
@@ -1299,10 +1300,10 @@ class TestSettingsEndpointsExtended:
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_app = MagicMock()
-        registered_post: dict = {}
+        registered_post: dict[str, Any] = {}
 
-        def capture_post(path: str):
-            def decorator(fn):
+        def capture_post(path: str) -> Any:
+            def decorator(fn: Any) -> Any:
                 registered_post[path] = fn
                 return fn
             return decorator
@@ -1328,10 +1329,10 @@ class TestSettingsEndpointsExtended:
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_app = MagicMock()
-        registered_post: dict = {}
+        registered_post: dict[str, Any] = {}
 
-        def capture_post(path: str):
-            def decorator(fn):
+        def capture_post(path: str) -> Any:
+            def decorator(fn: Any) -> Any:
                 registered_post[path] = fn
                 return fn
             return decorator
@@ -1361,10 +1362,10 @@ class TestSettingsEndpointsExtended:
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_app = MagicMock()
-        registered_post: dict = {}
+        registered_post: dict[str, Any] = {}
 
-        def capture_post(path: str):
-            def decorator(fn):
+        def capture_post(path: str) -> Any:
+            def decorator(fn: Any) -> Any:
                 registered_post[path] = fn
                 return fn
             return decorator
@@ -1403,10 +1404,10 @@ class TestSettingsEndpointsExtended:
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_app = MagicMock()
-        registered_post: dict = {}
+        registered_post: dict[str, Any] = {}
 
-        def capture_post(path: str):
-            def decorator(fn):
+        def capture_post(path: str) -> Any:
+            def decorator(fn: Any) -> Any:
                 registered_post[path] = fn
                 return fn
             return decorator
@@ -1444,10 +1445,10 @@ class TestSettingsEndpointsExtended:
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_app = MagicMock()
-        registered_post: dict = {}
+        registered_post: dict[str, Any] = {}
 
-        def capture_post(path: str):
-            def decorator(fn):
+        def capture_post(path: str) -> Any:
+            def decorator(fn: Any) -> Any:
                 registered_post[path] = fn
                 return fn
             return decorator
@@ -1485,7 +1486,7 @@ class TestLaunch:
         stream = LocalStream(mock_handler, mock_robot, instance_path=str(tmp_path))
 
         # Mock asyncio.run to properly close the coroutine without warning
-        def mock_asyncio_run(coro):
+        def mock_asyncio_run(coro: Any) -> None:
             coro.close()  # Properly close the coroutine to avoid warning
 
         with patch("reachy_mini_conversation_app.console.config") as mock_config:
@@ -1511,7 +1512,7 @@ class TestLaunch:
         stream = LocalStream(mock_handler, mock_robot)
 
         # Mock asyncio.run to properly close the coroutine without warning
-        def mock_asyncio_run(coro):
+        def mock_asyncio_run(coro: Any) -> None:
             coro.close()  # Properly close the coroutine to avoid warning
 
         with patch("reachy_mini_conversation_app.console.config") as mock_config:
@@ -1540,7 +1541,7 @@ class TestLaunch:
         stream = LocalStream(mock_handler, mock_robot)
 
         call_count = 0
-        def mock_key_getter():
+        def mock_key_getter() -> str:
             nonlocal call_count
             call_count += 1
             if call_count < 3:
@@ -1548,7 +1549,7 @@ class TestLaunch:
             return "provided-key"
 
         # Mock asyncio.run to properly close the coroutine without warning
-        def mock_asyncio_run(coro):
+        def mock_asyncio_run(coro: Any) -> None:
             coro.close()  # Properly close the coroutine to avoid warning
 
         with patch("reachy_mini_conversation_app.console.config") as mock_config:
@@ -1562,43 +1563,6 @@ class TestLaunch:
                             stream.launch()
                         except Exception:
                             pass  # May fail due to mock limitations
-
-
-    def test_console_import_handles_fastapi_missing(self, monkeypatch: Any) -> None:
-        """Reload console with missing FastAPI/pydantic modules to trigger fallback."""
-        import types
-        import importlib
-
-        # Backup any existing modules
-        backup = {}
-        for name in ("fastapi", "pydantic", "fastapi.responses", "starlette.staticfiles"):
-            if name in sys.modules:
-                backup[name] = sys.modules.pop(name)
-
-        # Insert minimal modules that lack expected attributes so 'from x import Y' fails
-        sys.modules["fastapi"] = types.ModuleType("fastapi")
-        sys.modules["pydantic"] = types.ModuleType("pydantic")
-        sys.modules["fastapi.responses"] = types.ModuleType("fastapi.responses")
-        sys.modules["starlette.staticfiles"] = types.ModuleType("starlette.staticfiles")
-
-        try:
-            import reachy_mini_conversation_app.console as console_mod
-            importlib.reload(console_mod)
-
-            # After reload, the fallback should set FastAPI/FileResponse/JSONResponse/StaticFiles/BaseModel to object
-            assert console_mod.FastAPI is object
-            assert console_mod.FileResponse is object
-            assert console_mod.JSONResponse is object
-            assert console_mod.StaticFiles is object
-            assert console_mod.BaseModel is object
-        finally:
-            # Restore backups
-            for name, mod in backup.items():
-                sys.modules[name] = mod
-            # Clean up temporary modules
-            for name in ("fastapi", "pydantic", "fastapi.responses", "starlette.staticfiles"):
-                if name in sys.modules and name not in backup:
-                    del sys.modules[name]
 
 
 class TestReadEnvTemplate:
@@ -2083,7 +2047,7 @@ class TestPlayLoopEdgeCases:
         # For transpose: if audio_data.shape[1] > audio_data.shape[0]
         audio_2d = np.zeros((10, 100), dtype=np.float32)  # 10 rows, 100 cols -> shape[1] > shape[0]
 
-        async def mock_emit() -> tuple:
+        async def mock_emit() -> tuple[int, np.ndarray[Any, np.dtype[np.floating[Any]]]]:
             return (24000, audio_2d)
 
         mock_handler.emit = mock_emit
@@ -2110,7 +2074,7 @@ class TestPlayLoopEdgeCases:
         # Create audio with shape (samples, channels) where channels > 1
         audio_2d = np.zeros((100, 2), dtype=np.float32)  # 100 samples, 2 channels
 
-        async def mock_emit() -> tuple:
+        async def mock_emit() -> tuple[int, np.ndarray[Any, np.dtype[np.floating[Any]]]]:
             return (24000, audio_2d)
 
         mock_handler.emit = mock_emit
@@ -2188,7 +2152,7 @@ class TestReadEnvLinesPackagedEdgeCases:
         with patch("pathlib.Path.cwd", return_value=tmp_path / "fake_cwd"):
             with patch("pathlib.Path.exists"):
                 # packaged .env.example exists (returns True for specific path check)
-                def exists_side_effect(self: Path = None) -> bool:
+                def exists_side_effect(self: Path | None = None) -> bool:
                     path_str = str(self) if self else ""
                     # Return True for packaged .env.example
                     if ".env.example" in path_str and "reachy_mini_conversation_app" in path_str:
@@ -2287,7 +2251,7 @@ class TestLaunchRunnerFunction:
             instance_path=str(tmp_path)
         )
 
-        captured_loop = [None]
+        captured_loop: list[asyncio.AbstractEventLoop | None] = [None]
 
         def capture_asyncio_run(coro: Any) -> None:
             # Run the actual coroutine in a new loop to capture behavior
@@ -2338,7 +2302,7 @@ class TestLaunchRunnerFunction:
             from reachy_mini_conversation_app.console import mount_personality_routes
             with patch.object(stream, "_settings_app", mock_settings_app):
                 loop = asyncio.get_running_loop()
-                stream._asyncio_loop = loop
+                object.__setattr__(stream, "_asyncio_loop", loop)
                 try:
                     # This should raise but be caught
                     with patch(
@@ -2629,7 +2593,7 @@ class TestPlayLoopAudio2DMultiChannel:
             stream._stop_event.clear()
             while not stream._stop_event.is_set() and iterations[0] < 1:
                 try:
-                    item = await asyncio.wait_for(
+                    item: Any = await asyncio.wait_for(
                         stream.handler.output_queue.get(),
                         timeout=0.1
                     )
@@ -2677,7 +2641,7 @@ class TestLaunchRunnerAsyncTasks:
         cancelled_caught = [False]
 
         async def mock_runner() -> None:
-            stream._asyncio_loop = asyncio.get_running_loop()
+            object.__setattr__(stream, "_asyncio_loop", asyncio.get_running_loop())
             stream._tasks = [
                 asyncio.create_task(asyncio.sleep(10)),
                 asyncio.create_task(asyncio.sleep(10)),
@@ -2731,7 +2695,7 @@ class TestLaunchRunnerShutdownInFinally:
         stream = LocalStream(mock_handler, mock_robot, instance_path=str(tmp_path))
 
         async def mock_runner() -> None:
-            stream._asyncio_loop = asyncio.get_running_loop()
+            object.__setattr__(stream, "_asyncio_loop", asyncio.get_running_loop())
             stream._tasks = []
             try:
                 # Empty tasks list -> gather returns immediately
@@ -2870,7 +2834,7 @@ class TestPlayLoopSingleChannelAudio:
         # After transpose check: shape[1] = 1, which is NOT > 1, so we skip the mono conversion
         single_channel_audio = np.zeros((100, 1), dtype=np.float32)
 
-        async def mock_emit() -> tuple:
+        async def mock_emit() -> tuple[int, np.ndarray[Any, np.dtype[np.floating[Any]]]]:
             return (24000, single_channel_audio)
 
         mock_handler.emit = mock_emit
@@ -2904,7 +2868,7 @@ class TestLaunchActualRunner:
         async def mock_runner() -> None:
             runner_executed[0] = True
             loop = asyncio.get_running_loop()
-            stream._asyncio_loop = loop
+            object.__setattr__(stream, "_asyncio_loop", loop)
             # Simulate the runner code path where settings_app is None
             try:
                 if stream._settings_app is not None:

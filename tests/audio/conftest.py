@@ -2,7 +2,7 @@
 
 import math
 import base64
-from typing import List, Tuple
+from typing import Callable, Generator, List, Tuple
 
 import numpy as np
 import pytest
@@ -18,7 +18,7 @@ def sample_rate() -> int:
 
 
 @pytest.fixture
-def sine_wave_generator(sample_rate: int):
+def sine_wave_generator(sample_rate: int) -> Callable[..., NDArray[np.int16]]:
     """Create a factory fixture to generate sine wave PCM data."""
 
     def _generate(
@@ -36,7 +36,9 @@ def sine_wave_generator(sample_rate: int):
 
 
 @pytest.fixture
-def base64_audio_generator(sine_wave_generator):
+def base64_audio_generator(
+    sine_wave_generator: Callable[..., NDArray[np.int16]],
+) -> Callable[..., str]:
     """Create a factory fixture to generate base64-encoded audio chunks."""
 
     def _generate(
@@ -85,7 +87,9 @@ def captured_offsets() -> List[Tuple[float, Tuple[float, float, float, float, fl
 
 
 @pytest.fixture
-def head_wobbler(captured_offsets):
+def head_wobbler(
+    captured_offsets: List[Tuple[float, Tuple[float, float, float, float, float, float]]],
+) -> Generator[HeadWobbler, None, None]:
     """Create a HeadWobbler instance with offset capture."""
     import time
 

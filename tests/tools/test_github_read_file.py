@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from anthropic.types import TextBlock
 
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.github_read_file import (
@@ -292,7 +293,7 @@ class TestGitHubReadFileAnalysis:
         test_file.write_text("def hello(): pass")
 
         mock_message = MagicMock()
-        mock_message.content = [MagicMock(text="Analysis result")]
+        mock_message.content = [TextBlock(type="text", text="Analysis result")]
 
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_message

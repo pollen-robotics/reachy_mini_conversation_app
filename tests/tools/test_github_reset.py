@@ -515,7 +515,7 @@ class TestGitHubResetToolExecution:
         # Make head.commit raise exception after reset (simulating unexpected state)
         call_count = [0]
 
-        def head_commit_side_effect():
+        def head_commit_side_effect() -> MagicMock:
             call_count[0] += 1
             if call_count[0] <= 1:
                 return mock_current_commit

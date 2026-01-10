@@ -1,5 +1,7 @@
 """Unit tests for the dance tool."""
 
+import builtins
+from typing import Any, Callable
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -234,14 +236,14 @@ class TestDanceImportFailure:
 
         try:
             # Create a mock that raises ImportError for dance library
-            original_import = __builtins__["__import__"]
+            original_import: Callable[..., Any] = builtins.__import__
 
-            def mock_import(name, *args, **kwargs):
+            def mock_import(name: str, *args: Any, **kwargs: Any) -> Any:
                 if "reachy_mini_dances_library" in name:
                     raise ImportError("Test import error for dance library")
                 return original_import(name, *args, **kwargs)
 
-            __builtins__["__import__"] = mock_import
+            builtins.__import__ = mock_import
 
             # Import the dance module fresh - this should trigger the except branch
             with caplog.at_level("WARNING"):
@@ -254,7 +256,7 @@ class TestDanceImportFailure:
 
         finally:
             # Restore original import
-            __builtins__["__import__"] = original_import
+            builtins.__import__ = original_import
 
             # Restore original modules
             for mod in modules_to_remove:

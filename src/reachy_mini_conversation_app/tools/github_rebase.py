@@ -189,7 +189,7 @@ class GitHubRebaseTool(Tool):
                     if "conflict" in str(e).lower() or "could not apply" in str(e).lower():
                         # Get conflicted files
                         conflicted = repo.index.unmerged_blobs()
-                        conflict_files = list({path for path, _ in conflicted.keys()}) if conflicted else []
+                        conflict_files = [str(path) for path in conflicted.keys()] if conflicted else []
 
                         return {
                             "status": "conflict",
@@ -219,7 +219,7 @@ class GitHubRebaseTool(Tool):
                 except GitCommandError as e:
                     if "conflict" in str(e).lower():
                         conflicted = repo.index.unmerged_blobs()
-                        conflict_files = list({path for path, _ in conflicted.keys()}) if conflicted else []
+                        conflict_files = [str(path) for path in conflicted.keys()] if conflicted else []
 
                         return {
                             "status": "conflict",

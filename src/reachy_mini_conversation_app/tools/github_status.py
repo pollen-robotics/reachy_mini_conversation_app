@@ -64,7 +64,7 @@ class GitHubStatusTool(Tool):
                 current_branch = f"HEAD detached at {repo.head.commit.hexsha[:8]}"
 
             # Tracking info
-            tracking_info = {}
+            tracking_info: Dict[str, Any] = {}
             try:
                 tracking_branch = repo.active_branch.tracking_branch()
                 if tracking_branch:

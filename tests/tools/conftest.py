@@ -1,6 +1,6 @@
 """Pytest fixtures specific to tool testing."""
 
-from typing import Any, Dict
+from typing import Any, Dict, Generator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -14,7 +14,7 @@ import pytest
 
 
 @pytest.fixture
-def isolated_tool_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+def isolated_tool_registry(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
     """Isolate tool registry to prevent cross-test contamination.
 
     This fixture resets the tool registry before and after each test,
@@ -136,7 +136,7 @@ def mock_emotion_library(monkeypatch: pytest.MonkeyPatch) -> Dict[str, MagicMock
 
 
 @pytest.fixture
-def mock_anthropic_for_code(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+def mock_anthropic_for_code(monkeypatch: pytest.MonkeyPatch) -> Generator[MagicMock, None, None]:
     """Mock Anthropic client for code generation tests."""
     mock_client = MagicMock()
 
@@ -210,7 +210,7 @@ def temp_git_repo(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def mock_github_api(monkeypatch: pytest.MonkeyPatch, mock_github_client: MagicMock) -> MagicMock:
+def mock_github_api(monkeypatch: pytest.MonkeyPatch, mock_github_client: MagicMock) -> Generator[MagicMock, None, None]:
     """Mock PyGithub for API operations."""
     with patch("github.Github", return_value=mock_github_client):
         yield mock_github_client

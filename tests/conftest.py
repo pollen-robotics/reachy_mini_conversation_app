@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
 import pytest
+from anthropic.types import TextBlock
 from numpy.typing import NDArray
 
 
@@ -280,7 +281,7 @@ def mock_anthropic_client() -> MagicMock:
 
     # Mock messages.create response
     mock_response = MagicMock()
-    mock_response.content = [MagicMock(text="Generated code response")]
+    mock_response.content = [TextBlock(type="text", text="Generated code response")]
     mock_response.stop_reason = "end_turn"
 
     mock.messages = MagicMock()

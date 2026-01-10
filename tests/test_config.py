@@ -2,6 +2,7 @@
 
 import os
 import sys
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -196,17 +197,17 @@ class TestSetConfigValue:
         def raise_on_setattr(self: object, name: str, value: object) -> None:
             if name == "TEST_FAIL_KEY":
                 raise RuntimeError("Test error")
-            original_setattr(self, name, value)  # type: ignore[arg-type]
+            original_setattr(self, name, value)
 
         monkeypatch.setattr(config.__class__, "__setattr__", raise_on_setattr)
 
         # Also make os.environ raise
         original_environ_setitem = os.environ.__class__.__setitem__
 
-        def raise_on_environ(self: object, key: str, value: str) -> None:
+        def raise_on_environ(self: Any, key: str, value: str) -> None:
             if key == "TEST_FAIL_KEY":
                 raise RuntimeError("Test error")
-            original_environ_setitem(self, key, value)  # type: ignore[arg-type]
+            original_environ_setitem(self, key, value)
 
         monkeypatch.setattr(os.environ.__class__, "__setitem__", raise_on_environ)
 
@@ -340,10 +341,10 @@ class TestSetCustomProfileExceptionHandling:
         # Make config.REACHY_MINI_CUSTOM_PROFILE property raise on assignment
         original_setattr = type(config).__setattr__
 
-        def raise_on_profile_setattr(self: object, name: str, value: object) -> None:
+        def raise_on_profile_setattr(self: Any, name: str, value: Any) -> None:
             if name == "REACHY_MINI_CUSTOM_PROFILE":
                 raise RuntimeError("Config update error")
-            original_setattr(self, name, value)  # type: ignore[arg-type]
+            original_setattr(self, name, value)
 
         monkeypatch.setattr(type(config), "__setattr__", raise_on_profile_setattr)
 
@@ -378,7 +379,7 @@ class TestSetCustomProfileExceptionHandling:
 
         original_import = builtins.__import__
 
-        def mock_import(name: str, *args: object, **kwargs: object) -> object:
+        def mock_import(name: str, *args: Any, **kwargs: Any) -> Any:
             if name == "os":
                 mock_module = MagicMock()
                 mock_module.environ = mock_environ

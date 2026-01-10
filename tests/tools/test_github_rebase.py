@@ -1,10 +1,12 @@
 """Unit tests for the github_rebase tool."""
 
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
 from git import GitCommandError, InvalidGitRepositoryError
+from git.repo import Repo
 
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.github_rebase import GitHubRebaseTool
@@ -59,6 +61,7 @@ class TestGitHubRebaseToolHelpers:
             mock_config.GITHUB_TOKEN = "ghp_test123"
             result = tool._get_authenticated_url(mock_repo)
 
+        assert result is not None
         assert "ghp_test123@github.com" in result
 
     def test_get_authenticated_url_ssh(self) -> None:
@@ -116,7 +119,7 @@ class TestGitHubRebaseToolHelpers:
 
         with patch("reachy_mini_conversation_app.tools.github_rebase.config") as mock_config:
             mock_config.GITHUB_TOKEN = "ghp_test123"
-            result = tool._get_authenticated_url(MockRepo())
+            result = tool._get_authenticated_url(cast(Repo, MockRepo()))
 
         assert result is None
 

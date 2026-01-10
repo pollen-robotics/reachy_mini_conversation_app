@@ -14,7 +14,7 @@ import sys
 import time
 import asyncio
 import logging
-from typing import List, Optional
+from typing import TYPE_CHECKING, Any, List, Optional
 from pathlib import Path
 
 from fastrtc import AdditionalOutputs, audio_to_float32
@@ -27,19 +27,48 @@ from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
 
 
-try:
-    # FastAPI is provided by the Reachy Mini Apps runtime
+# FastAPI types - import conditionally for type checking
+if TYPE_CHECKING:
     from fastapi import FastAPI, Response
     from pydantic import BaseModel
     from fastapi.responses import FileResponse, JSONResponse
     from starlette.staticfiles import StaticFiles
-except Exception:  # pragma: no cover - only loaded when settings_app is used
-    FastAPI = object  # type: ignore
-    FileResponse = object  # type: ignore
-    JSONResponse = object  # type: ignore
-    StaticFiles = object  # type: ignore
-    BaseModel = object  # type: ignore
 
+# Runtime imports with fallbacks
+_FASTAPI_AVAILABLE = False
+try:
+    # FastAPI is provided by the Reachy Mini Apps runtime
+    from fastapi import FastAPI, Response  # noqa: F811
+    from pydantic import BaseModel  # noqa: F811
+    from fastapi.responses import FileResponse, JSONResponse  # noqa: F811
+    from starlette.staticfiles import StaticFiles  # noqa: F811
+    _FASTAPI_AVAILABLE = True
+except Exception:  # pragma: no cover - only loaded when settings_app is used
+    # Define fallback values for when FastAPI is not available.
+    # These type: ignore comments are unavoidable because:
+    # - TYPE_CHECKING block declares these as class types
+    # - Runtime fallback assigns None when imports fail
+    # - mypy sees this as type mismatch (class vs None)
+    FastAPI = None  # type: ignore[assignment,misc]
+    Response = None  # type: ignore[assignment,misc]
+    BaseModel = None  # type: ignore[assignment,misc]
+    FileResponse = None  # type: ignore[assignment,misc]
+    JSONResponse = None  # type: ignore[assignment,misc]
+    StaticFiles = None  # type: ignore[assignment,misc]
+
+
+# Re-export for test patching
+__all__ = [
+    "LocalStream",
+    "create_settings_app",
+    "mount_personality_routes",
+    "FastAPI",
+    "FileResponse",
+    "JSONResponse",
+    "StaticFiles",
+    "BaseModel",
+    "MediaBackend",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +98,7 @@ class LocalStream:
         self._settings_app: Optional[FastAPI] = settings_app
         self._instance_path: Optional[str] = instance_path
         self._settings_initialized = False
-        self._asyncio_loop = None
+        self._asyncio_loop: Optional[asyncio.AbstractEventLoop] = None
 
     # ---- Settings UI (only when API key is missing) ----
     def _read_env_lines(self, env_path: Path) -> list[str]:
@@ -451,7 +480,7 @@ class LocalStream:
         async def runner() -> None:
             # Capture loop for cross-thread personality actions
             loop = asyncio.get_running_loop()
-            self._asyncio_loop = loop  # type: ignore[assignment]
+            self._asyncio_loop = loop
             # Mount personality routes now that loop and handler are available
             try:
                 if self._settings_app is not None:

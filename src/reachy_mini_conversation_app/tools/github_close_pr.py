@@ -144,12 +144,14 @@ class GitHubClosePRTool(Tool):
                         "hint": "Resolve conflicts or address failing checks first.",
                     }
 
-                # Merge the PR
-                merge_result = pr.merge(
-                    commit_title=commit_title,
-                    commit_message=commit_message,
-                    merge_method=merge_method,
-                )
+                # Merge the PR - build kwargs to avoid passing None values
+                merge_kwargs: Dict[str, Any] = {"merge_method": merge_method}
+                if commit_title is not None:
+                    merge_kwargs["commit_title"] = commit_title
+                if commit_message is not None:
+                    merge_kwargs["commit_message"] = commit_message
+
+                merge_result = pr.merge(**merge_kwargs)
 
                 result = {
                     "status": "success",

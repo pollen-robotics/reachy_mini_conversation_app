@@ -148,14 +148,14 @@ class GitHubCommentPRTool(Tool):
                     review_params["start_side"] = side
 
                 # Create review comment
-                comment = pr.create_review_comment(**review_params)
+                review_comment = pr.create_review_comment(**review_params)
 
-                result = {
+                result: Dict[str, Any] = {
                     "status": "success",
                     "message": f"Review comment added to PR #{pr_number}!",
                     "pr_number": pr_number,
                     "pr_title": pr.title,
-                    "comment_id": comment.id,
+                    "comment_id": review_comment.id,
                     "path": path,
                     "line": line,
                 }

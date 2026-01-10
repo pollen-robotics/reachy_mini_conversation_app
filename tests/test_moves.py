@@ -2,6 +2,7 @@
 
 import time
 import threading
+from typing import Any, Generator, cast
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -11,7 +12,7 @@ from numpy.typing import NDArray
 
 # Mock reachy_mini before importing moves
 @pytest.fixture(autouse=True)
-def mock_reachy_mini():
+def mock_reachy_mini() -> Generator[dict[str, Any], None, None]:
     """Mock reachy_mini module before importing moves."""
     mock_reachy = MagicMock()
     mock_utils = MagicMock()
@@ -19,8 +20,8 @@ def mock_reachy_mini():
     mock_interpolation = MagicMock()
 
     def mock_create_head_pose(
-        x=0, y=0, z=0, roll=0, pitch=0, yaw=0, degrees=True, mm=True
-    ) -> NDArray[np.float32]:
+        x: float = 0, y: float = 0, z: float = 0, roll: float = 0, pitch: float = 0, yaw: float = 0, degrees: bool = True, mm: bool = True
+    ) -> NDArray[np.floating[Any]]:
         """Mock create_head_pose that returns a 4x4 matrix."""
         pose = np.eye(4, dtype=np.float32)
         # Simple translation for x, y, z
@@ -32,17 +33,19 @@ def mock_reachy_mini():
     mock_utils.create_head_pose = mock_create_head_pose
 
     def mock_compose_world_offset(
-        primary: NDArray, secondary: NDArray, reorthonormalize: bool = False
-    ) -> NDArray[np.float32]:
+        primary: NDArray[np.floating[Any]], secondary: NDArray[np.floating[Any]], reorthonormalize: bool = False
+    ) -> NDArray[np.floating[Any]]:
         """Mock compose_world_offset."""
         # Simple addition for testing
-        return (primary + secondary).astype(np.float32)
+        result: NDArray[np.floating[Any]] = (primary + secondary).astype(np.float32)
+        return result
 
     def mock_linear_pose_interpolation(
-        start: NDArray, end: NDArray, t: float
-    ) -> NDArray[np.float32]:
+        start: NDArray[np.floating[Any]], end: NDArray[np.floating[Any]], t: float
+    ) -> NDArray[np.floating[Any]]:
         """Mock linear interpolation."""
-        return ((1 - t) * start + t * end).astype(np.float32)
+        result: NDArray[np.floating[Any]] = ((1 - t) * start + t * end).astype(np.float32)
+        return result
 
     mock_interpolation.compose_world_offset = mock_compose_world_offset
     mock_interpolation.linear_pose_interpolation = mock_linear_pose_interpolation
@@ -51,7 +54,7 @@ def mock_reachy_mini():
     class MockMove:
         duration: float = 1.0
 
-        def evaluate(self, t: float):
+        def evaluate(self, t: float) -> tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]], float]:
             return (np.eye(4, dtype=np.float32), np.array([0.0, 0.0]), 0.0)
 
     mock_motion.move = MagicMock()
@@ -88,7 +91,7 @@ def mock_reachy_mini():
 class TestBreathingMove:
     """Tests for BreathingMove class."""
 
-    def test_init_default_params(self, mock_reachy_mini: dict) -> None:
+    def test_init_default_params(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test BreathingMove initializes with default parameters."""
         from reachy_mini_conversation_app.moves import BreathingMove
 
@@ -106,7 +109,7 @@ class TestBreathingMove:
             move.interpolation_start_antennas, [0.1, -0.1]
         )
 
-    def test_init_custom_duration(self, mock_reachy_mini: dict) -> None:
+    def test_init_custom_duration(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test BreathingMove with custom interpolation duration."""
         from reachy_mini_conversation_app.moves import BreathingMove
 
@@ -118,7 +121,7 @@ class TestBreathingMove:
 
         assert move.interpolation_duration == 2.5
 
-    def test_duration_is_infinite(self, mock_reachy_mini: dict) -> None:
+    def test_duration_is_infinite(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test BreathingMove duration is infinite."""
         from reachy_mini_conversation_app.moves import BreathingMove
 
@@ -129,7 +132,7 @@ class TestBreathingMove:
 
         assert move.duration == float("inf")
 
-    def test_evaluate_interpolation_phase(self, mock_reachy_mini: dict) -> None:
+    def test_evaluate_interpolation_phase(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test evaluate during interpolation phase (t < interpolation_duration)."""
         from reachy_mini_conversation_app.moves import BreathingMove
 
@@ -153,7 +156,7 @@ class TestBreathingMove:
         assert head is not None
         assert antennas is not None
 
-    def test_evaluate_breathing_phase(self, mock_reachy_mini: dict) -> None:
+    def test_evaluate_breathing_phase(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test evaluate during breathing phase (t >= interpolation_duration)."""
         from reachy_mini_conversation_app.moves import BreathingMove
 
@@ -170,7 +173,7 @@ class TestBreathingMove:
         assert len(antennas) == 2
         assert body_yaw == 0.0
 
-    def test_breathing_z_oscillation(self, mock_reachy_mini: dict) -> None:
+    def test_breathing_z_oscillation(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test that breathing creates z-axis oscillation."""
         from reachy_mini_conversation_app.moves import BreathingMove
 
@@ -181,15 +184,16 @@ class TestBreathingMove:
         )
 
         # Sample at different times
-        z_values = []
+        z_values: list[float] = []
         for t in [0.0, 2.5, 5.0, 7.5, 10.0]:
             head, _, _ = move.evaluate(t)
+            assert head is not None
             z_values.append(head[2, 3])  # z is in position [2,3] of 4x4 matrix
 
         # Z should oscillate (not all same value)
         assert len(set(z_values)) > 1
 
-    def test_antenna_sway_opposite(self, mock_reachy_mini: dict) -> None:
+    def test_antenna_sway_opposite(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test that antennas sway in opposite directions."""
         from reachy_mini_conversation_app.moves import BreathingMove
 
@@ -201,6 +205,7 @@ class TestBreathingMove:
 
         # At a non-zero time point during breathing
         _, antennas, _ = move.evaluate(0.5)
+        assert antennas is not None
 
         # Antennas should have opposite signs (or both zero)
         if antennas[0] != 0.0:
@@ -210,7 +215,7 @@ class TestBreathingMove:
 class TestCombineFullBody:
     """Tests for combine_full_body function."""
 
-    def test_combine_neutral_poses(self, mock_reachy_mini: dict) -> None:
+    def test_combine_neutral_poses(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test combining two neutral poses."""
         from reachy_mini_conversation_app.moves import combine_full_body
 
@@ -222,7 +227,7 @@ class TestCombineFullBody:
         assert result[1] == (0.0, 0.0)  # antennas
         assert result[2] == 0.0  # body_yaw
 
-    def test_combine_antennas_sum(self, mock_reachy_mini: dict) -> None:
+    def test_combine_antennas_sum(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test that antennas are summed."""
         from reachy_mini_conversation_app.moves import combine_full_body
 
@@ -233,7 +238,7 @@ class TestCombineFullBody:
 
         assert result[1] == pytest.approx((0.15, -0.05))
 
-    def test_combine_body_yaw_sum(self, mock_reachy_mini: dict) -> None:
+    def test_combine_body_yaw_sum(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test that body_yaw is summed."""
         from reachy_mini_conversation_app.moves import combine_full_body
 
@@ -248,7 +253,7 @@ class TestCombineFullBody:
 class TestCloneFullBodyPose:
     """Tests for clone_full_body_pose function."""
 
-    def test_clone_creates_copy(self, mock_reachy_mini: dict) -> None:
+    def test_clone_creates_copy(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test that clone creates independent copy."""
         from reachy_mini_conversation_app.moves import clone_full_body_pose
 
@@ -263,7 +268,7 @@ class TestCloneFullBodyPose:
         # Clone should be unchanged
         assert cloned[0][0, 0] == 1.0
 
-    def test_clone_preserves_values(self, mock_reachy_mini: dict) -> None:
+    def test_clone_preserves_values(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test that clone preserves all values."""
         from reachy_mini_conversation_app.moves import clone_full_body_pose
 
@@ -277,14 +282,14 @@ class TestCloneFullBodyPose:
         assert cloned[1] == (0.2, -0.3)
         assert cloned[2] == 0.7
 
-    def test_clone_converts_to_float(self, mock_reachy_mini: dict) -> None:
+    def test_clone_converts_to_float(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test that clone converts antenna values to float."""
-        from reachy_mini_conversation_app.moves import clone_full_body_pose
+        from reachy_mini_conversation_app.moves import FullBodyPose, clone_full_body_pose
 
         head = np.eye(4, dtype=np.float32)
-        # Use numpy values that need conversion
+        # Use numpy values that need conversion - cast to FullBodyPose to test conversion behavior
         antennas = (np.float32(0.1), np.float64(-0.2))
-        original = (head, antennas, np.float32(0.5))
+        original = cast(FullBodyPose, (head, antennas, np.float32(0.5)))
 
         cloned = clone_full_body_pose(original)
 
@@ -296,7 +301,7 @@ class TestCloneFullBodyPose:
 class TestMovementState:
     """Tests for MovementState dataclass."""
 
-    def test_default_values(self, mock_reachy_mini: dict) -> None:
+    def test_default_values(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test MovementState default values."""
         from reachy_mini_conversation_app.moves import MovementState
 
@@ -309,7 +314,7 @@ class TestMovementState:
         assert state.face_tracking_offsets == (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         assert state.last_primary_pose is None
 
-    def test_update_activity(self, mock_reachy_mini: dict) -> None:
+    def test_update_activity(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test update_activity updates timestamp."""
         from reachy_mini_conversation_app.moves import MovementState
 
@@ -325,7 +330,7 @@ class TestMovementState:
 class TestLoopFrequencyStats:
     """Tests for LoopFrequencyStats dataclass."""
 
-    def test_default_values(self, mock_reachy_mini: dict) -> None:
+    def test_default_values(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test LoopFrequencyStats default values."""
         from reachy_mini_conversation_app.moves import LoopFrequencyStats
 
@@ -338,7 +343,7 @@ class TestLoopFrequencyStats:
         assert stats.last_freq == 0.0
         assert stats.potential_freq == 0.0
 
-    def test_reset(self, mock_reachy_mini: dict) -> None:
+    def test_reset(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test reset clears accumulator values."""
         from reachy_mini_conversation_app.moves import LoopFrequencyStats
 
@@ -358,7 +363,7 @@ class TestLoopFrequencyStats:
 class TestMovementManagerInit:
     """Tests for MovementManager initialization."""
 
-    def test_init_with_robot(self, mock_reachy_mini: dict) -> None:
+    def test_init_with_robot(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test MovementManager initializes with robot."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -369,7 +374,7 @@ class TestMovementManagerInit:
         assert manager.camera_worker is None
         assert manager.target_frequency == 100.0
 
-    def test_init_with_camera_worker(self, mock_reachy_mini: dict) -> None:
+    def test_init_with_camera_worker(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test MovementManager initializes with camera worker."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -379,7 +384,7 @@ class TestMovementManagerInit:
 
         assert manager.camera_worker is mock_camera
 
-    def test_init_creates_state(self, mock_reachy_mini: dict) -> None:
+    def test_init_creates_state(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test MovementManager creates initial state."""
         from reachy_mini_conversation_app.moves import MovementState, MovementManager
 
@@ -389,7 +394,7 @@ class TestMovementManagerInit:
         assert isinstance(manager.state, MovementState)
         assert manager.state.last_primary_pose is not None
 
-    def test_init_creates_locks(self, mock_reachy_mini: dict) -> None:
+    def test_init_creates_locks(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test MovementManager creates threading primitives."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -404,7 +409,7 @@ class TestMovementManagerInit:
 class TestMovementManagerQueueMove:
     """Tests for MovementManager queue_move method."""
 
-    def test_queue_move_adds_to_queue(self, mock_reachy_mini: dict) -> None:
+    def test_queue_move_adds_to_queue(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test queue_move adds command to queue."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -425,7 +430,7 @@ class TestMovementManagerQueueMove:
 class TestMovementManagerClearQueue:
     """Tests for MovementManager clear_move_queue method."""
 
-    def test_clear_queue_adds_command(self, mock_reachy_mini: dict) -> None:
+    def test_clear_queue_adds_command(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test clear_move_queue adds command to queue."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -442,7 +447,7 @@ class TestMovementManagerClearQueue:
 class TestMovementManagerSetSpeechOffsets:
     """Tests for MovementManager set_speech_offsets method."""
 
-    def test_set_speech_offsets_updates_pending(self, mock_reachy_mini: dict) -> None:
+    def test_set_speech_offsets_updates_pending(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test set_speech_offsets updates pending offsets."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -459,7 +464,7 @@ class TestMovementManagerSetSpeechOffsets:
 class TestMovementManagerSetListening:
     """Tests for MovementManager set_listening method."""
 
-    def test_set_listening_queues_command(self, mock_reachy_mini: dict) -> None:
+    def test_set_listening_queues_command(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test set_listening queues command when state changes."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -474,7 +479,7 @@ class TestMovementManagerSetListening:
         assert cmd == "set_listening"
         assert payload is True
 
-    def test_set_listening_no_change_no_queue(self, mock_reachy_mini: dict) -> None:
+    def test_set_listening_no_change_no_queue(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test set_listening does not queue when state unchanged."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -491,7 +496,7 @@ class TestMovementManagerSetListening:
 class TestMovementManagerIsIdle:
     """Tests for MovementManager is_idle method."""
 
-    def test_is_idle_true_when_inactive(self, mock_reachy_mini: dict) -> None:
+    def test_is_idle_true_when_inactive(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test is_idle returns True when inactive long enough."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -503,7 +508,7 @@ class TestMovementManagerIsIdle:
 
         assert manager.is_idle() is True
 
-    def test_is_idle_false_when_listening(self, mock_reachy_mini: dict) -> None:
+    def test_is_idle_false_when_listening(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test is_idle returns False when listening."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -515,7 +520,7 @@ class TestMovementManagerIsIdle:
 
         assert manager.is_idle() is False
 
-    def test_is_idle_false_when_recently_active(self, mock_reachy_mini: dict) -> None:
+    def test_is_idle_false_when_recently_active(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test is_idle returns False when recently active."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -530,7 +535,7 @@ class TestMovementManagerIsIdle:
 class TestMovementManagerHandleCommand:
     """Tests for MovementManager _handle_command method."""
 
-    def test_handle_queue_move(self, mock_reachy_mini: dict) -> None:
+    def test_handle_queue_move(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test handling queue_move command."""
         from reachy_mini.motion.move import Move
         from reachy_mini_conversation_app.moves import MovementManager
@@ -547,7 +552,7 @@ class TestMovementManagerHandleCommand:
         assert len(manager.move_queue) == 1
         assert manager.move_queue[0] is mock_move
 
-    def test_handle_clear_queue(self, mock_reachy_mini: dict) -> None:
+    def test_handle_clear_queue(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test handling clear_queue command."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -563,7 +568,7 @@ class TestMovementManagerHandleCommand:
         assert len(manager.move_queue) == 0
         assert manager.state.current_move is None
 
-    def test_handle_set_listening_true(self, mock_reachy_mini: dict) -> None:
+    def test_handle_set_listening_true(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test handling set_listening True command."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -579,7 +584,7 @@ class TestMovementManagerHandleCommand:
         assert manager._is_listening is True
         assert manager._antenna_unfreeze_blend == 0.0
 
-    def test_handle_unknown_command(self, mock_reachy_mini: dict) -> None:
+    def test_handle_unknown_command(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test handling unknown command logs warning."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -593,7 +598,7 @@ class TestMovementManagerHandleCommand:
 class TestMovementManagerGetPrimaryPose:
     """Tests for MovementManager _get_primary_pose method."""
 
-    def test_get_primary_pose_no_move(self, mock_reachy_mini: dict) -> None:
+    def test_get_primary_pose_no_move(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test _get_primary_pose returns last pose when no move."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -605,7 +610,7 @@ class TestMovementManagerGetPrimaryPose:
         assert pose is not None
         assert len(pose) == 3  # (head, antennas, body_yaw)
 
-    def test_get_primary_pose_with_move(self, mock_reachy_mini: dict) -> None:
+    def test_get_primary_pose_with_move(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test _get_primary_pose evaluates current move."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -631,7 +636,7 @@ class TestMovementManagerGetPrimaryPose:
 class TestMovementManagerGetSecondaryPose:
     """Tests for MovementManager _get_secondary_pose method."""
 
-    def test_get_secondary_pose_neutral(self, mock_reachy_mini: dict) -> None:
+    def test_get_secondary_pose_neutral(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test _get_secondary_pose returns neutral when no offsets."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -643,7 +648,7 @@ class TestMovementManagerGetSecondaryPose:
         assert pose[1] == (0.0, 0.0)  # antennas
         assert pose[2] == 0.0  # body_yaw
 
-    def test_get_secondary_pose_combines_offsets(self, mock_reachy_mini: dict) -> None:
+    def test_get_secondary_pose_combines_offsets(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test _get_secondary_pose combines speech and face offsets."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -662,7 +667,7 @@ class TestMovementManagerGetSecondaryPose:
 class TestMovementManagerUpdateFrequencyStats:
     """Tests for MovementManager _update_frequency_stats method."""
 
-    def test_update_frequency_stats(self, mock_reachy_mini: dict) -> None:
+    def test_update_frequency_stats(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test frequency stats are updated correctly."""
         from reachy_mini_conversation_app.moves import (
             MovementManager,
@@ -687,7 +692,7 @@ class TestMovementManagerUpdateFrequencyStats:
 class TestMovementManagerCalculateBlendedAntennas:
     """Tests for MovementManager _calculate_blended_antennas method."""
 
-    def test_blended_antennas_listening(self, mock_reachy_mini: dict) -> None:
+    def test_blended_antennas_listening(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test antennas frozen when listening."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -701,7 +706,7 @@ class TestMovementManagerCalculateBlendedAntennas:
 
         assert result == (0.5, -0.5)
 
-    def test_blended_antennas_not_listening(self, mock_reachy_mini: dict) -> None:
+    def test_blended_antennas_not_listening(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test antennas blend when not listening."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -721,7 +726,7 @@ class TestMovementManagerCalculateBlendedAntennas:
 class TestMovementManagerGetStatus:
     """Tests for MovementManager get_status method."""
 
-    def test_get_status_returns_dict(self, mock_reachy_mini: dict) -> None:
+    def test_get_status_returns_dict(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test get_status returns status dictionary."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -737,7 +742,7 @@ class TestMovementManagerGetStatus:
         assert "last_commanded_pose" in status
         assert "loop_frequency" in status
 
-    def test_get_status_correct_values(self, mock_reachy_mini: dict) -> None:
+    def test_get_status_correct_values(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test get_status returns correct values."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -756,7 +761,7 @@ class TestMovementManagerGetStatus:
 class TestMovementManagerStartStop:
     """Tests for MovementManager start/stop methods."""
 
-    def test_start_creates_thread(self, mock_reachy_mini: dict) -> None:
+    def test_start_creates_thread(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test start creates and starts worker thread."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -769,9 +774,10 @@ class TestMovementManagerStartStop:
             assert manager._thread.is_alive()
         finally:
             manager._stop_event.set()
-            manager._thread.join(timeout=1.0)
+            if manager._thread is not None:
+                manager._thread.join(timeout=1.0)
 
-    def test_start_twice_ignored(self, mock_reachy_mini: dict) -> None:
+    def test_start_twice_ignored(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test starting twice is ignored."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -786,9 +792,10 @@ class TestMovementManagerStartStop:
         assert manager._thread is first_thread
 
         manager._stop_event.set()
-        manager._thread.join(timeout=1.0)
+        if manager._thread is not None:
+            manager._thread.join(timeout=1.0)
 
-    def test_stop_joins_thread(self, mock_reachy_mini: dict) -> None:
+    def test_stop_joins_thread(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test stop joins the worker thread."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -805,7 +812,7 @@ class TestMovementManagerStartStop:
         assert thread is not None
         assert not thread.is_alive()
 
-    def test_stop_resets_to_neutral(self, mock_reachy_mini: dict) -> None:
+    def test_stop_resets_to_neutral(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test stop resets robot to neutral position."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -821,7 +828,7 @@ class TestMovementManagerStartStop:
 class TestMovementManagerWorkingLoop:
     """Tests for MovementManager working_loop method."""
 
-    def test_working_loop_runs(self, mock_reachy_mini: dict) -> None:
+    def test_working_loop_runs(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test working_loop executes and can be stopped."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -832,12 +839,13 @@ class TestMovementManagerWorkingLoop:
         manager.start()
         time.sleep(0.05)
         manager._stop_event.set()
-        manager._thread.join(timeout=1.0)
+        if manager._thread is not None:
+            manager._thread.join(timeout=1.0)
 
         # Should have called set_target at least once
         assert mock_robot.set_target.called
 
-    def test_working_loop_processes_commands(self, mock_reachy_mini: dict) -> None:
+    def test_working_loop_processes_commands(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test working_loop processes queued commands."""
         from reachy_mini.motion.move import Move
         from reachy_mini_conversation_app.moves import MovementManager
@@ -854,7 +862,8 @@ class TestMovementManagerWorkingLoop:
         manager.queue_move(mock_move)
         time.sleep(0.15)  # Give time for processing
         manager._stop_event.set()
-        manager._thread.join(timeout=1.0)
+        if manager._thread is not None:
+            manager._thread.join(timeout=1.0)
 
         # Move should have been processed
         mock_move.evaluate.assert_called()
@@ -863,7 +872,7 @@ class TestMovementManagerWorkingLoop:
 class TestConstants:
     """Tests for module constants."""
 
-    def test_control_loop_frequency(self, mock_reachy_mini: dict) -> None:
+    def test_control_loop_frequency(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test CONTROL_LOOP_FREQUENCY_HZ constant."""
         from reachy_mini_conversation_app.moves import CONTROL_LOOP_FREQUENCY_HZ
 
@@ -873,7 +882,7 @@ class TestConstants:
 class TestMovementManagerSetMovingState:
     """Tests for MovementManager set_moving_state method."""
 
-    def test_set_moving_state_queues_command(self, mock_reachy_mini: dict) -> None:
+    def test_set_moving_state_queues_command(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test set_moving_state adds command to queue."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -890,7 +899,7 @@ class TestMovementManagerSetMovingState:
 class TestMovementManagerApplyPendingOffsets:
     """Tests for MovementManager _apply_pending_offsets method."""
 
-    def test_apply_speech_offsets_when_dirty(self, mock_reachy_mini: dict) -> None:
+    def test_apply_speech_offsets_when_dirty(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test _apply_pending_offsets updates speech offsets when dirty."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -907,7 +916,7 @@ class TestMovementManagerApplyPendingOffsets:
         assert manager.state.speech_offsets == offsets
         assert manager._speech_offsets_dirty is False
 
-    def test_apply_face_offsets_when_dirty(self, mock_reachy_mini: dict) -> None:
+    def test_apply_face_offsets_when_dirty(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test _apply_pending_offsets updates face offsets when dirty."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -928,7 +937,7 @@ class TestMovementManagerApplyPendingOffsets:
 class TestMovementManagerHandleCommandExtended:
     """Extended tests for MovementManager _handle_command method."""
 
-    def test_handle_queue_move_invalid_payload(self, mock_reachy_mini: dict) -> None:
+    def test_handle_queue_move_invalid_payload(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test handling queue_move with invalid payload logs warning."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -941,7 +950,7 @@ class TestMovementManagerHandleCommandExtended:
         # Queue should remain empty
         assert len(manager.move_queue) == 0
 
-    def test_handle_queue_move_with_duration_conversion_error(self, mock_reachy_mini: dict) -> None:
+    def test_handle_queue_move_with_duration_conversion_error(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test handling queue_move when duration conversion fails."""
         from reachy_mini.motion.move import Move
         from reachy_mini_conversation_app.moves import MovementManager
@@ -957,7 +966,7 @@ class TestMovementManagerHandleCommandExtended:
         # Move should still be queued
         assert len(manager.move_queue) == 1
 
-    def test_handle_queue_move_without_duration(self, mock_reachy_mini: dict) -> None:
+    def test_handle_queue_move_without_duration(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test handling queue_move without duration attribute."""
         from reachy_mini.motion.move import Move
         from reachy_mini_conversation_app.moves import MovementManager
@@ -972,7 +981,7 @@ class TestMovementManagerHandleCommandExtended:
 
         assert len(manager.move_queue) == 1
 
-    def test_handle_set_moving_state_valid(self, mock_reachy_mini: dict) -> None:
+    def test_handle_set_moving_state_valid(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test handling set_moving_state with valid duration."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -986,7 +995,7 @@ class TestMovementManagerHandleCommandExtended:
         # Activity should be updated
         assert manager.state.last_activity_time > initial_activity
 
-    def test_handle_set_moving_state_invalid(self, mock_reachy_mini: dict) -> None:
+    def test_handle_set_moving_state_invalid(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test handling set_moving_state with invalid duration."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -999,7 +1008,7 @@ class TestMovementManagerHandleCommandExtended:
         # Activity should not be updated
         assert manager.state.last_activity_time == initial_activity
 
-    def test_handle_mark_activity(self, mock_reachy_mini: dict) -> None:
+    def test_handle_mark_activity(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test handling mark_activity command."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -1012,7 +1021,7 @@ class TestMovementManagerHandleCommandExtended:
 
         assert manager.state.last_activity_time > initial_activity
 
-    def test_handle_set_listening_debounce(self, mock_reachy_mini: dict) -> None:
+    def test_handle_set_listening_debounce(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test set_listening is debounced."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -1028,7 +1037,7 @@ class TestMovementManagerHandleCommandExtended:
         # Should still be False due to debounce
         assert manager._is_listening is False
 
-    def test_handle_set_listening_same_state(self, mock_reachy_mini: dict) -> None:
+    def test_handle_set_listening_same_state(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test set_listening does nothing when state unchanged."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -1045,7 +1054,7 @@ class TestMovementManagerHandleCommandExtended:
         # Should remain True but nothing special happens
         assert manager._is_listening is True
 
-    def test_handle_set_listening_unfreeze(self, mock_reachy_mini: dict) -> None:
+    def test_handle_set_listening_unfreeze(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test set_listening unfreezing resets blend."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -1066,7 +1075,7 @@ class TestMovementManagerHandleCommandExtended:
 class TestMovementManagerBreathing:
     """Tests for MovementManager breathing functionality."""
 
-    def test_breathing_starts_after_idle(self, mock_reachy_mini: dict) -> None:
+    def test_breathing_starts_after_idle(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test breathing starts after idle delay."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -1089,7 +1098,7 @@ class TestMovementManagerBreathing:
         assert manager._breathing_active is True
         assert len(manager.move_queue) > 0
 
-    def test_breathing_exception_handling(self, mock_reachy_mini: dict) -> None:
+    def test_breathing_exception_handling(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test breathing handles exceptions gracefully."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -1108,7 +1117,7 @@ class TestMovementManagerBreathing:
         # Breathing should not be active due to error
         assert manager._breathing_active is False
 
-    def test_breathing_stops_on_new_move(self, mock_reachy_mini: dict) -> None:
+    def test_breathing_stops_on_new_move(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test breathing stops when new move is queued."""
         from reachy_mini_conversation_app.moves import BreathingMove, MovementManager
 
@@ -1138,7 +1147,7 @@ class TestMovementManagerBreathing:
 class TestMovementManagerGetPrimaryPoseExtended:
     """Extended tests for _get_primary_pose."""
 
-    def test_get_primary_pose_none_head(self, mock_reachy_mini: dict) -> None:
+    def test_get_primary_pose_none_head(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test _get_primary_pose handles None head from move."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -1156,7 +1165,7 @@ class TestMovementManagerGetPrimaryPoseExtended:
         assert pose is not None
         assert pose[0] is not None
 
-    def test_get_primary_pose_none_antennas(self, mock_reachy_mini: dict) -> None:
+    def test_get_primary_pose_none_antennas(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test _get_primary_pose handles None antennas from move."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -1173,7 +1182,7 @@ class TestMovementManagerGetPrimaryPoseExtended:
         # Should have default antennas
         assert pose[1] == (0.0, 0.0)
 
-    def test_get_primary_pose_none_body_yaw(self, mock_reachy_mini: dict) -> None:
+    def test_get_primary_pose_none_body_yaw(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test _get_primary_pose handles None body_yaw from move."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -1190,7 +1199,7 @@ class TestMovementManagerGetPrimaryPoseExtended:
         # Should have default body_yaw
         assert pose[2] == 0.0
 
-    def test_get_primary_pose_no_last_pose(self, mock_reachy_mini: dict) -> None:
+    def test_get_primary_pose_no_last_pose(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test _get_primary_pose creates neutral when no last pose."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -1210,7 +1219,7 @@ class TestMovementManagerGetPrimaryPoseExtended:
 class TestMovementManagerBlendedAntennasExtended:
     """Extended tests for _calculate_blended_antennas."""
 
-    def test_blended_antennas_zero_duration(self, mock_reachy_mini: dict) -> None:
+    def test_blended_antennas_zero_duration(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test antennas blending with zero duration."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -1231,7 +1240,7 @@ class TestMovementManagerBlendedAntennasExtended:
 class TestMovementManagerIssueControlCommand:
     """Tests for _issue_control_command error handling."""
 
-    def test_issue_control_command_error(self, mock_reachy_mini: dict) -> None:
+    def test_issue_control_command_error(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test _issue_control_command handles errors."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -1249,7 +1258,7 @@ class TestMovementManagerIssueControlCommand:
         # Error should be logged
         mock_robot.set_target.assert_called_once()
 
-    def test_issue_control_command_error_suppression(self, mock_reachy_mini: dict) -> None:
+    def test_issue_control_command_error_suppression(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test _issue_control_command suppresses repeated errors."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -1268,7 +1277,7 @@ class TestMovementManagerIssueControlCommand:
         # Error counter should be incremented
         assert manager._set_target_err_suppressed == 1
 
-    def test_issue_control_command_error_suppression_logged(self, mock_reachy_mini: dict) -> None:
+    def test_issue_control_command_error_suppression_logged(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test _issue_control_command logs suppressed error count."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -1291,7 +1300,7 @@ class TestMovementManagerIssueControlCommand:
 class TestMovementManagerMaybeLogFrequency:
     """Tests for _maybe_log_frequency."""
 
-    def test_maybe_log_frequency_logs_at_interval(self, mock_reachy_mini: dict) -> None:
+    def test_maybe_log_frequency_logs_at_interval(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test _maybe_log_frequency logs at correct interval."""
         from reachy_mini_conversation_app.moves import MovementManager, LoopFrequencyStats
 
@@ -1307,7 +1316,7 @@ class TestMovementManagerMaybeLogFrequency:
         # Stats should be reset
         assert stats.count == 0
 
-    def test_maybe_log_frequency_skips_non_interval(self, mock_reachy_mini: dict) -> None:
+    def test_maybe_log_frequency_skips_non_interval(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test _maybe_log_frequency skips non-interval loops."""
         from reachy_mini_conversation_app.moves import MovementManager, LoopFrequencyStats
 
@@ -1327,7 +1336,7 @@ class TestMovementManagerMaybeLogFrequency:
 class TestMovementManagerUpdateFaceTracking:
     """Tests for _update_face_tracking."""
 
-    def test_update_face_tracking_with_camera_worker(self, mock_reachy_mini: dict) -> None:
+    def test_update_face_tracking_with_camera_worker(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test _update_face_tracking with camera worker."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -1345,7 +1354,7 @@ class TestMovementManagerUpdateFaceTracking:
 class TestMovementManagerStopExtended:
     """Extended tests for stop method."""
 
-    def test_stop_when_not_running(self, mock_reachy_mini: dict) -> None:
+    def test_stop_when_not_running(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test stop does nothing when not running."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -1358,7 +1367,7 @@ class TestMovementManagerStopExtended:
         # goto_target should not be called
         mock_robot.goto_target.assert_not_called()
 
-    def test_stop_goto_target_exception(self, mock_reachy_mini: dict) -> None:
+    def test_stop_goto_target_exception(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test stop handles goto_target exception."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -1381,7 +1390,7 @@ class TestMovementManagerStopExtended:
 class TestMovementManagerBranchCoverage:
     """Tests for edge case branch coverage."""
 
-    def test_update_frequency_stats_zero_period(self, mock_reachy_mini: dict) -> None:
+    def test_update_frequency_stats_zero_period(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test _update_frequency_stats with zero period (branch 659->666)."""
         from reachy_mini_conversation_app.moves import MovementManager, LoopFrequencyStats
 
@@ -1398,7 +1407,7 @@ class TestMovementManagerBranchCoverage:
         # Stats should not be updated
         assert result.count == initial_count
 
-    def test_update_frequency_stats_negative_period(self, mock_reachy_mini: dict) -> None:
+    def test_update_frequency_stats_negative_period(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test _update_frequency_stats with negative period (branch 659->666)."""
         from reachy_mini_conversation_app.moves import MovementManager, LoopFrequencyStats
 
@@ -1415,7 +1424,7 @@ class TestMovementManagerBranchCoverage:
         # Stats should not be updated
         assert result.count == initial_count
 
-    def test_blended_antennas_partial_blend(self, mock_reachy_mini: dict) -> None:
+    def test_blended_antennas_partial_blend(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test _calculate_blended_antennas with partial blend (branch 627->633)."""
         from reachy_mini_conversation_app.moves import MovementManager
 
@@ -1427,7 +1436,7 @@ class TestMovementManagerBranchCoverage:
         manager._antenna_blend_duration = 10.0  # Long duration
         manager._listening_antennas = (0.5, -0.5)
         manager._antenna_unfreeze_blend = 0.3  # Partial blend
-        manager._antenna_blend_start = time.monotonic() - 1.0
+        manager._last_listening_blend_time = time.monotonic() - 1.0
 
         target = (0.1, -0.1)
         _ = manager._calculate_blended_antennas(target)
@@ -1438,7 +1447,7 @@ class TestMovementManagerBranchCoverage:
         # (because new_blend < 1.0)
         assert manager._listening_antennas == (0.5, -0.5)
 
-    def test_schedule_next_tick_zero_sleep(self, mock_reachy_mini: dict) -> None:
+    def test_schedule_next_tick_zero_sleep(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test _schedule_next_tick when computation takes longer than target (branch 846->812)."""
         from reachy_mini_conversation_app.moves import MovementManager, LoopFrequencyStats
 
@@ -1472,7 +1481,7 @@ class TestMovementManagerBranchCoverage:
 
         loop_iterations = [0]
 
-        def mock_schedule_returning_zero(loop_start: float, stats: LoopFrequencyStats) -> tuple:
+        def mock_schedule_returning_zero(loop_start: float, stats: LoopFrequencyStats) -> tuple[float, LoopFrequencyStats]:
             """Return 0 sleep time to skip sleep call."""
             loop_iterations[0] += 1
             # After a few iterations, stop the loop
@@ -1480,7 +1489,8 @@ class TestMovementManagerBranchCoverage:
                 manager._stop_event.set()
             return (0.0, stats)
 
-        manager._schedule_next_tick = mock_schedule_returning_zero
+        # Use object.__setattr__ to bypass mypy's method assignment check
+        object.__setattr__(manager, "_schedule_next_tick", mock_schedule_returning_zero)
 
         # Run the control loop in a thread
         manager._stop_event.clear()
@@ -1511,10 +1521,11 @@ class TestMovementManagerBranchCoverage:
 
         # When clear_move_queue is called (line 737), set _thread to None
         # This simulates a race condition where thread becomes None between checks
-        def clear_and_nullify():
+        def clear_and_nullify() -> None:
             manager._thread = None
 
-        manager.clear_move_queue = clear_and_nullify
+        # Use object.__setattr__ to bypass mypy's method assignment check
+        object.__setattr__(manager, "clear_move_queue", clear_and_nullify)
 
         # stop() should handle this gracefully
         manager.stop()

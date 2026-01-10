@@ -1,10 +1,12 @@
 """Unit tests for the github_push tool."""
 
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
 from git import GitCommandError, InvalidGitRepositoryError
+from git.repo import Repo
 
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.github_push import GitHubPushTool
@@ -57,6 +59,7 @@ class TestGitHubPushToolHelpers:
             mock_config.GITHUB_TOKEN = "ghp_test123"
             result = tool._get_authenticated_url(mock_repo)
 
+        assert result is not None
         assert "ghp_test123@github.com" in result
         assert "owner/repo" in result
 
@@ -96,6 +99,7 @@ class TestGitHubPushToolHelpers:
             mock_config.GITHUB_TOKEN = "ghp_newtoken"
             result = tool._get_authenticated_url(mock_repo)
 
+        assert result is not None
         assert "ghp_newtoken@github.com" in result
         assert "oldtoken" not in result
 
@@ -832,6 +836,6 @@ class TestGitHubPushToolHelperEdgeCases:
 
         with patch("reachy_mini_conversation_app.tools.github_push.config") as mock_config:
             mock_config.GITHUB_TOKEN = "ghp_test123"
-            result = tool._get_authenticated_url(MockRepo())
+            result = tool._get_authenticated_url(cast(Repo, MockRepo()))
 
         assert result is None

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import sys
-from typing import Any
+from typing import Any, cast
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -223,7 +223,7 @@ class TestReadInstructionsFor:
 
         ui = PersonalityUI()
         # Make _resolve_profile_dir raise an exception
-        ui._resolve_profile_dir = MagicMock(side_effect=PermissionError("No access"))
+        object.__setattr__(ui, "_resolve_profile_dir", MagicMock(side_effect=PermissionError("No access")))
 
         result = ui._read_instructions_for("some_profile")
 
@@ -276,7 +276,8 @@ class TestCreateComponents:
         from reachy_mini_conversation_app.gradio_personality import PersonalityUI
 
         mock_dropdown = MagicMock()
-        gr.Dropdown.return_value = mock_dropdown
+        gr_mock = cast(MagicMock, gr)
+        gr_mock.Dropdown.return_value = mock_dropdown
 
         with patch("reachy_mini_conversation_app.gradio_personality.config") as mock_config:
             mock_config.REACHY_MINI_CUSTOM_PROFILE = None
@@ -285,7 +286,7 @@ class TestCreateComponents:
             ui.create_components()
 
             assert ui.personalities_dropdown is mock_dropdown
-            gr.Dropdown.assert_called()
+            gr_mock.Dropdown.assert_called()
 
     def test_create_components_creates_all_components(self) -> None:
         """Test that create_components creates all UI components."""
@@ -507,7 +508,7 @@ tool3
                 captured_fn = kwargs.get("fn")
                 return MagicMock()
 
-            ui.personalities_dropdown.change = capture_change
+            object.__setattr__(ui.personalities_dropdown, "change", capture_change)
 
             ui.wire_events(mock_handler, mock_blocks)
 
@@ -622,7 +623,7 @@ class TestWireEventsInternalFunctions:
                 mock_result.then = MagicMock(return_value=mock_result)
                 return mock_result
 
-            ui.apply_btn.click = capture_click
+            object.__setattr__(ui.apply_btn, "click", capture_click)
 
             ui.wire_events(mock_handler, mock_blocks)
 
@@ -661,7 +662,7 @@ class TestLoadProfileForEdit:
                 captured_fn = kwargs.get("fn")
                 return MagicMock()
 
-            ui.personalities_dropdown.change = capture_change
+            object.__setattr__(ui.personalities_dropdown, "change", capture_change)
 
             ui.wire_events(mock_handler, mock_blocks)
 
@@ -703,7 +704,7 @@ class TestLoadProfileForEdit:
                 captured_fn = kwargs.get("fn")
                 return MagicMock()
 
-            ui.personalities_dropdown.change = capture_change
+            object.__setattr__(ui.personalities_dropdown, "change", capture_change)
 
             ui.wire_events(mock_handler, mock_blocks)
 
@@ -858,7 +859,7 @@ class TestSavePersonalityHandler:
                 mock_result.then = MagicMock(return_value=mock_result)
                 return mock_result
 
-            ui.save_btn.click = capture_click
+            object.__setattr__(ui.save_btn, "click", capture_click)
 
             ui.wire_events(mock_handler, mock_blocks)
 
@@ -893,7 +894,7 @@ class TestSavePersonalityHandler:
                 mock_result.then = MagicMock(return_value=mock_result)
                 return mock_result
 
-            ui.save_btn.click = capture_click
+            object.__setattr__(ui.save_btn, "click", capture_click)
 
             ui.wire_events(mock_handler, mock_blocks)
 
@@ -931,7 +932,7 @@ class TestSavePersonalityHandler:
                 mock_result.then = MagicMock(return_value=mock_result)
                 return mock_result
 
-            ui.save_btn.click = capture_click
+            object.__setattr__(ui.save_btn, "click", capture_click)
 
             ui.wire_events(mock_handler, mock_blocks)
 
@@ -969,7 +970,7 @@ class TestSyncToolsHandler:
                 captured_fn = kwargs.get("fn")
                 return MagicMock()
 
-            ui.available_tools_cg.change = capture_change
+            object.__setattr__(ui.available_tools_cg, "change", capture_change)
 
             ui.wire_events(mock_handler, mock_blocks)
 
@@ -1369,9 +1370,10 @@ class TestReadVoiceForExceptionHandling:
             def raise_on_resolve(name: str) -> Path:
                 if name == "error_profile":
                     raise PermissionError("Cannot read profile")
-                return original_resolve(name)
+                result: Path = original_resolve(name)
+                return result
 
-            ui._resolve_profile_dir = raise_on_resolve
+            object.__setattr__(ui, "_resolve_profile_dir", raise_on_resolve)
 
             result = await captured_fn("error_profile")
 
@@ -1409,7 +1411,7 @@ class TestAvailableToolsForExceptionHandling:
                 captured_fn = kwargs.get("fn")
                 return MagicMock()
 
-            ui.personalities_dropdown.change = capture_change
+            object.__setattr__(ui.personalities_dropdown, "change", capture_change)
 
             ui.wire_events(mock_handler, mock_blocks)
 
@@ -1455,7 +1457,7 @@ class TestAvailableToolsForExceptionHandling:
                 captured_fn = kwargs.get("fn")
                 return MagicMock()
 
-            ui.personalities_dropdown.change = capture_change
+            object.__setattr__(ui.personalities_dropdown, "change", capture_change)
 
             ui.wire_events(mock_handler, mock_blocks)
 
@@ -1524,7 +1526,7 @@ class TestSavePersonalityProfileInChoices:
                 mock_result.then = MagicMock(return_value=mock_result)
                 return mock_result
 
-            ui.save_btn.click = capture_click
+            object.__setattr__(ui.save_btn, "click", capture_click)
 
             ui.wire_events(mock_handler, mock_blocks)
 
@@ -1573,7 +1575,7 @@ class TestAvailableToolsFor:
                 captured_fn = kwargs.get("fn")
                 return MagicMock()
 
-            ui.personalities_dropdown.change = capture_change
+            object.__setattr__(ui.personalities_dropdown, "change", capture_change)
 
             ui.wire_events(mock_handler, mock_blocks)
 
@@ -1618,7 +1620,7 @@ class TestAvailableToolsFor:
                 captured_fn = kwargs.get("fn")
                 return MagicMock()
 
-            ui.personalities_dropdown.change = capture_change
+            object.__setattr__(ui.personalities_dropdown, "change", capture_change)
 
             ui.wire_events(mock_handler, mock_blocks)
 
@@ -1733,7 +1735,7 @@ class TestAvailableToolsForGlobException:
                 captured_fn = kwargs.get("fn")
                 return MagicMock()
 
-            ui.personalities_dropdown.change = capture_change
+            object.__setattr__(ui.personalities_dropdown, "change", capture_change)
 
             ui.wire_events(mock_handler, mock_blocks)
 
@@ -1799,11 +1801,11 @@ class TestSavePersonalityValueNotInChoices:
             # Mock _list_personalities to return empty list
             # so that value won't be in choices
             original_list = ui._list_personalities
-            ui._list_personalities = MagicMock(return_value=[])
+            object.__setattr__(ui, "_list_personalities", MagicMock(return_value=[]))
 
             result = captured_save_personality("new_profile", "instructions", "tools", "cedar")
 
-            ui._list_personalities = original_list
+            object.__setattr__(ui, "_list_personalities", original_list)
 
             # Should have saved successfully
             assert "Saved personality" in result[2]

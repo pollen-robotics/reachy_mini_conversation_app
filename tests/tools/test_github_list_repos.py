@@ -1,6 +1,7 @@
 """Unit tests for the github_list_repos tool."""
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -234,7 +235,7 @@ class TestGitHubListReposToolExecution:
             # Patch the Path.read_text method to raise for the config file
             original_read_text = Path.read_text
 
-            def mock_read_text(self: Path, *args: object, **kwargs: object) -> str:
+            def mock_read_text(self: Path, *args: Any, **kwargs: Any) -> str:
                 if "config" in str(self):
                     raise PermissionError("Cannot read config")
                 return original_read_text(self, *args, **kwargs)
@@ -289,7 +290,7 @@ class TestGitHubListReposToolExecution:
             # Patch to raise exception when reading HEAD
             original_read_text = Path.read_text
 
-            def mock_read_text(self: Path, *args: object, **kwargs: object) -> str:
+            def mock_read_text(self: Path, *args: Any, **kwargs: Any) -> str:
                 if "HEAD" in str(self):
                     raise OSError("Cannot read HEAD")
                 return original_read_text(self, *args, **kwargs)

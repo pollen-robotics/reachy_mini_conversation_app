@@ -61,7 +61,7 @@ class GitHubIssueTool(Tool):
         repo_name = kwargs.get("repo", "")
         title = kwargs.get("title", "")
         body = kwargs.get("body", "")
-        labels: Optional[list] = kwargs.get("labels")
+        labels: Optional[list[str]] = kwargs.get("labels")
 
         logger.info(f"Tool call: github_issue - repo='{repo_name}', title='{title[:50]}...'")
 

@@ -1,5 +1,6 @@
 """Shared fixtures for vision module tests."""
 
+from typing import Generator
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -8,7 +9,7 @@ from numpy.typing import NDArray
 
 
 @pytest.fixture
-def mock_torch():
+def mock_torch() -> Generator[MagicMock, None, None]:
     """Mock torch module."""
     with patch("reachy_mini_conversation_app.vision.processors.torch") as mock:
         mock.cuda.is_available.return_value = False
@@ -21,7 +22,7 @@ def mock_torch():
 
 
 @pytest.fixture
-def mock_cv2():
+def mock_cv2() -> Generator[MagicMock, None, None]:
     """Mock cv2 module."""
     with patch("reachy_mini_conversation_app.vision.processors.cv2") as mock:
         mock.IMWRITE_JPEG_QUALITY = 1
@@ -36,7 +37,7 @@ def sample_image() -> NDArray[np.uint8]:
 
 
 @pytest.fixture
-def mock_processor():
+def mock_processor() -> MagicMock:
     """Mock AutoProcessor."""
     mock = MagicMock()
     mock.apply_chat_template.return_value = {
@@ -49,7 +50,7 @@ def mock_processor():
 
 
 @pytest.fixture
-def mock_model():
+def mock_model() -> MagicMock:
     """Mock AutoModelForImageTextToText."""
     mock = MagicMock()
     mock.generate.return_value = MagicMock()
@@ -59,7 +60,7 @@ def mock_model():
 
 
 @pytest.fixture
-def mock_camera():
+def mock_camera() -> MagicMock:
     """Mock camera for VisionManager."""
     mock = MagicMock()
     mock.get_latest_frame.return_value = np.zeros((480, 640, 3), dtype=np.uint8)

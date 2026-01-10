@@ -4,7 +4,7 @@ import base64
 import random
 import asyncio
 import logging
-from typing import Any, Final, Tuple, Literal, Optional
+from typing import Any, Final, Tuple, Literal, Optional, cast
 from pathlib import Path
 from datetime import datetime
 
@@ -28,6 +28,14 @@ from reachy_mini_conversation_app.tools.core_tools import (
 
 
 logger = logging.getLogger(__name__)
+
+# Re-export config for test patching
+__all__ = [
+    "OPEN_AI_INPUT_SAMPLE_RATE",
+    "OPEN_AI_OUTPUT_SAMPLE_RATE",
+    "OpenaiRealtimeHandler",
+    "config",
+]
 
 OPEN_AI_INPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
 OPEN_AI_OUTPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
@@ -158,7 +166,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         openai_api_key = config.OPENAI_API_KEY
         if self.gradio_mode and not openai_api_key:
             # api key was not found in .env or in the environment variables
-            await self.wait_for_args()  # type: ignore[no-untyped-call]
+            # wait_for_args is an untyped method from fastrtc.AsyncStreamHandler
+            _wait_for_args: Any = self.wait_for_args
+            await _wait_for_args()
             args = list(self.latest_args)
             textbox_api_key = args[3] if len(args[3]) > 0 else None
             if textbox_api_key is not None:
@@ -295,7 +305,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                 "voice": get_session_voice(),
                             },
                         },
-                        "tools": get_tool_specs(),  # type: ignore[typeddict-item]
+                        "tools": cast(Any, get_tool_specs()),
                         "tool_choice": "auto",
                     },
                 )
@@ -594,7 +604,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
             self.last_activity_time = time.monotonic()  # avoid repeated resets
 
-        return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
+        # wait_for_item returns Any; we cast to the expected return type
+        result: Tuple[int, NDArray[np.int16]] | AdditionalOutputs | None = await wait_for_item(self.output_queue)
+        return result
 
     async def shutdown(self) -> None:
         """Shutdown the handler."""

@@ -1,5 +1,6 @@
 """Unit tests for the move_head tool."""
 
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -173,18 +174,15 @@ class TestMoveHeadToolExecution:
         assert result["status"] == "looking front"
 
     @pytest.mark.asyncio
-    async def test_move_head_unknown_direction_uses_front(self, mock_deps: ToolDependencies) -> None:
-        """Test move_head with unknown direction defaults to front."""
+    async def test_move_head_unknown_direction_returns_error(self, mock_deps: ToolDependencies) -> None:
+        """Test move_head with unknown direction returns error."""
         tool = MoveHead()
 
-        with patch("reachy_mini_conversation_app.tools.move_head.create_head_pose") as mock_create:
-            mock_create.return_value = MagicMock()
+        result = await tool(mock_deps, direction="unknown_direction")
 
-            result = await tool(mock_deps, direction="unknown_direction")
-
-        # Should still work, using front as default
-        assert "status" in result
-        assert "looking unknown_direction" in result["status"]
+        # Should return an error for invalid direction
+        assert "error" in result
+        assert "direction must be one of" in result["error"]
 
     @pytest.mark.asyncio
     async def test_move_head_queues_goto_move(self, mock_deps: ToolDependencies) -> None:
@@ -240,5 +238,5 @@ class TestMoveHeadToolExecution:
 
             await tool(mock_deps, direction="left")
 
-        mock_deps.reachy_mini.get_current_head_pose.assert_called_once()
-        mock_deps.reachy_mini.get_current_joint_positions.assert_called_once()
+        cast(MagicMock, mock_deps.reachy_mini.get_current_head_pose).assert_called_once()
+        cast(MagicMock, mock_deps.reachy_mini.get_current_joint_positions).assert_called_once()

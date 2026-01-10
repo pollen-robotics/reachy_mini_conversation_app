@@ -2,9 +2,12 @@
 
 import sys
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from reachy_mini_conversation_app.tools.core_tools import Tool
 
 
 class TestToolDependencies:
@@ -78,7 +81,7 @@ class TestToolBaseClass:
                 "required": ["param1"],
             }
 
-            async def __call__(self, deps: ToolDependencies, **kwargs):
+            async def __call__(self, deps: Any, **kwargs: Any) -> dict[str, Any]:
                 return {"result": "ok"}
 
         tool = TestTool()
@@ -99,7 +102,7 @@ class TestToolBaseClass:
             description = "A test tool"
             parameters_schema = {"type": "object", "properties": {}}
 
-            async def __call__(self, deps: ToolDependencies, **kwargs):
+            async def __call__(self, deps: Any, **kwargs: Any) -> dict[str, Any]:
                 return {}
 
         tool = TestTool()
@@ -115,7 +118,7 @@ class TestToolBaseClass:
             parameters_schema = {"type": "object", "properties": {}}
             supports_background = True
 
-            async def __call__(self, deps: ToolDependencies, **kwargs):
+            async def __call__(self, deps: Any, **kwargs: Any) -> dict[str, Any]:
                 return {}
 
         tool = BackgroundTool()
@@ -134,7 +137,7 @@ class TestGetConcreteSubclasses:
             description = "A concrete tool"
             parameters_schema = {"type": "object", "properties": {}}
 
-            async def __call__(self, deps: ToolDependencies, **kwargs):
+            async def __call__(self, deps: Any, **kwargs: Any) -> dict[str, Any]:
                 return {}
 
         subclasses = get_concrete_subclasses(Tool)
@@ -152,14 +155,14 @@ class TestGetConcreteSubclasses:
             parameters_schema = {"type": "object", "properties": {}}
 
             @abc.abstractmethod
-            async def custom_method(self):
+            async def custom_method(self) -> None:
                 pass
 
         class ConcreteDerived(AbstractTool):
-            async def __call__(self, deps: ToolDependencies, **kwargs):
+            async def __call__(self, deps: Any, **kwargs: Any) -> dict[str, Any]:
                 return {}
 
-            async def custom_method(self):
+            async def custom_method(self) -> None:
                 pass
 
         subclasses = get_concrete_subclasses(Tool)
@@ -188,7 +191,7 @@ class TestSafeLoadObj:
         """Test loading None returns empty dict."""
         from reachy_mini_conversation_app.tools.core_tools import _safe_load_obj
 
-        result = _safe_load_obj(None)  # type: ignore[arg-type]
+        result = _safe_load_obj(None)
         assert result == {}
 
     def test_safe_load_obj_invalid_json(self) -> None:
@@ -219,7 +222,7 @@ class TestDispatchToolCall:
     """Tests for dispatch_tool_call function."""
 
     @pytest.fixture
-    def mock_deps(self) -> MagicMock:
+    def mock_deps(self) -> Any:
         """Create mock tool dependencies."""
         from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 
@@ -257,7 +260,7 @@ class TestDispatchToolCall:
                 "properties": {"msg": {"type": "string"}},
             }
 
-            async def __call__(self, deps: ToolDependencies, **kwargs):
+            async def __call__(self, deps: Any, **kwargs: Any) -> dict[str, Any]:
                 return {"message": kwargs.get("msg", "default")}
 
         # Temporarily add to registry
@@ -292,7 +295,7 @@ class TestDispatchToolCall:
             description = "Test tool for invalid JSON"
             parameters_schema = {"type": "object", "properties": {}}
 
-            async def __call__(self, deps: ToolDependencies, **kwargs):
+            async def __call__(self, deps: Any, **kwargs: Any) -> dict[str, Any]:
                 # kwargs should be empty due to invalid JSON
                 return {"received_kwargs": kwargs}
 
@@ -326,7 +329,7 @@ class TestDispatchToolCall:
             description = "Test tool that raises exception"
             parameters_schema = {"type": "object", "properties": {}}
 
-            async def __call__(self, deps: ToolDependencies, **kwargs):
+            async def __call__(self, deps: Any, **kwargs: Any) -> dict[str, Any]:
                 raise ValueError("Test error message")
 
         test_tool = ExceptionTestTool()
@@ -391,12 +394,12 @@ class TestLoadProfileTools:
         profile_dir = tmp_path / "profiles" / "test_profile"
         profile_dir.mkdir(parents=True)
 
-        with patch.object(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "test_profile"):
+        with patch("reachy_mini_conversation_app.config.config.REACHY_MINI_CUSTOM_PROFILE", "test_profile"):
             with patch.object(core_tools, "_TOOLS_INITIALIZED", False):
                 # Patch Path to point to our temp directory
                 mock_path = tmp_path / "core_tools.py"
 
-                with patch.object(core_tools.Path, "__new__", return_value=mock_path):
+                with patch("reachy_mini_conversation_app.tools.core_tools.Path.__new__", return_value=mock_path):
                     with pytest.raises(SystemExit) as exc_info:
                         # We need to patch at the module level where Path is used
                         with patch(
@@ -527,7 +530,7 @@ class TestLoadProfileToolsErrorHandling:
         # Mock file operations to raise exception on read
         original_open = open
 
-        def mock_open_with_error(path, mode="r", *args, **kwargs):
+        def mock_open_with_error(path: Any, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
             if "tools.txt" in str(path) and mode == "r":
                 raise IOError("Permission denied reading tools.txt")
             return original_open(path, mode, *args, **kwargs)
@@ -579,7 +582,7 @@ class TestLoadProfileToolsImportExceptions:
         monkeypatch.setattr(core_tools, "Path", lambda x: fake_file if x == core_tools.__file__ else Path(x))
 
         # Error message doesn't contain tool name -> dependency issue (line 148-150)
-        def import_side_effect(name):
+        def import_side_effect(name: str) -> None:
             if "profiles" in name:
                 raise ModuleNotFoundError("No module named 'numpy'")
             # Shared tool not found either
@@ -605,7 +608,7 @@ class TestLoadProfileToolsImportExceptions:
         monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "import_err")
         monkeypatch.setattr(core_tools, "Path", lambda x: fake_file if x == core_tools.__file__ else Path(x))
 
-        def import_side_effect(name):
+        def import_side_effect(name: str) -> None:
             if "profiles" in name:
                 raise ImportError("cannot import name 'Foo' from 'bar'")
             raise ModuleNotFoundError("broken_tool")
@@ -630,7 +633,7 @@ class TestLoadProfileToolsImportExceptions:
         monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "gen_err")
         monkeypatch.setattr(core_tools, "Path", lambda x: fake_file if x == core_tools.__file__ else Path(x))
 
-        def import_side_effect(name):
+        def import_side_effect(name: str) -> None:
             if "profiles" in name:
                 raise RuntimeError("Unexpected error in profile")
             raise ModuleNotFoundError("error_tool")
@@ -655,7 +658,7 @@ class TestLoadProfileToolsImportExceptions:
         monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "shared_import_err")
         monkeypatch.setattr(core_tools, "Path", lambda x: fake_file if x == core_tools.__file__ else Path(x))
 
-        def import_side_effect(name):
+        def import_side_effect(name: str) -> None:
             if "profiles" in name:
                 # Tool name in error - tool not found, try shared
                 raise ModuleNotFoundError("shared_broken")
@@ -683,7 +686,7 @@ class TestLoadProfileToolsImportExceptions:
         monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "shared_gen_err")
         monkeypatch.setattr(core_tools, "Path", lambda x: fake_file if x == core_tools.__file__ else Path(x))
 
-        def import_side_effect(name):
+        def import_side_effect(name: str) -> None:
             if "profiles" in name:
                 # Tool name in error - tool not found, try shared
                 raise ModuleNotFoundError("shared_error")
@@ -711,7 +714,7 @@ class TestLoadProfileToolsImportExceptions:
         monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "not_found_test")
         monkeypatch.setattr(core_tools, "Path", lambda x: fake_file if x == core_tools.__file__ else Path(x))
 
-        def import_side_effect(name):
+        def import_side_effect(name: str) -> None:
             # Tool name is in the error -> tool not found, not dependency
             raise ModuleNotFoundError("nonexistent_tool")
 
@@ -735,7 +738,7 @@ class TestLoadProfileToolsImportExceptions:
         monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "double_fail")
         monkeypatch.setattr(core_tools, "Path", lambda x: fake_file if x == core_tools.__file__ else Path(x))
 
-        def import_side_effect(name):
+        def import_side_effect(name: str) -> None:
             if "profiles" in name:
                 # Dependency missing - profile_error will be set
                 raise ModuleNotFoundError("No module named 'missing_dep'")
@@ -762,7 +765,7 @@ class TestLoadProfileToolsImportExceptions:
         monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "success_test")
         monkeypatch.setattr(core_tools, "Path", lambda x: fake_file if x == core_tools.__file__ else Path(x))
 
-        def import_side_effect(name):
+        def import_side_effect(name: str) -> MagicMock:
             if "profiles" in name:
                 # Successful load - no exception
                 return MagicMock()

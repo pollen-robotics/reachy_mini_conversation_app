@@ -5,7 +5,7 @@ import sys
 import time
 import argparse
 import threading
-from typing import Any, Dict, List
+from typing import Any, Dict, Generator, List
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -30,7 +30,7 @@ _MODULES_TO_MOCK = [
 
 
 @pytest.fixture(autouse=True)
-def mock_main_dependencies():
+def mock_main_dependencies() -> Generator[None, None, None]:
     """Mock heavy dependencies for main tests and restore them after."""
     # Save originals
     for mod_name in _MODULES_TO_MOCK:
@@ -200,7 +200,7 @@ class TestReachyMiniConversationApp:
         from reachy_mini_conversation_app.main import ReachyMiniConversationApp
 
         app = ReachyMiniConversationApp()
-        app._get_instance_path = MagicMock(return_value=Path("/tmp/test/file"))
+        object.__setattr__(app, "_get_instance_path", MagicMock(return_value=Path("/tmp/test/file")))
         app.settings_app = MagicMock()
 
         mock_robot = MagicMock()
@@ -677,7 +677,7 @@ class TestRunWithMockedInternalImports:
 
         mock_stream = MagicMock()
         # Make launch block until stop_event is set, then raise KeyboardInterrupt
-        def launch_side_effect():
+        def launch_side_effect() -> None:
             # Set the stop event to trigger the poll_stop_event thread
             stop_event.set()
             # Give the daemon thread time to process
@@ -717,7 +717,7 @@ class TestRunWithMockedInternalImports:
         mock_stream = MagicMock()
         mock_stream.close.side_effect = RuntimeError("Close error")
 
-        def launch_side_effect():
+        def launch_side_effect() -> None:
             stop_event.set()
             time.sleep(0.1)
             raise KeyboardInterrupt()

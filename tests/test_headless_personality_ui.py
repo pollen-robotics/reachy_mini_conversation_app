@@ -735,7 +735,7 @@ class TestEndpointHandlerExtraction:
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
         # Test the /personalities endpoint
-        list_handler = registered_handlers.get("GET /personalities")
+        list_handler = registered_handlers["GET /personalities"]
         assert list_handler is not None
 
         with patch(
@@ -770,7 +770,7 @@ class TestEndpointHandlerExtraction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        load_handler = registered_handlers.get("GET /personalities/load")
+        load_handler = registered_handlers["GET /personalities/load"]
         assert load_handler is not None
 
         with patch(
@@ -809,7 +809,7 @@ class TestEndpointHandlerExtraction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        voices_handler = registered_handlers.get("GET /voices")
+        voices_handler = registered_handlers["GET /voices"]
         assert voices_handler is not None
 
         # Call the async handler
@@ -834,7 +834,7 @@ class TestEndpointHandlerExtraction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        config_handler = registered_handlers.get("GET /config")
+        config_handler = registered_handlers["GET /config"]
         assert config_handler is not None
 
         with patch(
@@ -874,7 +874,7 @@ class TestEndpointHandlerExtraction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        config_key_handler = registered_handlers.get("GET /config/{key}")
+        config_key_handler = registered_handlers["GET /config/{key}"]
         assert config_key_handler is not None
 
         with patch(
@@ -905,7 +905,7 @@ class TestEndpointHandlerExtraction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        config_key_handler = registered_handlers.get("GET /config/{key}")
+        config_key_handler = registered_handlers["GET /config/{key}"]
         result = config_key_handler("UNKNOWN_KEY")
         # Should return JSONResponse for unknown key
         assert result is not None
@@ -928,7 +928,7 @@ class TestEndpointHandlerExtraction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        save_handler = registered_handlers.get("POST /personalities/save")
+        save_handler = registered_handlers["POST /personalities/save"]
         assert save_handler is not None
 
         with patch(
@@ -968,7 +968,7 @@ class TestEndpointHandlerExtraction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        save_handler = registered_handlers.get("POST /personalities/save")
+        save_handler = registered_handlers["POST /personalities/save"]
 
         # Empty name should return error
         result = save_handler(
@@ -998,7 +998,7 @@ class TestEndpointHandlerExtraction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        save_handler = registered_handlers.get("POST /personalities/save")
+        save_handler = registered_handlers["POST /personalities/save"]
 
         with patch(
             "reachy_mini_conversation_app.headless_personality_ui._write_profile",
@@ -1031,7 +1031,7 @@ class TestEndpointHandlerExtraction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        save_raw_handler = registered_handlers.get("POST /personalities/save_raw")
+        save_raw_handler = registered_handlers["POST /personalities/save_raw"]
         assert save_raw_handler is not None
 
         with patch(
@@ -1067,7 +1067,7 @@ class TestEndpointHandlerExtraction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        save_raw_get_handler = registered_handlers.get("GET /personalities/save_raw")
+        save_raw_get_handler = registered_handlers["GET /personalities/save_raw"]
         assert save_raw_get_handler is not None
 
         with patch(
@@ -1114,7 +1114,7 @@ class TestEndpointHandlerExtraction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        load_handler = registered_handlers.get("GET /personalities/load")
+        load_handler = registered_handlers["GET /personalities/load"]
 
         with patch(
             "reachy_mini_conversation_app.headless_personality_ui.resolve_profile_dir",
@@ -1153,7 +1153,7 @@ class TestEndpointHandlerExtraction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        reload_handler = registered_handlers.get("POST /config/reload")
+        reload_handler = registered_handlers["POST /config/reload"]
         assert reload_handler is not None
 
         with patch(
@@ -1196,7 +1196,7 @@ class TestEndpointHandlerExtraction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        set_config_handler = registered_handlers.get("POST /config/{key}")
+        set_config_handler = registered_handlers["POST /config/{key}"]
         assert set_config_handler is not None
 
         # Create a temp .env file
@@ -1233,7 +1233,7 @@ class TestEndpointHandlerExtraction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        delete_config_handler = registered_handlers.get("DELETE /config/{key}")
+        delete_config_handler = registered_handlers["DELETE /config/{key}"]
         assert delete_config_handler is not None
 
         # Create a temp .env file
@@ -1268,7 +1268,7 @@ class TestEndpointHandlerExtraction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        apply_handler = registered_handlers.get("POST /personalities/apply")
+        apply_handler = registered_handlers["POST /personalities/apply"]
         assert apply_handler is not None
 
         loop = asyncio.new_event_loop()
@@ -1301,7 +1301,7 @@ class TestEndpointHandlerExtraction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        apply_handler = registered_handlers.get("POST /personalities/apply")
+        apply_handler = registered_handlers["POST /personalities/apply"]
 
         # Create mock payload
         mock_payload = MagicMock()
@@ -1351,7 +1351,7 @@ class TestEndpointHandlerExtraction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        apply_handler = registered_handlers.get("POST /personalities/apply")
+        apply_handler = registered_handlers["POST /personalities/apply"]
 
         with patch("asyncio.run_coroutine_threadsafe") as mock_run:
             mock_future = MagicMock()
@@ -1401,7 +1401,7 @@ class TestEndpointHandlerExtraction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        voices_handler = registered_handlers.get("GET /voices")
+        voices_handler = registered_handlers["GET /voices"]
 
         with patch("asyncio.run_coroutine_threadsafe") as mock_run:
             mock_future = MagicMock()
@@ -1445,7 +1445,7 @@ class TestEndpointHandlerExtraction:
             get_persisted_personality=mock_get_persisted,
         )
 
-        list_handler = registered_handlers.get("GET /personalities")
+        list_handler = registered_handlers["GET /personalities"]
 
         with patch(
             "reachy_mini_conversation_app.headless_personality_ui.list_personalities",
@@ -1485,7 +1485,7 @@ class TestEndpointHandlerExtraction:
             get_persisted_personality=mock_get_persisted,
         )
 
-        list_handler = registered_handlers.get("GET /personalities")
+        list_handler = registered_handlers["GET /personalities"]
 
         with patch(
             "reachy_mini_conversation_app.headless_personality_ui.list_personalities",
@@ -1521,7 +1521,7 @@ class TestMaskSecretFunction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        config_handler = registered_handlers.get("GET /config")
+        config_handler = registered_handlers["GET /config"]
 
         with patch(
             "reachy_mini_conversation_app.headless_personality_ui.config"
@@ -1586,7 +1586,7 @@ class TestUpdateEnvFileFunction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        set_config_handler = registered_handlers.get("POST /config/{key}")
+        set_config_handler = registered_handlers["POST /config/{key}"]
 
         # When find_dotenv returns empty string, it should create in cwd
         with patch("dotenv.find_dotenv", return_value=""):
@@ -1624,7 +1624,7 @@ class TestCurrentChoiceFunction:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        list_handler = registered_handlers.get("GET /personalities")
+        list_handler = registered_handlers["GET /personalities"]
 
         with patch(
             "reachy_mini_conversation_app.headless_personality_ui.list_personalities",
@@ -1671,7 +1671,7 @@ class TestLoadEndpointBranches:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        load_handler = registered_handlers.get("GET /personalities/load")
+        load_handler = registered_handlers["GET /personalities/load"]
 
         with patch(
             "reachy_mini_conversation_app.headless_personality_ui.resolve_profile_dir",
@@ -1715,7 +1715,7 @@ class TestLoadEndpointBranches:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        load_handler = registered_handlers.get("GET /personalities/load")
+        load_handler = registered_handlers["GET /personalities/load"]
 
         with patch(
             "reachy_mini_conversation_app.headless_personality_ui.resolve_profile_dir",
@@ -1759,7 +1759,7 @@ class TestLoadEndpointBranches:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        load_handler = registered_handlers.get("GET /personalities/load")
+        load_handler = registered_handlers["GET /personalities/load"]
 
         with patch(
             "reachy_mini_conversation_app.headless_personality_ui.resolve_profile_dir",
@@ -1800,7 +1800,7 @@ class TestSaveRawEndpointBranches:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        save_raw_handler = registered_handlers.get("POST /personalities/save_raw")
+        save_raw_handler = registered_handlers["POST /personalities/save_raw"]
 
         # Empty name should return error
         result = save_raw_handler(
@@ -1830,7 +1830,7 @@ class TestSaveRawEndpointBranches:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        save_raw_handler = registered_handlers.get("POST /personalities/save_raw")
+        save_raw_handler = registered_handlers["POST /personalities/save_raw"]
 
         with patch(
             "reachy_mini_conversation_app.headless_personality_ui._write_profile",
@@ -1863,7 +1863,7 @@ class TestSaveRawEndpointBranches:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        save_raw_get_handler = registered_handlers.get("GET /personalities/save_raw")
+        save_raw_get_handler = registered_handlers["GET /personalities/save_raw"]
 
         loop = asyncio.new_event_loop()
         result = loop.run_until_complete(
@@ -1896,7 +1896,7 @@ class TestSaveRawEndpointBranches:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        save_raw_get_handler = registered_handlers.get("GET /personalities/save_raw")
+        save_raw_get_handler = registered_handlers["GET /personalities/save_raw"]
 
         with patch(
             "reachy_mini_conversation_app.headless_personality_ui._write_profile",
@@ -1940,12 +1940,12 @@ class TestApplyEndpointBranches:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        apply_handler = registered_handlers.get("POST /personalities/apply")
+        apply_handler = registered_handlers["POST /personalities/apply"]
 
         # Create mock request with json body
         mock_request = MagicMock()
 
-        async def mock_json() -> dict:
+        async def mock_json() -> dict[str, Any]:
             return {"name": "json_profile", "persist": True}
 
         mock_request.json = mock_json
@@ -2002,12 +2002,12 @@ class TestApplyEndpointBranches:
             persist_personality=mock_persist,
         )
 
-        apply_handler = registered_handlers.get("POST /personalities/apply")
+        apply_handler = registered_handlers["POST /personalities/apply"]
 
         # Create mock request with query params
         mock_request = MagicMock()
 
-        async def mock_json() -> dict:
+        async def mock_json() -> dict[str, Any]:
             raise Exception("No JSON body")
 
         mock_request.json = mock_json
@@ -2048,7 +2048,7 @@ class TestApplyEndpointBranches:
         mock_handler = MagicMock()
         mock_loop = MagicMock()
 
-        def mock_persist(name: str) -> None:
+        def mock_persist(name: str | None) -> None:
             raise IOError("Persist failed")
 
         def mock_get_loop() -> Any:
@@ -2067,7 +2067,7 @@ class TestApplyEndpointBranches:
             persist_personality=mock_persist,
         )
 
-        apply_handler = registered_handlers.get("POST /personalities/apply")
+        apply_handler = registered_handlers["POST /personalities/apply"]
 
         mock_payload = MagicMock()
         mock_payload.name = "test_profile"
@@ -2117,7 +2117,7 @@ class TestApplyEndpointBranches:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        apply_handler = registered_handlers.get("POST /personalities/apply")
+        apply_handler = registered_handlers["POST /personalities/apply"]
 
         mock_payload = MagicMock()
         mock_payload.name = "test_profile"
@@ -2165,7 +2165,7 @@ class TestVoicesEndpointBranches:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        voices_handler = registered_handlers.get("GET /voices")
+        voices_handler = registered_handlers["GET /voices"]
 
         with patch("asyncio.run_coroutine_threadsafe") as mock_run:
             mock_future = MagicMock()
@@ -2214,7 +2214,7 @@ class TestUpdateEnvFileBranches:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        set_config_handler = registered_handlers.get("POST /config/{key}")
+        set_config_handler = registered_handlers["POST /config/{key}"]
 
         env_file = tmp_path / ".env"
         env_file.write_text("")
@@ -2256,7 +2256,7 @@ class TestReloadConfigBranches:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        reload_handler = registered_handlers.get("POST /config/reload")
+        reload_handler = registered_handlers["POST /config/reload"]
 
         with patch(
             "reachy_mini_conversation_app.headless_personality_ui.reload_config",
@@ -2296,7 +2296,7 @@ class TestConfigKeyBranches:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        set_config_handler = registered_handlers.get("POST /config/{key}")
+        set_config_handler = registered_handlers["POST /config/{key}"]
 
         result = set_config_handler(key="UNKNOWN_KEY", value="value", persist=True)
         # Should return error response for unknown key
@@ -2328,7 +2328,7 @@ class TestConfigKeyBranches:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        set_config_handler = registered_handlers.get("POST /config/{key}")
+        set_config_handler = registered_handlers["POST /config/{key}"]
 
         with patch(
             "reachy_mini_conversation_app.headless_personality_ui.config"
@@ -2367,7 +2367,7 @@ class TestConfigKeyBranches:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        delete_config_handler = registered_handlers.get("DELETE /config/{key}")
+        delete_config_handler = registered_handlers["DELETE /config/{key}"]
 
         result = delete_config_handler(key="UNKNOWN_KEY", persist=True)
         # Should return error response for unknown key
@@ -2399,7 +2399,7 @@ class TestConfigKeyBranches:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        delete_config_handler = registered_handlers.get("DELETE /config/{key}")
+        delete_config_handler = registered_handlers["DELETE /config/{key}"]
 
         with patch(
             "reachy_mini_conversation_app.headless_personality_ui.config"
@@ -2441,7 +2441,7 @@ class TestStartupChoiceBranches:
             get_persisted_personality=mock_get_persisted,
         )
 
-        list_handler = registered_handlers.get("GET /personalities")
+        list_handler = registered_handlers["GET /personalities"]
 
         with patch(
             "reachy_mini_conversation_app.headless_personality_ui.list_personalities",
@@ -2481,11 +2481,11 @@ class TestApplyEndpointRequestBody:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        apply_handler = registered_handlers.get("POST /personalities/apply")
+        apply_handler = registered_handlers["POST /personalities/apply"]
 
         mock_request = MagicMock()
 
-        async def mock_json() -> dict:
+        async def mock_json() -> dict[str, Any]:
             return {"name": "from_body"}
 
         mock_request.json = mock_json
@@ -2542,11 +2542,11 @@ class TestApplyEndpointRequestBody:
             persist_personality=mock_persist_fn,
         )
 
-        apply_handler = registered_handlers.get("POST /personalities/apply")
+        apply_handler = registered_handlers["POST /personalities/apply"]
 
         mock_request = MagicMock()
 
-        async def mock_json() -> dict:
+        async def mock_json() -> dict[str, Any]:
             return {"name": "test_profile", "persist": True}
 
         mock_request.json = mock_json
@@ -2598,11 +2598,11 @@ class TestApplyEndpointRequestBody:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        apply_handler = registered_handlers.get("POST /personalities/apply")
+        apply_handler = registered_handlers["POST /personalities/apply"]
 
         mock_request = MagicMock()
 
-        async def mock_json() -> dict:
+        async def mock_json() -> dict[str, Any]:
             raise ValueError("Invalid JSON")
 
         mock_request.json = mock_json
@@ -2654,11 +2654,11 @@ class TestApplyEndpointRequestBody:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        apply_handler = registered_handlers.get("POST /personalities/apply")
+        apply_handler = registered_handlers["POST /personalities/apply"]
 
         mock_request = MagicMock()
 
-        async def mock_json() -> dict:
+        async def mock_json() -> dict[str, Any]:
             return {"name": "test"}
 
         mock_request.json = mock_json
@@ -2711,7 +2711,7 @@ class TestApplyEndpointRequestBody:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        apply_handler = registered_handlers.get("POST /personalities/apply")
+        apply_handler = registered_handlers["POST /personalities/apply"]
 
         with patch("asyncio.run_coroutine_threadsafe") as mock_run:
             mock_future = MagicMock()
@@ -2765,7 +2765,7 @@ class TestVoicesInnerException:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        _ = registered_handlers.get("GET /voices")
+        _ = registered_handlers["GET /voices"]
 
         # We need to actually run the inner coroutine in the loop
         # The issue is the test needs the inner _get_v function to run and handle exception
@@ -2786,7 +2786,8 @@ class TestVoicesInnerException:
             async def test_inner() -> list[str]:
                 # Directly test the inner logic
                 try:
-                    return await mock_handler.get_available_voices()
+                    result: list[str] = await mock_handler.get_available_voices()
+                    return result
                 except Exception:
                     return ["cedar"]
 
@@ -2817,7 +2818,7 @@ class TestUpdateEnvFileExistingKey:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        set_config_handler = registered_handlers.get("POST /config/{key}")
+        set_config_handler = registered_handlers["POST /config/{key}"]
 
         # Create env file with existing key
         env_file = tmp_path / ".env"
@@ -2858,7 +2859,7 @@ class TestUpdateEnvFileExistingKey:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        delete_config_handler = registered_handlers.get("DELETE /config/{key}")
+        delete_config_handler = registered_handlers["DELETE /config/{key}"]
 
         # Create env file with existing key
         env_file = tmp_path / ".env"
@@ -2900,7 +2901,7 @@ class TestUpdateRuntimeConfigNoAttr:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        set_config_handler = registered_handlers.get("POST /config/{key}")
+        set_config_handler = registered_handlers["POST /config/{key}"]
 
         with patch(
             "reachy_mini_conversation_app.headless_personality_ui.config"
@@ -2942,7 +2943,7 @@ class TestApplyInnerCoroutine:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        apply_handler = registered_handlers.get("POST /personalities/apply")
+        apply_handler = registered_handlers["POST /personalities/apply"]
 
         mock_payload = MagicMock()
         mock_payload.name = "test_profile"
@@ -2999,7 +3000,7 @@ class TestVoicesInnerCoroutine:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        voices_handler = registered_handlers.get("GET /voices")
+        voices_handler = registered_handlers["GET /voices"]
 
         # Run the test loop in a thread
         import threading
@@ -3044,7 +3045,7 @@ class TestVoicesInnerCoroutine:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        voices_handler = registered_handlers.get("GET /voices")
+        voices_handler = registered_handlers["GET /voices"]
 
         # Run the test loop in a thread
         import threading
@@ -3089,11 +3090,11 @@ class TestApplyDictBodyWithoutName:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        apply_handler = registered_handlers.get("POST /personalities/apply")
+        apply_handler = registered_handlers["POST /personalities/apply"]
 
         mock_request = MagicMock()
 
-        async def mock_json() -> dict:
+        async def mock_json() -> dict[str, Any]:
             # Dict with no "name" key
             return {"other_key": "value"}
 
@@ -3146,11 +3147,11 @@ class TestApplyDictBodyWithoutName:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        apply_handler = registered_handlers.get("POST /personalities/apply")
+        apply_handler = registered_handlers["POST /personalities/apply"]
 
         mock_request = MagicMock()
 
-        async def mock_json() -> list:
+        async def mock_json() -> list[str]:
             # Body is not a dict
             return ["not", "a", "dict"]
 

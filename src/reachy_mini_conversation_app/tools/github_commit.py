@@ -7,6 +7,7 @@ from pathlib import Path
 
 import openai
 import anthropic
+from anthropic.types import TextBlock
 from git import Repo, GitCommandError, InvalidGitRepositoryError
 
 from reachy_mini_conversation_app.config import config
@@ -217,7 +218,9 @@ Example response:
             ],
             system="You are a helpful assistant that generates semantic-release commit messages. Always respond with valid JSON only.",
         )
-        return self._parse_response(response.content[0].text)
+        first_block = response.content[0]
+        response_text = first_block.text if isinstance(first_block, TextBlock) else str(first_block)
+        return self._parse_response(response_text)
 
     def _generate_with_openai(
         self,
@@ -242,7 +245,8 @@ Example response:
             temperature=0.3,
             max_tokens=500,
         )
-        return self._parse_response(response.choices[0].message.content)
+        content = response.choices[0].message.content
+        return self._parse_response(content or "")
 
     def _generate_commit_message(
         self,

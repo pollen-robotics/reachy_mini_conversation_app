@@ -2,7 +2,7 @@ import time
 import base64
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Iterator, Tuple, cast
 from pathlib import Path
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -294,9 +294,10 @@ class TestOpenaiRealtimeHandlerReceive:
         mock_conn.input_audio_buffer.append = AsyncMock()
         handler.connection = mock_conn
 
-        # Create audio at different sample rate (float for resampling)
+        # Create audio at different sample rate (float32 for resampling)
         audio = np.zeros(2000, dtype=np.float32)
-        frame = (48000, audio)  # Different from 24000
+        # Cast to Any to satisfy type checker - the receive method handles conversion internally
+        frame = cast(Tuple[int, Any], (48000, audio))
 
         await handler.receive(frame)
 
@@ -397,9 +398,10 @@ class TestOpenaiRealtimeHandlerShutdown:
         """Test shutdown clears output queue."""
         handler = _build_handler_simple()
 
-        # Add items to queue
-        await handler.output_queue.put("item1")
-        await handler.output_queue.put("item2")
+        # Add items to queue - use valid audio frames
+        audio_frame = (24000, np.array([1, 2, 3], dtype=np.int16))
+        await handler.output_queue.put(audio_frame)
+        await handler.output_queue.put(audio_frame)
         assert not handler.output_queue.empty()
 
         await handler.shutdown()
@@ -793,7 +795,8 @@ class TestOpenaiRealtimeHandlerRestartSession:
     async def test_restart_session_no_client(self) -> None:
         """Test _restart_session does nothing without client."""
         handler = _build_handler_simple()
-        handler.client = None
+        # Set client to None using object.__setattr__ to bypass type check
+        object.__setattr__(handler, "client", None)
 
         # Should not raise
         await handler._restart_session()
@@ -1099,7 +1102,7 @@ class TestOpenaiRealtimeHandlerStartUpGradioMode:
         handler = rt_mod.OpenaiRealtimeHandler(deps, gradio_mode=True)
 
         # Mock wait_for_args to provide textbox key
-        handler.wait_for_args = AsyncMock()
+        object.__setattr__(handler, "wait_for_args", AsyncMock())
         handler.latest_args = ["", "", "", "sk-from-textbox"]
 
         # Mock the OpenAI client
@@ -1148,7 +1151,7 @@ class TestOpenaiRealtimeHandlerStartUpGradioMode:
         deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
         handler = rt_mod.OpenaiRealtimeHandler(deps, gradio_mode=True)
 
-        handler.wait_for_args = AsyncMock()
+        object.__setattr__(handler, "wait_for_args", AsyncMock())
         handler.latest_args = ["", "", "", ""]  # Empty textbox
 
         class FakeConn:
@@ -2218,7 +2221,7 @@ class TestStartUpConfigFallback:
     async def test_start_up_gradio_mode_uses_config_when_textbox_empty(self) -> None:
         """Test start_up uses config.OPENAI_API_KEY when textbox is empty (line 169)."""
         handler = _build_handler_simple()
-        handler._gradio_mode = True
+        handler.gradio_mode = True
         handler._provided_api_key = ""  # Empty textbox
 
         with patch.object(rt_mod, "config") as mock_config:
@@ -2286,7 +2289,7 @@ class TestRestartSessionEdgeCases:
         handler = _build_handler_simple()
 
         # Make client access raise
-        handler.client = None
+        object.__setattr__(handler, "client", None)
 
         # Should not raise
         await handler._restart_session()
@@ -2649,8 +2652,9 @@ class TestShutdownEdgeCases:
         """Test shutdown handles QueueEmpty exception (lines 634-635)."""
         handler = _build_handler_simple()
 
-        # Pre-populate the queue
-        await handler.output_queue.put("item1")
+        # Pre-populate the queue with valid audio frame
+        audio_frame = (24000, np.array([1, 2, 3], dtype=np.int16))
+        await handler.output_queue.put(audio_frame)
 
         # Now make get_nowait raise QueueEmpty on second call
         original_get_nowait = handler.output_queue.get_nowait
@@ -2663,7 +2667,7 @@ class TestShutdownEdgeCases:
                 raise asyncio.QueueEmpty()
             return original_get_nowait()
 
-        handler.output_queue.get_nowait = mock_get_nowait
+        object.__setattr__(handler.output_queue, "get_nowait", mock_get_nowait)
 
         await handler.shutdown()
 
@@ -2875,10 +2879,12 @@ class TestReceiveResample:
         mock_conn.input_audio_buffer = mock_input_audio_buffer
         handler.connection = mock_conn
 
-        # Audio at different sample rate - use float32 as that's what resample returns
+        # Audio at different sample rate - use float32 for resampling
         audio_48k = np.zeros(1000, dtype=np.float32)
+        # Cast to Any to satisfy type checker - the receive method handles conversion internally
+        frame = cast(Tuple[int, Any], (48000, audio_48k))
 
-        await handler.receive((48000, audio_48k))
+        await handler.receive(frame)
 
         mock_input_audio_buffer.append.assert_called_once()
 
@@ -2899,7 +2905,7 @@ class TestEmitBackgroundCompletionException:
 
         with patch.object(handler, "_check_background_completions", failing_check):
             # Should not raise, returns item from queue
-            handler.output_queue.put_nowait(("test", np.array([1, 2, 3])))
+            handler.output_queue.put_nowait((24000, np.array([1, 2, 3], dtype=np.int16)))
             result = await handler.emit()
             assert result is not None
 
@@ -2936,9 +2942,9 @@ class TestShutdownQueueEmpty:
         deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
         handler = rt_mod.OpenaiRealtimeHandler(deps)
 
-        # Add items to queue
-        handler.output_queue.put_nowait(("test1", np.array([1])))
-        handler.output_queue.put_nowait(("test2", np.array([2])))
+        # Add items to queue with valid audio frames
+        handler.output_queue.put_nowait((24000, np.array([1], dtype=np.int16)))
+        handler.output_queue.put_nowait((24000, np.array([2], dtype=np.int16)))
 
         await handler.shutdown()
 
@@ -2984,8 +2990,8 @@ class TestStartUpConfigApiKey:
         """Test line 169: uses config.OPENAI_API_KEY when textbox_api_key is empty."""
         handler = _build_handler_simple()
 
-        # Set textbox_api_key to empty string
-        handler.textbox_api_key = ""
+        # Set _provided_api_key to empty string
+        handler._provided_api_key = ""
 
         # Mock config to have a key
         with patch.object(rt_mod, "config") as mock_config:
@@ -3011,7 +3017,7 @@ class TestStartUpConnectedEventClearException:
     async def test_start_up_handles_connected_event_clear_exception(self) -> None:
         """Test lines 203-204: exception during _connected_event.clear() is caught."""
         handler = _build_handler_simple()
-        handler.textbox_api_key = "test-key"
+        handler._provided_api_key = "test-key"
 
         # Mock AsyncOpenAI
         with patch.object(rt_mod, "AsyncOpenAI"):
@@ -3405,7 +3411,7 @@ class TestPersistApiKeyOsEnvironException:
         env_file.write_text("EXISTING=value\n")
 
         # Create a mock environ that raises on setitem
-        class RaisingEnviron(dict):  # type: ignore[type-arg]
+        class RaisingEnviron(dict[str, str]):
             def __setitem__(self, key: str, value: str) -> None:
                 raise RuntimeError("Cannot set env var")
 
@@ -3492,7 +3498,7 @@ class TestStartUpGradioModeConfigFallback:
         async def fake_wait_for_args() -> None:
             pass
 
-        handler.wait_for_args = fake_wait_for_args  # type: ignore[method-assign]
+        object.__setattr__(handler, "wait_for_args", fake_wait_for_args)
         # args[3] is the textbox API key - empty string means fallback to config
         handler.latest_args = [None, None, None, ""]
 
@@ -3581,7 +3587,7 @@ class TestReceiveAudioMultiChannel:
         class FakeConn:
             input_audio_buffer = FakeAudioBuffer()
 
-        handler.connection = FakeConn()  # type: ignore[assignment]
+        handler.connection = FakeConn()
 
         # Create 2-channel audio (shape: samples x channels)
         # Make sure channels are in the expected format after transpose
@@ -3655,7 +3661,8 @@ class TestRestartSessionOuterExceptionCoverage:
         # Let me check what's in that outer try block that isn't already covered.
 
         # We can make the initial check fail by making _shutdown_requested raise
-        handler._shutdown_requested = property(lambda self: (_ for _ in ()).throw(RuntimeError("test")))  # type: ignore[assignment]
+        # Use object.__setattr__ to bypass mypy's property assignment check
+        object.__setattr__(handler, "_shutdown_requested", property(lambda self: (_ for _ in ()).throw(RuntimeError("test"))))
 
         async def patched_restart() -> None:
             # Make something fail that triggers lines 244-245
@@ -3696,7 +3703,7 @@ class TestRestartSessionOuterExceptionBeforeInnerTry:
             def __bool__(self) -> bool:
                 raise RuntimeError("Cannot access renewal task")
 
-        handler._session_renewal_task = RaisingOnAccess()  # type: ignore[assignment]
+        object.__setattr__(handler, "_session_renewal_task", RaisingOnAccess())
 
         await handler._restart_session()
 
@@ -3769,7 +3776,7 @@ class TestRunRealtimeSessionRenewalTaskNone:
             if name == "openai-session-renewal":
                 # Cancel the actual coro to avoid it running
                 coro.close()
-                return already_done_task  # type: ignore[return-value]
+                return already_done_task
             return original_create_task(coro, name=name)
 
         monkeypatch.setattr(asyncio, "create_task", patched_create_task)
@@ -3803,7 +3810,7 @@ class TestReceiveAudioSingleChannelAfterTranspose:
         class FakeConn:
             input_audio_buffer = FakeAudioBuffer()
 
-        handler.connection = FakeConn()  # type: ignore[assignment]
+        handler.connection = FakeConn()
 
         # Create 2D audio: shape = (2, 10) -> 2 samples, 10 channels
         # After transpose: shape = (10, 2) -> 10 samples, 2 channels
@@ -3839,15 +3846,15 @@ class TestCollectExceptionDuringIteration:
         handler = _build_handler_simple()
 
         # Create an object that raises when items() returns a problematic iterator
-        class RaisingIterator:
+        class RaisingIterator(Iterator[tuple[Any, Any]]):
             def __iter__(self) -> "RaisingIterator":
                 return self
 
-            def __next__(self) -> Any:
+            def __next__(self) -> tuple[Any, Any]:
                 raise RuntimeError("Iteration error")
 
-        class DictWithRaisingItems(dict):  # type: ignore[type-arg]
-            def items(self) -> RaisingIterator:
+        class DictWithRaisingItems(dict[Any, Any]):
+            def items(self) -> Any:  # Return type intentionally breaks contract for testing
                 return RaisingIterator()
 
         # Create nested structure where _collect will encounter the raising dict
@@ -3893,7 +3900,7 @@ class TestPersistApiKeyOsEnvironRaises:
 
         call_count = [0]
 
-        def raising_setitem(self: dict, key: str, value: Any) -> None:  # type: ignore[type-arg]
+        def raising_setitem(self: dict[str, Any], key: str, value: Any) -> None:
             if key == "OPENAI_API_KEY":
                 call_count[0] += 1
                 if call_count[0] == 1:  # Only raise on first call (inside _persist_api_key_if_needed)

@@ -1,35 +1,39 @@
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, TYPE_CHECKING
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from reachy_mini.motion.recorded_move import RecordedMoves
+
 # Initialize emotion library
+_RECORDED_MOVES: "RecordedMoves | None" = None
+EMOTION_AVAILABLE = False
+
 try:
     from reachy_mini.motion.recorded_move import RecordedMoves
     from reachy_mini_conversation_app.dance_emotion_moves import EmotionQueueMove
 
     # Note: huggingface_hub automatically reads HF_TOKEN from environment variables
-    RECORDED_MOVES = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
+    _RECORDED_MOVES = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
     EMOTION_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Emotion library not available: {e}")
-    RECORDED_MOVES = None
-    EMOTION_AVAILABLE = False
 
 
 def get_available_emotions_and_descriptions() -> str:
     """Get formatted list of available emotions with descriptions."""
-    if not EMOTION_AVAILABLE:
+    if not EMOTION_AVAILABLE or _RECORDED_MOVES is None:
         return "Emotions not available"
 
     try:
-        emotion_names = RECORDED_MOVES.list_moves()
+        emotion_names = _RECORDED_MOVES.list_moves()
         output = "Available emotions:\n"
         for name in emotion_names:
-            description = RECORDED_MOVES.get(name).description
+            description = _RECORDED_MOVES.get(name).description
             output += f" - {name}: {description}\n"
         return output
     except Exception as e:
@@ -57,7 +61,7 @@ class PlayEmotion(Tool):
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Play a pre-recorded emotion."""
-        if not EMOTION_AVAILABLE:
+        if not EMOTION_AVAILABLE or _RECORDED_MOVES is None:
             return {"error": "Emotion system not available"}
 
         emotion_name = kwargs.get("emotion")
@@ -68,13 +72,13 @@ class PlayEmotion(Tool):
 
         # Check if emotion exists
         try:
-            emotion_names = RECORDED_MOVES.list_moves()
+            emotion_names = _RECORDED_MOVES.list_moves()
             if emotion_name not in emotion_names:
                 return {"error": f"Unknown emotion '{emotion_name}'. Available: {emotion_names}"}
 
             # Add emotion to queue
             movement_manager = deps.movement_manager
-            emotion_move = EmotionQueueMove(emotion_name, RECORDED_MOVES)
+            emotion_move = EmotionQueueMove(emotion_name, _RECORDED_MOVES)
             movement_manager.queue_move(emotion_move)
 
             return {"status": "queued", "emotion": emotion_name}

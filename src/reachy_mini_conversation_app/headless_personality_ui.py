@@ -27,6 +27,19 @@ from .headless_personality import (
     read_instructions_for,
 )
 
+# Re-export for test patching
+__all__ = [
+    "mount_personality_routes",
+    "CONFIG_VARS",
+    "DEFAULT_OPTION",
+    "_sanitize_name",
+    "_write_profile",
+    "list_personalities",
+    "available_tools_for",
+    "resolve_profile_dir",
+    "read_instructions_for",
+]
+
 
 # Configuration variables that can be managed via the UI
 # Format: (env_var_name, config_attr_name, is_secret, description)
@@ -93,12 +106,12 @@ def mount_personality_routes(
             return DEFAULT_OPTION
 
     @app.get("/personalities")
-    def _list() -> dict:  # type: ignore
+    def _list() -> dict[str, Any]:
         choices = [DEFAULT_OPTION, *list_personalities()]
         return {"choices": choices, "current": _current_choice(), "startup": _startup_choice()}
 
     @app.get("/personalities/load")
-    def _load(name: str) -> dict:  # type: ignore
+    def _load(name: str) -> dict[str, Any]:
         instr = read_instructions_for(name)
         tools_txt = ""
         voice = "cedar"
@@ -127,10 +140,10 @@ def mount_personality_routes(
         instructions: str = Body("", embed=True),
         tools_text: str = Body("", embed=True),
         voice: Optional[str] = Body("cedar", embed=True),
-    ) -> dict:  # type: ignore
+    ) -> dict[str, Any] | JSONResponse:
         name_s = _sanitize_name(name)
         if not name_s:
-            return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)  # type: ignore
+            return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)
         v = voice or "cedar"
         try:
             logger.info(
@@ -145,7 +158,7 @@ def mount_personality_routes(
             choices = [DEFAULT_OPTION, *list_personalities()]
             return {"ok": True, "value": value, "choices": choices}
         except Exception as e:
-            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
     @app.post("/personalities/save_raw")
     def _save_raw(
@@ -153,10 +166,10 @@ def mount_personality_routes(
         instructions: str = Body("", embed=True),
         tools_text: str = Body("", embed=True),
         voice: Optional[str] = Body("cedar", embed=True),
-    ) -> dict:  # type: ignore
+    ) -> dict[str, Any] | JSONResponse:
         name_s = _sanitize_name(name)
         if not name_s:
-            return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)  # type: ignore
+            return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)
         v = voice or "cedar"
         try:
             logger.info(
@@ -167,13 +180,15 @@ def mount_personality_routes(
             choices = [DEFAULT_OPTION, *list_personalities()]
             return {"ok": True, "value": value, "choices": choices}
         except Exception as e:
-            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
     @app.get("/personalities/save_raw")
-    async def _save_raw_get(name: str, instructions: str = "", tools_text: str = "", voice: str = "cedar") -> dict:  # type: ignore
+    async def _save_raw_get(
+        name: str, instructions: str = "", tools_text: str = "", voice: str = "cedar"
+    ) -> dict[str, Any] | JSONResponse:
         name_s = _sanitize_name(name)
         if not name_s:
-            return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)  # type: ignore
+            return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)
         try:
             logger.info(
                 "Headless save_raw(GET): name=%r voice=%r instr_len=%d tools_len=%d",
@@ -187,7 +202,7 @@ def mount_personality_routes(
             choices = [DEFAULT_OPTION, *list_personalities()]
             return {"ok": True, "value": value, "choices": choices}
         except Exception as e:
-            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
     logger = logging.getLogger(__name__)
 
@@ -197,10 +212,10 @@ def mount_personality_routes(
         name: str | None = None,
         persist: Optional[bool] = None,
         request: Optional[Request] = None,
-    ) -> dict:  # type: ignore
+    ) -> dict[str, Any] | JSONResponse:
         loop = get_loop()
         if loop is None:
-            return JSONResponse({"ok": False, "error": "loop_unavailable"}, status_code=503)  # type: ignore
+            return JSONResponse({"ok": False, "error": "loop_unavailable"}, status_code=503)
 
         # Accept both JSON payload and query param for convenience
         sel_name: Optional[str] = None
@@ -247,7 +262,7 @@ def mount_personality_routes(
                     logger.warning("Failed to persist startup personality: %s", e)
             return {"ok": True, "status": status, "startup": persisted_choice}
         except Exception as e:
-            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
     @app.get("/voices")
     async def _voices() -> list[str]:
@@ -332,7 +347,7 @@ def mount_personality_routes(
             setattr(config, key, value if value else None)
 
     @app.get("/config")
-    def _get_config() -> dict:  # type: ignore
+    def _get_config() -> dict[str, Any]:
         """Get all configuration variables with masked secrets."""
         variables = []
         for env_key, config_attr, is_secret, description in CONFIG_VARS:
@@ -347,7 +362,7 @@ def mount_personality_routes(
         return {"variables": variables}
 
     @app.post("/config/reload")
-    def _reload_config() -> dict:  # type: ignore
+    def _reload_config() -> dict[str, Any] | JSONResponse:
         """Reload configuration from .env file."""
         try:
             reload_config()
@@ -364,10 +379,10 @@ def mount_personality_routes(
                 })
             return {"ok": True, "message": "Configuration reloaded", "variables": variables}
         except Exception as e:
-            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
     @app.get("/config/{key}")
-    def _get_config_key(key: str) -> dict:  # type: ignore
+    def _get_config_key(key: str) -> dict[str, Any] | JSONResponse:
         """Get a specific configuration variable."""
         for env_key, config_attr, is_secret, description in CONFIG_VARS:
             if env_key == key:
@@ -379,14 +394,14 @@ def mount_personality_routes(
                     "is_secret": is_secret,
                     "description": description,
                 }
-        return JSONResponse({"error": f"Unknown config key: {key}"}, status_code=404)  # type: ignore
+        return JSONResponse({"error": f"Unknown config key: {key}"}, status_code=404)
 
     @app.post("/config/{key}")
     def _set_config_key(
         key: str,
         value: Optional[str] = Body(None, embed=True),
         persist: bool = Body(True, embed=True),
-    ) -> dict:  # type: ignore
+    ) -> dict[str, Any] | JSONResponse:
         """Set a configuration variable."""
         # Find the config variable
         config_info = None
@@ -396,7 +411,7 @@ def mount_personality_routes(
                 break
 
         if config_info is None:
-            return JSONResponse({"error": f"Unknown config key: {key}"}, status_code=404)  # type: ignore
+            return JSONResponse({"error": f"Unknown config key: {key}"}, status_code=404)
 
         env_key, config_attr, is_secret, description = config_info
 
@@ -418,7 +433,7 @@ def mount_personality_routes(
         }
 
     @app.delete("/config/{key}")
-    def _delete_config_key(key: str, persist: bool = True) -> dict:  # type: ignore
+    def _delete_config_key(key: str, persist: bool = True) -> dict[str, Any] | JSONResponse:
         """Remove a configuration variable."""
         # Find the config variable
         config_info = None
@@ -428,7 +443,7 @@ def mount_personality_routes(
                 break
 
         if config_info is None:
-            return JSONResponse({"error": f"Unknown config key: {key}"}, status_code=404)  # type: ignore
+            return JSONResponse({"error": f"Unknown config key: {key}"}, status_code=404)
 
         env_key, config_attr, _, _ = config_info
 

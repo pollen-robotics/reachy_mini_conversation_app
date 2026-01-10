@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, Tuple, Literal
+from typing import Any, Dict, Tuple, Literal, cast
 
 from reachy_mini.utils import create_head_pose
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
@@ -41,7 +41,12 @@ class MoveHead(Tool):
         direction_raw = kwargs.get("direction")
         if not isinstance(direction_raw, str):
             return {"error": "direction must be a string"}
-        direction: Direction = direction_raw  # type: ignore[assignment]
+        # Validate direction is one of the allowed values
+        valid_directions: tuple[Direction, ...] = ("left", "right", "up", "down", "front")
+        if direction_raw not in valid_directions:
+            return {"error": f"direction must be one of {valid_directions}"}
+        # Now we know direction_raw is a valid Direction literal
+        direction = cast(Direction, direction_raw)
         logger.info("Tool call: move_head direction=%s", direction)
 
         deltas = self.DELTAS.get(direction, self.DELTAS["front"])

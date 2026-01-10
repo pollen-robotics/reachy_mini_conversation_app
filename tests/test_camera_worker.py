@@ -2,9 +2,11 @@
 
 import time
 import threading
+from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
+from numpy.typing import NDArray
 
 from reachy_mini_conversation_app.camera_worker import CameraWorker
 
@@ -372,7 +374,7 @@ class TestCameraWorkerFaceLostInterpolation:
         # First detect face, then lose it
         call_count = [0]
 
-        def get_head_position_side_effect(frame: np.ndarray) -> tuple:
+        def get_head_position_side_effect(frame: NDArray[np.floating[Any]]) -> tuple[NDArray[np.floating[Any]] | None, Any]:
             call_count[0] += 1
             if call_count[0] <= 3:
                 # Face detected first few calls
@@ -413,7 +415,7 @@ class TestCameraWorkerFaceLostInterpolation:
         # Alternate between face detected and not detected
         call_count = [0]
 
-        def get_head_position_side_effect(frame: np.ndarray) -> tuple:
+        def get_head_position_side_effect(frame: NDArray[np.floating[Any]]) -> tuple[NDArray[np.floating[Any]] | None, Any]:
             call_count[0] += 1
             # Alternate: face -> no face -> face
             if call_count[0] % 3 == 0:
@@ -448,7 +450,7 @@ class TestCameraWorkerFaceLostInterpolation:
         # Detect face once then never again
         call_count = [0]
 
-        def get_head_position_side_effect(frame: np.ndarray) -> tuple:
+        def get_head_position_side_effect(frame: NDArray[np.floating[Any]]) -> tuple[NDArray[np.floating[Any]] | None, Any]:
             call_count[0] += 1
             if call_count[0] == 1:
                 return (np.array([0.0, 0.0]), None)
@@ -541,7 +543,7 @@ class TestCameraWorkerFaceLostInterpolation:
         # Detect face once, then lose it
         first_call = [True]
 
-        def get_head_position_side_effect(frame: np.ndarray) -> tuple:
+        def get_head_position_side_effect(frame: NDArray[np.floating[Any]]) -> tuple[NDArray[np.floating[Any]] | None, Any]:
             if first_call[0]:
                 first_call[0] = False
                 return (np.array([0.0, 0.0]), None)
@@ -576,7 +578,7 @@ class TestCameraWorkerFaceLostInterpolation:
         # Always return no face after initial detection
         call_count = [0]
 
-        def get_head_position_side_effect(frame: np.ndarray) -> tuple:
+        def get_head_position_side_effect(frame: NDArray[np.floating[Any]]) -> tuple[NDArray[np.floating[Any]] | None, Any]:
             call_count[0] += 1
             if call_count[0] == 1:
                 return (np.array([0.0, 0.0]), None)

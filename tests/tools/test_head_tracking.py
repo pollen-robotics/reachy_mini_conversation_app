@@ -61,6 +61,7 @@ class TestHeadTrackingToolExecution:
         result = await tool(mock_deps, start=True)
 
         assert result["status"] == "head tracking started"
+        assert mock_deps.camera_worker is not None
         mock_deps.camera_worker.set_head_tracking_enabled.assert_called_once_with(True)
 
     @pytest.mark.asyncio
@@ -71,6 +72,7 @@ class TestHeadTrackingToolExecution:
         result = await tool(mock_deps, start=False)
 
         assert result["status"] == "head tracking stopped"
+        assert mock_deps.camera_worker is not None
         mock_deps.camera_worker.set_head_tracking_enabled.assert_called_once_with(False)
 
     @pytest.mark.asyncio
@@ -97,6 +99,7 @@ class TestHeadTrackingToolExecution:
         assert result["status"] == "head tracking started"
 
         # Reset mock
+        assert mock_deps.camera_worker is not None
         mock_deps.camera_worker.set_head_tracking_enabled.reset_mock()
 
         # Test with falsy value
@@ -111,4 +114,5 @@ class TestHeadTrackingToolExecution:
         result = await tool(mock_deps)
 
         assert result["status"] == "head tracking stopped"
+        assert mock_deps.camera_worker is not None
         mock_deps.camera_worker.set_head_tracking_enabled.assert_called_once_with(False)

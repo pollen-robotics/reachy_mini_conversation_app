@@ -120,6 +120,7 @@ class GitHubPushTool(Tool):
 
             if not needs_upstream:
                 # Fetch to compare with remote
+                assert tracking_branch is not None  # narrowing for mypy
                 try:
                     origin.fetch()
                     commits_ahead = list(repo.iter_commits(f"{tracking_branch.name}..HEAD"))
@@ -164,7 +165,7 @@ class GitHubPushTool(Tool):
                             "hint": "Use github_pull first to get the latest changes.",
                         }
 
-                result = {
+                result: Dict[str, Any] = {
                     "status": "success",
                     "message": "Changes pushed successfully!",
                     "path": str(repo_path),

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import openai
 import anthropic
+from anthropic.types import TextBlock
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
@@ -108,10 +109,12 @@ class GitHubReadFileTool(Tool):
                 messages=[{"role": "user", "content": user_message}],
             )
 
+            first_block = message.content[0]
+            analysis_text = first_block.text if isinstance(first_block, TextBlock) else str(first_block)
             return {
                 "analyzer": "claude",
                 "model": model,
-                "analysis": message.content[0].text,
+                "analysis": analysis_text,
             }
 
         except anthropic.AuthenticationError:
@@ -132,7 +135,7 @@ class GitHubReadFileTool(Tool):
 
         try:
             client = openai.OpenAI(api_key=api_key)
-            model = config.OPENAI_MODEL or "gpt-4o"
+            model = "gpt-4o"
 
             user_message = f"File: {file_path}\n\n```\n{content}\n```\n\n{prompt}"
 

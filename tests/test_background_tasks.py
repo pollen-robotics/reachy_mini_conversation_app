@@ -2,6 +2,7 @@
 
 import time
 import asyncio
+from typing import Any, Generator
 from unittest.mock import MagicMock
 
 import pytest
@@ -111,7 +112,7 @@ class TestBackgroundTaskManager:
     """Tests for BackgroundTaskManager class."""
 
     @pytest.fixture(autouse=True)
-    def reset_singleton(self) -> None:
+    def reset_singleton(self) -> Generator[None, None, None]:
         """Reset singleton before each test."""
         BackgroundTaskManager.reset_instance()
         yield
@@ -174,7 +175,7 @@ class TestBackgroundTaskManager:
 
         started = asyncio.Event()
 
-        async def dummy_coroutine() -> dict:
+        async def dummy_coroutine() -> dict[str, Any]:
             started.set()
             await asyncio.sleep(10)  # Long sleep, we'll cancel
             return {"status": "success"}
@@ -210,7 +211,7 @@ class TestBackgroundTaskManager:
 
         started = asyncio.Event()
 
-        async def dummy_coroutine() -> dict:
+        async def dummy_coroutine() -> dict[str, Any]:
             started.set()
             await asyncio.sleep(10)
             return {}
@@ -228,6 +229,7 @@ class TestBackgroundTaskManager:
         assert task.progress == 0.0
 
         # Cancel and await the task properly
+        assert task._task is not None
         task._task.cancel()
         try:
             await task._task
@@ -239,7 +241,7 @@ class TestBackgroundTaskManager:
         """Test that a task completes and queues notification."""
         manager = BackgroundTaskManager.get_instance()
 
-        async def success_coroutine() -> dict:
+        async def success_coroutine() -> dict[str, Any]:
             return {"message": "Done!"}
 
         task = await manager.start_task(
@@ -267,7 +269,7 @@ class TestBackgroundTaskManager:
         """Test that a failing task sets error status."""
         manager = BackgroundTaskManager.get_instance()
 
-        async def failing_coroutine() -> dict:
+        async def failing_coroutine() -> dict[str, Any]:
             raise ValueError("Test error")
 
         task = await manager.start_task(
@@ -296,7 +298,7 @@ class TestBackgroundTaskManager:
 
         cancel_reached = False
 
-        async def long_coroutine() -> dict:
+        async def long_coroutine() -> dict[str, Any]:
             nonlocal cancel_reached
             try:
                 await asyncio.sleep(10)
@@ -338,7 +340,7 @@ class TestBackgroundTaskManager:
         """Test that completed tasks cannot be cancelled."""
         manager = BackgroundTaskManager.get_instance()
 
-        async def quick_coroutine() -> dict:
+        async def quick_coroutine() -> dict[str, Any]:
             return {}
 
         task = await manager.start_task(
@@ -359,7 +361,7 @@ class TestBackgroundTaskManager:
 
         started = asyncio.Event()
 
-        async def progress_coroutine() -> dict:
+        async def progress_coroutine() -> dict[str, Any]:
             started.set()
             await asyncio.sleep(10)
             return {}
@@ -382,6 +384,7 @@ class TestBackgroundTaskManager:
         assert task.progress_message == "Halfway there"
 
         # Cancel and await the task properly
+        assert task._task is not None
         task._task.cancel()
         try:
             await task._task
@@ -395,7 +398,7 @@ class TestBackgroundTaskManager:
 
         started = asyncio.Event()
 
-        async def dummy() -> dict:
+        async def dummy() -> dict[str, Any]:
             started.set()
             await asyncio.sleep(10)
             return {}
@@ -419,6 +422,7 @@ class TestBackgroundTaskManager:
         assert task.progress == 0.0
 
         # Cancel and await the task properly
+        assert task._task is not None
         task._task.cancel()
         try:
             await task._task
@@ -432,7 +436,7 @@ class TestBackgroundTaskManager:
 
         started = asyncio.Event()
 
-        async def dummy() -> dict:
+        async def dummy() -> dict[str, Any]:
             started.set()
             await asyncio.sleep(10)
             return {}
@@ -451,6 +455,7 @@ class TestBackgroundTaskManager:
         assert result is False
 
         # Cancel and await the task properly
+        assert task._task is not None
         task._task.cancel()
         try:
             await task._task
@@ -700,7 +705,7 @@ class TestSummarizeResult:
     """Tests for _summarize_result method."""
 
     @pytest.fixture(autouse=True)
-    def reset_singleton(self) -> None:
+    def reset_singleton(self) -> Generator[None, None, None]:
         """Reset singleton before each test."""
         BackgroundTaskManager.reset_instance()
         yield
@@ -786,7 +791,7 @@ class TestBackgroundTaskManagerEdgeCases:
     """Tests for edge cases and branch coverage."""
 
     @pytest.fixture(autouse=True)
-    def reset_singleton(self) -> None:
+    def reset_singleton(self) -> Generator[None, None, None]:
         """Reset singleton before each test."""
         BackgroundTaskManager.reset_instance()
         yield

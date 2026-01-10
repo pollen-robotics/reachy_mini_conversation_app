@@ -147,7 +147,7 @@ def run_command(command: str, cwd: Path, timeout: int = 300) -> CheckResult:
 
 def run_auto_fix(repo_path: Path, auto_fix: AutoFixConfig) -> List[CheckResult]:
     """Run auto-fix commands."""
-    results = []
+    results: List[CheckResult] = []
 
     if not auto_fix.enabled or not auto_fix.commands:
         return results
