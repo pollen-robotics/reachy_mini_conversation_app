@@ -609,30 +609,33 @@ class TestMountedEndpoints:
 
 
 class TestConfigVarsContent:
-    """Tests for CONFIG_VARS content validation."""
+    """Tests for CONFIG_VARS content validation.
 
-    def test_config_vars_has_anthropic_key(self) -> None:
-        """Test that CONFIG_VARS includes ANTHROPIC_API_KEY."""
+    Note: CONFIG_VARS is now dynamically generated from BASE_CONFIG_VARS
+    plus any tool-specific env vars. ANTHROPIC_API_KEY and GITHUB_TOKEN
+    are only present when tools that declare them are loaded (e.g., Linus profile).
+    """
+
+    def test_config_vars_has_base_vars(self) -> None:
+        """Test that CONFIG_VARS includes base configuration variables."""
         from reachy_mini_conversation_app.headless_personality_ui import CONFIG_VARS
 
         keys = [var[0] for var in CONFIG_VARS]
-        assert "ANTHROPIC_API_KEY" in keys
+        # Base vars should always be present
+        assert "OPENAI_API_KEY" in keys
+        assert "MODEL_NAME" in keys
+        assert "HF_TOKEN" in keys
+        assert "HF_HOME" in keys
+        assert "LOCAL_VISION_MODEL" in keys
+        assert "REACHY_MINI_CUSTOM_PROFILE" in keys
 
-    def test_config_vars_has_github_token(self) -> None:
-        """Test that CONFIG_VARS includes GITHUB_TOKEN."""
-        from reachy_mini_conversation_app.headless_personality_ui import CONFIG_VARS
-
-        keys = [var[0] for var in CONFIG_VARS]
-        assert "GITHUB_TOKEN" in keys
-
-    def test_config_vars_secrets_are_marked(self) -> None:
-        """Test that secret vars are properly marked."""
+    def test_config_vars_base_secrets_are_marked(self) -> None:
+        """Test that base secret vars are properly marked."""
         from reachy_mini_conversation_app.headless_personality_ui import CONFIG_VARS
 
         secrets = {var[0]: var[2] for var in CONFIG_VARS}
         assert secrets["OPENAI_API_KEY"] is True
-        assert secrets["ANTHROPIC_API_KEY"] is True
-        assert secrets["GITHUB_TOKEN"] is True
+        assert secrets["HF_TOKEN"] is True
         assert secrets["MODEL_NAME"] is False
 
     def test_config_vars_has_descriptions(self) -> None:
@@ -641,6 +644,70 @@ class TestConfigVarsContent:
 
         for var in CONFIG_VARS:
             assert len(var[3]) > 0  # description should not be empty
+
+    def test_config_vars_dynamically_includes_tool_vars(self) -> None:
+        """Test that CONFIG_VARS can include tool-specific vars when tools declare them."""
+        from reachy_mini_conversation_app.tools import core_tools
+        from reachy_mini_conversation_app.tools.core_tools import Tool, EnvVar
+
+        # Create a mock tool with required_env_vars
+        class MockToolWithEnvVars(Tool):
+            name = "mock_tool_env_test"
+            description = "Mock tool for env var test"
+            parameters_schema = {"type": "object", "properties": {}}
+            required_env_vars = [
+                EnvVar("MOCK_API_KEY", is_secret=True, description="Mock API key"),
+            ]
+
+            async def __call__(self, deps: Any, **kwargs: Any) -> dict[str, Any]:
+                return {}
+
+        # Temporarily add to ALL_TOOLS
+        original_tools = core_tools.ALL_TOOLS.copy()
+        core_tools.ALL_TOOLS["mock_tool_env_test"] = MockToolWithEnvVars()
+
+        try:
+            # Re-import to get fresh CONFIG_VARS via get_config_vars()
+            from reachy_mini_conversation_app.headless_personality_ui import (
+                _get_config_vars_list,
+            )
+
+            config_vars = _get_config_vars_list()
+            keys = [var[0] for var in config_vars]
+
+            assert "MOCK_API_KEY" in keys
+        finally:
+            core_tools.ALL_TOOLS.clear()
+            core_tools.ALL_TOOLS.update(original_tools)
+
+
+class TestGetConfigVarsListFunction:
+    """Tests for _get_config_vars_list function."""
+
+    def test_get_config_vars_list_returns_list(self) -> None:
+        """Test that _get_config_vars_list returns a list of tuples."""
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            _get_config_vars_list,
+        )
+
+        result = _get_config_vars_list()
+
+        assert isinstance(result, list)
+        for item in result:
+            assert isinstance(item, tuple)
+            assert len(item) == 4
+
+    def test_get_config_vars_list_matches_get_config_vars(self) -> None:
+        """Test that _get_config_vars_list returns same as get_config_vars."""
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            get_config_vars,
+            _get_config_vars_list,
+        )
+
+        result1 = _get_config_vars_list()
+        result2 = get_config_vars()
+
+        assert result1 == result2
 
 
 class TestImportedConstants:

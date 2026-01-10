@@ -17,6 +17,7 @@ from fastapi import FastAPI
 
 from .config import config, reload_config
 from .openai_realtime import OpenaiRealtimeHandler
+from .tools.core_tools import get_config_vars
 from .headless_personality import (
     DEFAULT_OPTION,
     _sanitize_name,
@@ -39,24 +40,27 @@ __all__ = [
     "available_tools_for",
     "resolve_profile_dir",
     "read_instructions_for",
+    "get_config_vars",
 ]
 
 
-# Configuration variables that can be managed via the UI
-# Format: (env_var_name, config_attr_name, is_secret, description)
-CONFIG_VARS = [
-    ("OPENAI_API_KEY", "OPENAI_API_KEY", True, "OpenAI API key (required for voice)"),
-    ("MODEL_NAME", "MODEL_NAME", False, "OpenAI model name"),
-    ("HF_TOKEN", "HF_TOKEN", True, "Hugging Face token (optional, for vision)"),
-    ("HF_HOME", "HF_HOME", False, "Hugging Face cache directory"),
-    ("LOCAL_VISION_MODEL", "LOCAL_VISION_MODEL", False, "Local vision model path"),
-    ("ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY", True, "Anthropic API key (for Linus profile)"),
-    ("ANTHROPIC_MODEL", "ANTHROPIC_MODEL", False, "Anthropic model name"),
-    ("GITHUB_TOKEN", "GITHUB_TOKEN", True, "GitHub token (for Linus profile)"),
-    ("GITHUB_DEFAULT_OWNER", "GITHUB_DEFAULT_OWNER", False, "Default GitHub owner/org"),
-    ("GITHUB_OWNER_EMAIL", "GITHUB_OWNER_EMAIL", False, "Email for git commits"),
-    ("REACHY_MINI_CUSTOM_PROFILE", "REACHY_MINI_CUSTOM_PROFILE", False, "Custom profile name"),
-]
+def _get_config_vars_list() -> list[tuple[str, str, bool, str]]:
+    """Get configuration variables dynamically from tools.
+
+    This function returns the list of config vars from get_config_vars(),
+    which collects BASE_CONFIG_VARS plus any tool-specific env vars.
+
+    Returns:
+        List of tuples: (env_var_name, config_attr_name, is_secret, description)
+
+    """
+    return get_config_vars()
+
+
+# Backward compatibility alias - now dynamically generated
+# Note: This is evaluated at import time, so it won't include tool vars
+# that are loaded later. Use _get_config_vars_list() for dynamic access.
+CONFIG_VARS = _get_config_vars_list()
 
 
 def mount_personality_routes(
@@ -351,7 +355,7 @@ def mount_personality_routes(
     def _get_config() -> dict[str, Any]:
         """Get all configuration variables with masked secrets."""
         variables = []
-        for env_key, config_attr, is_secret, description in CONFIG_VARS:
+        for env_key, config_attr, is_secret, description in _get_config_vars_list():
             value = getattr(config, config_attr, None)
             variables.append({
                 "key": env_key,
@@ -369,7 +373,7 @@ def mount_personality_routes(
             reload_config()
             # Return updated config
             variables = []
-            for env_key, config_attr, is_secret, description in CONFIG_VARS:
+            for env_key, config_attr, is_secret, description in _get_config_vars_list():
                 value = getattr(config, config_attr, None)
                 variables.append({
                     "key": env_key,
@@ -385,7 +389,7 @@ def mount_personality_routes(
     @app.get("/config/{key}")
     def _get_config_key(key: str) -> dict[str, Any] | JSONResponse:
         """Get a specific configuration variable."""
-        for env_key, config_attr, is_secret, description in CONFIG_VARS:
+        for env_key, config_attr, is_secret, description in _get_config_vars_list():
             if env_key == key:
                 value = getattr(config, config_attr, None)
                 return {
@@ -406,7 +410,7 @@ def mount_personality_routes(
         """Set a configuration variable."""
         # Find the config variable
         config_info = None
-        for env_key, config_attr, is_secret, description in CONFIG_VARS:
+        for env_key, config_attr, is_secret, description in _get_config_vars_list():
             if env_key == key:
                 config_info = (env_key, config_attr, is_secret, description)
                 break
@@ -438,7 +442,7 @@ def mount_personality_routes(
         """Remove a configuration variable."""
         # Find the config variable
         config_info = None
-        for env_key, config_attr, is_secret, description in CONFIG_VARS:
+        for env_key, config_attr, is_secret, description in _get_config_vars_list():
             if env_key == key:
                 config_info = (env_key, config_attr, is_secret, description)
                 break

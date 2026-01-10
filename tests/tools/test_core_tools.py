@@ -120,6 +120,70 @@ class TestCollectAllEnvVars:
         for base_var in BASE_CONFIG_VARS:
             assert base_var.name in result_names
 
+    def test_collect_all_env_vars_with_empty_base_config_vars(self) -> None:
+        """Test collect_all_env_vars when BASE_CONFIG_VARS is empty.
+
+        This tests the case where BASE_CONFIG_VARS has no items.
+        """
+        from reachy_mini_conversation_app.tools import core_tools
+
+        # Save original values
+        original_base_vars = core_tools.BASE_CONFIG_VARS.copy()
+        original_tools = core_tools.ALL_TOOLS.copy()
+
+        try:
+            # Clear BASE_CONFIG_VARS to test empty case
+            core_tools.BASE_CONFIG_VARS.clear()
+            # Also clear ALL_TOOLS to avoid interference
+            core_tools.ALL_TOOLS.clear()
+
+            result = core_tools.collect_all_env_vars()
+
+            # Result should be empty when both BASE_CONFIG_VARS and ALL_TOOLS are empty
+            assert result == []
+        finally:
+            # Restore original values
+            core_tools.BASE_CONFIG_VARS.clear()
+            core_tools.BASE_CONFIG_VARS.extend(original_base_vars)
+            core_tools.ALL_TOOLS.clear()
+            core_tools.ALL_TOOLS.update(original_tools)
+
+    def test_collect_all_env_vars_with_duplicate_in_base_config_vars(self) -> None:
+        """Test collect_all_env_vars when BASE_CONFIG_VARS has duplicate entries.
+
+        This covers the branch where env_var.name is already in seen (143->142),
+        meaning the condition `if env_var.name not in seen` is False.
+        """
+        from reachy_mini_conversation_app.tools import core_tools
+
+        # Save original values
+        original_base_vars = core_tools.BASE_CONFIG_VARS.copy()
+        original_tools = core_tools.ALL_TOOLS.copy()
+
+        try:
+            # Clear and add duplicates to BASE_CONFIG_VARS
+            core_tools.BASE_CONFIG_VARS.clear()
+            core_tools.BASE_CONFIG_VARS.extend([
+                EnvVar("DUPLICATE_VAR", is_secret=True, description="First declaration"),
+                EnvVar("DUPLICATE_VAR", is_secret=False, description="Second declaration"),
+            ])
+            # Clear ALL_TOOLS to avoid interference
+            core_tools.ALL_TOOLS.clear()
+
+            result = core_tools.collect_all_env_vars()
+
+            # Should only have one entry, the first one
+            assert len(result) == 1
+            assert result[0].name == "DUPLICATE_VAR"
+            assert result[0].is_secret is True  # First declaration
+            assert result[0].description == "First declaration"
+        finally:
+            # Restore original values
+            core_tools.BASE_CONFIG_VARS.clear()
+            core_tools.BASE_CONFIG_VARS.extend(original_base_vars)
+            core_tools.ALL_TOOLS.clear()
+            core_tools.ALL_TOOLS.update(original_tools)
+
     def test_collect_all_env_vars_deduplicates(self) -> None:
         """Test that collect_all_env_vars removes duplicates."""
         from reachy_mini_conversation_app.tools.core_tools import collect_all_env_vars
