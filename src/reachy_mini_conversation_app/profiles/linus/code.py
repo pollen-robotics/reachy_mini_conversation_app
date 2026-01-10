@@ -10,7 +10,7 @@ import anthropic
 from anthropic.types import TextBlock
 
 from reachy_mini_conversation_app.config import config
-from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
+from reachy_mini_conversation_app.tools.core_tools import EnvVar, Tool, ToolDependencies
 
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,20 @@ class CodeTool(Tool):
         "Use this tool when the user asks you to write, create, or generate code. "
         "Can save to ~/reachy_code/ (default) or directly to a repository in ~/reachy_repos/."
     )
+    required_env_vars = [
+        EnvVar(
+            "ANTHROPIC_API_KEY",
+            is_secret=True,
+            description="Anthropic API key for Claude code generation",
+        ),
+        EnvVar(
+            "ANTHROPIC_MODEL",
+            is_secret=False,
+            description="Claude model to use (default: claude-sonnet-4-20250514)",
+            default="claude-sonnet-4-20250514",
+            required=False,
+        ),
+    ]
     parameters_schema = {
         "type": "object",
         "properties": {
