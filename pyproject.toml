@@ -59,6 +59,7 @@ dev = [
   "pytest",
   "pytest-asyncio",
   "pytest-cov",
+  "pytest-timeout",
   "ruff==0.12.0",
   "mypy==1.18.2",
   "pre-commit",
