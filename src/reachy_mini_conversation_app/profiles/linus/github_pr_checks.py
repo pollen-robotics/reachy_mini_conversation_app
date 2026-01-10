@@ -8,6 +8,8 @@ from github import Github, GithubException
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
+from .github_env_vars import GITHUB_ENV_VARS
+
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +23,7 @@ class GitHubPRChecksTool(Tool):
         "Shows all check runs (GitHub Actions, etc.) with their status, conclusion, and error details. "
         "Useful for debugging failed CI pipelines."
     )
+    required_env_vars = GITHUB_ENV_VARS
     parameters_schema = {
         "type": "object",
         "properties": {

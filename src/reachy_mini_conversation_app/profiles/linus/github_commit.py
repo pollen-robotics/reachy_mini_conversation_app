@@ -18,6 +18,8 @@ from reachy_mini_conversation_app.profiles.linus.commit_rules import (
     run_pre_commit_checks,
 )
 
+from .github_env_vars import GITHUB_ENV_VARS
+
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,7 @@ class GitHubCommitTool(Tool):
         "IMPORTANT: Always ask user for confirmation before calling this tool. "
         "Commit types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert."
     )
+    required_env_vars = GITHUB_ENV_VARS
     parameters_schema = {
         "type": "object",
         "properties": {

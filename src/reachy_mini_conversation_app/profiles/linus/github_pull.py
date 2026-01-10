@@ -8,6 +8,8 @@ from git import Repo, GitCommandError, InvalidGitRepositoryError
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
+from .github_env_vars import GITHUB_ENV_VARS
+
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,7 @@ class GitHubPullTool(Tool):
         "Pull the latest changes from a GitHub repository. "
         "Use this when the user wants to update a local repository with remote changes."
     )
+    required_env_vars = GITHUB_ENV_VARS
     parameters_schema = {
         "type": "object",
         "properties": {

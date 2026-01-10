@@ -8,6 +8,8 @@ from github import Github, GithubException
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
+from .github_env_vars import GITHUB_ENV_VARS
+
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +22,7 @@ class GitHubPRCommentTool(Tool):
         "Add a comment to a GitHub pull request. "
         "Use this when the user wants to review, comment, or provide feedback on a PR."
     )
+    required_env_vars = GITHUB_ENV_VARS
     parameters_schema = {
         "type": "object",
         "properties": {
