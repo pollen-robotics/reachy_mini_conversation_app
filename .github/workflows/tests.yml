@@ -71,4 +71,4 @@ jobs:
           PY
 
       - name: Run tests
-        run: .venv/bin/pytest -q
+        run: .venv/bin/pytest --cov=reachy_mini_conversation_app --cov-report=term-missing -q
