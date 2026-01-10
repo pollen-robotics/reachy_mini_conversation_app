@@ -197,13 +197,8 @@ class TestHandleVisionStuff:
         assert vision_manager is None
         mock_camera_worker_cls.assert_called_once_with(mock_robot, mock_yolo_tracker)
 
-    @patch("reachy_mini_conversation_app.utils.CameraWorker")
-    def test_handle_vision_stuff_mediapipe_tracker(
-        self, mock_camera_worker_cls: MagicMock
-    ) -> None:
+    def test_handle_vision_stuff_mediapipe_tracker(self) -> None:
         """Test handle_vision_stuff with MediaPipe head tracker."""
-        from reachy_mini_conversation_app.utils import handle_vision_stuff
-
         args = argparse.Namespace(
             no_camera=False,
             head_tracker="mediapipe",
@@ -211,33 +206,38 @@ class TestHandleVisionStuff:
         )
         mock_robot = MagicMock()
         mock_camera_worker = MagicMock()
-        mock_camera_worker_cls.return_value = mock_camera_worker
 
-        # Mock the mediapipe head tracker
+        # Mock the mediapipe head tracker module before importing
         mock_mediapipe_tracker = MagicMock()
-        with patch.dict(
-            "sys.modules",
-            {"reachy_mini_toolbox": MagicMock(), "reachy_mini_toolbox.vision": MagicMock()},
-        ):
-            with patch(
-                "reachy_mini_toolbox.vision.HeadTracker",
-                return_value=mock_mediapipe_tracker,
-                create=True,
-            ):
-                # We need to re-import to pick up the mock
-                import importlib
-                import reachy_mini_conversation_app.utils as utils_module
+        mock_mediapipe_module = MagicMock()
+        mock_mediapipe_module.HeadTracker.return_value = mock_mediapipe_tracker
 
-                # Direct approach - patch at import time
-                mock_mediapipe_module = MagicMock()
-                mock_mediapipe_module.HeadTracker.return_value = mock_mediapipe_tracker
+        # Need to set up mocks before the import happens
+        import sys
+        sys.modules["reachy_mini_toolbox"] = MagicMock()
+        sys.modules["reachy_mini_toolbox.vision"] = mock_mediapipe_module
 
-                with patch.dict("sys.modules", {"reachy_mini_toolbox.vision": mock_mediapipe_module}):
-                    camera_worker, head_tracker, vision_manager = handle_vision_stuff(args, mock_robot)
+        try:
+            # Re-import the function to trigger the mediapipe branch
+            from importlib import reload
+            import reachy_mini_conversation_app.utils as utils_module
+            reload(utils_module)
 
-        assert camera_worker is mock_camera_worker
-        assert head_tracker is mock_mediapipe_tracker
-        assert vision_manager is None
+            # Patch CameraWorker after reload
+            with patch.object(utils_module, "CameraWorker", return_value=mock_camera_worker):
+                camera_worker, head_tracker, vision_manager = utils_module.handle_vision_stuff(args, mock_robot)
+
+            assert camera_worker is mock_camera_worker
+            assert head_tracker is mock_mediapipe_tracker
+            assert vision_manager is None
+        finally:
+            # Clean up sys.modules
+            sys.modules.pop("reachy_mini_toolbox", None)
+            sys.modules.pop("reachy_mini_toolbox.vision", None)
+            # Reload to restore original state
+            from importlib import reload
+            import reachy_mini_conversation_app.utils as utils_module
+            reload(utils_module)
 
     @patch("reachy_mini_conversation_app.utils.CameraWorker")
     def test_handle_vision_stuff_local_vision_enabled(
@@ -431,3 +431,31 @@ class TestSetupLogger:
             call_messages = [str(c) for c in calls]
             assert any("AVCaptureDeviceTypeExternal" in msg for msg in call_messages)
             assert any("aiortc" in msg for msg in call_messages)
+
+
+class TestHandleVisionStuffEdgeCases:
+    """Tests for edge cases in handle_vision_stuff function."""
+
+    @patch("reachy_mini_conversation_app.utils.CameraWorker")
+    def test_handle_vision_stuff_unknown_head_tracker(
+        self, mock_camera_worker_cls: MagicMock
+    ) -> None:
+        """Test handle_vision_stuff with unknown head tracker value (branch 60->66)."""
+        from reachy_mini_conversation_app.utils import handle_vision_stuff
+
+        args = argparse.Namespace(
+            no_camera=False,
+            head_tracker="unknown_tracker",  # Not yolo, not mediapipe
+            local_vision=False,
+        )
+        mock_robot = MagicMock()
+        mock_camera_worker = MagicMock()
+        mock_camera_worker_cls.return_value = mock_camera_worker
+
+        camera_worker, head_tracker, vision_manager = handle_vision_stuff(args, mock_robot)
+
+        # Should have camera but no head tracker since unknown tracker is ignored
+        assert camera_worker is mock_camera_worker
+        assert head_tracker is None
+        assert vision_manager is None
+        mock_camera_worker_cls.assert_called_once_with(mock_robot, None)

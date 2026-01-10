@@ -286,3 +286,23 @@ class TestGitHubWriteFileToolExecution:
 
         assert "error" in result
         assert "Failed to write" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_github_write_file_create_dirs_false_parent_exists(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_write_file with create_dirs=False when parent exists."""
+        tool = GitHubWriteFileTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        repo_path = repos_dir / "myrepo"
+        repo_path.mkdir()
+        # Create the parent directory so create_dirs=False path succeeds
+        (repo_path / "existing_dir").mkdir()
+
+        with patch("reachy_mini_conversation_app.tools.github_write_file.REPOS_DIR", repos_dir):
+            result = await tool(mock_deps, repo="myrepo", path="existing_dir/file.txt", content="content", create_dirs=False)
+
+        # Should succeed because parent exists
+        assert result["status"] == "success"
+        assert result["action"] == "created"
+        assert (repo_path / "existing_dir" / "file.txt").exists()

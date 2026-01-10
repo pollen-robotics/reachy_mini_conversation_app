@@ -871,3 +871,655 @@ class TestConstants:
         from reachy_mini_conversation_app.moves import CONTROL_LOOP_FREQUENCY_HZ
 
         assert CONTROL_LOOP_FREQUENCY_HZ == 100.0
+
+
+class TestMovementManagerSetMovingState:
+    """Tests for MovementManager set_moving_state method."""
+
+    def test_set_moving_state_queues_command(self, mock_reachy_mini: dict) -> None:
+        """Test set_moving_state adds command to queue."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        manager.set_moving_state(2.5)
+
+        cmd, payload = manager._command_queue.get_nowait()
+        assert cmd == "set_moving_state"
+        assert payload == 2.5
+
+
+class TestMovementManagerApplyPendingOffsets:
+    """Tests for MovementManager _apply_pending_offsets method."""
+
+    def test_apply_speech_offsets_when_dirty(self, mock_reachy_mini: dict) -> None:
+        """Test _apply_pending_offsets updates speech offsets when dirty."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        # Set pending offsets
+        offsets = (0.1, 0.2, 0.3, 0.01, 0.02, 0.03)
+        manager._pending_speech_offsets = offsets
+        manager._speech_offsets_dirty = True
+
+        manager._apply_pending_offsets()
+
+        assert manager.state.speech_offsets == offsets
+        assert manager._speech_offsets_dirty is False
+
+    def test_apply_face_offsets_when_dirty(self, mock_reachy_mini: dict) -> None:
+        """Test _apply_pending_offsets updates face offsets when dirty."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        # Set pending face offsets
+        offsets = (0.05, 0.06, 0.07, 0.005, 0.006, 0.007)
+        manager._pending_face_offsets = offsets
+        manager._face_offsets_dirty = True
+
+        manager._apply_pending_offsets()
+
+        assert manager.state.face_tracking_offsets == offsets
+        assert manager._face_offsets_dirty is False
+
+
+class TestMovementManagerHandleCommandExtended:
+    """Extended tests for MovementManager _handle_command method."""
+
+    def test_handle_queue_move_invalid_payload(self, mock_reachy_mini: dict) -> None:
+        """Test handling queue_move with invalid payload logs warning."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        # Pass something that's not a Move instance
+        manager._handle_command("queue_move", "not_a_move", time.monotonic())
+
+        # Queue should remain empty
+        assert len(manager.move_queue) == 0
+
+    def test_handle_queue_move_with_duration_conversion_error(self, mock_reachy_mini: dict) -> None:
+        """Test handling queue_move when duration conversion fails."""
+        from reachy_mini_conversation_app.moves import MovementManager
+        from reachy_mini.motion.move import Move
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        mock_move = MagicMock(spec=Move)
+        mock_move.duration = "invalid"  # Can't convert to float
+
+        manager._handle_command("queue_move", mock_move, time.monotonic())
+
+        # Move should still be queued
+        assert len(manager.move_queue) == 1
+
+    def test_handle_queue_move_without_duration(self, mock_reachy_mini: dict) -> None:
+        """Test handling queue_move without duration attribute."""
+        from reachy_mini_conversation_app.moves import MovementManager
+        from reachy_mini.motion.move import Move
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        mock_move = MagicMock(spec=Move)
+        del mock_move.duration  # Remove duration attribute
+
+        manager._handle_command("queue_move", mock_move, time.monotonic())
+
+        assert len(manager.move_queue) == 1
+
+    def test_handle_set_moving_state_valid(self, mock_reachy_mini: dict) -> None:
+        """Test handling set_moving_state with valid duration."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+        initial_activity = manager.state.last_activity_time
+
+        time.sleep(0.01)
+        manager._handle_command("set_moving_state", 1.5, time.monotonic())
+
+        # Activity should be updated
+        assert manager.state.last_activity_time > initial_activity
+
+    def test_handle_set_moving_state_invalid(self, mock_reachy_mini: dict) -> None:
+        """Test handling set_moving_state with invalid duration."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+        initial_activity = manager.state.last_activity_time
+
+        manager._handle_command("set_moving_state", "invalid", time.monotonic())
+
+        # Activity should not be updated
+        assert manager.state.last_activity_time == initial_activity
+
+    def test_handle_mark_activity(self, mock_reachy_mini: dict) -> None:
+        """Test handling mark_activity command."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+        initial_activity = manager.state.last_activity_time
+
+        time.sleep(0.01)
+        manager._handle_command("mark_activity", None, time.monotonic())
+
+        assert manager.state.last_activity_time > initial_activity
+
+    def test_handle_set_listening_debounce(self, mock_reachy_mini: dict) -> None:
+        """Test set_listening is debounced."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        current_time = time.monotonic()
+        # Set last toggle time to now (within debounce period)
+        manager._last_listening_toggle_time = current_time
+
+        manager._handle_command("set_listening", True, current_time)
+
+        # Should still be False due to debounce
+        assert manager._is_listening is False
+
+    def test_handle_set_listening_same_state(self, mock_reachy_mini: dict) -> None:
+        """Test set_listening does nothing when state unchanged."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        current_time = time.monotonic()
+        manager._last_listening_toggle_time = current_time - 1.0  # Past debounce
+        manager._is_listening = True  # Already listening
+
+        # Try to set to True again
+        manager._handle_command("set_listening", True, current_time)
+
+        # Should remain True but nothing special happens
+        assert manager._is_listening is True
+
+    def test_handle_set_listening_unfreeze(self, mock_reachy_mini: dict) -> None:
+        """Test set_listening unfreezing resets blend."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        current_time = time.monotonic()
+        manager._last_listening_toggle_time = current_time - 1.0
+        manager._is_listening = True  # Currently listening
+
+        # Disable listening (unfreeze)
+        manager._handle_command("set_listening", False, current_time)
+
+        assert manager._is_listening is False
+        assert manager._antenna_unfreeze_blend == 0.0
+
+
+class TestMovementManagerBreathing:
+    """Tests for MovementManager breathing functionality."""
+
+    def test_breathing_starts_after_idle(self, mock_reachy_mini: dict) -> None:
+        """Test breathing starts after idle delay."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        mock_robot.get_current_joint_positions.return_value = (
+            np.eye(4, dtype=np.float32),
+            np.array([0.0, 0.0]),
+        )
+        mock_robot.get_current_head_pose.return_value = np.eye(4, dtype=np.float32)
+
+        manager = MovementManager(current_robot=mock_robot)
+        manager.idle_inactivity_delay = 0.01  # Very short delay for testing
+
+        # Set activity time far in the past
+        manager.state.last_activity_time = time.monotonic() - 10.0
+
+        manager._manage_breathing(time.monotonic())
+
+        # Breathing should have been activated
+        assert manager._breathing_active is True
+        assert len(manager.move_queue) > 0
+
+    def test_breathing_exception_handling(self, mock_reachy_mini: dict) -> None:
+        """Test breathing handles exceptions gracefully."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        mock_robot.get_current_joint_positions.side_effect = Exception("Robot error")
+
+        manager = MovementManager(current_robot=mock_robot)
+        manager.idle_inactivity_delay = 0.01
+
+        # Set activity time far in the past
+        manager.state.last_activity_time = time.monotonic() - 10.0
+
+        # Should not raise
+        manager._manage_breathing(time.monotonic())
+
+        # Breathing should not be active due to error
+        assert manager._breathing_active is False
+
+    def test_breathing_stops_on_new_move(self, mock_reachy_mini: dict) -> None:
+        """Test breathing stops when new move is queued."""
+        from reachy_mini_conversation_app.moves import MovementManager, BreathingMove
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        # Set up breathing move as current
+        breathing = BreathingMove(
+            interpolation_start_pose=np.eye(4, dtype=np.float32),
+            interpolation_start_antennas=(0.0, 0.0),
+        )
+        manager.state.current_move = breathing
+        manager._breathing_active = True
+
+        # Add a new move to queue
+        mock_move = MagicMock()
+        mock_move.duration = 1.0
+        manager.move_queue.append(mock_move)
+
+        manager._manage_breathing(time.monotonic())
+
+        # Breathing should be stopped
+        assert manager._breathing_active is False
+        assert manager.state.current_move is None
+
+
+class TestMovementManagerGetPrimaryPoseExtended:
+    """Extended tests for _get_primary_pose."""
+
+    def test_get_primary_pose_none_head(self, mock_reachy_mini: dict) -> None:
+        """Test _get_primary_pose handles None head from move."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        mock_move = MagicMock()
+        mock_move.evaluate.return_value = (None, np.array([0.0, 0.0]), 0.0)
+        manager.state.current_move = mock_move
+        manager.state.move_start_time = time.monotonic()
+
+        pose = manager._get_primary_pose(time.monotonic())
+
+        # Should have a valid pose despite None head
+        assert pose is not None
+        assert pose[0] is not None
+
+    def test_get_primary_pose_none_antennas(self, mock_reachy_mini: dict) -> None:
+        """Test _get_primary_pose handles None antennas from move."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        mock_move = MagicMock()
+        mock_move.evaluate.return_value = (np.eye(4, dtype=np.float32), None, 0.0)
+        manager.state.current_move = mock_move
+        manager.state.move_start_time = time.monotonic()
+
+        pose = manager._get_primary_pose(time.monotonic())
+
+        # Should have default antennas
+        assert pose[1] == (0.0, 0.0)
+
+    def test_get_primary_pose_none_body_yaw(self, mock_reachy_mini: dict) -> None:
+        """Test _get_primary_pose handles None body_yaw from move."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        mock_move = MagicMock()
+        mock_move.evaluate.return_value = (np.eye(4, dtype=np.float32), np.array([0.0, 0.0]), None)
+        manager.state.current_move = mock_move
+        manager.state.move_start_time = time.monotonic()
+
+        pose = manager._get_primary_pose(time.monotonic())
+
+        # Should have default body_yaw
+        assert pose[2] == 0.0
+
+    def test_get_primary_pose_no_last_pose(self, mock_reachy_mini: dict) -> None:
+        """Test _get_primary_pose creates neutral when no last pose."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        # Clear last primary pose
+        manager.state.last_primary_pose = None
+
+        pose = manager._get_primary_pose(time.monotonic())
+
+        # Should create neutral pose
+        assert pose is not None
+        assert manager.state.last_primary_pose is not None
+
+
+class TestMovementManagerBlendedAntennasExtended:
+    """Extended tests for _calculate_blended_antennas."""
+
+    def test_blended_antennas_zero_duration(self, mock_reachy_mini: dict) -> None:
+        """Test antennas blending with zero duration."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        manager._is_listening = False
+        manager._antenna_blend_duration = 0.0  # Zero duration
+        manager._listening_antennas = (0.5, -0.5)
+        manager._antenna_unfreeze_blend = 0.0
+
+        result = manager._calculate_blended_antennas((0.1, -0.1))
+
+        # Should immediately be at target
+        assert result == pytest.approx((0.1, -0.1))
+
+
+class TestMovementManagerIssueControlCommand:
+    """Tests for _issue_control_command error handling."""
+
+    def test_issue_control_command_error(self, mock_reachy_mini: dict) -> None:
+        """Test _issue_control_command handles errors."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        mock_robot.set_target.side_effect = Exception("Robot error")
+
+        manager = MovementManager(current_robot=mock_robot)
+        manager._last_set_target_err = 0  # Long time ago
+
+        # Should not raise
+        manager._issue_control_command(
+            np.eye(4, dtype=np.float32), (0.0, 0.0), 0.0
+        )
+
+        # Error should be logged
+        mock_robot.set_target.assert_called_once()
+
+    def test_issue_control_command_error_suppression(self, mock_reachy_mini: dict) -> None:
+        """Test _issue_control_command suppresses repeated errors."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        mock_robot.set_target.side_effect = Exception("Robot error")
+
+        manager = MovementManager(current_robot=mock_robot)
+        # Set last error to very recent (within suppression interval)
+        manager._last_set_target_err = time.monotonic()
+        manager._set_target_err_suppressed = 0
+
+        manager._issue_control_command(
+            np.eye(4, dtype=np.float32), (0.0, 0.0), 0.0
+        )
+
+        # Error counter should be incremented
+        assert manager._set_target_err_suppressed == 1
+
+    def test_issue_control_command_error_suppression_logged(self, mock_reachy_mini: dict) -> None:
+        """Test _issue_control_command logs suppressed error count."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        mock_robot.set_target.side_effect = Exception("Robot error")
+
+        manager = MovementManager(current_robot=mock_robot)
+        # Set last error to past suppression interval
+        manager._last_set_target_err = time.monotonic() - 10.0
+        manager._set_target_err_suppressed = 5  # Some suppressed errors
+
+        manager._issue_control_command(
+            np.eye(4, dtype=np.float32), (0.0, 0.0), 0.0
+        )
+
+        # Suppressed count should be reset
+        assert manager._set_target_err_suppressed == 0
+
+
+class TestMovementManagerMaybeLogFrequency:
+    """Tests for _maybe_log_frequency."""
+
+    def test_maybe_log_frequency_logs_at_interval(self, mock_reachy_mini: dict) -> None:
+        """Test _maybe_log_frequency logs at correct interval."""
+        from reachy_mini_conversation_app.moves import MovementManager, LoopFrequencyStats
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        stats = LoopFrequencyStats(mean=50.0, m2=10.0, min_freq=45.0, count=100, last_freq=48.0)
+        print_interval = 200
+
+        # Should log at interval
+        manager._maybe_log_frequency(200, print_interval, stats)
+
+        # Stats should be reset
+        assert stats.count == 0
+
+    def test_maybe_log_frequency_skips_non_interval(self, mock_reachy_mini: dict) -> None:
+        """Test _maybe_log_frequency skips non-interval loops."""
+        from reachy_mini_conversation_app.moves import MovementManager, LoopFrequencyStats
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        stats = LoopFrequencyStats(mean=50.0, m2=10.0, min_freq=45.0, count=100, last_freq=48.0)
+        print_interval = 200
+
+        # Should not log
+        manager._maybe_log_frequency(199, print_interval, stats)
+
+        # Stats should not be reset
+        assert stats.count == 100
+
+
+class TestMovementManagerUpdateFaceTracking:
+    """Tests for _update_face_tracking."""
+
+    def test_update_face_tracking_with_camera_worker(self, mock_reachy_mini: dict) -> None:
+        """Test _update_face_tracking with camera worker."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        mock_camera = MagicMock()
+        mock_camera.get_face_tracking_offsets.return_value = (0.1, 0.2, 0.3, 0.01, 0.02, 0.03)
+
+        manager = MovementManager(current_robot=mock_robot, camera_worker=mock_camera)
+
+        manager._update_face_tracking(time.monotonic())
+
+        assert manager.state.face_tracking_offsets == (0.1, 0.2, 0.3, 0.01, 0.02, 0.03)
+
+
+class TestMovementManagerStopExtended:
+    """Extended tests for stop method."""
+
+    def test_stop_when_not_running(self, mock_reachy_mini: dict) -> None:
+        """Test stop does nothing when not running."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        # Stop without starting
+        manager.stop()
+
+        # goto_target should not be called
+        mock_robot.goto_target.assert_not_called()
+
+    def test_stop_goto_target_exception(self, mock_reachy_mini: dict) -> None:
+        """Test stop handles goto_target exception."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        mock_robot.goto_target.side_effect = Exception("Robot error")
+
+        manager = MovementManager(current_robot=mock_robot)
+
+        manager.start()
+        time.sleep(0.05)
+
+        # Should not raise
+        manager.stop()
+
+        # Thread should be stopped despite error
+        assert manager._thread is None or not manager._thread.is_alive()
+
+
+
+class TestMovementManagerBranchCoverage:
+    """Tests for edge case branch coverage."""
+
+    def test_update_frequency_stats_zero_period(self, mock_reachy_mini: dict) -> None:
+        """Test _update_frequency_stats with zero period (branch 659->666)."""
+        from reachy_mini_conversation_app.moves import MovementManager, LoopFrequencyStats
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        stats = LoopFrequencyStats()
+        initial_count = stats.count
+
+        # Call with same timestamps (period=0)
+        current_time = time.monotonic()
+        result = manager._update_frequency_stats(current_time, current_time, stats)
+
+        # Stats should not be updated
+        assert result.count == initial_count
+
+    def test_update_frequency_stats_negative_period(self, mock_reachy_mini: dict) -> None:
+        """Test _update_frequency_stats with negative period (branch 659->666)."""
+        from reachy_mini_conversation_app.moves import MovementManager, LoopFrequencyStats
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        stats = LoopFrequencyStats()
+        initial_count = stats.count
+
+        # Call with prev > current (negative period)
+        current_time = time.monotonic()
+        result = manager._update_frequency_stats(current_time, current_time + 1.0, stats)
+
+        # Stats should not be updated
+        assert result.count == initial_count
+
+    def test_blended_antennas_partial_blend(self, mock_reachy_mini: dict) -> None:
+        """Test _calculate_blended_antennas with partial blend (branch 627->633)."""
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        # Set up for partial blend (blend < 1.0 and not listening)
+        manager._is_listening = False
+        manager._antenna_blend_duration = 10.0  # Long duration
+        manager._listening_antennas = (0.5, -0.5)
+        manager._antenna_unfreeze_blend = 0.3  # Partial blend
+        manager._antenna_blend_start = time.monotonic() - 1.0
+
+        target = (0.1, -0.1)
+        result = manager._calculate_blended_antennas(target)
+
+        # Blend should be partially mixed
+        # The new_blend will advance from 0.3 but not reach 1.0
+        # So _listening_antennas should NOT be updated to target
+        # (because new_blend < 1.0)
+        assert manager._listening_antennas == (0.5, -0.5)
+
+    def test_schedule_next_tick_zero_sleep(self, mock_reachy_mini: dict) -> None:
+        """Test _schedule_next_tick when computation takes longer than target (branch 846->812)."""
+        from reachy_mini_conversation_app.moves import MovementManager, LoopFrequencyStats
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        # Set a very short target period
+        manager.target_period = 0.001  # 1ms
+
+        stats = LoopFrequencyStats()
+
+        # Mock _now to simulate long computation time
+        # _schedule_next_tick calls self._now() once at line 670
+        # computation_time = self._now() - loop_start
+        # loop_start will be passed as 0.0, so we need _now() to return 1.0
+        manager._now = lambda: 1.0  # Simulates computation_time = 1.0
+
+        sleep_time, result_stats = manager._schedule_next_tick(0.0, stats)
+
+        # Sleep time should be 0 (max(0.0, 0.001 - 1.0) = 0.0)
+        assert sleep_time == 0.0
+
+    def test_working_loop_zero_sleep_skips_sleep(self) -> None:
+        """Test working_loop skips sleep when sleep_time <= 0 (branch 846->812)."""
+        from reachy_mini_conversation_app.moves import MovementManager, LoopFrequencyStats
+        import threading
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        loop_iterations = [0]
+
+        def mock_schedule_returning_zero(loop_start: float, stats: LoopFrequencyStats) -> tuple:
+            """Return 0 sleep time to skip sleep call."""
+            loop_iterations[0] += 1
+            # After a few iterations, stop the loop
+            if loop_iterations[0] >= 3:
+                manager._stop_event.set()
+            return (0.0, stats)
+
+        manager._schedule_next_tick = mock_schedule_returning_zero
+
+        # Run the control loop in a thread
+        manager._stop_event.clear()
+        thread = threading.Thread(target=manager.working_loop, daemon=True)
+        thread.start()
+
+        # Wait for thread to finish
+        thread.join(timeout=2.0)
+
+        # Should have run at least 3 iterations
+        assert loop_iterations[0] >= 3
+
+    def test_stop_thread_becomes_none_between_check_and_join(self) -> None:
+        """Test stop() when _thread becomes None between initial check and join (branch 741->744).
+
+        This tests the defensive code path where _thread could theoretically become None
+        after passing the initial is_alive() check but before the join() call.
+        """
+        from reachy_mini_conversation_app.moves import MovementManager
+
+        mock_robot = MagicMock()
+        manager = MovementManager(current_robot=mock_robot)
+
+        # Create a mock thread that is "alive"
+        mock_thread = MagicMock()
+        mock_thread.is_alive.return_value = True
+        manager._thread = mock_thread
+
+        # When clear_move_queue is called (line 737), set _thread to None
+        # This simulates a race condition where thread becomes None between checks
+        def clear_and_nullify():
+            manager._thread = None
+
+        manager.clear_move_queue = clear_and_nullify
+
+        # stop() should handle this gracefully
+        manager.stop()
+
+        # Thread should be None (was set by our side effect)
+        assert manager._thread is None

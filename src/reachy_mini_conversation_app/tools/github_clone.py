@@ -105,12 +105,11 @@ class GitHubCloneTool(Tool):
 
             # Configure git user if GITHUB_DEFAULT_OWNER is set
             owner = config.GITHUB_DEFAULT_OWNER
-            email = config.GITHUB_OWNER_EMAIL or (f"{owner}@users.noreply.github.com" if owner else None)
             if owner:
+                email = config.GITHUB_OWNER_EMAIL or f"{owner}@users.noreply.github.com"
                 with repo.config_writer() as git_config:
                     git_config.set_value("user", "name", owner)
-                    if email:
-                        git_config.set_value("user", "email", email)
+                    git_config.set_value("user", "email", email)
 
             logger.info(f"Cloned {full_repo} to {local_path}")
             return {

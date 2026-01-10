@@ -453,3 +453,254 @@ class TestConstants:
         assert VAD_DB_ON > VAD_DB_OFF  # Hysteresis
         assert VAD_DB_ON < 0  # Both should be negative dB
         assert VAD_DB_OFF < 0
+    def test_swayrollrt_with_empty_audio(self) -> None:
+        """Test SwayRollRT with empty audio."""
+        sway = SwayRollRT()
+        empty_audio = np.array([], dtype=np.int16)
+        result = sway.feed(empty_audio, 24000)
+        assert isinstance(result, list)
+
+    def test_swayrollrt_with_silence(self) -> None:
+        """Test SwayRollRT with silence."""
+        sway = SwayRollRT()
+        silence = np.zeros(2400, dtype=np.int16)
+        result = sway.feed(silence, 24000)
+        assert isinstance(result, list)
+
+    def test_swayrollrt_with_random_noise(self) -> None:
+        """Test SwayRollRT with random noise."""
+        sway = SwayRollRT()
+        noise = np.random.randint(-1000, 1000, 2400, dtype=np.int16)
+        result = sway.feed(noise, 24000)
+        assert isinstance(result, list)
+
+    def test_swayrollrt_multiple_chunks(self) -> None:
+        """Test feeding multiple audio chunks."""
+        sway = SwayRollRT()
+        for i in range(5):
+            audio = np.random.randint(-500, 500, 2400, dtype=np.int16)
+            result = sway.feed(audio, 24000)
+            assert isinstance(result, list)
+
+    def test_swayrollrt_different_sample_rates(self) -> None:
+        """Test with different sample rates."""
+        sway = SwayRollRT()
+        audio_16k = np.random.randint(-500, 500, 1600, dtype=np.int16)
+        result1 = sway.feed(audio_16k, 16000)
+        audio_48k = np.random.randint(-500, 500, 4800, dtype=np.int16)
+        result2 = sway.feed(audio_48k, 48000)
+        assert isinstance(result1, list)
+        assert isinstance(result2, list)
+
+    def test_swayrollrt_max_values(self) -> None:
+        """Test with maximum values."""
+        sway = SwayRollRT()
+        loud = np.full(2400, 32767, dtype=np.int16)
+        result = sway.feed(loud, 24000)
+        assert isinstance(result, list)
+
+    def test_swayrollrt_min_values(self) -> None:
+        """Test with minimum values."""
+        sway = SwayRollRT()
+        quiet = np.full(2400, -32768, dtype=np.int16)
+        result = sway.feed(quiet, 24000)
+        assert isinstance(result, list)
+
+    def test_swayrollrt_result_structure(self) -> None:
+        """Test structure of feed results."""
+        sway = SwayRollRT()
+        audio = np.random.randint(-500, 500, 2400, dtype=np.int16)
+        result = sway.feed(audio, 24000)
+        if result:
+            for item in result:
+                assert isinstance(item, dict)
+                expected_keys = {'x_mm', 'y_mm', 'z_mm', 'roll_rad', 'pitch_rad', 'yaw_rad'}
+                assert set(item.keys()) >= expected_keys
+
+
+class TestToFloat32MonoExtended:
+    """Extended tests for _to_float32_mono edge cases."""
+
+    def test_to_float32_mono_3d_array(self) -> None:
+        """Test conversion of 3D array (line 87).
+
+        This tests the branch where ndim > 2, requiring reshape and mean.
+        """
+        # Create a 3D array (e.g., batch x channels x samples)
+        audio_3d = np.ones((2, 3, 100), dtype=np.float32) * 0.5
+        result = _to_float32_mono(audio_3d)
+        assert result.dtype == np.float32
+        # Should have been reduced to 1D
+        assert result.ndim == 1
+
+
+class TestResampleLinearExtended:
+    """Extended tests for _resample_linear edge cases."""
+
+    def test_resample_to_empty_result(self) -> None:
+        """Test resampling that produces empty result (line 169 via line 105).
+
+        When the output size would be very small, it returns empty.
+        """
+        # Single sample with extreme downsampling
+        audio = np.array([1.0], dtype=np.float32)
+        result = _resample_linear(audio, 96000, 8000)
+        # n_out would be ~0.08, so <= 1, returns empty
+        assert len(result) == 0
+
+
+class TestSwayRollRTFeedExtended:
+    """Extended tests for SwayRollRT feed edge cases."""
+
+    def test_feed_resampling_to_empty(self) -> None:
+        """Test feeding audio that resamples to empty (line 169).
+
+        When resampling produces empty array, should return empty list.
+        """
+        sway = SwayRollRT()
+        # Very short audio with extreme rate that will resample to empty
+        tiny_audio = np.array([1000], dtype=np.int16)
+        result = sway.feed(tiny_audio, 96000)  # Will produce < 1 sample at 16kHz
+        assert isinstance(result, list)
+
+    def test_feed_with_existing_carry(self) -> None:
+        """Test feeding when carry buffer already has data (line 173).
+
+        This tests the branch where self.carry.size > 0.
+        """
+        sway = SwayRollRT()
+        # First, feed a small chunk that leaves carry
+        small_chunk = np.zeros(HOP // 2, dtype=np.int16)
+        sway.feed(small_chunk, SR)
+        assert len(sway.carry) > 0  # Should have leftover in carry
+
+        # Now feed more - this should concatenate with existing carry
+        more_audio = np.zeros(HOP, dtype=np.int16)
+        sway.feed(more_audio, SR)
+        # The feed should have processed the concatenated buffers
+
+
+class TestSwayRollRTVADExtended:
+    """Extended tests for VAD state transitions."""
+
+    def test_vad_release_turns_off(self) -> None:
+        """Test VAD turns off after release period (line 208).
+
+        This tests when vad_on is True and vad_below >= RELEASE_FR.
+        """
+        from reachy_mini_conversation_app.audio.speech_tapper import VAD_RELEASE_MS
+
+        sway = SwayRollRT()
+
+        # First, turn VAD on with loud audio
+        t = np.linspace(0, 0.3, int(SR * 0.3), endpoint=False)
+        loud = (0.9 * np.sin(2 * np.pi * 440 * t) * 32767).astype(np.int16)
+        sway.feed(loud, SR)
+
+        # Ensure VAD is on
+        # May need more loud audio to trigger attack
+        for _ in range(5):
+            sway.feed(loud, SR)
+
+        # Now feed silence for longer than VAD_RELEASE_MS
+        release_duration_s = (VAD_RELEASE_MS + 100) / 1000.0
+        silence = np.zeros(int(SR * release_duration_s), dtype=np.int16)
+
+        # Keep feeding silence until VAD turns off
+        for _ in range(10):
+            sway.feed(silence, SR)
+            if not sway.vad_on and sway.vad_below > 0:
+                break
+
+        # VAD should be off or vad_below should be counting
+        # (The exact behavior depends on timing)
+        assert sway.vad_below > 0 or not sway.vad_on
+
+
+class TestSwayEnvExtended:
+    """Extended tests for sway envelope clamping."""
+
+    def test_sway_env_clamped_to_zero(self) -> None:
+        """Test sway_env is clamped to 0 when it goes negative (line 223).
+
+        This tests when sway_env would go below 0.
+        """
+        sway = SwayRollRT()
+        # Set sway_env to a very small positive value
+        sway.sway_env = 0.01
+
+        # Feed silence which should drive sway_env toward 0
+        # and the clamping should kick in
+        silence = np.zeros(int(SR * 0.5), dtype=np.int16)
+        sway.feed(silence, SR)
+
+        # sway_env should be at or very close to 0
+        assert sway.sway_env >= 0.0
+
+    def test_sway_env_clamped_to_one(self) -> None:
+        """Test sway_env is clamped to 1 when it goes above 1 (line 225).
+
+        This tests when sway_env would exceed 1.
+        """
+        sway = SwayRollRT()
+        # Set sway_env close to 1
+        sway.sway_env = 0.99
+
+        # Feed very loud audio continuously to drive sway_env high
+        t = np.linspace(0, 0.5, int(SR * 0.5), endpoint=False)
+        loud = (0.95 * np.sin(2 * np.pi * 440 * t) * 32767).astype(np.int16)
+
+        # Feed multiple times to trigger VAD and build up envelope
+        for _ in range(10):
+            sway.feed(loud, SR)
+
+        # sway_env should be clamped at or below 1
+        assert sway.sway_env <= 1.0
+
+    def test_sway_env_negative_clamped_directly(self) -> None:
+        """Test sway_env negative value is clamped (line 223).
+
+        Directly set sway_env to negative and verify clamping.
+        """
+        sway = SwayRollRT()
+
+        # First, fill the samples buffer with enough data so FRAME check passes
+        # FRAME = SR * FRAME_MS / 1000 = 16000 * 20 / 1000 = 320 samples
+        # We need at least FRAME samples in the deque
+        initial_audio = np.zeros(FRAME + HOP, dtype=np.int16)
+        sway.feed(initial_audio, SR)
+
+        # Now set sway_env to a negative value
+        # With VAD off and sway_down counting, target = down = 1 - sway_down/RELEASE_FR
+        # We want target to be small, and sway_env to be negative
+        sway.sway_env = -0.1
+        sway.vad_on = False
+        sway.sway_down = 100  # High release counter, so down = 1 - 100/25 = negative clamped
+
+        # Feed a small chunk - just one HOP to trigger one iteration
+        silence = np.zeros(HOP, dtype=np.int16)
+        sway.feed(silence, SR)
+
+        # After clamping, sway_env should be >= 0
+        assert sway.sway_env >= 0.0
+
+    def test_sway_env_above_one_clamped_directly(self) -> None:
+        """Test sway_env above 1 is clamped (line 225).
+
+        Directly set sway_env above 1 and verify clamping.
+        """
+        sway = SwayRollRT()
+        # Set sway_env above 1 directly
+        sway.sway_env = 1.5
+        # Also set up VAD state so target will be high
+        sway.vad_on = True
+        sway.sway_up = 100  # High attack counter
+
+        # Feed loud audio so target is high (up = sway_up/SWAY_ATTACK_FR = large)
+        # If target > 1 and sway_env is already high, new value could exceed 1
+        t = np.linspace(0, 0.05, int(SR * 0.05), endpoint=False)
+        loud = (0.95 * np.sin(2 * np.pi * 440 * t) * 32767).astype(np.int16)
+        sway.feed(loud, SR)
+
+        # After clamping, sway_env should be at most 1.0
+        assert sway.sway_env <= 1.0

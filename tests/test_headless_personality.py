@@ -161,6 +161,36 @@ class TestListPersonalities:
         assert "user_personalities/my_custom" in result
         assert "user_personalities" not in result
 
+    def test_list_personalities_skips_invalid_user_profiles(self, tmp_path: Path) -> None:
+        """Test that invalid user profiles are skipped (branch 53->52)."""
+        from reachy_mini_conversation_app.headless_personality import list_personalities
+
+        # Create user_personalities directory
+        user_dir = tmp_path / "user_personalities"
+        user_dir.mkdir()
+
+        # Create valid user profile
+        valid_profile = user_dir / "valid_profile"
+        valid_profile.mkdir()
+        (valid_profile / "instructions.txt").write_text("Valid instructions")
+
+        # Create invalid user profile (no instructions.txt)
+        invalid_profile = user_dir / "invalid_profile"
+        invalid_profile.mkdir()
+
+        # Create a file instead of directory (should be skipped)
+        (user_dir / "just_a_file.txt").write_text("not a profile")
+
+        with patch(
+            "reachy_mini_conversation_app.headless_personality._profiles_root",
+            return_value=tmp_path,
+        ):
+            result = list_personalities()
+
+        assert "user_personalities/valid_profile" in result
+        assert "user_personalities/invalid_profile" not in result
+        assert "user_personalities/just_a_file.txt" not in result
+
     def test_list_personalities_handles_exception(self, tmp_path: Path) -> None:
         """Test that exceptions are handled gracefully."""
         from reachy_mini_conversation_app.headless_personality import list_personalities
@@ -335,6 +365,39 @@ class TestAvailableToolsFor:
 
         # Should return empty list on exception
         assert result == []
+
+    def test_available_tools_for_handles_local_tools_exception(self, tmp_path: Path) -> None:
+        """Test that exceptions when reading local tools are handled (lines 92-93)."""
+        from reachy_mini_conversation_app.headless_personality import available_tools_for
+
+        # Create tools directory with shared tools
+        tools_dir = tmp_path / "tools"
+        tools_dir.mkdir()
+        (tools_dir / "shared_tool.py").write_text("# shared")
+
+        # Create profile directory
+        profile_dir = tmp_path / "profiles" / "my_profile"
+        profile_dir.mkdir(parents=True)
+
+        with patch(
+            "reachy_mini_conversation_app.headless_personality._tools_dir",
+            return_value=tools_dir,
+        ):
+            with patch(
+                "reachy_mini_conversation_app.headless_personality._profiles_root",
+                return_value=tmp_path / "profiles",
+            ):
+                # Mock resolve_profile_dir to return a path that raises on glob
+                mock_path = MagicMock()
+                mock_path.glob.side_effect = PermissionError("No access to profile")
+                with patch(
+                    "reachy_mini_conversation_app.headless_personality.resolve_profile_dir",
+                    return_value=mock_path,
+                ):
+                    result = available_tools_for("my_profile")
+
+        # Should still return shared tools even if local tools fail
+        assert "shared_tool" in result
 
 
 class TestWriteProfile:

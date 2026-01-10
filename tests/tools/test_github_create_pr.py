@@ -452,3 +452,234 @@ class TestGitHubCreatePRToolExecution:
 
         assert "error" in result
         assert "Failed to create" in result["error"]
+
+    def test_get_current_branch_exception(self, tmp_path: Path) -> None:
+        """Test _get_current_branch handles exception (lines 90-91)."""
+        tool = GitHubCreatePRTool()
+        repos_dir = tmp_path / "repos"
+        repos_dir.mkdir()
+        repo_path = repos_dir / "myrepo"
+        repo_path.mkdir()
+
+        with patch("reachy_mini_conversation_app.tools.github_create_pr.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_create_pr.Repo") as mock_repo:
+                mock_repo.side_effect = Exception("Unexpected")
+                result = tool._get_current_branch("myrepo")
+                assert result is None
+
+    @pytest.mark.asyncio
+    async def test_github_create_pr_issue_link_no_body(self, mock_deps: ToolDependencies) -> None:
+        """Test github_create_pr links issue without body (line 142)."""
+        tool = GitHubCreatePRTool()
+
+        mock_pr = MagicMock()
+        mock_pr.number = 1
+        mock_pr.title = "Fix issue"
+        mock_pr.html_url = "url"
+
+        mock_gh_repo = MagicMock()
+        mock_gh_repo.default_branch = "main"
+        mock_gh_repo.owner.login = "owner"
+        mock_gh_repo.get_branch.return_value = MagicMock()
+        mock_gh_repo.get_pulls.return_value = []
+        mock_gh_repo.create_pull.return_value = mock_pr
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_gh_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_create_pr.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_create_pr.Github", return_value=mock_github):
+                result = await tool(
+                    mock_deps,
+                    repo="owner/repo",
+                    title="Fix issue",
+                    body="",  # Empty body
+                    head="feature",
+                    issue_number=123,
+                    confirmed=True,
+                )
+
+        assert result["status"] == "success"
+        # Body should just be "Closes #123"
+        call_args = mock_gh_repo.create_pull.call_args
+        assert call_args.kwargs["body"] == "Closes #123"
+
+    @pytest.mark.asyncio
+    async def test_github_create_pr_with_base_specified(self, mock_deps: ToolDependencies) -> None:
+        """Test github_create_pr with base branch specified (branch 149->153)."""
+        tool = GitHubCreatePRTool()
+
+        mock_pr = MagicMock()
+        mock_pr.number = 1
+        mock_pr.title = "Test PR"
+        mock_pr.html_url = "url"
+
+        mock_gh_repo = MagicMock()
+        mock_gh_repo.default_branch = "main"  # Should not be used
+        mock_gh_repo.owner.login = "owner"
+        mock_gh_repo.get_branch.return_value = MagicMock()
+        mock_gh_repo.get_pulls.return_value = []
+        mock_gh_repo.create_pull.return_value = mock_pr
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_gh_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_create_pr.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_create_pr.Github", return_value=mock_github):
+                result = await tool(
+                    mock_deps,
+                    repo="owner/repo",
+                    title="Test PR",
+                    head="feature",
+                    base="develop",  # Explicitly specify base
+                    confirmed=True,
+                )
+
+        assert result["status"] == "success"
+        assert result["base"] == "develop"
+        call_args = mock_gh_repo.create_pull.call_args
+        assert call_args.kwargs["base"] == "develop"
+
+    @pytest.mark.asyncio
+    async def test_github_create_pr_get_branch_non_404_error(self, mock_deps: ToolDependencies) -> None:
+        """Test github_create_pr reraises non-404 error on get_branch (line 161)."""
+        tool = GitHubCreatePRTool()
+
+        mock_gh_repo = MagicMock()
+        mock_gh_repo.get_branch.side_effect = GithubException(500, {"message": "Internal Error"}, None)
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_gh_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_create_pr.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_create_pr.Github", return_value=mock_github):
+                result = await tool(
+                    mock_deps,
+                    repo="owner/repo",
+                    title="Test PR",
+                    head="feature",
+                    confirmed=True,
+                )
+
+        # Should propagate as GitHub API error (not branch not found)
+        assert "error" in result
+        assert "GitHub API error" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_github_create_pr_422_other_error(self, mock_deps: ToolDependencies) -> None:
+        """Test github_create_pr handles 422 error without 'No commits' (line 209)."""
+        tool = GitHubCreatePRTool()
+
+        mock_gh_repo = MagicMock()
+        mock_gh_repo.default_branch = "main"
+        mock_gh_repo.owner.login = "owner"
+        mock_gh_repo.get_branch.return_value = MagicMock()
+        mock_gh_repo.get_pulls.return_value = []
+        mock_gh_repo.create_pull.side_effect = GithubException(
+            422, {"message": "Validation failed: base branch is invalid"}, None
+        )
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_gh_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_create_pr.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_create_pr.Github", return_value=mock_github):
+                result = await tool(
+                    mock_deps,
+                    repo="owner/repo",
+                    title="Test PR",
+                    head="feature",
+                    confirmed=True,
+                )
+
+        assert "error" in result
+        assert "Could not create PR" in result["error"]
+        assert "hint" in result
+
+    @pytest.mark.asyncio
+    async def test_github_create_pr_other_github_error(self, mock_deps: ToolDependencies) -> None:
+        """Test github_create_pr handles other GitHub API error (line 216)."""
+        tool = GitHubCreatePRTool()
+
+        mock_gh_repo = MagicMock()
+        mock_gh_repo.default_branch = "main"
+        mock_gh_repo.owner.login = "owner"
+        mock_gh_repo.get_branch.return_value = MagicMock()
+        mock_gh_repo.get_pulls.return_value = []
+        mock_gh_repo.create_pull.side_effect = GithubException(
+            500, {"message": "Internal Server Error"}, None
+        )
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_gh_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_create_pr.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_create_pr.Github", return_value=mock_github):
+                result = await tool(
+                    mock_deps,
+                    repo="owner/repo",
+                    title="Test PR",
+                    head="feature",
+                    confirmed=True,
+                )
+
+        assert "error" in result
+        assert "GitHub API error" in result["error"]
+        assert "Internal Server Error" in result["error"]
+
+
+class TestGitHubCreatePRToolBranchCoverage:
+    """Tests for branch coverage edge cases."""
+
+    @pytest.fixture
+    def mock_deps(self) -> ToolDependencies:
+        """Create mock tool dependencies."""
+        return ToolDependencies(
+            reachy_mini=MagicMock(),
+            movement_manager=MagicMock(),
+        )
+
+    @pytest.mark.asyncio
+    async def test_create_pr_no_head_and_current_branch_succeeds(self, mock_deps: ToolDependencies) -> None:
+        """Test create PR when head not specified but _get_current_branch succeeds (branch 131->137).
+
+        This tests the branch where line 131 evaluates to False (head is truthy after call).
+        """
+        tool = GitHubCreatePRTool()
+
+        mock_pr = MagicMock()
+        mock_pr.number = 99
+        mock_pr.title = "Auto-detected branch PR"
+        mock_pr.html_url = "https://github.com/owner/repo/pull/99"
+
+        mock_gh_repo = MagicMock()
+        mock_gh_repo.default_branch = "main"
+        mock_gh_repo.owner.login = "owner"
+        mock_gh_repo.get_branch.return_value = MagicMock()
+        mock_gh_repo.get_pulls.return_value = []
+        mock_gh_repo.create_pull.return_value = mock_pr
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_gh_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_create_pr.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_create_pr.Github", return_value=mock_github):
+                # Patch _get_current_branch to return a valid branch (not None)
+                with patch.object(tool, "_get_current_branch", return_value="auto-detected-branch"):
+                    result = await tool(
+                        mock_deps,
+                        repo="owner/repo",
+                        title="Test PR",
+                        # head is not specified - will be auto-detected
+                        confirmed=True,
+                    )
+
+        assert result["status"] == "success"
+        assert result["head"] == "auto-detected-branch"
+        mock_gh_repo.create_pull.assert_called_once()

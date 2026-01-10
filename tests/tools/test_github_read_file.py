@@ -360,6 +360,201 @@ class TestGitHubReadFileAnalysis:
         assert "not configured" in result["analysis_error"].lower()
 
 
+class TestGitHubReadFileAnalysisErrors:
+    """Tests for AI analysis error handling."""
+
+    @pytest.fixture
+    def mock_deps(self) -> ToolDependencies:
+        """Create mock tool dependencies."""
+        return ToolDependencies(
+            reachy_mini=MagicMock(),
+            movement_manager=MagicMock(),
+        )
+
+    @pytest.fixture
+    def setup_repo(self, tmp_path: Path) -> Path:
+        """Set up test repo with a file."""
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        repo_path = repos_dir / "myrepo"
+        repo_path.mkdir()
+        test_file = repo_path / "test.py"
+        test_file.write_text("def hello(): pass")
+        return repos_dir
+
+    @pytest.mark.asyncio
+    async def test_claude_authentication_error(self, mock_deps: ToolDependencies, setup_repo: Path) -> None:
+        """Test Claude AuthenticationError handling (line 117-118)."""
+        import anthropic
+        tool = GitHubReadFileTool()
+
+        with patch("reachy_mini_conversation_app.tools.github_read_file.REPOS_DIR", setup_repo):
+            with patch("reachy_mini_conversation_app.tools.github_read_file.config") as mock_config:
+                mock_config.ANTHROPIC_API_KEY = "invalid-key"
+                mock_config.ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+                with patch("reachy_mini_conversation_app.tools.github_read_file.anthropic.Anthropic") as mock_cls:
+                    mock_client = MagicMock()
+                    mock_client.messages.create.side_effect = anthropic.AuthenticationError(
+                        message="Invalid API key", body=None, response=MagicMock()
+                    )
+                    mock_cls.return_value = mock_client
+                    result = await tool(mock_deps, repo="myrepo", path="test.py", analyze=True)
+
+        assert result["status"] == "success"
+        assert "analysis_error" in result
+        assert "Invalid ANTHROPIC_API_KEY" in result["analysis_error"]
+
+    @pytest.mark.asyncio
+    async def test_claude_rate_limit_error(self, mock_deps: ToolDependencies, setup_repo: Path) -> None:
+        """Test Claude RateLimitError handling (line 119-120)."""
+        import anthropic
+        tool = GitHubReadFileTool()
+
+        with patch("reachy_mini_conversation_app.tools.github_read_file.REPOS_DIR", setup_repo):
+            with patch("reachy_mini_conversation_app.tools.github_read_file.config") as mock_config:
+                mock_config.ANTHROPIC_API_KEY = "test-key"
+                mock_config.ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+                with patch("reachy_mini_conversation_app.tools.github_read_file.anthropic.Anthropic") as mock_cls:
+                    mock_client = MagicMock()
+                    mock_client.messages.create.side_effect = anthropic.RateLimitError(
+                        message="Rate limit exceeded", body=None, response=MagicMock()
+                    )
+                    mock_cls.return_value = mock_client
+                    result = await tool(mock_deps, repo="myrepo", path="test.py", analyze=True)
+
+        assert result["status"] == "success"
+        assert "analysis_error" in result
+        assert "rate limit" in result["analysis_error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_claude_generic_exception(self, mock_deps: ToolDependencies, setup_repo: Path) -> None:
+        """Test Claude generic exception handling (lines 121-123)."""
+        tool = GitHubReadFileTool()
+
+        with patch("reachy_mini_conversation_app.tools.github_read_file.REPOS_DIR", setup_repo):
+            with patch("reachy_mini_conversation_app.tools.github_read_file.config") as mock_config:
+                mock_config.ANTHROPIC_API_KEY = "test-key"
+                mock_config.ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+                with patch("reachy_mini_conversation_app.tools.github_read_file.anthropic.Anthropic") as mock_cls:
+                    mock_client = MagicMock()
+                    mock_client.messages.create.side_effect = RuntimeError("Unexpected error")
+                    mock_cls.return_value = mock_client
+                    result = await tool(mock_deps, repo="myrepo", path="test.py", analyze=True)
+
+        assert result["status"] == "success"
+        assert "analysis_error" in result
+        assert "Claude analysis failed" in result["analysis_error"]
+
+    @pytest.mark.asyncio
+    async def test_openai_no_api_key(self, mock_deps: ToolDependencies, setup_repo: Path) -> None:
+        """Test OpenAI no API key error (line 131)."""
+        tool = GitHubReadFileTool()
+
+        with patch("reachy_mini_conversation_app.tools.github_read_file.REPOS_DIR", setup_repo):
+            with patch("reachy_mini_conversation_app.tools.github_read_file.config") as mock_config:
+                mock_config.OPENAI_API_KEY = None
+                result = await tool(mock_deps, repo="myrepo", path="test.py", analyze=True, analyzer="openai")
+
+        assert result["status"] == "success"
+        assert "analysis_error" in result
+        assert "OPENAI_API_KEY" in result["analysis_error"]
+
+    @pytest.mark.asyncio
+    async def test_openai_authentication_error(self, mock_deps: ToolDependencies, setup_repo: Path) -> None:
+        """Test OpenAI AuthenticationError handling (lines 151-152)."""
+        import openai
+        tool = GitHubReadFileTool()
+
+        with patch("reachy_mini_conversation_app.tools.github_read_file.REPOS_DIR", setup_repo):
+            with patch("reachy_mini_conversation_app.tools.github_read_file.config") as mock_config:
+                mock_config.OPENAI_API_KEY = "invalid-key"
+                mock_config.OPENAI_MODEL = "gpt-4o"
+                with patch("reachy_mini_conversation_app.tools.github_read_file.openai.OpenAI") as mock_cls:
+                    mock_client = MagicMock()
+                    mock_client.chat.completions.create.side_effect = openai.AuthenticationError(
+                        message="Invalid API key", body=None, response=MagicMock()
+                    )
+                    mock_cls.return_value = mock_client
+                    result = await tool(mock_deps, repo="myrepo", path="test.py", analyze=True, analyzer="openai")
+
+        assert result["status"] == "success"
+        assert "analysis_error" in result
+        assert "Invalid OPENAI_API_KEY" in result["analysis_error"]
+
+    @pytest.mark.asyncio
+    async def test_openai_rate_limit_error(self, mock_deps: ToolDependencies, setup_repo: Path) -> None:
+        """Test OpenAI RateLimitError handling (lines 153-154)."""
+        import openai
+        tool = GitHubReadFileTool()
+
+        with patch("reachy_mini_conversation_app.tools.github_read_file.REPOS_DIR", setup_repo):
+            with patch("reachy_mini_conversation_app.tools.github_read_file.config") as mock_config:
+                mock_config.OPENAI_API_KEY = "test-key"
+                mock_config.OPENAI_MODEL = "gpt-4o"
+                with patch("reachy_mini_conversation_app.tools.github_read_file.openai.OpenAI") as mock_cls:
+                    mock_client = MagicMock()
+                    mock_client.chat.completions.create.side_effect = openai.RateLimitError(
+                        message="Rate limit exceeded", body=None, response=MagicMock()
+                    )
+                    mock_cls.return_value = mock_client
+                    result = await tool(mock_deps, repo="myrepo", path="test.py", analyze=True, analyzer="openai")
+
+        assert result["status"] == "success"
+        assert "analysis_error" in result
+        assert "rate limit" in result["analysis_error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_openai_generic_exception(self, mock_deps: ToolDependencies, setup_repo: Path) -> None:
+        """Test OpenAI generic exception handling (lines 155-157)."""
+        tool = GitHubReadFileTool()
+
+        with patch("reachy_mini_conversation_app.tools.github_read_file.REPOS_DIR", setup_repo):
+            with patch("reachy_mini_conversation_app.tools.github_read_file.config") as mock_config:
+                mock_config.OPENAI_API_KEY = "test-key"
+                mock_config.OPENAI_MODEL = "gpt-4o"
+                with patch("reachy_mini_conversation_app.tools.github_read_file.openai.OpenAI") as mock_cls:
+                    mock_client = MagicMock()
+                    mock_client.chat.completions.create.side_effect = RuntimeError("Unexpected error")
+                    mock_cls.return_value = mock_client
+                    result = await tool(mock_deps, repo="myrepo", path="test.py", analyze=True, analyzer="openai")
+
+        assert result["status"] == "success"
+        assert "analysis_error" in result
+        assert "OpenAI analysis failed" in result["analysis_error"]
+
+
+class TestGitHubReadFileExceptions:
+    """Tests for file reading exception handling."""
+
+    @pytest.fixture
+    def mock_deps(self) -> ToolDependencies:
+        """Create mock tool dependencies."""
+        return ToolDependencies(
+            reachy_mini=MagicMock(),
+            movement_manager=MagicMock(),
+        )
+
+    @pytest.mark.asyncio
+    async def test_generic_read_exception(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test generic exception handling when reading file (lines 268-270)."""
+        tool = GitHubReadFileTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        repo_path = repos_dir / "myrepo"
+        repo_path.mkdir()
+        test_file = repo_path / "test.py"
+        test_file.write_text("content")
+
+        with patch("reachy_mini_conversation_app.tools.github_read_file.REPOS_DIR", repos_dir):
+            # Patch read_text to raise an exception
+            with patch.object(Path, "read_text", side_effect=IOError("Disk error")):
+                result = await tool(mock_deps, repo="myrepo", path="test.py")
+
+        assert "error" in result
+        assert "Failed to read file" in result["error"]
+
+
 class TestTextExtensions:
     """Tests for text file extensions."""
 

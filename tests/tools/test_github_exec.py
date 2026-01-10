@@ -151,6 +151,14 @@ class TestGitHubExecCheckCommand:
         status, reason = tool._check_command("/usr/bin/python script.py")
         assert status == "allowed"
 
+    def test_check_command_uppercase_with_args(self) -> None:
+        """Test _check_command allows uppercase whitelisted command with arguments."""
+        tool = GitHubExecTool()
+        # PYTEST is uppercase, base_cmd won't match (PYTEST != pytest)
+        # but cmd_lower will be "pytest tests/" which matches "pytest " prefix
+        status, reason = tool._check_command("PYTEST tests/")
+        assert status == "allowed"
+
 
 class TestAllowedCommands:
     """Tests for ALLOWED_COMMANDS constant."""

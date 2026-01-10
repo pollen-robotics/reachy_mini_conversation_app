@@ -338,3 +338,35 @@ class TestGitHubCloseIssueToolExecution:
 
         assert "error" in result
         assert "Failed to close issue" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_github_close_issue_with_default_owner(self, mock_deps: ToolDependencies) -> None:
+        """Test github_close_issue uses GITHUB_DEFAULT_OWNER for repo without slash."""
+        tool = GitHubCloseIssueTool()
+
+        mock_issue = MagicMock()
+        mock_issue.number = 1
+        mock_issue.title = "Test Issue"
+        mock_issue.html_url = "https://github.com/default-owner/myrepo/issues/1"
+
+        mock_repo = MagicMock()
+        mock_repo.get_issue.return_value = mock_issue
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_close_issue.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            mock_config.GITHUB_DEFAULT_OWNER = "default-owner"
+            with patch("reachy_mini_conversation_app.tools.github_close_issue.Github", return_value=mock_github):
+                result = await tool(
+                    mock_deps,
+                    repo="myrepo",  # No slash - should use default owner
+                    issue_number=1,
+                    action="close",
+                    confirmed=True,
+                )
+
+        assert result["status"] == "success"
+        # Verify the full repo name was used
+        mock_github.get_repo.assert_called_once_with("default-owner/myrepo")

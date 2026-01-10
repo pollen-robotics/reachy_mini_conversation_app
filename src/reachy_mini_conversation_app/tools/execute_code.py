@@ -87,12 +87,11 @@ class ExecuteCodeTool(Tool):
             }
 
         # Determine command based on extension
+        # Note: Only .py and .sh are in ALLOWED_EXTENSIONS, checked above
         if path.suffix.lower() == ".py":
             cmd = ["python3", str(path)]
-        elif path.suffix.lower() == ".sh":
+        else:  # .sh - only other allowed extension
             cmd = ["bash", str(path)]
-        else:
-            return {"error": f"Unsupported extension: {path.suffix}"}
 
         try:
             # Execute with timeout and capture output

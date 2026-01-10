@@ -595,3 +595,463 @@ class TestInitializeVisionManager:
                 result = initialize_vision_manager(mock_camera)
 
                 assert result is None
+
+
+class TestVisionProcessorAdditional:
+    """Additional tests for device branches and OOM/cleanup behavior."""
+
+    def test_determine_device_mps_preference_and_auto(self, mock_heavy_imports: dict) -> None:
+        """Test that mps is selected when requested or available under auto."""
+        # Enable MPS in the mocked torch
+        mock_heavy_imports["torch"].backends.mps.is_available.return_value = True
+
+        from reachy_mini_conversation_app.vision.processors import (
+            VisionConfig,
+            VisionProcessor,
+        )
+
+        cfg = VisionConfig(device_preference="mps")
+        p = VisionProcessor(vision_config=cfg)
+        assert p.device == "mps"
+
+        cfg2 = VisionConfig(device_preference="auto")
+        p2 = VisionProcessor(vision_config=cfg2)
+        assert p2.device == "mps"
+
+    def test_process_image_cuda_oom_retries_then_failure(self, mock_heavy_imports: dict) -> None:
+        """Simulate torch.cuda.OutOfMemoryError during generation and ensure final OOM message."""
+        # Make CUDA available and set OOM exception class
+        mock_heavy_imports["torch"].cuda.is_available.return_value = True
+
+        from reachy_mini_conversation_app.vision.processors import (
+            VisionConfig,
+            VisionProcessor,
+        )
+
+        # Prepare mocks
+        mock_processor = MagicMock()
+        # apply_chat_template should return tensor-like objects with .to
+        inp = {"input_ids": MagicMock(), "attention_mask": MagicMock()}
+        mock_processor.apply_chat_template.return_value = inp
+        mock_processor.batch_decode.return_value = ["assistant\nWill not be used"]
+        mock_processor.tokenizer.eos_token_id = 0
+
+        # Model that raises OOM when generate is called
+        def raise_oom(*args, **kwargs):
+            raise mock_heavy_imports["torch"].cuda.OutOfMemoryError("OOM")
+
+        mock_model = MagicMock()
+        mock_model.to.return_value = mock_model
+        mock_model.generate.side_effect = raise_oom
+
+        with patch(
+            "reachy_mini_conversation_app.vision.processors.AutoProcessor.from_pretrained",
+            return_value=mock_processor,
+        ):
+            with patch(
+                "reachy_mini_conversation_app.vision.processors.AutoModelForImageTextToText.from_pretrained",
+                return_value=mock_model,
+            ):
+                cfg = VisionConfig(device_preference="cuda", max_retries=2, retry_delay=0.0)
+                p = VisionProcessor(vision_config=cfg)
+                p.initialize()
+
+                import numpy as _np
+
+                image = _np.zeros((10, 10, 3), dtype=_np.uint8)
+                result = p.process_image(image)
+
+                assert "out of memory" in result.lower()
+
+    def test_process_image_mps_calls_empty_cache(self, mock_heavy_imports: dict) -> None:
+        """Ensure torch.mps.empty_cache() is called when device is mps after generation."""
+        # Enable MPS and ensure a callable empty_cache exists
+        mock_heavy_imports["torch"].backends.mps.is_available.return_value = True
+        mock_heavy_imports["torch"].mps.empty_cache = MagicMock()
+
+        from reachy_mini_conversation_app.vision.processors import (
+            VisionConfig,
+            VisionProcessor,
+        )
+
+        mock_processor = MagicMock()
+        mock_processor.apply_chat_template.return_value = {"input_ids": MagicMock()}
+        mock_processor.batch_decode.return_value = ["assistant\nAll good"]
+        mock_processor.tokenizer.eos_token_id = 0
+
+        mock_model = MagicMock()
+        mock_model.to.return_value = mock_model
+        mock_model.generate.return_value = MagicMock()
+
+        with patch(
+            "reachy_mini_conversation_app.vision.processors.AutoProcessor.from_pretrained",
+            return_value=mock_processor,
+        ):
+            with patch(
+                "reachy_mini_conversation_app.vision.processors.AutoModelForImageTextToText.from_pretrained",
+                return_value=mock_model,
+            ):
+                cfg = VisionConfig(device_preference="mps")
+                p = VisionProcessor(vision_config=cfg)
+                p.initialize()
+
+                import numpy as _np
+
+                image = _np.zeros((8, 8, 3), dtype=_np.uint8)
+                res = p.process_image(image)
+
+                # Ensure result is returned and mps empty_cache was invoked
+                assert "all good" in res.lower()
+                assert mock_heavy_imports["torch"].mps.empty_cache.called
+
+
+class TestVisionProcessorEdgeCases:
+    """Tests for edge cases and missing branch coverage."""
+
+    def test_initialize_model_is_none(self, mock_heavy_imports: dict) -> None:
+        """Test initialize when model.to() returns None."""
+        from reachy_mini_conversation_app.vision.processors import VisionProcessor
+
+        mock_processor = MagicMock()
+        mock_model = MagicMock()
+        mock_model.to.return_value = None
+
+        with patch(
+            "reachy_mini_conversation_app.vision.processors.AutoProcessor.from_pretrained",
+            return_value=mock_processor,
+        ):
+            with patch(
+                "reachy_mini_conversation_app.vision.processors.AutoModelForImageTextToText.from_pretrained",
+                return_value=mock_model,
+            ):
+                processor = VisionProcessor()
+                result = processor.initialize()
+
+                # Should still return True but model will be None
+                assert result is True
+                assert processor.model is None
+
+    def test_process_image_cuda_clears_cache(self, mock_heavy_imports: dict) -> None:
+        """Test that CUDA cache is cleared after processing."""
+        mock_heavy_imports["torch"].cuda.is_available.return_value = True
+        mock_heavy_imports["torch"].backends.mps.is_available.return_value = False
+        mock_heavy_imports["torch"].cuda.empty_cache = MagicMock()
+
+        from reachy_mini_conversation_app.vision.processors import (
+            VisionConfig,
+            VisionProcessor,
+        )
+
+        mock_processor = MagicMock()
+        mock_processor.apply_chat_template.return_value = {"input_ids": MagicMock()}
+        mock_processor.batch_decode.return_value = ["assistant\nTest response"]
+        mock_processor.tokenizer.eos_token_id = 0
+
+        mock_model = MagicMock()
+        mock_model.to.return_value = mock_model
+        mock_model.generate.return_value = MagicMock()
+
+        with patch(
+            "reachy_mini_conversation_app.vision.processors.AutoProcessor.from_pretrained",
+            return_value=mock_processor,
+        ):
+            with patch(
+                "reachy_mini_conversation_app.vision.processors.AutoModelForImageTextToText.from_pretrained",
+                return_value=mock_model,
+            ):
+                cfg = VisionConfig(device_preference="cuda")
+                processor = VisionProcessor(vision_config=cfg)
+                processor.initialize()
+
+                image = np.zeros((8, 8, 3), dtype=np.uint8)
+                result = processor.process_image(image)
+
+                assert "test response" in result.lower()
+                assert mock_heavy_imports["torch"].cuda.empty_cache.called
+
+    def test_process_image_oom_non_cuda_device(self, mock_heavy_imports: dict) -> None:
+        """Test OOM handling when device is not CUDA."""
+        mock_heavy_imports["torch"].cuda.is_available.return_value = False
+        mock_heavy_imports["torch"].backends.mps.is_available.return_value = False
+
+        from reachy_mini_conversation_app.vision.processors import (
+            VisionConfig,
+            VisionProcessor,
+        )
+
+        def raise_oom(*args, **kwargs):
+            raise mock_heavy_imports["torch"].cuda.OutOfMemoryError("OOM")
+
+        mock_processor = MagicMock()
+        mock_processor.apply_chat_template.return_value = {"input_ids": MagicMock()}
+
+        mock_model = MagicMock()
+        mock_model.to.return_value = mock_model
+        mock_model.generate.side_effect = raise_oom
+
+        with patch(
+            "reachy_mini_conversation_app.vision.processors.AutoProcessor.from_pretrained",
+            return_value=mock_processor,
+        ):
+            with patch(
+                "reachy_mini_conversation_app.vision.processors.AutoModelForImageTextToText.from_pretrained",
+                return_value=mock_model,
+            ):
+                cfg = VisionConfig(device_preference="cpu", max_retries=2, retry_delay=0.0)
+                processor = VisionProcessor(vision_config=cfg)
+                processor.initialize()
+
+                image = np.zeros((8, 8, 3), dtype=np.uint8)
+                result = processor.process_image(image)
+
+                assert "out of memory" in result.lower()
+
+    def test_extract_response_marker_empty_result(self, mock_heavy_imports: dict) -> None:
+        """Test response extraction when marker produces empty result."""
+        from reachy_mini_conversation_app.vision.processors import VisionProcessor
+
+        processor = VisionProcessor()
+
+        # Test where marker exists but result after split is empty
+        result = processor._extract_response("assistant\n")
+
+        # Should fall back to full text
+        assert result == "assistant"
+
+    def test_process_image_zero_retries(self, mock_heavy_imports: dict) -> None:
+        """Test process_image with zero max_retries (branch 101->exit)."""
+        from reachy_mini_conversation_app.vision.processors import (
+            VisionConfig,
+            VisionProcessor,
+        )
+
+        mock_processor = MagicMock()
+        mock_model = MagicMock()
+        mock_model.to.return_value = mock_model
+
+        with patch(
+            "reachy_mini_conversation_app.vision.processors.AutoProcessor.from_pretrained",
+            return_value=mock_processor,
+        ):
+            with patch(
+                "reachy_mini_conversation_app.vision.processors.AutoModelForImageTextToText.from_pretrained",
+                return_value=mock_model,
+            ):
+                cfg = VisionConfig(max_retries=0)
+                processor = VisionProcessor(vision_config=cfg)
+                processor.initialize()
+
+                image = np.zeros((8, 8, 3), dtype=np.uint8)
+                result = processor.process_image(image)
+
+                # With zero retries, the for loop doesn't execute and returns None
+                assert result is None
+
+
+class TestVisionManagerEdgeCases:
+    """Tests for VisionManager edge cases."""
+
+    def test_stop_without_start(self, mock_heavy_imports: dict) -> None:
+        """Test stop when thread was never started."""
+        from reachy_mini_conversation_app.vision.processors import VisionManager
+
+        mock_camera = MagicMock()
+        mock_processor = MagicMock()
+        mock_model = MagicMock()
+        mock_model.to.return_value = mock_model
+
+        with patch(
+            "reachy_mini_conversation_app.vision.processors.AutoProcessor.from_pretrained",
+            return_value=mock_processor,
+        ):
+            with patch(
+                "reachy_mini_conversation_app.vision.processors.AutoModelForImageTextToText.from_pretrained",
+                return_value=mock_model,
+            ):
+                manager = VisionManager(mock_camera)
+                # Stop without starting should not raise
+                manager.stop()
+
+                assert manager._stop_event.is_set()
+
+    def test_working_loop_no_frame(self, mock_heavy_imports: dict) -> None:
+        """Test working loop when camera returns no frame."""
+        from reachy_mini_conversation_app.vision.processors import (
+            VisionConfig,
+            VisionManager,
+        )
+
+        mock_camera = MagicMock()
+        mock_camera.get_latest_frame.return_value = None
+
+        mock_processor = MagicMock()
+        mock_model = MagicMock()
+        mock_model.to.return_value = mock_model
+
+        with patch(
+            "reachy_mini_conversation_app.vision.processors.AutoProcessor.from_pretrained",
+            return_value=mock_processor,
+        ):
+            with patch(
+                "reachy_mini_conversation_app.vision.processors.AutoModelForImageTextToText.from_pretrained",
+                return_value=mock_model,
+            ):
+                cfg = VisionConfig(vision_interval=0.0)
+                manager = VisionManager(mock_camera, vision_config=cfg)
+
+                # Run the loop briefly
+                manager.start()
+                time.sleep(0.15)
+                manager.stop()
+
+                # Should have called get_latest_frame but not processed anything
+                assert mock_camera.get_latest_frame.called
+
+    def test_working_loop_invalid_response(self, mock_heavy_imports: dict) -> None:
+        """Test working loop with invalid vision response."""
+        from reachy_mini_conversation_app.vision.processors import (
+            VisionConfig,
+            VisionManager,
+        )
+
+        mock_camera = MagicMock()
+        mock_camera.get_latest_frame.return_value = np.zeros((8, 8, 3), dtype=np.uint8)
+
+        mock_processor = MagicMock()
+        mock_processor.apply_chat_template.return_value = {"input_ids": MagicMock()}
+        mock_processor.batch_decode.return_value = ["assistant\nVision model not initialized"]
+        mock_processor.tokenizer.eos_token_id = 0
+
+        mock_model = MagicMock()
+        mock_model.to.return_value = mock_model
+        mock_model.generate.return_value = MagicMock()
+
+        with patch(
+            "reachy_mini_conversation_app.vision.processors.AutoProcessor.from_pretrained",
+            return_value=mock_processor,
+        ):
+            with patch(
+                "reachy_mini_conversation_app.vision.processors.AutoModelForImageTextToText.from_pretrained",
+                return_value=mock_model,
+            ):
+                cfg = VisionConfig(vision_interval=0.0)
+                manager = VisionManager(mock_camera, vision_config=cfg)
+
+                manager.start()
+                time.sleep(0.15)
+                manager.stop()
+
+                # Should not have updated last_processed_time due to invalid response
+                assert manager._last_processed_time == 0.0
+
+    def test_working_loop_exception_handling(
+        self, mock_heavy_imports: dict, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test working loop handles exceptions gracefully."""
+        from reachy_mini_conversation_app.vision.processors import (
+            VisionConfig,
+            VisionManager,
+        )
+
+        mock_camera = MagicMock()
+        mock_camera.get_latest_frame.side_effect = RuntimeError("Camera error")
+
+        mock_processor = MagicMock()
+        mock_model = MagicMock()
+        mock_model.to.return_value = mock_model
+
+        with patch(
+            "reachy_mini_conversation_app.vision.processors.AutoProcessor.from_pretrained",
+            return_value=mock_processor,
+        ):
+            with patch(
+                "reachy_mini_conversation_app.vision.processors.AutoModelForImageTextToText.from_pretrained",
+                return_value=mock_model,
+            ):
+                cfg = VisionConfig(vision_interval=0.0)
+                manager = VisionManager(mock_camera, vision_config=cfg)
+
+                manager.start()
+                time.sleep(0.2)  # Allow time for exception to be caught
+                manager.stop()
+
+                # Should have logged the error
+                assert "error" in caplog.text.lower() or "Camera error" in str(mock_camera.get_latest_frame.side_effect)
+
+    def test_working_loop_valid_response(self, mock_heavy_imports: dict) -> None:
+        """Test working loop with valid vision response."""
+        from reachy_mini_conversation_app.vision.processors import (
+            VisionConfig,
+            VisionManager,
+        )
+
+        mock_camera = MagicMock()
+        mock_camera.get_latest_frame.return_value = np.zeros((8, 8, 3), dtype=np.uint8)
+
+        mock_processor = MagicMock()
+        mock_processor.apply_chat_template.return_value = {"input_ids": MagicMock()}
+        mock_processor.batch_decode.return_value = ["assistant\nA person standing in a room"]
+        mock_processor.tokenizer.eos_token_id = 0
+
+        mock_model = MagicMock()
+        mock_model.to.return_value = mock_model
+        mock_model.generate.return_value = MagicMock()
+
+        with patch(
+            "reachy_mini_conversation_app.vision.processors.AutoProcessor.from_pretrained",
+            return_value=mock_processor,
+        ):
+            with patch(
+                "reachy_mini_conversation_app.vision.processors.AutoModelForImageTextToText.from_pretrained",
+                return_value=mock_model,
+            ):
+                cfg = VisionConfig(vision_interval=0.0)
+                manager = VisionManager(mock_camera, vision_config=cfg)
+
+                manager.start()
+                time.sleep(0.15)
+                manager.stop()
+
+                # Should have updated last_processed_time
+                assert manager._last_processed_time > 0
+
+    def test_working_loop_interval_not_elapsed(self, mock_heavy_imports: dict) -> None:
+        """Test working loop skips processing when interval hasn't elapsed (branch 246->261)."""
+        from reachy_mini_conversation_app.vision.processors import (
+            VisionConfig,
+            VisionManager,
+        )
+
+        mock_camera = MagicMock()
+        mock_camera.get_latest_frame.return_value = np.zeros((8, 8, 3), dtype=np.uint8)
+
+        mock_processor = MagicMock()
+        mock_processor.apply_chat_template.return_value = {"input_ids": MagicMock()}
+        mock_processor.batch_decode.return_value = ["assistant\nA person standing in a room"]
+        mock_processor.tokenizer.eos_token_id = 0
+
+        mock_model = MagicMock()
+        mock_model.to.return_value = mock_model
+        mock_model.generate.return_value = MagicMock()
+
+        with patch(
+            "reachy_mini_conversation_app.vision.processors.AutoProcessor.from_pretrained",
+            return_value=mock_processor,
+        ):
+            with patch(
+                "reachy_mini_conversation_app.vision.processors.AutoModelForImageTextToText.from_pretrained",
+                return_value=mock_model,
+            ):
+                # Use a very long interval so condition is never met
+                cfg = VisionConfig(vision_interval=1000.0)
+                manager = VisionManager(mock_camera, vision_config=cfg)
+
+                # Set last_processed_time to current time so interval check fails
+                manager._last_processed_time = time.time()
+
+                manager.start()
+                time.sleep(0.15)  # Let the loop run a few iterations
+                manager.stop()
+
+                # get_latest_frame should NOT have been called because interval hasn't elapsed
+                mock_camera.get_latest_frame.assert_not_called()

@@ -486,3 +486,277 @@ class TestGitHubLogToolExecution:
 
         assert "error" in result
         assert "Failed to get commit history" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_github_log_oneline_with_empty_lines(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_log oneline handles empty lines in output."""
+        tool = GitHubLogTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        # Output with empty lines
+        log_output = "abc123 Initial commit\n\ndef456 Second commit\n"
+
+        mock_git = MagicMock()
+        mock_git.log.return_value = log_output
+
+        mock_active_branch = MagicMock()
+        mock_active_branch.name = "main"
+
+        mock_repo = MagicMock()
+        mock_repo.git = mock_git
+        mock_repo.active_branch = mock_active_branch
+
+        with patch("reachy_mini_conversation_app.tools.github_log.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_log.Repo", return_value=mock_repo):
+                result = await tool(mock_deps, repo="myrepo", oneline=True)
+
+        assert result["status"] == "success"
+        # Should only have 2 commits, not counting empty lines
+        assert result["commit_count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_github_log_oneline_hash_only(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_log oneline handles hash-only lines (no message)."""
+        tool = GitHubLogTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        # Output with a hash-only line (no message after hash)
+        log_output = "abc123"
+
+        mock_git = MagicMock()
+        mock_git.log.return_value = log_output
+
+        mock_active_branch = MagicMock()
+        mock_active_branch.name = "main"
+
+        mock_repo = MagicMock()
+        mock_repo.git = mock_git
+        mock_repo.active_branch = mock_active_branch
+
+        with patch("reachy_mini_conversation_app.tools.github_log.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_log.Repo", return_value=mock_repo):
+                result = await tool(mock_deps, repo="myrepo", oneline=True)
+
+        assert result["status"] == "success"
+        assert result["commit_count"] == 1
+        assert result["commits"][0]["hash"] == "abc123"
+        assert result["commits"][0]["message"] == ""
+
+    @pytest.mark.asyncio
+    async def test_github_log_normal_format_empty_lines(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_log normal format handles lines without pipe separators."""
+        tool = GitHubLogTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        # Output with lines that don't have pipe separator or have too few parts
+        log_output = "some random line\nabc|abc|Author|a@b.com|2024-01-15|Commit\nincomplete|data"
+
+        mock_git = MagicMock()
+        mock_git.log.return_value = log_output
+
+        mock_active_branch = MagicMock()
+        mock_active_branch.name = "main"
+
+        mock_repo = MagicMock()
+        mock_repo.git = mock_git
+        mock_repo.active_branch = mock_active_branch
+
+        with patch("reachy_mini_conversation_app.tools.github_log.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_log.Repo", return_value=mock_repo):
+                result = await tool(mock_deps, repo="myrepo")
+
+        assert result["status"] == "success"
+        # Only the valid line should be counted
+        assert result["commit_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_github_log_stat_with_all_filters(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_log stat mode with all filters (branch, author, since, until, path)."""
+        tool = GitHubLogTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_git = MagicMock()
+        # First call for main log, second call for stats
+        mock_git.log.side_effect = [
+            "abc|abc|Author|a@b.com|2024-01-15|Commit",
+            " file.txt | 2 +-\n\n other.txt | 5 ++--",
+        ]
+
+        mock_active_branch = MagicMock()
+        mock_active_branch.name = "main"
+
+        mock_repo = MagicMock()
+        mock_repo.git = mock_git
+        mock_repo.active_branch = mock_active_branch
+
+        with patch("reachy_mini_conversation_app.tools.github_log.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_log.Repo", return_value=mock_repo):
+                result = await tool(
+                    mock_deps,
+                    repo="myrepo",
+                    stat=True,
+                    branch="develop",
+                    author="John",
+                    since="2024-01-01",
+                    until="2024-12-31",
+                    path="src/",
+                )
+
+        assert result["status"] == "success"
+        # Verify filters are recorded
+        assert "author: John" in result["filters"]
+        assert "since: 2024-01-01" in result["filters"]
+        assert "until: 2024-12-31" in result["filters"]
+        assert "path: src/" in result["filters"]
+        # Verify stat call includes all filters
+        assert mock_git.log.call_count == 2
+        stat_call_args = mock_git.log.call_args_list[1][0]
+        assert "--stat" in stat_call_args
+        assert "develop" in stat_call_args
+        assert "--author=John" in stat_call_args
+        assert "--since=2024-01-01" in stat_call_args
+        assert "--until=2024-12-31" in stat_call_args
+        assert "--" in stat_call_args
+        assert "src/" in stat_call_args
+
+    @pytest.mark.asyncio
+    async def test_github_log_stat_empty_output(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_log stat with empty stat output."""
+        tool = GitHubLogTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_git = MagicMock()
+        # First call for main log, second call for stats (empty)
+        mock_git.log.side_effect = [
+            "abc|abc|Author|a@b.com|2024-01-15|Commit",
+            "",  # Empty stat output
+        ]
+
+        mock_active_branch = MagicMock()
+        mock_active_branch.name = "main"
+
+        mock_repo = MagicMock()
+        mock_repo.git = mock_git
+        mock_repo.active_branch = mock_active_branch
+
+        with patch("reachy_mini_conversation_app.tools.github_log.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_log.Repo", return_value=mock_repo):
+                result = await tool(mock_deps, repo="myrepo", stat=True)
+
+        assert result["status"] == "success"
+        assert result["commit_count"] == 1
+        # No stats key should be added to commits
+        assert "stats" not in result["commits"][0]
+
+    @pytest.mark.asyncio
+    async def test_github_log_stat_exception(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_log stat handles exception gracefully."""
+        tool = GitHubLogTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_git = MagicMock()
+        # First call succeeds, second call (stat) raises exception
+        mock_git.log.side_effect = [
+            "abc|abc|Author|a@b.com|2024-01-15|Commit",
+            RuntimeError("Failed to get stats"),
+        ]
+
+        mock_active_branch = MagicMock()
+        mock_active_branch.name = "main"
+
+        mock_repo = MagicMock()
+        mock_repo.git = mock_git
+        mock_repo.active_branch = mock_active_branch
+
+        with patch("reachy_mini_conversation_app.tools.github_log.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_log.Repo", return_value=mock_repo):
+                result = await tool(mock_deps, repo="myrepo", stat=True)
+
+        # Should still succeed, just without stats
+        assert result["status"] == "success"
+        assert result["commit_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_github_log_stat_block_index_out_of_range(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_log stat handles more stat blocks than commits."""
+        tool = GitHubLogTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_git = MagicMock()
+        # Only one commit but multiple stat blocks
+        mock_git.log.side_effect = [
+            "abc|abc|Author|a@b.com|2024-01-15|Commit",
+            " file1.txt | 2 +-\n\n file2.txt | 3 +-\n\n file3.txt | 1 +",
+        ]
+
+        mock_active_branch = MagicMock()
+        mock_active_branch.name = "main"
+
+        mock_repo = MagicMock()
+        mock_repo.git = mock_git
+        mock_repo.active_branch = mock_active_branch
+
+        with patch("reachy_mini_conversation_app.tools.github_log.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_log.Repo", return_value=mock_repo):
+                result = await tool(mock_deps, repo="myrepo", stat=True)
+
+        assert result["status"] == "success"
+        assert result["commit_count"] == 1
+        # Only the first stat block should be attached
+        assert "stats" in result["commits"][0]
+
+    @pytest.mark.asyncio
+    async def test_github_log_stat_empty_block(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_log stat handles empty stat blocks."""
+        tool = GitHubLogTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_git = MagicMock()
+        # Stat output with an empty block (whitespace only) at index 1
+        # First block has content, second block is empty (whitespace only)
+        mock_git.log.side_effect = [
+            "abc|abc|Author|a@b.com|2024-01-15|Commit\ndef|def|Author2|b@c.com|2024-01-16|Commit2",
+            "file1.txt | 2 +-\n\n   ",  # Second block is whitespace only
+        ]
+
+        mock_active_branch = MagicMock()
+        mock_active_branch.name = "main"
+
+        mock_repo = MagicMock()
+        mock_repo.git = mock_git
+        mock_repo.active_branch = mock_active_branch
+
+        with patch("reachy_mini_conversation_app.tools.github_log.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_log.Repo", return_value=mock_repo):
+                result = await tool(mock_deps, repo="myrepo", stat=True)
+
+        assert result["status"] == "success"
+        assert result["commit_count"] == 2
+        # First commit should have stats
+        assert "stats" in result["commits"][0]
+        # Second commit should NOT have stats (empty block after strip)
+        assert "stats" not in result["commits"][1]

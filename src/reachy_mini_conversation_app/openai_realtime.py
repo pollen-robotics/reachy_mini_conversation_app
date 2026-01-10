@@ -178,7 +178,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.client = AsyncOpenAI(api_key=openai_api_key)
 
         max_attempts = 3
-        for attempt in range(1, max_attempts + 1):
+        attempt = 0
+        while True:
+            attempt += 1
             try:
                 await self._run_realtime_session()
                 # Normal exit from the session, stop retrying

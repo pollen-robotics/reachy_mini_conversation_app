@@ -155,8 +155,8 @@ class GitHubPushTool(Tool):
                     info = push_info[0]
                     if info.flags & info.ERROR:
                         error_msg = info.summary if hasattr(info, "summary") else "Push failed"
-                        if token:
-                            error_msg = error_msg.replace(token, "***")
+                        # token is always set here (early return at line 98 if not)
+                        error_msg = error_msg.replace(token, "***")
                         return {"error": f"Push failed: {error_msg}"}
                     elif info.flags & info.REJECTED:
                         return {
@@ -184,9 +184,8 @@ class GitHubPushTool(Tool):
 
         except GitCommandError as e:
             error_msg = str(e)
-            # Hide token from error messages
-            if token:
-                error_msg = error_msg.replace(token, "***")
+            # Hide token from error messages (token is always set - early return at line 98 if not)
+            error_msg = error_msg.replace(token, "***")
 
             if "rejected" in error_msg.lower():
                 return {
@@ -199,7 +198,7 @@ class GitHubPushTool(Tool):
 
         except Exception as e:
             error_msg = str(e)
-            if token:
-                error_msg = error_msg.replace(token, "***")
+            # Hide token from error messages (token is always set - early return at line 98 if not)
+            error_msg = error_msg.replace(token, "***")
             logger.exception(f"Error pushing repo: {e}")
             return {"error": f"Failed to push: {error_msg}"}

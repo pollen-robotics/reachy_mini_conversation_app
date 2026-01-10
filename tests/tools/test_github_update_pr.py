@@ -439,3 +439,64 @@ class TestGitHubUpdatePRToolExecution:
 
         assert "error" in result
         assert "Failed to update" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_github_update_pr_empty_assignees_clears_all(self, mock_deps: ToolDependencies) -> None:
+        """Test github_update_pr with empty assignees list clears all assignees."""
+        tool = GitHubUpdatePRTool()
+
+        mock_pr = MagicMock()
+        mock_pr.number = 1
+        mock_pr.title = "PR"
+        mock_pr.html_url = "url"
+
+        # Existing assignees that should be removed
+        existing_assignee = MagicMock()
+        mock_issue = MagicMock()
+        mock_issue.assignees = [existing_assignee]
+
+        mock_gh_repo = MagicMock()
+        mock_gh_repo.get_pull.return_value = mock_pr
+        mock_gh_repo.get_issue.return_value = mock_issue
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_gh_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_update_pr.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_update_pr.Github", return_value=mock_github):
+                # Pass empty list - should remove existing but not add any new
+                result = await tool(mock_deps, repo="owner/repo", pr_number=1, assignees=[])
+
+        assert result["status"] == "success"
+        assert "assignees" in result["updated_fields"]
+        # Should remove existing assignee
+        mock_issue.remove_from_assignees.assert_called_once_with(existing_assignee)
+        # Should NOT call add_to_assignees since list is empty
+        mock_issue.add_to_assignees.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_github_update_pr_draft_false_on_non_draft_pr(self, mock_deps: ToolDependencies) -> None:
+        """Test github_update_pr with draft=False on a non-draft PR does nothing."""
+        tool = GitHubUpdatePRTool()
+
+        mock_pr = MagicMock()
+        mock_pr.number = 1
+        mock_pr.title = "PR"
+        mock_pr.html_url = "url"
+        mock_pr.draft = False  # Already not a draft
+
+        mock_gh_repo = MagicMock()
+        mock_gh_repo.get_pull.return_value = mock_pr
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_gh_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_update_pr.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_update_pr.Github", return_value=mock_github):
+                # draft=False on non-draft PR - should be a no-op for draft handling
+                result = await tool(mock_deps, repo="owner/repo", pr_number=1, draft=False)
+
+        # Since no other updates, should be no_changes
+        assert result["status"] == "no_changes"

@@ -1,9 +1,46 @@
 """Unit tests for the config module."""
 
 import os
-from unittest.mock import patch, MagicMock
+import sys
+import importlib
+from unittest.mock import patch, MagicMock, PropertyMock
 
 import pytest
+
+
+class TestConfigModuleLoad:
+    """Tests for module-level config loading."""
+
+    def test_module_loads_with_no_dotenv_file(self) -> None:
+        """Test module-level code when no .env file is found (line 17).
+
+        This covers the else branch at lines 16-17.
+        """
+        # Save original module references
+        module_name = "reachy_mini_conversation_app.config"
+        original_module = sys.modules.get(module_name)
+
+        try:
+            # Remove the module from cache to force reload
+            if module_name in sys.modules:
+                del sys.modules[module_name]
+
+            # Patch find_dotenv to return empty string (no .env found)
+            with patch("dotenv.find_dotenv", return_value=""):
+                # Import will trigger module-level code
+                import reachy_mini_conversation_app.config as config_module
+
+                # Verify the module loaded successfully
+                assert hasattr(config_module, "config")
+                assert hasattr(config_module, "Config")
+        finally:
+            # Restore the original module to avoid side effects on other tests
+            if original_module is not None:
+                sys.modules[module_name] = original_module
+            elif module_name in sys.modules:
+                del sys.modules[module_name]
+                # Reimport the original module
+                import reachy_mini_conversation_app.config  # noqa: F401
 
 
 class TestConfig:
@@ -293,3 +330,87 @@ class TestConfigSingleton:
 
         # Restore
         config.MODEL_NAME = original
+
+class TestSetCustomProfile:
+    """Tests for the set_custom_profile function."""
+
+    def test_set_custom_profile_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test successfully setting a custom profile."""
+        from reachy_mini_conversation_app.config import set_custom_profile, config
+
+        # Set a profile
+        set_custom_profile("developer_linus")
+        assert config.REACHY_MINI_CUSTOM_PROFILE == "developer_linus"
+        assert os.getenv("REACHY_MINI_CUSTOM_PROFILE") == "developer_linus"
+
+    def test_set_custom_profile_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test setting custom profile to None clears it."""
+        from reachy_mini_conversation_app.config import set_custom_profile, config
+
+        # First set a profile
+        set_custom_profile("developer_linus")
+        assert config.REACHY_MINI_CUSTOM_PROFILE == "developer_linus"
+
+        # Then clear it
+        set_custom_profile(None)
+        assert config.REACHY_MINI_CUSTOM_PROFILE is None
+        assert os.getenv("REACHY_MINI_CUSTOM_PROFILE") is None
+
+    def test_set_custom_profile_exception_on_config_update(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that exceptions during config update are caught (lines 58-59)."""
+        from reachy_mini_conversation_app.config import set_custom_profile, config
+
+        # Make config.REACHY_MINI_CUSTOM_PROFILE property raise on assignment
+        original_setattr = type(config).__setattr__
+
+        def raise_on_profile_setattr(self: object, name: str, value: object) -> None:
+            if name == "REACHY_MINI_CUSTOM_PROFILE":
+                raise RuntimeError("Config update error")
+            original_setattr(self, name, value)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(type(config), "__setattr__", raise_on_profile_setattr)
+
+        # Should not raise - exception is caught
+        set_custom_profile("test_profile")
+
+        # Verify env var was still set (second try block succeeded)
+        import os
+        assert os.environ.get("REACHY_MINI_CUSTOM_PROFILE") == "test_profile"
+
+        # Cleanup
+        os.environ.pop("REACHY_MINI_CUSTOM_PROFILE", None)
+
+    def test_set_custom_profile_exception_on_env_update(self) -> None:
+        """Test that exceptions during env update are caught (lines 68-69)."""
+        from reachy_mini_conversation_app.config import set_custom_profile, config
+
+        # First set successfully
+        set_custom_profile("test_profile")
+        assert config.REACHY_MINI_CUSTOM_PROFILE == "test_profile"
+
+        # Clean up env var
+        os.environ.pop("REACHY_MINI_CUSTOM_PROFILE", None)
+
+        # Mock os.environ operations to raise exceptions
+        mock_environ = MagicMock()
+        mock_environ.__setitem__ = MagicMock(side_effect=RuntimeError("Env set error"))
+        mock_environ.pop = MagicMock(side_effect=RuntimeError("Env pop error"))
+
+        # Use patch on the import within the function (os imported as _os)
+        import builtins
+
+        original_import = builtins.__import__
+
+        def mock_import(name: str, *args: object, **kwargs: object) -> object:
+            if name == "os":
+                mock_module = MagicMock()
+                mock_module.environ = mock_environ
+                return mock_module
+            return original_import(name, *args, **kwargs)
+
+        with patch.object(builtins, "__import__", side_effect=mock_import):
+            # Should not raise - exception is caught in second try block
+            set_custom_profile("another_profile")
+
+        # Config should still be updated (first try block succeeded)
+        assert config.REACHY_MINI_CUSTOM_PROFILE == "another_profile"

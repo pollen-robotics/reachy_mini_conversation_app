@@ -195,7 +195,8 @@ class GitHubRmTool(Tool):
             else:
                 result["hint"] = "Files deleted. Use github_commit to commit the removal."
 
-        elif errors:
+        else:
+            # No files/dirs were removed - must have errors (every path adds to one list)
             result["status"] = "failed"
             result["message"] = "No files were removed."
 

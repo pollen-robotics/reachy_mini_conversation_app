@@ -773,3 +773,132 @@ class TestSummarizeResult:
         manager = BackgroundTaskManager.get_instance()
         result = manager._summarize_result({"foo": "bar", "baz": 123})
         assert result == "Task completed."
+
+    def test_summarize_result_with_unknown_status(self) -> None:
+        """Test summarizing result with unknown status value (branch 237->239)."""
+        manager = BackgroundTaskManager.get_instance()
+        # Status is present but not "success" or "error"
+        result = manager._summarize_result({"status": "pending"})
+        assert result == "Task completed."
+
+
+class TestBackgroundTaskManagerEdgeCases:
+    """Tests for edge cases and branch coverage."""
+
+    @pytest.fixture(autouse=True)
+    def reset_singleton(self) -> None:
+        """Reset singleton before each test."""
+        BackgroundTaskManager.reset_instance()
+        yield
+        BackgroundTaskManager.reset_instance()
+
+    def test_set_connection_with_explicit_loop(self) -> None:
+        """Test set_connection when loop is explicitly provided (line 111)."""
+        manager = BackgroundTaskManager.get_instance()
+        mock_connection = MagicMock()
+        mock_queue: asyncio.Queue[MagicMock] = asyncio.Queue()
+        explicit_loop = asyncio.new_event_loop()
+
+        try:
+            manager.set_connection(mock_connection, mock_queue, loop=explicit_loop)
+            assert manager._loop is explicit_loop
+        finally:
+            explicit_loop.close()
+
+    def test_set_connection_without_running_loop(self) -> None:
+        """Test set_connection when no running event loop (lines 115-117)."""
+        manager = BackgroundTaskManager.get_instance()
+        mock_connection = MagicMock()
+        mock_queue: asyncio.Queue[MagicMock] = asyncio.Queue()
+
+        # Call set_connection outside of async context (no running loop)
+        # This should trigger the RuntimeError fallback path
+        manager.set_connection(mock_connection, mock_queue)
+
+        # Should have created or obtained a loop
+        assert manager._loop is not None
+
+    @pytest.mark.asyncio
+    async def test_cancel_task_with_no_asyncio_task(self) -> None:
+        """Test cancel_task when task._task is None (line 296)."""
+        manager = BackgroundTaskManager.get_instance()
+
+        # Manually add a task without an asyncio task attached
+        task = BackgroundTask(
+            id="notask",
+            name="no_task",
+            description="Task without asyncio task",
+            status=TaskStatus.RUNNING,
+        )
+        task._task = None  # Explicitly None
+        manager._tasks["notask"] = task
+
+        result = await manager.cancel_task("notask")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_get_notification_without_timeout(self) -> None:
+        """Test get_notification without timeout (line 349)."""
+        manager = BackgroundTaskManager.get_instance()
+
+        # Add notification to queue first
+        notification = TaskNotification(
+            task_id="test",
+            task_name="test_task",
+            status=TaskStatus.COMPLETED,
+            message="Done",
+        )
+        await manager._notification_queue.put(notification)
+
+        # Call without timeout - should return immediately since item is available
+        result = await manager.get_notification(timeout=None)
+        assert result is notification
+
+    def test_cleanup_old_tasks_logs_when_removing(self) -> None:
+        """Test cleanup_old_tasks logging when tasks are removed (lines 377-380)."""
+        manager = BackgroundTaskManager.get_instance()
+
+        now = time.monotonic()
+
+        # Add multiple old tasks to ensure removal and logging
+        for i in range(3):
+            manager._tasks[f"old_task_{i}"] = BackgroundTask(
+                id=f"old_task_{i}",
+                name=f"old_{i}",
+                description=f"Old task {i}",
+                status=TaskStatus.COMPLETED,
+                completed_at=now - 7200,  # 2 hours ago
+            )
+
+        # Should remove all 3 and trigger the logging branch
+        removed = manager.cleanup_old_tasks(max_age_seconds=3600)
+
+        assert removed == 3
+        assert len(manager._tasks) == 0
+
+    def test_cleanup_old_tasks_nothing_to_remove(self) -> None:
+        """Test cleanup_old_tasks when no tasks need removal (branch 377->380 False)."""
+        manager = BackgroundTaskManager.get_instance()
+
+        now = time.monotonic()
+
+        # Add only recent tasks that shouldn't be removed
+        manager._tasks["recent"] = BackgroundTask(
+            id="recent",
+            name="recent",
+            description="Recent completed",
+            status=TaskStatus.COMPLETED,
+            completed_at=now - 100,  # Only 100 seconds ago
+        )
+        manager._tasks["running"] = BackgroundTask(
+            id="running",
+            name="running",
+            description="Running",
+            status=TaskStatus.RUNNING,
+        )
+
+        # With max_age of 3600, nothing should be removed
+        removed = manager.cleanup_old_tasks(max_age_seconds=3600)
+
+        assert removed == 0
+        assert len(manager._tasks) == 2

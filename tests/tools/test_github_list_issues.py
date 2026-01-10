@@ -308,3 +308,58 @@ class TestGitHubListIssuesToolExecution:
 
         assert "error" in result
         assert "Failed to list issues" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_github_list_issues_with_default_owner(self, mock_deps: ToolDependencies) -> None:
+        """Test github_list_issues uses default owner (line 53)."""
+        tool = GitHubListIssuesTool()
+
+        mock_repo = MagicMock()
+        mock_repo.get_issues.return_value = []
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_list_issues.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            mock_config.GITHUB_DEFAULT_OWNER = "default-owner"
+            with patch("reachy_mini_conversation_app.tools.github_list_issues.Github", return_value=mock_github):
+                result = await tool(mock_deps, repo="myrepo")  # No slash
+
+        assert result["status"] == "success"
+        assert result["repo"] == "default-owner/myrepo"
+        mock_github.get_repo.assert_called_once_with("default-owner/myrepo")
+
+    @pytest.mark.asyncio
+    async def test_github_list_issues_permission_denied(self, mock_deps: ToolDependencies) -> None:
+        """Test github_list_issues handles 403 permission denied (line 125)."""
+        tool = GitHubListIssuesTool()
+
+        mock_github = MagicMock()
+        mock_github.get_repo.side_effect = GithubException(403, {"message": "Permission denied"}, None)
+
+        with patch("reachy_mini_conversation_app.tools.github_list_issues.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_list_issues.Github", return_value=mock_github):
+                result = await tool(mock_deps, repo="owner/repo")
+
+        assert "error" in result
+        assert "Permission denied" in result["error"]
+        assert "repo" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_github_list_issues_other_github_error(self, mock_deps: ToolDependencies) -> None:
+        """Test github_list_issues handles other GitHub errors (lines 129-130)."""
+        tool = GitHubListIssuesTool()
+
+        mock_github = MagicMock()
+        mock_github.get_repo.side_effect = GithubException(500, {"message": "Internal Server Error"}, None)
+
+        with patch("reachy_mini_conversation_app.tools.github_list_issues.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_list_issues.Github", return_value=mock_github):
+                result = await tool(mock_deps, repo="owner/repo")
+
+        assert "error" in result
+        assert "GitHub API error" in result["error"]
+        assert "Internal Server Error" in result["error"]

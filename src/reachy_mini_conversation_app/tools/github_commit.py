@@ -311,8 +311,8 @@ Example response:
         try:
             # Configure git user if GITHUB_DEFAULT_OWNER is set
             owner = config.GITHUB_DEFAULT_OWNER
-            email = config.GITHUB_OWNER_EMAIL or (f"{owner}@users.noreply.github.com" if owner else None)
             if owner:
+                email = config.GITHUB_OWNER_EMAIL or f"{owner}@users.noreply.github.com"
                 with repo.config_writer() as git_config:
                     try:
                         repo.config_reader().get_value("user", "name")
@@ -321,8 +321,7 @@ Example response:
                     try:
                         repo.config_reader().get_value("user", "email")
                     except Exception:
-                        if email:
-                            git_config.set_value("user", "email", email)
+                        git_config.set_value("user", "email", email)
 
             # Get staged files
             staged_output = repo.git.diff("--cached", "--name-only")

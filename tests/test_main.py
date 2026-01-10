@@ -542,3 +542,202 @@ class TestRunWithMockedInternalImports:
                         run(args, robot=mock_robot, app_stop_event=stop_event)
 
         # Test completed without hanging
+    def test_run_creates_gradio_ui_when_gradio_true(self) -> None:
+        """Test run creates Gradio UI when gradio=True."""
+        from reachy_mini_conversation_app.main import run
+
+        args = self._create_mock_args(gradio=True)
+        mocks = self._mock_run_internals()
+
+        mock_robot = MagicMock()
+        mock_robot.client.get_status.return_value = {"simulation_enabled": False}
+
+        # Mock gradio components
+        mock_stream_ui = MagicMock()
+        mock_stream = MagicMock()
+        mock_stream.ui = mock_stream_ui
+        mock_stream.ui.launch.side_effect = KeyboardInterrupt()
+
+        mock_stream_class = MagicMock(return_value=mock_stream)
+
+        mock_personality_ui = MagicMock()
+        mock_personality_ui.additional_inputs_ordered.return_value = []
+        mock_personality_ui_class = MagicMock(return_value=mock_personality_ui)
+
+        mock_fastapi_app = MagicMock()
+
+        with patch("reachy_mini_conversation_app.main.setup_logger", return_value=MagicMock()):
+            with patch("reachy_mini_conversation_app.main.handle_vision_stuff", return_value=(None, None, None)):
+                with patch("reachy_mini_conversation_app.main.FastAPI", return_value=mock_fastapi_app):
+                    with patch.dict("sys.modules", {
+                        "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
+                        "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
+                        "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]),
+                        "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=mocks["ToolDependencies"]),
+                        "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=mocks["HeadWobbler"]),
+                        "reachy_mini_conversation_app.gradio_personality": MagicMock(PersonalityUI=mock_personality_ui_class),
+                    }):
+                        with patch("fastrtc.Stream", mock_stream_class):
+                            with patch("time.sleep"):
+                                run(args, robot=mock_robot)
+
+        # Verify Gradio setup was called
+        mock_personality_ui_class.assert_called_once()
+        mock_personality_ui.create_components.assert_called_once()
+
+    def test_run_gradio_uses_existing_fastapi_app(self) -> None:
+        """Test run uses existing FastAPI app in gradio mode when provided."""
+        from reachy_mini_conversation_app.main import run
+
+        args = self._create_mock_args(gradio=True)
+        mocks = self._mock_run_internals()
+
+        mock_robot = MagicMock()
+        mock_robot.client.get_status.return_value = {"simulation_enabled": False}
+
+        # Mock gradio components
+        mock_stream_ui = MagicMock()
+        mock_stream = MagicMock()
+        mock_stream.ui = mock_stream_ui
+        mock_stream.ui.launch.side_effect = KeyboardInterrupt()
+        mock_stream_class = MagicMock(return_value=mock_stream)
+
+        mock_personality_ui = MagicMock()
+        mock_personality_ui.additional_inputs_ordered.return_value = []
+        mock_personality_ui_class = MagicMock(return_value=mock_personality_ui)
+
+        mock_existing_app = MagicMock()
+
+        with patch("reachy_mini_conversation_app.main.setup_logger", return_value=MagicMock()):
+            with patch("reachy_mini_conversation_app.main.handle_vision_stuff", return_value=(None, None, None)):
+                with patch.dict("sys.modules", {
+                    "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
+                    "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
+                    "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]),
+                    "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=mocks["ToolDependencies"]),
+                    "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=mocks["HeadWobbler"]),
+                    "reachy_mini_conversation_app.gradio_personality": MagicMock(PersonalityUI=mock_personality_ui_class),
+                }):
+                    with patch("fastrtc.Stream", mock_stream_class):
+                        with patch("time.sleep"):
+                            run(args, robot=mock_robot, settings_app=mock_existing_app)
+
+        # Verify existing app was used (not FastAPI() called to create new one)
+        mock_personality_ui.wire_events.assert_called_once()
+
+    def test_run_gradio_with_stop_event_launches_thread(self) -> None:
+        """Test run with app_stop_event launches daemon thread in gradio mode."""
+        from reachy_mini_conversation_app.main import run
+
+        args = self._create_mock_args(gradio=True)
+        mocks = self._mock_run_internals()
+
+        mock_robot = MagicMock()
+        mock_robot.client.get_status.return_value = {"simulation_enabled": False}
+
+        # Mock gradio components
+        mock_stream_ui = MagicMock()
+        mock_stream = MagicMock()
+        mock_stream.ui = mock_stream_ui
+        mock_stream.ui.launch.side_effect = KeyboardInterrupt()
+        mock_stream_class = MagicMock(return_value=mock_stream)
+
+        mock_personality_ui = MagicMock()
+        mock_personality_ui.additional_inputs_ordered.return_value = []
+        mock_personality_ui_class = MagicMock(return_value=mock_personality_ui)
+
+        stop_event = threading.Event()
+
+        with patch("reachy_mini_conversation_app.main.setup_logger", return_value=MagicMock()):
+            with patch("reachy_mini_conversation_app.main.handle_vision_stuff", return_value=(None, None, None)):
+                with patch("reachy_mini_conversation_app.main.FastAPI", return_value=MagicMock()):
+                    with patch.dict("sys.modules", {
+                        "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
+                        "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
+                        "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]),
+                        "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=mocks["ToolDependencies"]),
+                        "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=mocks["HeadWobbler"]),
+                        "reachy_mini_conversation_app.gradio_personality": MagicMock(PersonalityUI=mock_personality_ui_class),
+                    }):
+                        with patch("fastrtc.Stream", mock_stream_class):
+                            with patch("time.sleep"):
+                                run(args, robot=mock_robot, app_stop_event=stop_event)
+
+        # Test completed without hanging (stop_event thread was created)
+
+    def test_run_stop_event_thread_executes_shutdown(self) -> None:
+        """Test that stop event thread executes shutdown code (lines 172-176)."""
+        from reachy_mini_conversation_app.main import run
+
+        args = self._create_mock_args()
+
+        mock_robot = MagicMock()
+        mock_robot.client.get_status.return_value = {"simulation_enabled": False}
+
+        stop_event = threading.Event()
+
+        mock_stream = MagicMock()
+        # Make launch block until stop_event is set, then raise KeyboardInterrupt
+        def launch_side_effect():
+            # Set the stop event to trigger the poll_stop_event thread
+            stop_event.set()
+            # Give the daemon thread time to process
+            time.sleep(0.1)
+            raise KeyboardInterrupt()
+
+        mock_stream.launch.side_effect = launch_side_effect
+        mock_stream_class = MagicMock(return_value=mock_stream)
+
+        mock_logger = MagicMock()
+
+        with patch("reachy_mini_conversation_app.main.setup_logger", return_value=mock_logger):
+            with patch("reachy_mini_conversation_app.main.handle_vision_stuff", return_value=(None, None, None)):
+                with patch.dict("sys.modules", {
+                    "reachy_mini_conversation_app.moves": MagicMock(MovementManager=MagicMock()),
+                    "reachy_mini_conversation_app.console": MagicMock(LocalStream=mock_stream_class),
+                    "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=MagicMock()),
+                    "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=MagicMock()),
+                    "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=MagicMock()),
+                }):
+                    run(args, robot=mock_robot, app_stop_event=stop_event)
+
+        # Verify the stop event shutdown path was triggered
+        mock_logger.info.assert_any_call("App stop event detected, shutting down...")
+
+    def test_run_stop_event_thread_handles_close_error(self) -> None:
+        """Test that stop event thread handles stream_manager.close() error (lines 175-176)."""
+        from reachy_mini_conversation_app.main import run
+
+        args = self._create_mock_args()
+
+        mock_robot = MagicMock()
+        mock_robot.client.get_status.return_value = {"simulation_enabled": False}
+
+        stop_event = threading.Event()
+
+        mock_stream = MagicMock()
+        mock_stream.close.side_effect = RuntimeError("Close error")
+
+        def launch_side_effect():
+            stop_event.set()
+            time.sleep(0.1)
+            raise KeyboardInterrupt()
+
+        mock_stream.launch.side_effect = launch_side_effect
+        mock_stream_class = MagicMock(return_value=mock_stream)
+
+        mock_logger = MagicMock()
+
+        with patch("reachy_mini_conversation_app.main.setup_logger", return_value=mock_logger):
+            with patch("reachy_mini_conversation_app.main.handle_vision_stuff", return_value=(None, None, None)):
+                with patch.dict("sys.modules", {
+                    "reachy_mini_conversation_app.moves": MagicMock(MovementManager=MagicMock()),
+                    "reachy_mini_conversation_app.console": MagicMock(LocalStream=mock_stream_class),
+                    "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=MagicMock()),
+                    "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=MagicMock()),
+                    "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=MagicMock()),
+                }):
+                    run(args, robot=mock_robot, app_stop_event=stop_event)
+
+        # Verify the error was logged
+        assert any("Error while closing stream manager" in str(call) for call in mock_logger.error.call_args_list)

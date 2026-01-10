@@ -661,3 +661,185 @@ class TestGitHubBranchToolExecution:
 
         assert result["status"] == "success"
         assert result["repo"] == "myrepo"
+
+    @pytest.mark.asyncio
+    async def test_github_branch_create_push_error(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_branch create with push fails (lines 189-190)."""
+        tool = GitHubBranchTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_branch = MagicMock()
+        mock_branch.name = "main"
+
+        mock_new_branch = MagicMock()
+
+        mock_origin = MagicMock()
+        mock_origin.url = "https://github.com/owner/repo.git"
+        mock_origin.push.side_effect = GitCommandError("push", "remote rejected")
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch = mock_branch
+        mock_repo.branches = [mock_branch]
+        mock_repo.create_head.return_value = mock_new_branch
+        mock_repo.remotes.origin = mock_origin
+
+        with patch("reachy_mini_conversation_app.tools.github_branch.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_branch.Repo", return_value=mock_repo):
+                with patch("reachy_mini_conversation_app.tools.github_branch.config") as mock_config:
+                    mock_config.GITHUB_TOKEN = "ghp_token"
+                    result = await tool(mock_deps, repo="myrepo", action="create", branch="feature", push=True)
+
+        assert result["status"] == "success"
+        assert "push_error" in result
+        assert "Failed to push" in result["push_error"]
+
+    @pytest.mark.asyncio
+    async def test_github_branch_delete_other_git_error(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_branch delete with other git error (line 261)."""
+        tool = GitHubBranchTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_main = MagicMock()
+        mock_main.name = "main"
+        mock_feature = MagicMock()
+        mock_feature.name = "feature"
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch.name = "main"
+        mock_repo.branches = [mock_main, mock_feature]
+        mock_repo.delete_head.side_effect = GitCommandError("delete", "some other error")
+
+        with patch("reachy_mini_conversation_app.tools.github_branch.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_branch.Repo", return_value=mock_repo):
+                result = await tool(mock_deps, repo="myrepo", action="delete", branch="feature")
+
+        assert "error" in result
+        assert "Git command failed" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_github_branch_generic_exception(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_branch handles generic exception (lines 276-278)."""
+        tool = GitHubBranchTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_repo = MagicMock()
+        type(mock_repo).active_branch = PropertyMock(side_effect=RuntimeError("Unexpected error"))
+
+        with patch("reachy_mini_conversation_app.tools.github_branch.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_branch.Repo", return_value=mock_repo):
+                result = await tool(mock_deps, repo="myrepo", action="list")
+
+        assert "error" in result
+        assert "Failed to manage branch" in result["error"]
+
+    def test_get_authenticated_url_exception(self) -> None:
+        """Test _get_authenticated_url handles exception (lines 79-81)."""
+        tool = GitHubBranchTool()
+
+        mock_repo = MagicMock()
+        # Make remotes.origin.url raise an exception
+        type(mock_repo.remotes).origin = PropertyMock(side_effect=Exception("No remote"))
+
+        with patch("reachy_mini_conversation_app.tools.github_branch.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "ghp_test"
+            result = tool._get_authenticated_url(mock_repo)
+
+        assert result is None
+
+    def test_get_authenticated_url_non_github_url(self) -> None:
+        """Test _get_authenticated_url returns None for non-GitHub URLs (branch 72->81)."""
+        tool = GitHubBranchTool()
+
+        mock_repo = MagicMock()
+        mock_repo.remotes.origin.url = "https://gitlab.com/owner/repo.git"
+
+        with patch("reachy_mini_conversation_app.tools.github_branch.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "ghp_test"
+            result = tool._get_authenticated_url(mock_repo)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_github_branch_create_push_no_auth_url(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_branch create push without auth URL (branch 176->179, 186->192)."""
+        tool = GitHubBranchTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_branch = MagicMock()
+        mock_branch.name = "main"
+
+        mock_new_branch = MagicMock()
+
+        mock_origin = MagicMock()
+        mock_origin.url = "https://not-github.com/owner/repo.git"  # Non-github URL
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch = mock_branch
+        mock_repo.branches = [mock_branch]
+        mock_repo.create_head.return_value = mock_new_branch
+        mock_repo.remotes.origin = mock_origin
+
+        with patch("reachy_mini_conversation_app.tools.github_branch.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_branch.Repo", return_value=mock_repo):
+                with patch("reachy_mini_conversation_app.tools.github_branch.config") as mock_config:
+                    mock_config.GITHUB_TOKEN = "ghp_token"
+                    # Explicitly patch _get_authenticated_url to return None
+                    with patch.object(tool, "_get_authenticated_url", return_value=None):
+                        result = await tool(mock_deps, repo="myrepo", action="create", branch="feature", push=True)
+
+        # Should still try to push even without auth URL
+        assert result["status"] == "success"
+        mock_origin.push.assert_called_once()
+        # set_url should NOT have been called since auth_url is None
+        mock_origin.set_url.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_github_branch_switch_multiple_remotes(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_branch switch finds branch in second remote (branch 201->200)."""
+        tool = GitHubBranchTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_main = MagicMock()
+        mock_main.name = "main"
+
+        # First remote has no matching refs
+        mock_remote1_ref = MagicMock()
+        mock_remote1_ref.name = "origin/main"
+        mock_remote1 = MagicMock()
+        mock_remote1.refs = [mock_remote1_ref]
+
+        # Second remote has the feature branch
+        mock_remote2_ref = MagicMock()
+        mock_remote2_ref.name = "upstream/feature"
+        mock_remote2 = MagicMock()
+        mock_remote2.refs = [mock_remote2_ref]
+
+        mock_new_branch = MagicMock()
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch.name = "main"
+        mock_repo.branches = [mock_main]
+        mock_repo.remotes = [mock_remote1, mock_remote2]
+        mock_repo.create_head.return_value = mock_new_branch
+
+        with patch("reachy_mini_conversation_app.tools.github_branch.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_branch.Repo", return_value=mock_repo):
+                result = await tool(mock_deps, repo="myrepo", action="switch", branch="feature")
+
+        assert result["status"] == "success"
+        assert result["tracking"] == "upstream/feature"

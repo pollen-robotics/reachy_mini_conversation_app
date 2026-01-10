@@ -517,3 +517,110 @@ class TestGitHubClosePRToolExecution:
 
         assert "error" in result
         assert "Failed to close" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_github_close_pr_merge_delete_branch_from_fork(self, mock_deps: ToolDependencies) -> None:
+        """Test github_close_pr doesn't delete branch when PR is from fork (branch 170->177)."""
+        tool = GitHubClosePRTool()
+
+        mock_merge_result = MagicMock()
+        mock_merge_result.sha = "abc123"
+
+        mock_pr = MagicMock()
+        mock_pr.number = 1
+        mock_pr.title = "Test PR"
+        mock_pr.html_url = "url"
+        mock_pr.mergeable = True
+        mock_pr.merge.return_value = mock_merge_result
+        mock_pr.head.ref = "feature-branch"
+        mock_pr.head.repo.full_name = "forker/repo"  # Different repo (fork)
+
+        mock_gh_repo = MagicMock()
+        mock_gh_repo.get_pull.return_value = mock_pr
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_gh_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_close_pr.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_close_pr.Github", return_value=mock_github):
+                result = await tool(
+                    mock_deps,
+                    repo="owner/repo",
+                    pr_number=1,
+                    action="merge",
+                    delete_branch=True,
+                    confirmed=True,
+                )
+
+        assert result["status"] == "success"
+        # Branch should NOT be deleted since it's from a fork
+        assert "branch_deleted" not in result
+        mock_gh_repo.get_git_ref.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_github_close_pr_merge_delete_branch_error(self, mock_deps: ToolDependencies) -> None:
+        """Test github_close_pr handles branch deletion error (lines 174-175)."""
+        tool = GitHubClosePRTool()
+
+        mock_merge_result = MagicMock()
+        mock_merge_result.sha = "abc123"
+
+        mock_pr = MagicMock()
+        mock_pr.number = 1
+        mock_pr.title = "Test PR"
+        mock_pr.html_url = "url"
+        mock_pr.mergeable = True
+        mock_pr.merge.return_value = mock_merge_result
+        mock_pr.head.ref = "feature-branch"
+        mock_pr.head.repo.full_name = "owner/repo"  # Same repo
+
+        mock_gh_repo = MagicMock()
+        mock_gh_repo.get_pull.return_value = mock_pr
+        mock_gh_repo.get_git_ref.side_effect = GithubException(422, {"message": "Reference already gone"}, None)
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_gh_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_close_pr.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_close_pr.Github", return_value=mock_github):
+                result = await tool(
+                    mock_deps,
+                    repo="owner/repo",
+                    pr_number=1,
+                    action="merge",
+                    delete_branch=True,
+                    confirmed=True,
+                )
+
+        assert result["status"] == "success"
+        # Merge succeeded but branch deletion failed
+        assert "branch_delete_error" in result
+        assert "branch_deleted" not in result
+
+    @pytest.mark.asyncio
+    async def test_github_close_pr_other_github_error(self, mock_deps: ToolDependencies) -> None:
+        """Test github_close_pr handles other GitHub API errors (lines 207-208)."""
+        tool = GitHubClosePRTool()
+
+        mock_gh_repo = MagicMock()
+        mock_gh_repo.get_pull.side_effect = GithubException(500, {"message": "Internal Server Error"}, None)
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_gh_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_close_pr.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_close_pr.Github", return_value=mock_github):
+                result = await tool(
+                    mock_deps,
+                    repo="owner/repo",
+                    pr_number=1,
+                    action="close",
+                    confirmed=True,
+                )
+
+        assert "error" in result
+        assert "GitHub API error" in result["error"]
+        assert "Internal Server Error" in result["error"]

@@ -100,13 +100,14 @@ class GitHubRestoreTool(Tool):
 
         try:
             # Build restore command arguments
+            # Note: after line 79-80, at least one of staged/worktree is always True
             restore_args = []
 
             if staged and worktree:
                 restore_args.extend(["--staged", "--worktree"])
             elif staged:
                 restore_args.append("--staged")
-            elif worktree:
+            else:  # worktree must be True here
                 restore_args.append("--worktree")
 
             if source:
@@ -167,10 +168,10 @@ class GitHubRestoreTool(Tool):
             result["staged"] = staged
             result["worktree"] = worktree
 
-            # Hint for next steps
+            # Hint for next steps (at least one of staged/worktree is always True)
             if staged and not worktree:
                 result["hint"] = "Files are now unstaged. Use github_add to re-stage them if needed."
-            elif worktree:
+            else:  # worktree is True
                 result["hint"] = "Working tree changes have been discarded."
 
             return result

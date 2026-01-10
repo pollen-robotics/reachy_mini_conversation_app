@@ -182,6 +182,65 @@ class TestEmotionAvailability:
         # Could be RecordedMoves object or None depending on library availability
 
 
+class TestPlayEmotionImportFailure:
+    """Tests for import failure handling."""
+
+    def test_import_failure_sets_emotion_not_available(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Test ImportError during emotion library import sets EMOTION_AVAILABLE to False."""
+        import importlib
+        import sys
+
+        # Save original modules to restore later
+        modules_to_remove = [
+            "reachy_mini_conversation_app.tools.play_emotion",
+            "reachy_mini.motion.recorded_move",
+            "reachy_mini.motion",
+            "reachy_mini",
+            "reachy_mini_conversation_app.dance_emotion_moves",
+        ]
+        saved_modules = {name: sys.modules.get(name) for name in modules_to_remove}
+
+        try:
+            # Remove the modules so they can be reimported
+            for name in modules_to_remove:
+                if name in sys.modules:
+                    del sys.modules[name]
+
+            # Mock the import to fail
+            original_import = __builtins__["__import__"]
+
+            def mock_import(name: str, *args: object, **kwargs: object) -> object:
+                if "recorded_move" in name or "dance_emotion_moves" in name:
+                    raise ImportError(f"Mocked import error for {name}")
+                return original_import(name, *args, **kwargs)
+
+            __builtins__["__import__"] = mock_import
+
+            try:
+                # Reimport the module
+                play_emotion_module = importlib.import_module(
+                    "reachy_mini_conversation_app.tools.play_emotion"
+                )
+
+                # Check that EMOTION_AVAILABLE is False
+                assert play_emotion_module.EMOTION_AVAILABLE is False
+                assert play_emotion_module.RECORDED_MOVES is None
+                assert "not available" in caplog.text.lower()
+            finally:
+                __builtins__["__import__"] = original_import
+        finally:
+            # Restore original modules
+            for name, module in saved_modules.items():
+                if module is not None:
+                    sys.modules[name] = module
+                elif name in sys.modules:
+                    del sys.modules[name]
+
+            # Force reimport to restore proper state
+            if "reachy_mini_conversation_app.tools.play_emotion" in sys.modules:
+                del sys.modules["reachy_mini_conversation_app.tools.play_emotion"]
+
+
 class TestGetAvailableEmotionsAndDescriptions:
     """Tests for get_available_emotions_and_descriptions function."""
 

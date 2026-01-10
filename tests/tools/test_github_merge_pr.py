@@ -584,3 +584,211 @@ class TestGitHubMergePRToolExecution:
 
         assert "error" in result
         assert "Failed to merge" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_github_merge_pr_get_pull_other_github_error(self, mock_deps: ToolDependencies) -> None:
+        """Test github_merge_pr re-raises non-404 GithubException from get_pull."""
+        tool = GitHubMergePRTool()
+
+        mock_gh_repo = MagicMock()
+        # Non-404 exception (e.g., 500 server error)
+        mock_gh_repo.get_pull.side_effect = GithubException(500, {"message": "Server Error"}, None)
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_gh_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_merge_pr.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_merge_pr.Github", return_value=mock_github):
+                result = await tool(
+                    mock_deps,
+                    repo="owner/repo",
+                    pr_number=1,
+                    confirmed=True,
+                )
+
+        assert "error" in result
+        assert "GitHub API error" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_github_merge_pr_skip_delete_branch(self, mock_deps: ToolDependencies) -> None:
+        """Test github_merge_pr with delete_branch=False."""
+        tool = GitHubMergePRTool()
+
+        mock_merge_result = MagicMock()
+        mock_merge_result.merged = True
+        mock_merge_result.sha = "abc123"
+        mock_merge_result.message = "Merged"
+
+        mock_pr = MagicMock()
+        mock_pr.number = 1
+        mock_pr.title = "PR"
+        mock_pr.state = "open"
+        mock_pr.mergeable = True
+        mock_pr.mergeable_state = "clean"
+        mock_pr.merge.return_value = mock_merge_result
+        mock_pr.head.ref = "feature"
+
+        mock_gh_repo = MagicMock()
+        mock_gh_repo.get_pull.return_value = mock_pr
+        mock_gh_repo.default_branch = "main"
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_gh_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_merge_pr.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_merge_pr.Github", return_value=mock_github):
+                result = await tool(
+                    mock_deps,
+                    repo="owner/repo",
+                    pr_number=1,
+                    delete_branch=False,
+                    confirmed=True,
+                )
+
+        assert result["status"] == "success"
+        assert "branch_deleted" not in result
+        # get_git_ref should not have been called
+        mock_gh_repo.get_git_ref.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_github_merge_pr_no_delete_default_branch(self, mock_deps: ToolDependencies) -> None:
+        """Test github_merge_pr doesn't delete the default branch."""
+        tool = GitHubMergePRTool()
+
+        mock_merge_result = MagicMock()
+        mock_merge_result.merged = True
+        mock_merge_result.sha = "abc123"
+        mock_merge_result.message = "Merged"
+
+        mock_pr = MagicMock()
+        mock_pr.number = 1
+        mock_pr.title = "PR"
+        mock_pr.state = "open"
+        mock_pr.mergeable = True
+        mock_pr.mergeable_state = "clean"
+        mock_pr.merge.return_value = mock_merge_result
+        # Head ref is the same as default branch
+        mock_pr.head.ref = "main"
+
+        mock_gh_repo = MagicMock()
+        mock_gh_repo.get_pull.return_value = mock_pr
+        mock_gh_repo.default_branch = "main"
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_gh_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_merge_pr.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_merge_pr.Github", return_value=mock_github):
+                result = await tool(
+                    mock_deps,
+                    repo="owner/repo",
+                    pr_number=1,
+                    delete_branch=True,
+                    confirmed=True,
+                )
+
+        assert result["status"] == "success"
+        # Branch should not be deleted because it's the default branch
+        assert "branch_deleted" not in result
+        mock_gh_repo.get_git_ref.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_github_merge_pr_branch_delete_fails(self, mock_deps: ToolDependencies) -> None:
+        """Test github_merge_pr handles branch deletion failure gracefully."""
+        tool = GitHubMergePRTool()
+
+        mock_merge_result = MagicMock()
+        mock_merge_result.merged = True
+        mock_merge_result.sha = "abc123"
+        mock_merge_result.message = "Merged"
+
+        mock_pr = MagicMock()
+        mock_pr.number = 1
+        mock_pr.title = "PR"
+        mock_pr.state = "open"
+        mock_pr.mergeable = True
+        mock_pr.mergeable_state = "clean"
+        mock_pr.merge.return_value = mock_merge_result
+        mock_pr.head.ref = "feature-branch"
+
+        mock_gh_repo = MagicMock()
+        mock_gh_repo.get_pull.return_value = mock_pr
+        mock_gh_repo.default_branch = "main"
+        # Branch deletion raises exception
+        mock_gh_repo.get_git_ref.side_effect = GithubException(403, {"message": "Forbidden"}, None)
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_gh_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_merge_pr.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_merge_pr.Github", return_value=mock_github):
+                result = await tool(
+                    mock_deps,
+                    repo="owner/repo",
+                    pr_number=1,
+                    delete_branch=True,
+                    confirmed=True,
+                )
+
+        # Merge should still succeed, just with a warning
+        assert result["status"] == "success"
+        assert "branch_delete_warning" in result
+        assert "branch_deleted" not in result
+
+    @pytest.mark.asyncio
+    async def test_github_merge_pr_repo_not_found(self, mock_deps: ToolDependencies) -> None:
+        """Test github_merge_pr handles 404 repo not found."""
+        tool = GitHubMergePRTool()
+
+        mock_github = MagicMock()
+        mock_github.get_repo.side_effect = GithubException(404, {"message": "Not Found"}, None)
+
+        with patch("reachy_mini_conversation_app.tools.github_merge_pr.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_merge_pr.Github", return_value=mock_github):
+                result = await tool(
+                    mock_deps,
+                    repo="owner/repo",
+                    pr_number=1,
+                    confirmed=True,
+                )
+
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+        assert "owner/repo" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_github_merge_pr_generic_github_error(self, mock_deps: ToolDependencies) -> None:
+        """Test github_merge_pr handles generic GitHub API error."""
+        tool = GitHubMergePRTool()
+
+        mock_pr = MagicMock()
+        mock_pr.number = 1
+        mock_pr.state = "open"
+        mock_pr.mergeable = True
+        mock_pr.mergeable_state = "clean"
+        # Use a status code other than 404, 405, 409
+        mock_pr.merge.side_effect = GithubException(422, {"message": "Validation Failed"}, None)
+
+        mock_gh_repo = MagicMock()
+        mock_gh_repo.get_pull.return_value = mock_pr
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_gh_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_merge_pr.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_merge_pr.Github", return_value=mock_github):
+                result = await tool(
+                    mock_deps,
+                    repo="owner/repo",
+                    pr_number=1,
+                    confirmed=True,
+                )
+
+        assert "error" in result
+        assert "GitHub API error" in result["error"]

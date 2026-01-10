@@ -403,3 +403,160 @@ class TestGitHubRmToolExecution:
                 result = await tool(mock_deps, repo="owner/myrepo", paths=["file.txt"], confirmed=True)
 
         assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_github_rm_directory_git_only(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_rm removes directory with git_only (line 133)."""
+        tool = GitHubRmTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        repo_path = repos_dir / "myrepo"
+        repo_path.mkdir()
+        (repo_path / "mydir").mkdir()
+
+        mock_index = MagicMock()
+        mock_repo = MagicMock()
+        mock_repo.index = mock_index
+
+        with patch("reachy_mini_conversation_app.tools.github_rm.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_rm.Repo", return_value=mock_repo):
+                result = await tool(mock_deps, repo="myrepo", paths=["mydir"], recursive=True, git_only=True, confirmed=True)
+
+        assert result["status"] == "success"
+        assert "mydir" in result["removed_dirs"]
+        # Should call remove with working_tree=False and r=True
+        mock_index.remove.assert_called_with(["mydir"], working_tree=False, r=True)
+
+    @pytest.mark.asyncio
+    async def test_github_rm_directory_fallback_shutil(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_rm falls back to shutil.rmtree when git remove fails (lines 138-140)."""
+        tool = GitHubRmTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        repo_path = repos_dir / "myrepo"
+        repo_path.mkdir()
+        test_dir = repo_path / "untracked_dir"
+        test_dir.mkdir()
+        (test_dir / "file.txt").touch()
+
+        mock_index = MagicMock()
+        # Git remove fails because directory is not tracked
+        mock_index.remove.side_effect = GitCommandError("rm", "not tracked")
+
+        mock_repo = MagicMock()
+        mock_repo.index = mock_index
+
+        with patch("reachy_mini_conversation_app.tools.github_rm.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_rm.Repo", return_value=mock_repo):
+                result = await tool(mock_deps, repo="myrepo", paths=["untracked_dir"], recursive=True, confirmed=True)
+
+        assert result["status"] == "success"
+        assert "untracked_dir" in result["removed_dirs"]
+        # Directory should be deleted from filesystem
+        assert not test_dir.exists()
+
+    @pytest.mark.asyncio
+    async def test_github_rm_dir_local_modifications_error(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_rm handles local modifications error for directory (lines 163-169)."""
+        tool = GitHubRmTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        repo_path = repos_dir / "myrepo"
+        repo_path.mkdir()
+        (repo_path / "mydir").mkdir()
+
+        mock_index = MagicMock()
+        # Git remove fails due to local modifications - on directory with recursive
+        mock_index.remove.side_effect = GitCommandError("rm", "has local modifications")
+
+        mock_repo = MagicMock()
+        mock_repo.index = mock_index
+
+        with patch("reachy_mini_conversation_app.tools.github_rm.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_rm.Repo", return_value=mock_repo):
+                with patch("reachy_mini_conversation_app.tools.github_rm.shutil.rmtree") as mock_rmtree:
+                    mock_rmtree.side_effect = GitCommandError("rm", "has local modifications")
+                    result = await tool(mock_deps, repo="myrepo", paths=["mydir"], recursive=True, git_only=True, confirmed=True)
+
+        assert "errors" in result
+        assert "local modifications" in result["errors"][0]["error"].lower()
+        assert "force=true" in result["errors"][0]["error"]
+
+    @pytest.mark.asyncio
+    async def test_github_rm_dir_has_changes_staged_error(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_rm handles staged changes error for directory (lines 163-169)."""
+        tool = GitHubRmTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        repo_path = repos_dir / "myrepo"
+        repo_path.mkdir()
+        (repo_path / "mydir").mkdir()
+
+        mock_index = MagicMock()
+        mock_index.remove.side_effect = GitCommandError("rm", "has changes staged in the index")
+
+        mock_repo = MagicMock()
+        mock_repo.index = mock_index
+
+        with patch("reachy_mini_conversation_app.tools.github_rm.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_rm.Repo", return_value=mock_repo):
+                with patch("reachy_mini_conversation_app.tools.github_rm.shutil.rmtree") as mock_rmtree:
+                    mock_rmtree.side_effect = GitCommandError("rm", "has changes staged")
+                    result = await tool(mock_deps, repo="myrepo", paths=["mydir"], recursive=True, git_only=True, confirmed=True)
+
+        assert "errors" in result
+        assert "local modifications" in result["errors"][0]["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_github_rm_dir_other_git_error(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_rm handles other git errors for directory (lines 170-171)."""
+        tool = GitHubRmTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        repo_path = repos_dir / "myrepo"
+        repo_path.mkdir()
+        (repo_path / "mydir").mkdir()
+
+        mock_index = MagicMock()
+        mock_index.remove.side_effect = GitCommandError("rm", "some other error that is not modifications")
+
+        mock_repo = MagicMock()
+        mock_repo.index = mock_index
+
+        with patch("reachy_mini_conversation_app.tools.github_rm.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_rm.Repo", return_value=mock_repo):
+                with patch("reachy_mini_conversation_app.tools.github_rm.shutil.rmtree") as mock_rmtree:
+                    mock_rmtree.side_effect = GitCommandError("rm", "some other error")
+                    result = await tool(mock_deps, repo="myrepo", paths=["mydir"], recursive=True, git_only=True, confirmed=True)
+
+        assert "errors" in result
+        assert "some other error" in result["errors"][0]["error"]
+
+    @pytest.mark.asyncio
+    async def test_github_rm_dir_generic_exception(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_rm handles generic exception for directory (lines 172-173)."""
+        tool = GitHubRmTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        repo_path = repos_dir / "myrepo"
+        repo_path.mkdir()
+        (repo_path / "mydir").mkdir()
+
+        mock_index = MagicMock()
+        mock_index.remove.side_effect = RuntimeError("Unexpected error")
+
+        mock_repo = MagicMock()
+        mock_repo.index = mock_index
+
+        with patch("reachy_mini_conversation_app.tools.github_rm.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_rm.Repo", return_value=mock_repo):
+                result = await tool(mock_deps, repo="myrepo", paths=["mydir"], recursive=True, git_only=True, confirmed=True)
+
+        assert "errors" in result
+        assert "Unexpected error" in result["errors"][0]["error"]

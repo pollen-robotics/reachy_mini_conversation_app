@@ -442,6 +442,25 @@ class TestBuildPrompt:
         assert "model.py" in prompt
         assert "Fix bugs" in prompt
 
+    def test_build_prompt_without_edit_or_model(self) -> None:
+        """Test building prompt with neither edit_prompt nor model_content (branch 118->124)."""
+        tool = GitHubEditFileTool()
+
+        # This directly tests the branch where both edit_prompt and model_content are None
+        prompt = tool._build_prompt(
+            target_content="content",
+            target_path="test.py",
+            edit_prompt=None,
+            model_content=None,
+            model_path=None,
+        )
+
+        assert "test.py" in prompt
+        assert "content" in prompt
+        # Neither edit instructions nor model file should be in the prompt
+        assert "Edit instructions:" not in prompt
+        assert "Model/Reference file:" not in prompt
+
 
 class TestReadFile:
     """Tests for _read_file method."""
@@ -470,3 +489,200 @@ class TestReadFile:
         result = tool._read_file(tmp_path, "../../../etc/passwd")
 
         assert result is None
+
+    def test_read_file_exception(self, tmp_path: Path) -> None:
+        """Test reading file with exception returns None (lines 84-85)."""
+        tool = GitHubEditFileTool()
+        test_file = tmp_path / "test.py"
+        test_file.write_text("content")
+
+        with patch.object(Path, "read_text", side_effect=IOError("Read error")):
+            result = tool._read_file(tmp_path, "test.py")
+
+        assert result is None
+
+
+class TestGitHubEditFileAPIErrors:
+    """Tests for API error handling."""
+
+    @pytest.fixture
+    def mock_deps(self) -> ToolDependencies:
+        """Create mock tool dependencies."""
+        return ToolDependencies(
+            reachy_mini=MagicMock(),
+            movement_manager=MagicMock(),
+        )
+
+    @pytest.fixture
+    def setup_repo(self, tmp_path: Path) -> Path:
+        """Set up test repo with a file."""
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        repo_path = repos_dir / "myrepo"
+        repo_path.mkdir()
+        test_file = repo_path / "target.py"
+        test_file.write_text("def hello(): pass")
+        return repos_dir
+
+    @pytest.mark.asyncio
+    async def test_claude_api_exception(self, mock_deps: ToolDependencies, setup_repo: Path) -> None:
+        """Test Claude API exception handling (lines 153-155)."""
+        tool = GitHubEditFileTool()
+
+        with patch("reachy_mini_conversation_app.tools.github_edit_file.REPOS_DIR", setup_repo):
+            with patch("reachy_mini_conversation_app.tools.github_edit_file.config") as mock_config:
+                mock_config.ANTHROPIC_API_KEY = "test-key"
+                mock_config.ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+                with patch("reachy_mini_conversation_app.tools.github_edit_file.anthropic.Anthropic") as mock_cls:
+                    mock_client = MagicMock()
+                    mock_client.messages.create.side_effect = RuntimeError("API error")
+                    mock_cls.return_value = mock_client
+                    result = await tool(mock_deps, repo="myrepo", path="target.py", edit_prompt="fix")
+
+        assert "error" in result
+        assert "Claude API error" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_openai_no_api_key(self, mock_deps: ToolDependencies, setup_repo: Path) -> None:
+        """Test OpenAI no API key error (line 161)."""
+        tool = GitHubEditFileTool()
+
+        with patch("reachy_mini_conversation_app.tools.github_edit_file.REPOS_DIR", setup_repo):
+            with patch("reachy_mini_conversation_app.tools.github_edit_file.config") as mock_config:
+                mock_config.OPENAI_API_KEY = None
+                result = await tool(mock_deps, repo="myrepo", path="target.py", edit_prompt="fix", analyzer="openai")
+
+        assert "error" in result
+        assert "OPENAI_API_KEY not configured" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_openai_api_exception(self, mock_deps: ToolDependencies, setup_repo: Path) -> None:
+        """Test OpenAI API exception handling (lines 175-177)."""
+        tool = GitHubEditFileTool()
+
+        with patch("reachy_mini_conversation_app.tools.github_edit_file.REPOS_DIR", setup_repo):
+            with patch("reachy_mini_conversation_app.tools.github_edit_file.config") as mock_config:
+                mock_config.OPENAI_API_KEY = "test-key"
+                with patch("reachy_mini_conversation_app.tools.github_edit_file.openai.OpenAI") as mock_cls:
+                    mock_client = MagicMock()
+                    mock_client.chat.completions.create.side_effect = RuntimeError("API error")
+                    mock_cls.return_value = mock_client
+                    result = await tool(mock_deps, repo="myrepo", path="target.py", edit_prompt="fix", analyzer="openai")
+
+        assert "error" in result
+        assert "OpenAI API error" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_model_file_with_edit_prompt(self, mock_deps: ToolDependencies, setup_repo: Path) -> None:
+        """Test using model file with edit_prompt (branch 118->124)."""
+        tool = GitHubEditFileTool()
+
+        repo_path = setup_repo / "myrepo"
+        (repo_path / "model.py").write_text("def model(): '''Docstring'''\n    pass")
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="def hello():\n    '''Hello'''\n    pass")]
+
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_response
+
+        with patch("reachy_mini_conversation_app.tools.github_edit_file.REPOS_DIR", setup_repo):
+            with patch("reachy_mini_conversation_app.tools.github_edit_file.config") as mock_config:
+                mock_config.ANTHROPIC_API_KEY = "test-key"
+                mock_config.ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+                with patch("reachy_mini_conversation_app.tools.github_edit_file.anthropic.Anthropic", return_value=mock_client):
+                    result = await tool(
+                        mock_deps,
+                        repo="myrepo",
+                        path="target.py",
+                        model_path="model.py",
+                        edit_prompt="Also add docstring",
+                    )
+
+        assert result["status"] == "preview"
+        assert result["model_file"] == "model.py"
+
+    @pytest.mark.asyncio
+    async def test_model_file_from_different_repo(self, mock_deps: ToolDependencies, setup_repo: Path) -> None:
+        """Test using model file from different repo (line 278)."""
+        tool = GitHubEditFileTool()
+
+        # Create model repo
+        model_repo_path = setup_repo / "model_repo"
+        model_repo_path.mkdir()
+        (model_repo_path / "example.py").write_text("def example(): pass")
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="def hello(): pass")]
+
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_response
+
+        with patch("reachy_mini_conversation_app.tools.github_edit_file.REPOS_DIR", setup_repo):
+            with patch("reachy_mini_conversation_app.tools.github_edit_file.config") as mock_config:
+                mock_config.ANTHROPIC_API_KEY = "test-key"
+                mock_config.ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+                with patch("reachy_mini_conversation_app.tools.github_edit_file.anthropic.Anthropic", return_value=mock_client):
+                    result = await tool(
+                        mock_deps,
+                        repo="myrepo",
+                        path="target.py",
+                        model_path="example.py",
+                        model_repo="model_repo",
+                    )
+
+        assert result["status"] == "preview"
+        assert result["model_file"] == "example.py"
+        assert result["model_repo"] == "model_repo"
+
+    @pytest.mark.asyncio
+    async def test_apply_write_exception(self, mock_deps: ToolDependencies, setup_repo: Path) -> None:
+        """Test exception when writing file during apply (lines 287-289)."""
+        tool = GitHubEditFileTool()
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="def hello(): print('hi')")]
+
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_response
+
+        with patch("reachy_mini_conversation_app.tools.github_edit_file.REPOS_DIR", setup_repo):
+            with patch("reachy_mini_conversation_app.tools.github_edit_file.config") as mock_config:
+                mock_config.ANTHROPIC_API_KEY = "test-key"
+                mock_config.ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+                with patch("reachy_mini_conversation_app.tools.github_edit_file.anthropic.Anthropic", return_value=mock_client):
+                    with patch.object(Path, "write_text", side_effect=PermissionError("Cannot write")):
+                        result = await tool(
+                            mock_deps,
+                            repo="myrepo",
+                            path="target.py",
+                            edit_prompt="fix",
+                            apply=True,
+                        )
+
+        assert "error" in result
+        assert "Failed to write file" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_markdown_code_block_without_closing(self, mock_deps: ToolDependencies, setup_repo: Path) -> None:
+        """Test markdown code block stripping when closing tag is not at end (lines 258->260)."""
+        tool = GitHubEditFileTool()
+
+        # AI returns code block with content after closing tag or no closing tag
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="```python\ndef hello(): pass")]  # No closing ```
+
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_response
+
+        with patch("reachy_mini_conversation_app.tools.github_edit_file.REPOS_DIR", setup_repo):
+            with patch("reachy_mini_conversation_app.tools.github_edit_file.config") as mock_config:
+                mock_config.ANTHROPIC_API_KEY = "test-key"
+                mock_config.ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+                with patch("reachy_mini_conversation_app.tools.github_edit_file.anthropic.Anthropic", return_value=mock_client):
+                    result = await tool(mock_deps, repo="myrepo", path="target.py", edit_prompt="fix")
+
+        assert result["status"] == "preview"
+        # Code block opening should be stripped
+        assert not result["new_content"].startswith("```")
+        assert "def hello()" in result["new_content"]

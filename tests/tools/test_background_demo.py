@@ -218,3 +218,50 @@ class TestBackgroundDemoRunDemo:
 
         assert "message" in result
         assert "5 seconds" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_run_demo_progress_no_running_tasks(self) -> None:
+        """Test _run_demo with progress when no running tasks found."""
+        tool = BackgroundDemoTool()
+
+        mock_manager = MagicMock()
+        mock_manager.get_running_tasks.return_value = []  # No tasks running
+        mock_manager.update_progress = AsyncMock()
+
+        mock_sleep = AsyncMock()
+        with patch(
+            "reachy_mini_conversation_app.tools.background_demo.BackgroundTaskManager.get_instance",
+            return_value=mock_manager,
+        ):
+            with patch("reachy_mini_conversation_app.tools.background_demo.asyncio.sleep", mock_sleep):
+                result = await tool._run_demo(2, with_progress=True)
+
+        assert result["status"] == "success"
+        # update_progress should NOT be called since current_task_id is None
+        mock_manager.update_progress.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_run_demo_progress_with_other_tasks(self) -> None:
+        """Test _run_demo with progress when other tasks are running but not background_demo."""
+        tool = BackgroundDemoTool()
+
+        # A task that is NOT background_demo
+        mock_other_task = MagicMock()
+        mock_other_task.id = "other-task-id"
+        mock_other_task.name = "some_other_task"
+
+        mock_manager = MagicMock()
+        mock_manager.get_running_tasks.return_value = [mock_other_task]  # Different task
+        mock_manager.update_progress = AsyncMock()
+
+        mock_sleep = AsyncMock()
+        with patch(
+            "reachy_mini_conversation_app.tools.background_demo.BackgroundTaskManager.get_instance",
+            return_value=mock_manager,
+        ):
+            with patch("reachy_mini_conversation_app.tools.background_demo.asyncio.sleep", mock_sleep):
+                result = await tool._run_demo(2, with_progress=True)
+
+        assert result["status"] == "success"
+        # update_progress should NOT be called since we didn't find a matching task
+        mock_manager.update_progress.assert_not_called()

@@ -86,6 +86,40 @@ class TestGitHubRebaseToolHelpers:
 
         assert result is None
 
+    def test_get_authenticated_url_non_github_url(self) -> None:
+        """Test _get_authenticated_url with non-github URL returns None."""
+        tool = GitHubRebaseTool()
+
+        mock_repo = MagicMock()
+        mock_repo.remotes.origin.url = "https://gitlab.com/owner/repo.git"
+
+        with patch("reachy_mini_conversation_app.tools.github_rebase.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "ghp_test123"
+            result = tool._get_authenticated_url(mock_repo)
+
+        assert result is None
+
+    def test_get_authenticated_url_access_error(self) -> None:
+        """Test _get_authenticated_url handles exception during URL access."""
+        tool = GitHubRebaseTool()
+
+        class MockOrigin:
+            @property
+            def url(self) -> str:
+                raise RuntimeError("Cannot access URL")
+
+        class MockRemotes:
+            origin = MockOrigin()
+
+        class MockRepo:
+            remotes = MockRemotes()
+
+        with patch("reachy_mini_conversation_app.tools.github_rebase.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "ghp_test123"
+            result = tool._get_authenticated_url(MockRepo())
+
+        assert result is None
+
 
 class TestGitHubRebaseToolExecution:
     """Tests for GitHubRebaseTool tool execution."""
@@ -678,3 +712,195 @@ class TestGitHubRebaseToolExecution:
 
         assert result["status"] == "success"
         assert result["repo"] == "myrepo"
+
+    @pytest.mark.asyncio
+    async def test_github_rebase_url_with_existing_auth(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_rebase handles URL with existing authentication token."""
+        tool = GitHubRebaseTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        repo_path = repos_dir / "myrepo"
+        repo_path.mkdir()
+        git_dir = repo_path / ".git"
+        git_dir.mkdir()
+
+        mock_main = MagicMock()
+        mock_main.name = "main"
+
+        mock_origin = MagicMock()
+        # URL with existing @github.com (e.g., already has auth)
+        mock_origin.url = "https://oldtoken@github.com/owner/repo.git"
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch.name = "feature"
+        mock_repo.branches = [mock_main]
+        mock_repo.iter_commits.return_value = [MagicMock()]
+        mock_repo.remotes.origin = mock_origin
+
+        with patch("reachy_mini_conversation_app.tools.github_rebase.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_rebase.config") as mock_config:
+                mock_config.GITHUB_TOKEN = "ghp_newtoken"
+
+                with patch("reachy_mini_conversation_app.tools.github_rebase.Repo", return_value=mock_repo):
+                    result = await tool(mock_deps, repo="myrepo", action="start", onto="main", confirmed=True, update_remote=True)
+
+        assert result["status"] == "success"
+        mock_origin.fetch.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_github_rebase_get_authenticated_url_exception(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_rebase handles exception in _get_authenticated_url."""
+        tool = GitHubRebaseTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        repo_path = repos_dir / "myrepo"
+        repo_path.mkdir()
+        git_dir = repo_path / ".git"
+        git_dir.mkdir()
+
+        mock_main = MagicMock()
+        mock_main.name = "main"
+
+        mock_origin = MagicMock()
+        # Simulate exception when accessing url
+        type(mock_origin).url = property(lambda self: (_ for _ in ()).throw(AttributeError("no url")))
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch.name = "feature"
+        mock_repo.branches = [mock_main]
+        mock_repo.iter_commits.return_value = [MagicMock()]
+        mock_repo.remotes.origin = mock_origin
+
+        with patch("reachy_mini_conversation_app.tools.github_rebase.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_rebase.config") as mock_config:
+                mock_config.GITHUB_TOKEN = "ghp_token"
+
+                with patch("reachy_mini_conversation_app.tools.github_rebase.Repo", return_value=mock_repo):
+                    result = await tool(mock_deps, repo="myrepo", action="start", onto="main", confirmed=True, update_remote=True)
+
+        # Should still succeed, just without authenticated URL
+        assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_github_rebase_no_update_remote(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_rebase with update_remote=False skips fetch."""
+        tool = GitHubRebaseTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        repo_path = repos_dir / "myrepo"
+        repo_path.mkdir()
+        git_dir = repo_path / ".git"
+        git_dir.mkdir()
+
+        mock_main = MagicMock()
+        mock_main.name = "main"
+
+        mock_origin = MagicMock()
+        mock_origin.url = "https://github.com/owner/repo.git"
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch.name = "feature"
+        mock_repo.branches = [mock_main]
+        mock_repo.iter_commits.return_value = [MagicMock()]
+        mock_repo.remotes.origin = mock_origin
+
+        with patch("reachy_mini_conversation_app.tools.github_rebase.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_rebase.config") as mock_config:
+                mock_config.GITHUB_TOKEN = None
+
+                with patch("reachy_mini_conversation_app.tools.github_rebase.Repo", return_value=mock_repo):
+                    result = await tool(mock_deps, repo="myrepo", action="start", onto="main", confirmed=True, update_remote=False)
+
+        assert result["status"] == "success"
+        mock_origin.fetch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_github_rebase_fetch_exception(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_rebase handles fetch exception gracefully."""
+        tool = GitHubRebaseTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        repo_path = repos_dir / "myrepo"
+        repo_path.mkdir()
+        git_dir = repo_path / ".git"
+        git_dir.mkdir()
+
+        mock_main = MagicMock()
+        mock_main.name = "main"
+
+        mock_origin = MagicMock()
+        mock_origin.url = "https://github.com/owner/repo.git"
+        mock_origin.fetch.side_effect = Exception("Network error")
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch.name = "feature"
+        mock_repo.branches = [mock_main]
+        mock_repo.iter_commits.return_value = [MagicMock()]
+        mock_repo.remotes.origin = mock_origin
+
+        with patch("reachy_mini_conversation_app.tools.github_rebase.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_rebase.config") as mock_config:
+                mock_config.GITHUB_TOKEN = "ghp_token"
+
+                with patch("reachy_mini_conversation_app.tools.github_rebase.Repo", return_value=mock_repo):
+                    result = await tool(mock_deps, repo="myrepo", action="start", onto="main", confirmed=True, update_remote=True)
+
+        # Should still succeed even if fetch fails
+        assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_github_rebase_continue_reraises_non_conflict_error(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_rebase continue re-raises non-conflict GitCommandError."""
+        tool = GitHubRebaseTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        repo_path = repos_dir / "myrepo"
+        repo_path.mkdir()
+        git_dir = repo_path / ".git"
+        git_dir.mkdir()
+        (git_dir / "rebase-merge").mkdir()
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch.name = "feature"
+        # Error without "conflict" in message
+        mock_repo.git.rebase.side_effect = GitCommandError("rebase", "fatal: cannot continue")
+
+        with patch("reachy_mini_conversation_app.tools.github_rebase.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_rebase.Repo", return_value=mock_repo):
+                result = await tool(mock_deps, repo="myrepo", action="continue")
+
+        assert "error" in result
+        assert "Git rebase failed" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_github_rebase_outer_exception_handler(
+        self, mock_deps: ToolDependencies, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test github_rebase outer exception handler with non-GitCommandError."""
+        tool = GitHubRebaseTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        repo_path = repos_dir / "myrepo"
+        repo_path.mkdir()
+        git_dir = repo_path / ".git"
+        git_dir.mkdir()
+        (git_dir / "rebase-merge").mkdir()
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch.name = "feature"
+        # Non-GitCommandError exception
+        mock_repo.git.rebase.side_effect = RuntimeError("Unexpected runtime error")
+
+        with patch("reachy_mini_conversation_app.tools.github_rebase.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_rebase.Repo", return_value=mock_repo):
+                result = await tool(mock_deps, repo="myrepo", action="continue")
+
+        assert "error" in result
+        assert "Failed to rebase" in result["error"]
+        assert "Unexpected runtime error" in result["error"]

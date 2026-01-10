@@ -182,10 +182,12 @@ def run(
         vision_manager.start()
 
     def poll_stop_event() -> None:
-        """Poll the stop event to allow graceful shutdown."""
-        if app_stop_event is not None:
-            app_stop_event.wait()
+        """Poll the stop event to allow graceful shutdown.
 
+        Note: This function is only called when app_stop_event is truthy (line 178),
+        so we can safely wait on it without checking.
+        """
+        app_stop_event.wait()  # type: ignore[union-attr]
         logger.info("App stop event detected, shutting down...")
         try:
             stream_manager.close()

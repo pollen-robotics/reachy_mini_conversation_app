@@ -210,3 +210,55 @@ class TestDanceAvailability:
         assert hasattr(dance, "AVAILABLE_MOVES")
         # Could be dict or empty dict depending on library availability
         assert isinstance(dance.AVAILABLE_MOVES, dict)
+
+
+class TestDanceImportFailure:
+    """Tests for dance library import failure handling."""
+
+    def test_import_failure_sets_dance_not_available(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Test ImportError during dance library import sets DANCE_AVAILABLE to False."""
+        import importlib
+        import sys
+
+        # Save original modules
+        modules_to_remove = [
+            "reachy_mini_conversation_app.tools.dance",
+            "reachy_mini_dances_library.collection.dance",
+            "reachy_mini_dances_library.collection",
+            "reachy_mini_dances_library",
+        ]
+        saved_modules = {}
+        for mod in modules_to_remove:
+            if mod in sys.modules:
+                saved_modules[mod] = sys.modules.pop(mod)
+
+        try:
+            # Create a mock that raises ImportError for dance library
+            original_import = __builtins__["__import__"]
+
+            def mock_import(name, *args, **kwargs):
+                if "reachy_mini_dances_library" in name:
+                    raise ImportError("Test import error for dance library")
+                return original_import(name, *args, **kwargs)
+
+            __builtins__["__import__"] = mock_import
+
+            # Import the dance module fresh - this should trigger the except branch
+            with caplog.at_level("WARNING"):
+                dance_module = importlib.import_module("reachy_mini_conversation_app.tools.dance")
+
+            # Verify the module handled the import error
+            assert dance_module.DANCE_AVAILABLE is False
+            assert dance_module.AVAILABLE_MOVES == {}
+            assert "Dance library not available" in caplog.text
+
+        finally:
+            # Restore original import
+            __builtins__["__import__"] = original_import
+
+            # Restore original modules
+            for mod in modules_to_remove:
+                if mod in sys.modules:
+                    del sys.modules[mod]
+            for mod, module in saved_modules.items():
+                sys.modules[mod] = module

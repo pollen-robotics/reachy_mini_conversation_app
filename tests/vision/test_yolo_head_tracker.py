@@ -428,6 +428,128 @@ class TestGetHeadPosition:
         assert position[1] < 0  # Above center
 
 
+class TestGetHeadPositionEdgeCases:
+    """Edge case tests for get_head_position."""
+
+    def test_get_head_position_confidence_is_none_after_detection(self, mock_heavy_imports: dict) -> None:
+        """Test get_head_position skips confidence logging when confidence is None."""
+        from reachy_mini_conversation_app.vision.yolo_head_tracker import HeadTracker
+
+        mock_model = MagicMock()
+        mock_model.to.return_value = mock_model
+        mock_heavy_imports["ultralytics"].YOLO.return_value = mock_model
+
+        # Create detections with valid face index BUT confidence is None
+        # This tests line 134->139 branch where we have a valid face_idx but
+        # detections.confidence is None, so we skip the logging
+        mock_result = MagicMock()
+        # We need _select_best_face to return a valid index, but confidence to be None
+        # for the confidence logging check at line 134
+
+        # Create a custom detection mock that has xyxy but confidence=None
+        # but _select_best_face will still return a valid index
+        class SpecialDetections:
+            def __init__(self):
+                self.xyxy = np.array([[270, 190, 370, 290]], dtype=np.float32)
+                # Note: confidence is initially set for _select_best_face
+                # but we'll set it to None after
+                self._confidence = np.array([0.9], dtype=np.float32)
+
+            @property
+            def confidence(self):
+                return self._confidence
+
+            @confidence.setter
+            def confidence(self, value):
+                self._confidence = value
+
+            @classmethod
+            def from_ultralytics(cls, results):
+                return results._detections
+
+        # Create the detections that will pass _select_best_face but have None confidence later
+        detection_obj = MockDetections(
+            xyxy=np.array([[270, 190, 370, 290]], dtype=np.float32),
+            confidence=np.array([0.9], dtype=np.float32),  # Valid for _select_best_face
+        )
+
+        mock_result._detections = detection_obj
+        mock_model.return_value = [mock_result]
+
+        tracker = HeadTracker()
+
+        # Now set confidence to None AFTER the model is set up
+        # but this won't help since the detection is created fresh each call
+
+        # Actually, let's patch the tracker's _select_best_face to return 0
+        # and use detections with confidence=None
+        detection_obj_no_conf = MockDetections(
+            xyxy=np.array([[270, 190, 370, 290]], dtype=np.float32),
+            confidence=None,  # No confidence
+        )
+
+        mock_result._detections = detection_obj_no_conf
+        # Patch _select_best_face to return 0 despite None confidence
+        original_select = tracker._select_best_face
+        tracker._select_best_face = lambda d: 0  # Always return first face
+
+        img = np.zeros((480, 640, 3), dtype=np.uint8)
+        position, roll = tracker.get_head_position(img)
+
+        # Should still return valid position, just without confidence logging
+        assert position is not None
+        assert roll == 0.0
+
+        # Restore original method
+        tracker._select_best_face = original_select
+
+
+class TestHeadTrackerImportFailure:
+    """Tests for import failure handling."""
+
+    def test_import_failure_raises_import_error(self) -> None:
+        """Test ImportError is raised when dependencies are missing."""
+        import sys
+        import importlib
+
+        # Save original modules
+        modules_to_remove = [
+            "reachy_mini_conversation_app.vision.yolo_head_tracker",
+            "supervision",
+            "ultralytics",
+        ]
+        saved_modules = {name: sys.modules.get(name) for name in modules_to_remove}
+
+        try:
+            # Remove modules
+            for name in modules_to_remove:
+                if name in sys.modules:
+                    del sys.modules[name]
+
+            # Mock the import to fail
+            original_import = __builtins__["__import__"]
+
+            def mock_import(name: str, *args, **kwargs):
+                if name in ("supervision", "ultralytics"):
+                    raise ImportError(f"No module named '{name}'")
+                return original_import(name, *args, **kwargs)
+
+            __builtins__["__import__"] = mock_import
+
+            try:
+                with pytest.raises(ImportError, match="To use YOLO head tracker"):
+                    importlib.import_module("reachy_mini_conversation_app.vision.yolo_head_tracker")
+            finally:
+                __builtins__["__import__"] = original_import
+        finally:
+            # Restore original modules
+            for name, module in saved_modules.items():
+                if module is not None:
+                    sys.modules[name] = module
+                elif name in sys.modules:
+                    del sys.modules[name]
+
+
 class TestHeadTrackerIntegration:
     """Integration tests for HeadTracker."""
 

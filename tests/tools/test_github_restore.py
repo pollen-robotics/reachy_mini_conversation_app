@@ -378,3 +378,30 @@ class TestGitHubRestoreToolExecution:
 
         assert result["status"] == "success"
         mock_git.restore.assert_called_with("--staged", "--", "file1.txt", "file2.txt")
+
+    @pytest.mark.asyncio
+    async def test_github_restore_worktree_only_all_files(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_restore with worktree only and all files (.)."""
+        tool = GitHubRestoreTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_git = MagicMock()
+        mock_git.diff.return_value = "file1.txt\nfile2.txt"
+
+        mock_repo = MagicMock()
+        mock_repo.git = mock_git
+
+        with patch("reachy_mini_conversation_app.tools.github_restore.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_restore.Repo", return_value=mock_repo):
+                result = await tool(mock_deps, repo="myrepo", files=["."], worktree=True, confirmed=True)
+
+        assert result["status"] == "success"
+        assert result["worktree"] is True
+        # Should have the worktree hint
+        assert "hint" in result
+        assert "Working tree" in result["hint"]
+        mock_git.restore.assert_called_with("--worktree", "--", ".")
+

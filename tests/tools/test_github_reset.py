@@ -445,3 +445,93 @@ class TestGitHubResetToolExecution:
                 result = await tool(mock_deps, repo="owner/myrepo")
 
         assert result["status"] == "no_change"
+
+    @pytest.mark.asyncio
+    async def test_github_reset_invalid_mode(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_reset with invalid mode bypasses all branches (119->123)."""
+        tool = GitHubResetTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_current_commit = MagicMock()
+        mock_current_commit.hexsha = "abc1234567890"
+        mock_current_commit.message = "Current commit"
+
+        mock_target_commit = MagicMock()
+        mock_target_commit.hexsha = "def5678901234"
+        mock_target_commit.message = "Target commit"
+
+        mock_reset_commit = MagicMock()
+        mock_reset_commit.hexsha = "abc1234567890"
+        mock_reset_commit.message = "Reset commit"
+
+        mock_head = MagicMock()
+        mock_head.commit = mock_target_commit
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch.name = "main"
+        mock_repo.head.commit = mock_current_commit
+        mock_repo.head = mock_head
+        mock_repo.commit.return_value = mock_target_commit
+        mock_repo.iter_commits.return_value = [mock_reset_commit]
+
+        with patch("reachy_mini_conversation_app.tools.github_reset.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_reset.Repo", return_value=mock_repo):
+                # Use invalid mode that bypasses schema validation
+                result = await tool(mock_deps, repo="myrepo", mode="invalid")
+
+        # Should still succeed since reset doesn't use mode variable for actual git operation
+        # but no hint/warning will be set since none of the mode branches match
+        assert result["status"] == "success"
+        assert "hint" not in result
+        assert "warning" not in result
+
+    @pytest.mark.asyncio
+    async def test_github_reset_exception_after_target_validation(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_reset handles exception in main try block (163-165)."""
+        tool = GitHubResetTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_current_commit = MagicMock()
+        mock_current_commit.hexsha = "abc1234567890"
+        mock_current_commit.message = "Current commit"
+
+        mock_target_commit = MagicMock()
+        mock_target_commit.hexsha = "def5678901234"
+        mock_target_commit.message = "Target commit"
+
+        mock_reset_commit = MagicMock()
+        mock_reset_commit.hexsha = "xyz1234567890"
+        mock_reset_commit.message = "Reset commit"
+
+        mock_head = MagicMock()
+        # Reset succeeds, but accessing head.commit after fails
+        mock_head.reset.return_value = None
+        # Make head.commit raise exception after reset (simulating unexpected state)
+        call_count = [0]
+
+        def head_commit_side_effect():
+            call_count[0] += 1
+            if call_count[0] <= 1:
+                return mock_current_commit
+            raise RuntimeError("Unexpected state after reset")
+
+        type(mock_head).commit = property(lambda self: head_commit_side_effect())
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch.name = "main"
+        mock_repo.head = mock_head
+        mock_repo.commit.return_value = mock_target_commit
+        mock_repo.iter_commits.return_value = [mock_reset_commit]
+
+        with patch("reachy_mini_conversation_app.tools.github_reset.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_reset.Repo", return_value=mock_repo):
+                result = await tool(mock_deps, repo="myrepo", mode="mixed")
+
+        assert "error" in result
+        assert "Failed to reset" in result["error"]

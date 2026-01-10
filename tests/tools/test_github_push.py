@@ -568,3 +568,270 @@ class TestGitHubPushToolExecution:
                     result = await tool(mock_deps, repo="owner/myrepo", confirmed=True)
 
         assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_github_push_fetch_git_error_sets_needs_upstream(
+        self, mock_deps: ToolDependencies, tmp_path: Path
+    ) -> None:
+        """Test github_push sets needs_upstream when fetch fails."""
+        tool = GitHubPushTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_tracking = MagicMock()
+        mock_tracking.name = "origin/main"
+
+        mock_push_info = MagicMock()
+        mock_push_info.ERROR = 16
+        mock_push_info.REJECTED = 32
+        mock_push_info.flags = 0
+
+        mock_origin = MagicMock()
+        mock_origin.url = "https://github.com/owner/repo.git"
+        # Fetch fails with GitCommandError
+        mock_origin.fetch.side_effect = GitCommandError("fetch", "remote not found")
+        mock_origin.push.return_value = [mock_push_info]
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch.name = "main"
+        mock_repo.active_branch.tracking_branch.return_value = mock_tracking
+        mock_repo.remotes.origin = mock_origin
+
+        with patch("reachy_mini_conversation_app.tools.github_push.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_push.config") as mock_config:
+                mock_config.GITHUB_TOKEN = "ghp_token"
+
+                with patch("reachy_mini_conversation_app.tools.github_push.Repo", return_value=mock_repo):
+                    result = await tool(mock_deps, repo="myrepo", confirmed=True)
+
+        assert result["status"] == "success"
+        # Should have used set_upstream because fetch failed
+        mock_origin.push.assert_called_with(refspec="main:main", set_upstream=True)
+
+    @pytest.mark.asyncio
+    async def test_github_push_empty_push_info(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_push handles empty push_info."""
+        tool = GitHubPushTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_tracking = MagicMock()
+        mock_tracking.name = "origin/main"
+
+        mock_origin = MagicMock()
+        mock_origin.url = "https://github.com/owner/repo.git"
+        mock_origin.push.return_value = []  # Empty list
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch.name = "main"
+        mock_repo.active_branch.tracking_branch.return_value = mock_tracking
+        mock_repo.iter_commits.return_value = [MagicMock()]
+        mock_repo.remotes.origin = mock_origin
+
+        with patch("reachy_mini_conversation_app.tools.github_push.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_push.config") as mock_config:
+                mock_config.GITHUB_TOKEN = "ghp_token"
+
+                with patch("reachy_mini_conversation_app.tools.github_push.Repo", return_value=mock_repo):
+                    result = await tool(mock_deps, repo="myrepo", confirmed=True)
+
+        assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_github_push_error_with_token_in_summary(
+        self, mock_deps: ToolDependencies, tmp_path: Path
+    ) -> None:
+        """Test github_push hides token from error summary."""
+        tool = GitHubPushTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_tracking = MagicMock()
+        mock_tracking.name = "origin/main"
+
+        mock_push_info = MagicMock()
+        mock_push_info.ERROR = 16
+        mock_push_info.REJECTED = 32
+        mock_push_info.flags = 16  # ERROR flag
+        mock_push_info.summary = "Failed with ghp_secret token"
+
+        mock_origin = MagicMock()
+        mock_origin.url = "https://github.com/owner/repo.git"
+        mock_origin.push.return_value = [mock_push_info]
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch.name = "main"
+        mock_repo.active_branch.tracking_branch.return_value = mock_tracking
+        mock_repo.iter_commits.return_value = [MagicMock()]
+        mock_repo.remotes.origin = mock_origin
+
+        with patch("reachy_mini_conversation_app.tools.github_push.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_push.config") as mock_config:
+                mock_config.GITHUB_TOKEN = "ghp_secret"
+
+                with patch("reachy_mini_conversation_app.tools.github_push.Repo", return_value=mock_repo):
+                    result = await tool(mock_deps, repo="myrepo", confirmed=True)
+
+        assert "error" in result
+        assert "ghp_secret" not in result["error"]
+        assert "***" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_github_push_generic_exception_with_token(
+        self, mock_deps: ToolDependencies, tmp_path: Path
+    ) -> None:
+        """Test github_push hides token in generic exception."""
+        tool = GitHubPushTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_tracking = MagicMock()
+        mock_tracking.name = "origin/main"
+
+        mock_origin = MagicMock()
+        mock_origin.url = "https://github.com/owner/repo.git"
+        mock_origin.push.side_effect = RuntimeError("Error with ghp_mytoken in message")
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch.name = "main"
+        mock_repo.active_branch.tracking_branch.return_value = mock_tracking
+        mock_repo.iter_commits.return_value = [MagicMock()]
+        mock_repo.remotes.origin = mock_origin
+
+        with patch("reachy_mini_conversation_app.tools.github_push.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_push.config") as mock_config:
+                mock_config.GITHUB_TOKEN = "ghp_mytoken"
+
+                with patch("reachy_mini_conversation_app.tools.github_push.Repo", return_value=mock_repo):
+                    result = await tool(mock_deps, repo="myrepo", confirmed=True)
+
+        assert "error" in result
+        assert "ghp_mytoken" not in result["error"]
+        assert "***" in result["error"]
+
+
+    @pytest.mark.asyncio
+    async def test_github_push_without_auth_url(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_push works without authenticated URL (non-github remote)."""
+        tool = GitHubPushTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_tracking = MagicMock()
+        mock_tracking.name = "origin/main"
+
+        mock_push_info = MagicMock()
+        mock_push_info.ERROR = 16
+        mock_push_info.REJECTED = 32
+        mock_push_info.flags = 0
+
+        mock_origin = MagicMock()
+        # Use non-github URL so auth_url will be None
+        mock_origin.url = "https://gitlab.com/owner/repo.git"
+        mock_origin.push.return_value = [mock_push_info]
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch.name = "main"
+        mock_repo.active_branch.tracking_branch.return_value = mock_tracking
+        mock_repo.iter_commits.return_value = [MagicMock()]
+        mock_repo.remotes.origin = mock_origin
+
+        with patch("reachy_mini_conversation_app.tools.github_push.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_push.config") as mock_config:
+                mock_config.GITHUB_TOKEN = "ghp_token"
+
+                with patch("reachy_mini_conversation_app.tools.github_push.Repo", return_value=mock_repo):
+                    result = await tool(mock_deps, repo="myrepo", confirmed=True)
+
+        assert result["status"] == "success"
+        # set_url should NOT have been called since auth_url is None
+        mock_origin.set_url.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_github_push_error_no_summary_attribute(
+        self, mock_deps: ToolDependencies, tmp_path: Path
+    ) -> None:
+        """Test github_push handles error without summary attribute."""
+        tool = GitHubPushTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_tracking = MagicMock()
+        mock_tracking.name = "origin/main"
+
+        mock_push_info = MagicMock()
+        mock_push_info.ERROR = 16
+        mock_push_info.REJECTED = 32
+        mock_push_info.flags = 16  # ERROR flag
+        # Remove summary attribute
+        del mock_push_info.summary
+
+        mock_origin = MagicMock()
+        mock_origin.url = "https://github.com/owner/repo.git"
+        mock_origin.push.return_value = [mock_push_info]
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch.name = "main"
+        mock_repo.active_branch.tracking_branch.return_value = mock_tracking
+        mock_repo.iter_commits.return_value = [MagicMock()]
+        mock_repo.remotes.origin = mock_origin
+
+        with patch("reachy_mini_conversation_app.tools.github_push.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_push.config") as mock_config:
+                mock_config.GITHUB_TOKEN = "ghp_token"
+
+                with patch("reachy_mini_conversation_app.tools.github_push.Repo", return_value=mock_repo):
+                    result = await tool(mock_deps, repo="myrepo", confirmed=True)
+
+        assert "error" in result
+        assert "Push failed" in result["error"]
+
+
+class TestGitHubPushToolHelperEdgeCases:
+    """Tests for edge cases in helper methods."""
+
+    def test_get_authenticated_url_non_github_url(self) -> None:
+        """Test _get_authenticated_url with non-github URL returns None."""
+        tool = GitHubPushTool()
+
+        mock_repo = MagicMock()
+        mock_repo.remotes.origin.url = "https://gitlab.com/owner/repo.git"
+
+        with patch("reachy_mini_conversation_app.tools.github_push.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "ghp_test123"
+            result = tool._get_authenticated_url(mock_repo)
+
+        assert result is None
+
+    def test_get_authenticated_url_exception(self) -> None:
+        """Test _get_authenticated_url handles exception."""
+        tool = GitHubPushTool()
+
+        class MockOrigin:
+            @property
+            def url(self) -> str:
+                raise RuntimeError("Cannot access URL")
+
+        class MockRemotes:
+            origin = MockOrigin()
+
+        class MockRepo:
+            remotes = MockRemotes()
+
+        with patch("reachy_mini_conversation_app.tools.github_push.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "ghp_test123"
+            result = tool._get_authenticated_url(MockRepo())
+
+        assert result is None

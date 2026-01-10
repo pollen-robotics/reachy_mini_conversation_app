@@ -336,3 +336,83 @@ class TestGitHubStatusToolExecution:
         assert "1 staged" in result["summary"]
         assert "1 modified" in result["summary"]
         assert "1 untracked" in result["summary"]
+
+    @pytest.mark.asyncio
+    async def test_github_status_with_empty_lines_in_output(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_status handles empty lines in git diff output."""
+        tool = GitHubStatusTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch.name = "main"
+        mock_repo.active_branch.tracking_branch.return_value = None
+        # Git output with empty lines mixed in
+        mock_repo.git.diff.side_effect = lambda *args, **kwargs: (
+            "A\tfile1.py\n\nM\tfile2.py\n" if "--cached" in args else "\nM\tother.py\n\n"
+        )
+        mock_repo.untracked_files = []
+
+        with patch("reachy_mini_conversation_app.tools.github_status.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_status.Repo", return_value=mock_repo):
+                result = await tool(mock_deps, repo="myrepo")
+
+        assert result["status"] == "success"
+        # Should have parsed files correctly, ignoring empty lines
+        assert result["staged_count"] == 2
+        assert result["modified_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_github_status_with_malformed_lines(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_status handles malformed lines (no tab separator)."""
+        tool = GitHubStatusTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch.name = "main"
+        mock_repo.active_branch.tracking_branch.return_value = None
+        # Git output with malformed lines (no tab separator)
+        mock_repo.git.diff.side_effect = lambda *args, **kwargs: (
+            "A\tvalid.py\nmalformed_no_tab\nM\tvalid2.py" if "--cached" in args else "M\tvalid.py\nno_tab_here"
+        )
+        mock_repo.untracked_files = []
+
+        with patch("reachy_mini_conversation_app.tools.github_status.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_status.Repo", return_value=mock_repo):
+                result = await tool(mock_deps, repo="myrepo")
+
+        assert result["status"] == "success"
+        # Should have parsed valid files, skipping malformed lines
+        assert result["staged_count"] == 2  # valid.py and valid2.py
+        assert result["modified_count"] == 1  # valid.py only
+
+    @pytest.mark.asyncio
+    async def test_github_status_modified_with_empty_line_in_middle(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_status handles empty line in the middle of modified files output."""
+        tool = GitHubStatusTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_repo = MagicMock()
+        mock_repo.active_branch.name = "main"
+        mock_repo.active_branch.tracking_branch.return_value = None
+        # Modified output has empty line in the middle (after strip, still has empty line between)
+        mock_repo.git.diff.side_effect = lambda *args, **kwargs: (
+            "" if "--cached" in args else "M\tfile1.py\n\nM\tfile2.py"
+        )
+        mock_repo.untracked_files = []
+
+        with patch("reachy_mini_conversation_app.tools.github_status.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_status.Repo", return_value=mock_repo):
+                result = await tool(mock_deps, repo="myrepo")
+
+        assert result["status"] == "success"
+        # Should parse both files, skipping the empty line
+        assert result["modified_count"] == 2

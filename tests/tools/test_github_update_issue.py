@@ -358,3 +358,56 @@ class TestGitHubUpdateIssueToolExecution:
 
         assert "error" in result
         assert "Failed to update issue" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_github_update_issue_with_default_owner(self, mock_deps: ToolDependencies) -> None:
+        """Test github_update_issue uses GITHUB_DEFAULT_OWNER for repo without slash."""
+        tool = GitHubUpdateIssueTool()
+
+        mock_issue = MagicMock()
+        mock_issue.title = "Updated"
+        mock_issue.html_url = "url"
+
+        mock_repo = MagicMock()
+        mock_repo.get_issue.return_value = mock_issue
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_update_issue.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            mock_config.GITHUB_DEFAULT_OWNER = "default-owner"
+            with patch("reachy_mini_conversation_app.tools.github_update_issue.Github", return_value=mock_github):
+                result = await tool(mock_deps, repo="myrepo", issue_number=1, title="Updated")
+
+        assert result["status"] == "success"
+        mock_github.get_repo.assert_called_once_with("default-owner/myrepo")
+
+    @pytest.mark.asyncio
+    async def test_github_update_issue_empty_assignees_clears_all(self, mock_deps: ToolDependencies) -> None:
+        """Test github_update_issue with empty assignees list clears all assignees."""
+        tool = GitHubUpdateIssueTool()
+
+        existing_assignee = MagicMock()
+        mock_issue = MagicMock()
+        mock_issue.title = "Title"
+        mock_issue.html_url = "url"
+        mock_issue.assignees = [existing_assignee]
+
+        mock_repo = MagicMock()
+        mock_repo.get_issue.return_value = mock_issue
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_update_issue.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_update_issue.Github", return_value=mock_github):
+                # Pass empty list - should remove existing but not add any new
+                result = await tool(mock_deps, repo="owner/repo", issue_number=1, assignees=[])
+
+        assert result["status"] == "success"
+        assert "assignees" in result["updated_fields"]
+        mock_issue.remove_from_assignees.assert_called_once_with(existing_assignee)
+        # Should NOT call add_to_assignees since list is empty
+        mock_issue.add_to_assignees.assert_not_called()

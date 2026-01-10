@@ -345,3 +345,56 @@ class TestGitHubDiscardToolExecution:
         assert result["status"] == "success"
         # Should have called checkout with "." (all files)
         mock_git.checkout.assert_called_with("--", ".")
+
+    @pytest.mark.asyncio
+    async def test_github_discard_empty_files_list(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_discard with empty files list skips checkout."""
+        tool = GitHubDiscardTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_git = MagicMock()
+        mock_git.diff.return_value = "file.txt"
+
+        mock_repo = MagicMock()
+        mock_repo.git = mock_git
+        mock_repo.untracked_files = []
+
+        with patch("reachy_mini_conversation_app.tools.github_discard.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_discard.Repo", return_value=mock_repo):
+                # Pass empty files list - should skip discard loop
+                result = await tool(mock_deps, repo="myrepo", files=[], confirmed=True)
+
+        assert result["status"] == "success"
+        assert "no changes" in result["message"].lower()
+        # Should NOT call checkout since files list is empty
+        mock_git.checkout.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_github_discard_untracked_no_files_to_clean(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_discard with untracked=True but no untracked files."""
+        tool = GitHubDiscardTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        (repos_dir / "myrepo").mkdir()
+
+        mock_git = MagicMock()
+        mock_git.diff.return_value = "file.txt"
+
+        mock_repo = MagicMock()
+        mock_repo.git = mock_git
+        mock_repo.untracked_files = []  # No untracked files
+
+        with patch("reachy_mini_conversation_app.tools.github_discard.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_discard.Repo", return_value=mock_repo):
+                # untracked=True but no untracked files exist
+                result = await tool(mock_deps, repo="myrepo", untracked=True, confirmed=True)
+
+        assert result["status"] == "success"
+        # Should NOT call clean since no untracked files
+        mock_git.clean.assert_not_called()
+        # But should still discard modified files
+        assert "discarded_files" in result

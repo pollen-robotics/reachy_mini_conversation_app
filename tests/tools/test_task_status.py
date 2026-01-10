@@ -262,3 +262,61 @@ class TestTaskStatusToolExecution:
         assert result["status"] == "running"
         assert result["count"] == 2
         assert len(result["tasks"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_task_status_progress_without_message_specific(self, mock_deps: ToolDependencies) -> None:
+        """Test task_status with progress but no progress_message (specific task)."""
+        tool = TaskStatusTool()
+
+        mock_task = MagicMock()
+        mock_task.id = "task-prog"
+        mock_task.name = "progress_no_msg"
+        mock_task.description = "Task with progress but no message"
+        mock_task.started_at = time.monotonic() - 3
+        mock_task.status = TaskStatus.RUNNING
+        mock_task.progress = 0.25
+        mock_task.progress_message = None  # No message, just progress
+        mock_task.result = None
+        mock_task.error = None
+
+        mock_manager = MagicMock()
+        mock_manager.get_task.return_value = mock_task
+
+        with patch(
+            "reachy_mini_conversation_app.tools.task_status.BackgroundTaskManager.get_instance",
+            return_value=mock_manager,
+        ):
+            result = await tool(mock_deps, task_id="task-prog")
+
+        assert result["progress"] == 25.0
+        assert result["progress_percent"] == "25%"
+        assert "progress_message" not in result  # Should not be present
+
+    @pytest.mark.asyncio
+    async def test_task_status_progress_without_message_running_list(self, mock_deps: ToolDependencies) -> None:
+        """Test task_status with progress but no progress_message in running list."""
+        tool = TaskStatusTool()
+
+        mock_task = MagicMock()
+        mock_task.id = "task-prog-run"
+        mock_task.name = "progress_no_msg_running"
+        mock_task.description = "Running task with progress but no message"
+        mock_task.started_at = time.monotonic() - 2
+        mock_task.progress = 0.80
+        mock_task.progress_message = None  # No message, just progress
+
+        mock_manager = MagicMock()
+        mock_manager.get_running_tasks.return_value = [mock_task]
+
+        with patch(
+            "reachy_mini_conversation_app.tools.task_status.BackgroundTaskManager.get_instance",
+            return_value=mock_manager,
+        ):
+            result = await tool(mock_deps)
+
+        assert result["status"] == "running"
+        assert result["count"] == 1
+        task_info = result["tasks"][0]
+        assert task_info["progress"] == 80.0
+        assert task_info["progress_percent"] == "80%"
+        assert "progress_message" not in task_info  # Should not be present

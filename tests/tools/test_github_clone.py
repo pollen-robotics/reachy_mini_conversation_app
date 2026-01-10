@@ -286,3 +286,52 @@ class TestGitHubCloneToolExecution:
         assert "Failed to clone" in result["error"]
         # Token should be hidden
         assert "my_token" not in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_github_clone_generic_exception_no_token(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_clone handles generic exceptions without token."""
+        tool = GitHubCloneTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+
+        with patch("reachy_mini_conversation_app.tools.github_clone.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_clone.config") as mock_config:
+                mock_config.GITHUB_DEFAULT_OWNER = "owner"
+                mock_config.GITHUB_TOKEN = None  # No token
+
+                with patch("reachy_mini_conversation_app.tools.github_clone.Repo") as mock_repo_class:
+                    mock_repo_class.clone_from.side_effect = RuntimeError("Unexpected error")
+
+                    result = await tool(mock_deps, repo="myrepo")
+
+        assert "error" in result
+        assert "Failed to clone" in result["error"]
+        assert "Unexpected error" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_github_clone_success_with_owner_no_custom_email(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_clone sets default email when GITHUB_OWNER_EMAIL is not set."""
+        tool = GitHubCloneTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+
+        mock_repo = MagicMock()
+        mock_config_writer = MagicMock()
+        mock_repo.config_writer.return_value.__enter__ = MagicMock(return_value=mock_config_writer)
+        mock_repo.config_writer.return_value.__exit__ = MagicMock(return_value=None)
+
+        with patch("reachy_mini_conversation_app.tools.github_clone.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_clone.config") as mock_config:
+                mock_config.GITHUB_DEFAULT_OWNER = "myowner"
+                mock_config.GITHUB_TOKEN = None
+                mock_config.GITHUB_OWNER_EMAIL = None  # No custom email, will use default
+
+                with patch("reachy_mini_conversation_app.tools.github_clone.Repo") as mock_repo_class:
+                    mock_repo_class.clone_from.return_value = mock_repo
+
+                    result = await tool(mock_deps, repo="myrepo")
+
+        assert result["status"] == "success"
+        # Check that git config was set with the default noreply email
+        mock_config_writer.set_value.assert_any_call("user", "name", "myowner")
+        mock_config_writer.set_value.assert_any_call("user", "email", "myowner@users.noreply.github.com")

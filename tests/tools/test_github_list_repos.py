@@ -212,3 +212,92 @@ class TestGitHubListReposToolExecution:
         assert result["repos"][0]["name"] == "myrepo"
         # No remote_url since none was found
         assert "remote_url" not in result["repos"][0]
+
+    @pytest.mark.asyncio
+    async def test_github_list_repos_handles_config_read_exception(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_list_repos handles exception when reading config (lines 66-67)."""
+        tool = GitHubListReposTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+
+        repo = repos_dir / "myrepo"
+        repo.mkdir()
+        git_dir = repo / ".git"
+        git_dir.mkdir()
+        config_file = git_dir / "config"
+        config_file.write_text("dummy")
+        # Make config unreadable - we need to mock read_text to raise an exception
+        # But creating a directory with same name won't work, so use a mock
+
+        with patch("reachy_mini_conversation_app.tools.github_list_repos.REPOS_DIR", repos_dir):
+            # Patch the Path.read_text method to raise for the config file
+            original_read_text = Path.read_text
+
+            def mock_read_text(self: Path, *args: object, **kwargs: object) -> str:
+                if "config" in str(self):
+                    raise PermissionError("Cannot read config")
+                return original_read_text(self, *args, **kwargs)
+
+            with patch.object(Path, "read_text", mock_read_text):
+                result = await tool(mock_deps)
+
+        assert result["status"] == "success"
+        assert result["repos"][0]["name"] == "myrepo"
+        # Should still succeed but without remote_url
+        assert "remote_url" not in result["repos"][0]
+
+    @pytest.mark.asyncio
+    async def test_github_list_repos_detached_head(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_list_repos handles detached HEAD state (branch 74->79)."""
+        tool = GitHubListReposTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+
+        repo = repos_dir / "myrepo"
+        repo.mkdir()
+        git_dir = repo / ".git"
+        git_dir.mkdir()
+        # Detached HEAD - not starting with "ref: refs/heads/"
+        (git_dir / "HEAD").write_text("abc1234567890def")
+
+        with patch("reachy_mini_conversation_app.tools.github_list_repos.REPOS_DIR", repos_dir):
+            result = await tool(mock_deps)
+
+        assert result["status"] == "success"
+        assert result["repos"][0]["name"] == "myrepo"
+        # Branch should not be set in detached HEAD state
+        assert "branch" not in result["repos"][0]
+
+    @pytest.mark.asyncio
+    async def test_github_list_repos_handles_head_read_exception(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_list_repos handles exception when reading HEAD (lines 76-77)."""
+        tool = GitHubListReposTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+
+        repo = repos_dir / "myrepo"
+        repo.mkdir()
+        git_dir = repo / ".git"
+        git_dir.mkdir()
+        head_file = git_dir / "HEAD"
+        head_file.write_text("ref: refs/heads/main")
+
+        with patch("reachy_mini_conversation_app.tools.github_list_repos.REPOS_DIR", repos_dir):
+            # Patch to raise exception when reading HEAD
+            original_read_text = Path.read_text
+
+            def mock_read_text(self: Path, *args: object, **kwargs: object) -> str:
+                if "HEAD" in str(self):
+                    raise OSError("Cannot read HEAD")
+                return original_read_text(self, *args, **kwargs)
+
+            with patch.object(Path, "read_text", mock_read_text):
+                result = await tool(mock_deps)
+
+        assert result["status"] == "success"
+        assert result["repos"][0]["name"] == "myrepo"
+        # Branch should not be set due to read error
+        assert "branch" not in result["repos"][0]

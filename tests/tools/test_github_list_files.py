@@ -341,3 +341,28 @@ class TestGitHubListFilesToolExecution:
         assert result["status"] == "success"
         paths = [f["path"] for f in result["files"]]
         assert paths == sorted(paths)
+
+    @pytest.mark.asyncio
+    async def test_github_list_files_recursive_find_fails(self, mock_deps: ToolDependencies, tmp_path: Path) -> None:
+        """Test github_list_files handles find command failure in recursive mode."""
+        tool = GitHubListFilesTool()
+
+        repos_dir = tmp_path / "reachy_repos"
+        repos_dir.mkdir()
+        repo_path = repos_dir / "myrepo"
+        repo_path.mkdir()
+
+        # Mock subprocess with non-zero return code
+        mock_result = MagicMock()
+        mock_result.returncode = 1  # Non-zero = failure
+        mock_result.stdout = ""
+        mock_result.stderr = "find: error"
+
+        with patch("reachy_mini_conversation_app.tools.github_list_files.REPOS_DIR", repos_dir):
+            with patch("reachy_mini_conversation_app.tools.github_list_files.subprocess.run", return_value=mock_result):
+                result = await tool(mock_deps, repo="myrepo", recursive=True)
+
+        # Should still return success but with empty files list
+        assert result["status"] == "success"
+        assert result["count"] == 0
+        assert result["files"] == []
