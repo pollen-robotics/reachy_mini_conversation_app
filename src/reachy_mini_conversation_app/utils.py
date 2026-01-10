@@ -1,7 +1,7 @@
 import logging
 import argparse
 import warnings
-from typing import Any, Tuple
+from typing import Any, Tuple, Optional
 
 from reachy_mini import ReachyMini
 from reachy_mini_conversation_app.camera_worker import CameraWorker
@@ -26,16 +26,10 @@ def parse_args() -> Tuple[argparse.Namespace, list]:  # type: ignore
     parser.add_argument("--gradio", default=False, action="store_true", help="Open gradio interface")
     parser.add_argument("--debug", default=False, action="store_true", help="Enable debug logging")
     parser.add_argument(
-        "--wireless-version",
-        default=False,
-        action="store_true",
-        help="Use WebRTC backend for wireless version of the robot",
-    )
-    parser.add_argument(
-        "--on-device",
-        default=False,
-        action="store_true",
-        help="Use when conversation app is running on the same device as Reachy Mini daemon",
+        "--robot-name",
+        type=str,
+        default=None,
+        help="[Optional] Robot name/prefix for Zenoh topics (must match daemon's --robot-name). Only needed for development with multiple robots.",
     )
     return parser.parse_known_args()
 
@@ -108,3 +102,22 @@ def setup_logger(debug: bool) -> logging.Logger:
         logging.getLogger("fastrtc").setLevel(logging.ERROR)
         logging.getLogger("aioice").setLevel(logging.WARNING)
     return logger
+
+def log_connection_troubleshooting(logger: logging.Logger, robot_name: Optional[str]) -> None:
+    """Log troubleshooting steps for connection issues."""
+    logger.error("Troubleshooting steps:")
+    logger.error("  1. Verify reachy-mini-daemon is running")
+
+    if robot_name is not None:
+        logger.error(
+            f"  2. Daemon must be started with: --robot-name '{robot_name}'"
+        )
+    else:
+        logger.error(
+            "  2. If daemon uses --robot-name, add the same flag here: "
+            "--robot-name <name>"
+        )
+
+    logger.error("  3. For wireless: check network connectivity")
+    logger.error("  4. Review daemon logs")
+    logger.error("  5. Restart the daemon")

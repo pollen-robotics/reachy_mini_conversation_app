@@ -15,7 +15,7 @@ from reachy_mini_conversation_app.audio.speech_tapper import HOP_MS, SwayRollRT
 
 
 SAMPLE_RATE = 24000
-MOVEMENT_LATENCY_S = 0.08  # seconds between audio and robot movement
+MOVEMENT_LATENCY_S = 0.2  # seconds between audio and robot movement
 logger = logging.getLogger(__name__)
 
 
