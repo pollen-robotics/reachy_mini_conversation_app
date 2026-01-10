@@ -7,7 +7,70 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from reachy_mini_conversation_app.tools.core_tools import Tool
+from reachy_mini_conversation_app.tools.core_tools import EnvVar, Tool
+
+
+class TestEnvVar:
+    """Tests for EnvVar dataclass."""
+
+    def test_envvar_minimal_creation(self) -> None:
+        """Test EnvVar with only required field."""
+        env_var = EnvVar(name="MY_VAR")
+
+        assert env_var.name == "MY_VAR"
+        assert env_var.is_secret is False
+        assert env_var.description == ""
+        assert env_var.default is None
+        assert env_var.required is True
+
+    def test_envvar_all_fields(self) -> None:
+        """Test EnvVar with all fields specified."""
+        env_var = EnvVar(
+            name="API_KEY",
+            is_secret=True,
+            description="API key for external service",
+            default="default_key",
+            required=False,
+        )
+
+        assert env_var.name == "API_KEY"
+        assert env_var.is_secret is True
+        assert env_var.description == "API key for external service"
+        assert env_var.default == "default_key"
+        assert env_var.required is False
+
+    def test_envvar_to_config_tuple(self) -> None:
+        """Test EnvVar.to_config_tuple() conversion."""
+        env_var = EnvVar(
+            name="ANTHROPIC_API_KEY",
+            is_secret=True,
+            description="Anthropic API key for Claude",
+        )
+
+        result = env_var.to_config_tuple()
+
+        assert result == ("ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY", True, "Anthropic API key for Claude")
+        assert len(result) == 4
+
+    def test_envvar_to_config_tuple_non_secret(self) -> None:
+        """Test EnvVar.to_config_tuple() for non-secret variable."""
+        env_var = EnvVar(
+            name="MODEL_NAME",
+            is_secret=False,
+            description="Model name to use",
+        )
+
+        result = env_var.to_config_tuple()
+
+        assert result == ("MODEL_NAME", "MODEL_NAME", False, "Model name to use")
+
+    def test_envvar_to_config_tuple_empty_description(self) -> None:
+        """Test EnvVar.to_config_tuple() with empty description."""
+        env_var = EnvVar(name="SIMPLE_VAR")
+
+        result = env_var.to_config_tuple()
+
+        assert result == ("SIMPLE_VAR", "SIMPLE_VAR", False, "")
 
 
 class TestToolDependencies:
@@ -120,6 +183,42 @@ class TestToolBaseClass:
 
         tool = BackgroundTool()
         assert tool.supports_background is True
+
+    def test_tool_required_env_vars_default_empty(self) -> None:
+        """Test that required_env_vars defaults to empty list."""
+
+        class SimpleTool(Tool):
+            name = "simple_tool"
+            description = "A simple tool"
+            parameters_schema = {"type": "object", "properties": {}}
+
+            async def __call__(self, deps: Any, **kwargs: Any) -> dict[str, Any]:
+                return {}
+
+        tool = SimpleTool()
+        assert tool.required_env_vars == []
+
+    def test_tool_required_env_vars_can_be_set(self) -> None:
+        """Test that required_env_vars can be declared on a tool."""
+
+        class ToolWithEnvVars(Tool):
+            name = "tool_with_env_vars"
+            description = "A tool that needs env vars"
+            parameters_schema = {"type": "object", "properties": {}}
+            required_env_vars = [
+                EnvVar("API_KEY", is_secret=True, description="API key"),
+                EnvVar("MODEL", default="gpt-4", description="Model name"),
+            ]
+
+            async def __call__(self, deps: Any, **kwargs: Any) -> dict[str, Any]:
+                return {}
+
+        tool = ToolWithEnvVars()
+        assert len(tool.required_env_vars) == 2
+        assert tool.required_env_vars[0].name == "API_KEY"
+        assert tool.required_env_vars[0].is_secret is True
+        assert tool.required_env_vars[1].name == "MODEL"
+        assert tool.required_env_vars[1].default == "gpt-4"
 
 
 class TestGetConcreteSubclasses:

@@ -5,7 +5,7 @@ import json
 import inspect
 import logging
 import importlib
-from typing import Any, Dict, List
+from typing import Any, Dict, List, ClassVar
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -30,6 +30,7 @@ PROFILES_DIRECTORY = "reachy_mini_conversation_app.profiles"
 
 # Re-export imported modules that tests need to access for patching
 __all__ = [
+    "EnvVar",
     "Tool",
     "ToolDependencies",
     "ALL_TOOLS",
@@ -65,6 +66,41 @@ def get_concrete_subclasses(base: type) -> List[type[Tool]]:
 
 
 @dataclass
+class EnvVar:
+    """Declaration of an environment variable required by a tool.
+
+    Tools can declare their required environment variables by adding a
+    `required_env_vars` class attribute with a list of EnvVar instances.
+    These declarations are collected at startup and used to dynamically
+    populate the configuration UI.
+
+    Example:
+        class MyTool(Tool):
+            name = "my_tool"
+            required_env_vars = [
+                EnvVar("MY_API_KEY", is_secret=True, description="API key for service"),
+                EnvVar("MY_MODEL", default="gpt-4", description="Model to use"),
+            ]
+
+    """
+
+    name: str  # Environment variable name (e.g., "ANTHROPIC_API_KEY")
+    is_secret: bool = False  # If True, value is masked in UI
+    description: str = ""  # Human-readable description for UI
+    default: str | None = None  # Default value if not set
+    required: bool = True  # If True, tool may fail without this var
+
+    def to_config_tuple(self) -> tuple[str, str, bool, str]:
+        """Convert to CONFIG_VARS tuple format for backward compatibility.
+
+        Returns:
+            Tuple of (env_var_name, config_attr_name, is_secret, description)
+
+        """
+        return (self.name, self.name, self.is_secret, self.description)
+
+
+@dataclass
 class ToolDependencies:
     """External dependencies injected into tools."""
 
@@ -89,12 +125,14 @@ class Tool(abc.ABC):
 
     Optional:
       - supports_background: bool  # Whether tool can run in background (default: False)
+      - required_env_vars: List[EnvVar]  # Environment variables this tool needs
     """
 
     name: str
     description: str
     parameters_schema: Dict[str, Any]
     supports_background: bool = False  # Override in subclass to enable background execution
+    required_env_vars: ClassVar[List[EnvVar]] = []  # Override to declare env var dependencies
 
     def spec(self) -> Dict[str, Any]:
         """Return the function spec for LLM consumption."""
