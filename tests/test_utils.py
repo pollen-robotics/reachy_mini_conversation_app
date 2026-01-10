@@ -22,8 +22,7 @@ class TestParseArgs:
         assert args.local_vision is False
         assert args.gradio is False
         assert args.debug is False
-        assert args.wireless_version is False
-        assert args.on_device is False
+        assert args.robot_name is None
         assert unknown == []
 
     def test_parse_args_head_tracker_yolo(self) -> None:
@@ -80,23 +79,14 @@ class TestParseArgs:
 
         assert args.debug is True
 
-    def test_parse_args_wireless_version(self) -> None:
-        """Test parse_args with --wireless-version flag."""
+    def test_parse_args_robot_name(self) -> None:
+        """Test parse_args with --robot-name flag."""
         from reachy_mini_conversation_app.utils import parse_args
 
-        with patch("sys.argv", ["prog", "--wireless-version"]):
+        with patch("sys.argv", ["prog", "--robot-name", "my_robot"]):
             args, _ = parse_args()
 
-        assert args.wireless_version is True
-
-    def test_parse_args_on_device(self) -> None:
-        """Test parse_args with --on-device flag."""
-        from reachy_mini_conversation_app.utils import parse_args
-
-        with patch("sys.argv", ["prog", "--on-device"]):
-            args, _ = parse_args()
-
-        assert args.on_device is True
+        assert args.robot_name == "my_robot"
 
     def test_parse_args_multiple_flags(self) -> None:
         """Test parse_args with multiple flags combined."""
@@ -459,3 +449,46 @@ class TestHandleVisionStuffEdgeCases:
         assert head_tracker is None
         assert vision_manager is None
         mock_camera_worker_cls.assert_called_once_with(mock_robot, None)
+
+
+class TestLogConnectionTroubleshooting:
+    """Tests for log_connection_troubleshooting function."""
+
+    def test_log_connection_troubleshooting_with_robot_name(self) -> None:
+        """Test log_connection_troubleshooting logs correctly with robot_name."""
+        from reachy_mini_conversation_app.utils import log_connection_troubleshooting
+
+        mock_logger = MagicMock()
+        log_connection_troubleshooting(mock_logger, robot_name="my_robot")
+
+        # Check that error was called multiple times (6 calls total)
+        assert mock_logger.error.call_count == 6
+
+        # Check specific messages
+        calls = [str(c) for c in mock_logger.error.call_args_list]
+        assert any("Troubleshooting steps" in c for c in calls)
+        assert any("Verify reachy-mini-daemon is running" in c for c in calls)
+        assert any("--robot-name 'my_robot'" in c for c in calls)
+        assert any("check network connectivity" in c for c in calls)
+        assert any("Review daemon logs" in c for c in calls)
+        assert any("Restart the daemon" in c for c in calls)
+
+    def test_log_connection_troubleshooting_without_robot_name(self) -> None:
+        """Test log_connection_troubleshooting logs correctly without robot_name."""
+        from reachy_mini_conversation_app.utils import log_connection_troubleshooting
+
+        mock_logger = MagicMock()
+        log_connection_troubleshooting(mock_logger, robot_name=None)
+
+        # Check that error was called multiple times (6 calls total)
+        assert mock_logger.error.call_count == 6
+
+        # Check specific messages - should suggest adding --robot-name flag
+        calls = [str(c) for c in mock_logger.error.call_args_list]
+        assert any("Troubleshooting steps" in c for c in calls)
+        assert any("Verify reachy-mini-daemon is running" in c for c in calls)
+        assert any("If daemon uses --robot-name" in c for c in calls)
+        assert any("--robot-name <name>" in c for c in calls)
+        assert any("check network connectivity" in c for c in calls)
+        assert any("Review daemon logs" in c for c in calls)
+        assert any("Restart the daemon" in c for c in calls)

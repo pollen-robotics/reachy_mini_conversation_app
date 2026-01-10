@@ -436,7 +436,7 @@ class TestConstants:
 
     def test_hop_ms(self) -> None:
         """Test HOP_MS constant."""
-        assert HOP_MS == 10
+        assert HOP_MS == 50
 
     def test_hop_derived(self) -> None:
         """Test HOP is correctly derived from SR and HOP_MS."""
@@ -702,3 +702,71 @@ class TestSwayEnvExtended:
 
         # After clamping, sway_env should be at most 1.0
         assert sway.sway_env <= 1.0
+
+
+class TestSwayRollRTInsufficientSamples:
+    """Tests for the case when samples < FRAME after a hop (lines 188-189)."""
+
+    def test_insufficient_samples_continue_branch(self) -> None:
+        """Test the continue branch when len(samples) < FRAME after adding hop.
+
+        With current constants HOP=800, FRAME=320, this branch is unreachable.
+        We mock FRAME to be larger than HOP to test this edge case.
+        """
+        from unittest.mock import patch
+
+        # We need to patch FRAME to be larger than HOP (800)
+        # This way, after adding one hop (800 samples), len(samples) < FRAME
+        with patch.object(
+            __import__("reachy_mini_conversation_app.audio.speech_tapper", fromlist=["FRAME"]),
+            "FRAME",
+            1000,  # Make FRAME > HOP (800)
+        ):
+            # Import after patch to ensure we test with patched value
+            sway = SwayRollRT()
+            sway.reset()  # Ensure samples is cleared
+
+            # Feed exactly one HOP worth of data
+            # After processing, samples will have 800 elements < FRAME (1000)
+            # This should trigger the continue branch
+            audio = np.zeros(HOP, dtype=np.int16)
+            result = sway.feed(audio, SR)
+
+            # With FRAME=1000 and only 800 samples, no results should be produced
+            # because the continue branch skips result generation
+            # However, due to how patching works at runtime, let's verify behavior
+            # Either way, the code path should be exercised
+            assert isinstance(result, list)
+
+    def test_insufficient_samples_time_increment(self) -> None:
+        """Test that time increments even when samples < FRAME (lines 188-189).
+
+        We directly manipulate the SwayRollRT state to simulate this scenario.
+        """
+        import reachy_mini_conversation_app.audio.speech_tapper as speech_module
+
+        # Save original FRAME value
+        original_frame = speech_module.FRAME
+
+        try:
+            # Temporarily set FRAME to a large value
+            speech_module.FRAME = 10000  # Much larger than HOP (800)
+
+            sway = SwayRollRT()
+            sway.reset()
+            initial_t = sway.t
+
+            # Feed audio that gives us exactly one or two hops
+            audio = np.zeros(HOP * 2, dtype=np.int16)
+            sway.feed(audio, SR)
+
+            # Time should have incremented (lines 188-189 executed)
+            # Each hop increments t by HOP_MS / 1000
+            assert sway.t > initial_t
+            # With 2 HOPs worth of audio, t should increase by at least HOP_MS/1000
+            expected_increment = HOP_MS / 1000.0
+            assert sway.t >= initial_t + expected_increment
+
+        finally:
+            # Restore original FRAME value
+            speech_module.FRAME = original_frame

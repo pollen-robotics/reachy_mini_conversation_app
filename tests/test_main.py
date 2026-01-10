@@ -168,10 +168,9 @@ class TestRunSimulationCheck:
             debug=False,
             no_camera=False,
             head_tracker=None,
-            wireless_version=False,
-            on_device=False,
             gradio=False,
             local_vision=False,
+            robot_name=None,
         )
         mock_robot = MagicMock()
         mock_robot.client.get_status.return_value = {"simulation_enabled": True}
@@ -229,10 +228,9 @@ class TestRunWithMockedInternalImports:
             "debug": False,
             "no_camera": False,
             "head_tracker": None,
-            "wireless_version": False,
-            "on_device": False,
             "gradio": False,
             "local_vision": False,
+            "robot_name": None,
         }
         defaults.update(kwargs)
         return argparse.Namespace(**defaults)
@@ -252,8 +250,8 @@ class TestRunWithMockedInternalImports:
         mocks["LocalStream"].return_value = mock_stream_instance
         return mocks
 
-    def test_run_initializes_robot_default_backend(self) -> None:
-        """Test run initializes robot with default backend."""
+    def test_run_initializes_robot_auto_backend(self) -> None:
+        """Test run initializes robot with auto-detected backend."""
         from reachy_mini_conversation_app.main import run
 
         args = self._create_mock_args()
@@ -277,13 +275,14 @@ class TestRunWithMockedInternalImports:
                         with patch("time.sleep"):
                             run(args)
 
-        mock_robot_class.assert_called_once_with(media_backend="default")
+        # ReachyMini is called without explicit backend (auto-detection)
+        mock_robot_class.assert_called_once_with()
 
-    def test_run_initializes_robot_webrtc_backend(self) -> None:
-        """Test run initializes robot with WebRTC backend for wireless remote."""
+    def test_run_initializes_robot_with_robot_name(self) -> None:
+        """Test run initializes robot with robot_name parameter."""
         from reachy_mini_conversation_app.main import run
 
-        args = self._create_mock_args(wireless_version=True, on_device=False)
+        args = self._create_mock_args(robot_name="my_robot")
         mocks = self._mock_run_internals()
 
         mock_robot_class = MagicMock()
@@ -304,34 +303,8 @@ class TestRunWithMockedInternalImports:
                         with patch("time.sleep"):
                             run(args)
 
-        mock_robot_class.assert_called_once_with(media_backend="webrtc", localhost_only=False)
-
-    def test_run_initializes_robot_gstreamer_backend(self) -> None:
-        """Test run initializes robot with GStreamer backend for wireless on-device."""
-        from reachy_mini_conversation_app.main import run
-
-        args = self._create_mock_args(wireless_version=True, on_device=True)
-        mocks = self._mock_run_internals()
-
-        mock_robot_class = MagicMock()
-        mock_robot = MagicMock()
-        mock_robot.client.get_status.return_value = {"simulation_enabled": False}
-        mock_robot_class.return_value = mock_robot
-
-        with patch("reachy_mini_conversation_app.main.ReachyMini", mock_robot_class):
-            with patch("reachy_mini_conversation_app.main.setup_logger", return_value=MagicMock()):
-                with patch("reachy_mini_conversation_app.main.handle_vision_stuff", return_value=(None, None, None)):
-                    with patch.dict("sys.modules", {
-                        "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
-                        "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
-                        "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]),
-                        "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=mocks["ToolDependencies"]),
-                        "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=mocks["HeadWobbler"]),
-                    }):
-                        with patch("time.sleep"):
-                            run(args)
-
-        mock_robot_class.assert_called_once_with(media_backend="gstreamer")
+        # ReachyMini is called with robot_name
+        mock_robot_class.assert_called_once_with(robot_name="my_robot")
 
     def test_run_uses_provided_robot(self) -> None:
         """Test run uses provided robot instead of creating new one."""
@@ -382,7 +355,10 @@ class TestRunWithMockedInternalImports:
                     with patch("time.sleep"):
                         run(args, robot=mock_robot)
 
-        mock_logger.warning.assert_any_call("Head tracking is not activated due to --no-camera.")
+        mock_logger.warning.assert_any_call(
+            "Head tracking disabled: --no-camera flag is set. "
+            "Remove --no-camera to enable head tracking."
+        )
 
     def test_run_starts_all_services(self) -> None:
         """Test run starts all services (movement_manager, head_wobbler, etc.)."""
@@ -740,3 +716,93 @@ class TestRunWithMockedInternalImports:
 
         # Verify the error was logged
         assert any("Error while closing stream manager" in str(call) for call in mock_logger.error.call_args_list)
+
+    def test_run_handles_timeout_error_on_robot_init(self) -> None:
+        """Test run handles TimeoutError during robot initialization (lines 70-76)."""
+        from reachy_mini_conversation_app.main import run
+
+        args = self._create_mock_args()
+
+        mock_robot_class = MagicMock()
+        mock_robot_class.side_effect = TimeoutError("Connection timed out")
+
+        mock_logger = MagicMock()
+
+        with patch("reachy_mini_conversation_app.main.ReachyMini", mock_robot_class):
+            with patch("reachy_mini_conversation_app.main.setup_logger", return_value=mock_logger):
+                with patch("reachy_mini_conversation_app.main.log_connection_troubleshooting") as mock_troubleshoot:
+                    with pytest.raises(SystemExit) as exc_info:
+                        run(args)
+
+        assert exc_info.value.code == 1
+        # Verify error was logged
+        assert any("Connection timeout" in str(call) for call in mock_logger.error.call_args_list)
+        # Verify troubleshooting was called
+        mock_troubleshoot.assert_called_once_with(mock_logger, None)
+
+    def test_run_handles_timeout_error_with_robot_name(self) -> None:
+        """Test run handles TimeoutError and logs robot_name in troubleshooting."""
+        from reachy_mini_conversation_app.main import run
+
+        args = self._create_mock_args(robot_name="my_robot")
+
+        mock_robot_class = MagicMock()
+        mock_robot_class.side_effect = TimeoutError("Connection timed out")
+
+        mock_logger = MagicMock()
+
+        with patch("reachy_mini_conversation_app.main.ReachyMini", mock_robot_class):
+            with patch("reachy_mini_conversation_app.main.setup_logger", return_value=mock_logger):
+                with patch("reachy_mini_conversation_app.main.log_connection_troubleshooting") as mock_troubleshoot:
+                    with pytest.raises(SystemExit) as exc_info:
+                        run(args)
+
+        assert exc_info.value.code == 1
+        # Verify troubleshooting was called with robot_name
+        mock_troubleshoot.assert_called_once_with(mock_logger, "my_robot")
+
+    def test_run_handles_connection_error_on_robot_init(self) -> None:
+        """Test run handles ConnectionError during robot initialization (lines 78-84)."""
+        from reachy_mini_conversation_app.main import run
+
+        args = self._create_mock_args()
+
+        mock_robot_class = MagicMock()
+        mock_robot_class.side_effect = ConnectionError("Failed to connect")
+
+        mock_logger = MagicMock()
+
+        with patch("reachy_mini_conversation_app.main.ReachyMini", mock_robot_class):
+            with patch("reachy_mini_conversation_app.main.setup_logger", return_value=mock_logger):
+                with patch("reachy_mini_conversation_app.main.log_connection_troubleshooting") as mock_troubleshoot:
+                    with pytest.raises(SystemExit) as exc_info:
+                        run(args)
+
+        assert exc_info.value.code == 1
+        # Verify error was logged
+        assert any("Connection failed" in str(call) for call in mock_logger.error.call_args_list)
+        # Verify troubleshooting was called
+        mock_troubleshoot.assert_called_once_with(mock_logger, None)
+
+    def test_run_handles_generic_exception_on_robot_init(self) -> None:
+        """Test run handles generic Exception during robot initialization (lines 86-91)."""
+        from reachy_mini_conversation_app.main import run
+
+        args = self._create_mock_args()
+
+        mock_robot_class = MagicMock()
+        mock_robot_class.side_effect = ValueError("Some unexpected error")
+
+        mock_logger = MagicMock()
+
+        with patch("reachy_mini_conversation_app.main.ReachyMini", mock_robot_class):
+            with patch("reachy_mini_conversation_app.main.setup_logger", return_value=mock_logger):
+                with pytest.raises(SystemExit) as exc_info:
+                    run(args)
+
+        assert exc_info.value.code == 1
+        # Verify error messages were logged
+        error_messages = [str(call) for call in mock_logger.error.call_args_list]
+        assert any("Unexpected error" in msg for msg in error_messages)
+        assert any("ValueError" in msg for msg in error_messages)
+        assert any("check your configuration" in msg for msg in error_messages)
