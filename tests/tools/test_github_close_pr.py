@@ -624,3 +624,48 @@ class TestGitHubClosePRToolExecution:
         assert "error" in result
         assert "GitHub API error" in result["error"]
         assert "Internal Server Error" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_github_close_pr_merge_with_custom_commit_title_and_message(
+        self, mock_deps: ToolDependencies
+    ) -> None:
+        """Test github_close_pr merges with custom commit_title and commit_message (lines 150, 152)."""
+        tool = GitHubClosePRTool()
+
+        mock_merge_result = MagicMock()
+        mock_merge_result.sha = "abc123"
+
+        mock_pr = MagicMock()
+        mock_pr.number = 1
+        mock_pr.title = "Test PR"
+        mock_pr.html_url = "url"
+        mock_pr.mergeable = True
+        mock_pr.merge.return_value = mock_merge_result
+
+        mock_gh_repo = MagicMock()
+        mock_gh_repo.get_pull.return_value = mock_pr
+
+        mock_github = MagicMock()
+        mock_github.get_repo.return_value = mock_gh_repo
+
+        with patch("reachy_mini_conversation_app.tools.github_close_pr.config") as mock_config:
+            mock_config.GITHUB_TOKEN = "test-token"
+            with patch("reachy_mini_conversation_app.tools.github_close_pr.Github", return_value=mock_github):
+                result = await tool(
+                    mock_deps,
+                    repo="owner/repo",
+                    pr_number=1,
+                    action="merge",
+                    commit_title="Custom merge title",
+                    commit_message="Custom merge message body",
+                    confirmed=True,
+                )
+
+        assert result["status"] == "success"
+        assert "merged" in result["message"].lower()
+        # Verify merge was called with custom title and message
+        mock_pr.merge.assert_called_once_with(
+            merge_method="merge",
+            commit_title="Custom merge title",
+            commit_message="Custom merge message body",
+        )
