@@ -6,11 +6,13 @@ __version__: str
 
 class Tokenizer:
     """Tokenizer class."""
+
     eos_token_id: int
     def decode(self, *args: Any, **kwargs: Any) -> str: ...
 
 class AutoProcessor:
     """Auto processor class for transformers."""
+
     tokenizer: Tokenizer
     @classmethod
     def from_pretrained(cls, model_name_or_path: str, **kwargs: Any) -> "AutoProcessor": ...
@@ -20,6 +22,7 @@ class AutoProcessor:
 
 class AutoModelForImageTextToText:
     """Auto model for image-to-text tasks."""
+
     @classmethod
     def from_pretrained(cls, model_name_or_path: str, **kwargs: Any) -> "AutoModelForImageTextToText": ...
     def to(self, device: str) -> "AutoModelForImageTextToText": ...

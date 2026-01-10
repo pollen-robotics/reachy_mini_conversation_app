@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import sys
 import asyncio
-from typing import Any, Generator, cast
+from typing import Any, Generator
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 

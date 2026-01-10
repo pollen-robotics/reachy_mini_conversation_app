@@ -7,8 +7,8 @@ from pathlib import Path
 
 import openai
 import anthropic
-from anthropic.types import TextBlock
 from git import Repo, GitCommandError, InvalidGitRepositoryError
+from anthropic.types import TextBlock
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies

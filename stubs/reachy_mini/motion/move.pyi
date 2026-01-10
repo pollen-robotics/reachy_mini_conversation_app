@@ -1,6 +1,5 @@
 """Type stubs for reachy_mini.motion.move module."""
 
-from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -30,5 +29,6 @@ class Move:
             - head_pose: 4x4 transformation matrix or None
             - antennas: Array of antenna positions or None
             - body_yaw: Body yaw angle or None
+
         """
         ...

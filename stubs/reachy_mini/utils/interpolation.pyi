@@ -19,6 +19,7 @@ def compose_world_offset(
 
     Returns:
         Combined 4x4 transformation matrix.
+
     """
     ...
 
@@ -36,5 +37,6 @@ def linear_pose_interpolation(
 
     Returns:
         Interpolated 4x4 transformation matrix.
+
     """
     ...

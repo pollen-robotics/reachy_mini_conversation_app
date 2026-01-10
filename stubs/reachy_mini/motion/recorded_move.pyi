@@ -15,6 +15,7 @@ class RecordedMoves:
 
         Returns:
             The requested Move object.
+
         """
         ...
 
@@ -23,5 +24,6 @@ class RecordedMoves:
 
         Returns:
             List of move names.
+
         """
         ...

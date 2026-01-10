@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
 import pytest
-from anthropic.types import TextBlock
 from numpy.typing import NDArray
+from anthropic.types import TextBlock
 
 
 # Ensure src is in path

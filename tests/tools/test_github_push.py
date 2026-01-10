@@ -1,7 +1,7 @@
 """Unit tests for the github_push tool."""
 
+from typing import cast
 from pathlib import Path
-from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest

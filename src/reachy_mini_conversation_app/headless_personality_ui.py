@@ -27,6 +27,7 @@ from .headless_personality import (
     read_instructions_for,
 )
 
+
 # Re-export for test patching
 __all__ = [
     "mount_personality_routes",

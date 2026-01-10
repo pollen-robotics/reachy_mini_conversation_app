@@ -14,7 +14,7 @@ import sys
 import time
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, List, Optional
+from typing import TYPE_CHECKING, List, Optional
 from pathlib import Path
 
 from fastrtc import AdditionalOutputs, audio_to_float32
@@ -60,7 +60,6 @@ except Exception:  # pragma: no cover - only loaded when settings_app is used
 # Re-export for test patching
 __all__ = [
     "LocalStream",
-    "create_settings_app",
     "mount_personality_routes",
     "FastAPI",
     "FileResponse",

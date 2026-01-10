@@ -2,7 +2,7 @@
 
 import math
 import base64
-from typing import Callable, Generator, List, Tuple
+from typing import List, Tuple, Callable, Generator
 
 import numpy as np
 import pytest

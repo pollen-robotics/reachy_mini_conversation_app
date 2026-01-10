@@ -1,8 +1,8 @@
 """Unit tests for the core_tools module."""
 
 import sys
-from pathlib import Path
 from typing import Any
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -68,7 +68,6 @@ class TestToolBaseClass:
 
     def test_tool_spec_generation(self) -> None:
         """Test that Tool.spec() generates correct function spec."""
-        from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
         class TestTool(Tool):
             name = "test_tool"
@@ -95,7 +94,6 @@ class TestToolBaseClass:
 
     def test_tool_supports_background_default_false(self) -> None:
         """Test that supports_background defaults to False."""
-        from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
         class TestTool(Tool):
             name = "test_tool"
@@ -110,7 +108,6 @@ class TestToolBaseClass:
 
     def test_tool_supports_background_can_be_enabled(self) -> None:
         """Test that supports_background can be set to True."""
-        from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
         class BackgroundTool(Tool):
             name = "background_tool"
@@ -130,7 +127,7 @@ class TestGetConcreteSubclasses:
 
     def test_get_concrete_subclasses_finds_direct_subclasses(self) -> None:
         """Test finding direct concrete subclasses."""
-        from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies, get_concrete_subclasses
+        from reachy_mini_conversation_app.tools.core_tools import get_concrete_subclasses
 
         class ConcreteTool(Tool):
             name = "concrete_tool"
@@ -147,7 +144,7 @@ class TestGetConcreteSubclasses:
         """Test that abstract classes are skipped."""
         import abc
 
-        from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies, get_concrete_subclasses
+        from reachy_mini_conversation_app.tools.core_tools import get_concrete_subclasses
 
         class AbstractTool(Tool, abc.ABC):
             name = "abstract_tool"
@@ -246,8 +243,6 @@ class TestDispatchToolCall:
         """Test successful tool dispatch."""
         from reachy_mini_conversation_app.tools.core_tools import (
             ALL_TOOLS,
-            Tool,
-            ToolDependencies,
             dispatch_tool_call,
         )
 
@@ -285,8 +280,6 @@ class TestDispatchToolCall:
         """Test dispatch with invalid JSON args."""
         from reachy_mini_conversation_app.tools.core_tools import (
             ALL_TOOLS,
-            Tool,
-            ToolDependencies,
             dispatch_tool_call,
         )
 
@@ -319,8 +312,6 @@ class TestDispatchToolCall:
         """Test dispatch handles tool exceptions gracefully."""
         from reachy_mini_conversation_app.tools.core_tools import (
             ALL_TOOLS,
-            Tool,
-            ToolDependencies,
             dispatch_tool_call,
         )
 

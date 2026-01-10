@@ -5,7 +5,7 @@ import sys
 import time
 import argparse
 import threading
-from typing import Any, Dict, Generator, List
+from typing import Any, Dict, List, Generator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 

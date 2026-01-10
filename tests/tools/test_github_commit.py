@@ -4,8 +4,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from anthropic.types import TextBlock
 from git import GitCommandError, InvalidGitRepositoryError
+from anthropic.types import TextBlock
 
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.github_commit import COMMIT_TYPES, GitHubCommitTool

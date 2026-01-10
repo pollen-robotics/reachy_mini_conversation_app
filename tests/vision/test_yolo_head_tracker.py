@@ -1,13 +1,14 @@
 """Unit tests for the YOLO head tracker module."""
 
-import builtins
 import sys
+import builtins
 from typing import TYPE_CHECKING, Any, Callable, Generator, cast
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
+
 
 if TYPE_CHECKING:
     from supervision import Detections

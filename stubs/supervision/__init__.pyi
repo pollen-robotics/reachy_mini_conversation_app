@@ -5,7 +5,6 @@ from typing import Any, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 
-
 class Detections:
     """Supervision Detections class."""
 

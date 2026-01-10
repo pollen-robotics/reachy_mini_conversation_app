@@ -1,7 +1,7 @@
 """Unit tests for the github_rebase tool."""
 
-from pathlib import Path
 from typing import cast
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest

@@ -1,7 +1,7 @@
 """Unit tests for the github_list_repos tool."""
 
-from pathlib import Path
 from typing import Any
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
