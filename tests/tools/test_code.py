@@ -1,12 +1,11 @@
 """Unit tests for the code generation tool."""
 
-import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from reachy_mini_conversation_app.tools.code import CodeTool, CODE_OUTPUT_DIR, REPOS_DIR
+from reachy_mini_conversation_app.tools.code import CodeTool
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 
 

@@ -2,19 +2,19 @@
 
 import json
 import logging
-from pathlib import Path
 from typing import Any, Dict, List, Optional
+from pathlib import Path
 
-import anthropic
 import openai
-from git import Repo, InvalidGitRepositoryError, GitCommandError
+import anthropic
+from git import Repo, GitCommandError, InvalidGitRepositoryError
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 from reachy_mini_conversation_app.tools.commit_rules import (
     load_commit_rules,
-    run_pre_commit_checks,
     format_check_results,
+    run_pre_commit_checks,
 )
 
 
@@ -338,7 +338,7 @@ Example response:
             # For amend, check that there's a commit to amend
             if amend:
                 try:
-                    last_commit = repo.head.commit
+                    _ = repo.head.commit
                 except ValueError:
                     return {"error": "No commits in repository. Cannot amend."}
 

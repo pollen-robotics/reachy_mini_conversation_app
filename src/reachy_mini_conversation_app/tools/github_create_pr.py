@@ -1,11 +1,11 @@
 """GitHub create pull request tool using PyGithub."""
 
 import logging
-from pathlib import Path
 from typing import Any, Dict, Optional
+from pathlib import Path
 
-from github import Github, GithubException
 from git import Repo, InvalidGitRepositoryError
+from github import Github, GithubException
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies

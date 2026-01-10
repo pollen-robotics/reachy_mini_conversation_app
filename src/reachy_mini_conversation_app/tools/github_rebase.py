@@ -1,10 +1,10 @@
 """GitHub rebase tool - rebase branches using GitPython."""
 
 import logging
+from typing import Any, Dict
 from pathlib import Path
-from typing import Any, Dict, List
 
-from git import Repo, InvalidGitRepositoryError, GitCommandError
+from git import Repo, GitCommandError, InvalidGitRepositoryError
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
@@ -189,7 +189,7 @@ class GitHubRebaseTool(Tool):
                     if "conflict" in str(e).lower() or "could not apply" in str(e).lower():
                         # Get conflicted files
                         conflicted = repo.index.unmerged_blobs()
-                        conflict_files = list(set(path for path, _ in conflicted.keys())) if conflicted else []
+                        conflict_files = list({path for path, _ in conflicted.keys()}) if conflicted else []
 
                         return {
                             "status": "conflict",
@@ -219,7 +219,7 @@ class GitHubRebaseTool(Tool):
                 except GitCommandError as e:
                     if "conflict" in str(e).lower():
                         conflicted = repo.index.unmerged_blobs()
-                        conflict_files = list(set(path for path, _ in conflicted.keys())) if conflicted else []
+                        conflict_files = list({path for path, _ in conflicted.keys()}) if conflicted else []
 
                         return {
                             "status": "conflict",

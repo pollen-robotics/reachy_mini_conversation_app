@@ -1,11 +1,10 @@
 """Code generation tool using Claude API."""
 
-import os
 import re
 import logging
+from typing import Any, Dict
 from pathlib import Path
 from datetime import datetime
-from typing import Any, Dict
 
 import anthropic
 

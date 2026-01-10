@@ -1,9 +1,8 @@
 """Unit tests for the core_tools module."""
 
-import json
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -128,7 +127,7 @@ class TestGetConcreteSubclasses:
 
     def test_get_concrete_subclasses_finds_direct_subclasses(self) -> None:
         """Test finding direct concrete subclasses."""
-        from reachy_mini_conversation_app.tools.core_tools import Tool, get_concrete_subclasses, ToolDependencies
+        from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies, get_concrete_subclasses
 
         class ConcreteTool(Tool):
             name = "concrete_tool"
@@ -144,7 +143,8 @@ class TestGetConcreteSubclasses:
     def test_get_concrete_subclasses_skips_abstract(self) -> None:
         """Test that abstract classes are skipped."""
         import abc
-        from reachy_mini_conversation_app.tools.core_tools import Tool, get_concrete_subclasses, ToolDependencies
+
+        from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies, get_concrete_subclasses
 
         class AbstractTool(Tool, abc.ABC):
             name = "abstract_tool"
@@ -242,10 +242,10 @@ class TestDispatchToolCall:
     async def test_dispatch_tool_call_success(self, mock_deps: MagicMock) -> None:
         """Test successful tool dispatch."""
         from reachy_mini_conversation_app.tools.core_tools import (
-            dispatch_tool_call,
             ALL_TOOLS,
             Tool,
             ToolDependencies,
+            dispatch_tool_call,
         )
 
         # Create and register a test tool
@@ -281,10 +281,10 @@ class TestDispatchToolCall:
     async def test_dispatch_tool_call_with_invalid_json(self, mock_deps: MagicMock) -> None:
         """Test dispatch with invalid JSON args."""
         from reachy_mini_conversation_app.tools.core_tools import (
-            dispatch_tool_call,
             ALL_TOOLS,
             Tool,
             ToolDependencies,
+            dispatch_tool_call,
         )
 
         class InvalidJsonTestTool(Tool):
@@ -315,10 +315,10 @@ class TestDispatchToolCall:
     async def test_dispatch_tool_call_handles_exception(self, mock_deps: MagicMock) -> None:
         """Test dispatch handles tool exceptions gracefully."""
         from reachy_mini_conversation_app.tools.core_tools import (
-            dispatch_tool_call,
             ALL_TOOLS,
             Tool,
             ToolDependencies,
+            dispatch_tool_call,
         )
 
         class ExceptionTestTool(Tool):
@@ -348,7 +348,7 @@ class TestGetToolSpecs:
 
     def test_get_tool_specs_returns_all(self) -> None:
         """Test get_tool_specs returns all specs by default."""
-        from reachy_mini_conversation_app.tools.core_tools import get_tool_specs, ALL_TOOL_SPECS
+        from reachy_mini_conversation_app.tools.core_tools import ALL_TOOL_SPECS, get_tool_specs
 
         specs = get_tool_specs()
         assert len(specs) == len(ALL_TOOL_SPECS)
@@ -356,9 +356,9 @@ class TestGetToolSpecs:
     def test_get_tool_specs_with_exclusion(self) -> None:
         """Test get_tool_specs excludes specified tools."""
         from reachy_mini_conversation_app.tools.core_tools import (
-            get_tool_specs,
-            ALL_TOOL_SPECS,
             ALL_TOOLS,
+            ALL_TOOL_SPECS,
+            get_tool_specs,
         )
 
         if not ALL_TOOLS:
@@ -374,7 +374,7 @@ class TestGetToolSpecs:
 
     def test_get_tool_specs_with_nonexistent_exclusion(self) -> None:
         """Test get_tool_specs ignores nonexistent tools in exclusion list."""
-        from reachy_mini_conversation_app.tools.core_tools import get_tool_specs, ALL_TOOL_SPECS
+        from reachy_mini_conversation_app.tools.core_tools import ALL_TOOL_SPECS, get_tool_specs
 
         specs = get_tool_specs(exclusion_list=["nonexistent_tool"])
         assert len(specs) == len(ALL_TOOL_SPECS)
@@ -394,7 +394,6 @@ class TestLoadProfileTools:
         with patch.object(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "test_profile"):
             with patch.object(core_tools, "_TOOLS_INITIALIZED", False):
                 # Patch Path to point to our temp directory
-                original_file = core_tools.Path(__file__)
                 mock_path = tmp_path / "core_tools.py"
 
                 with patch.object(core_tools.Path, "__new__", return_value=mock_path):
@@ -475,8 +474,9 @@ class TestInitializeTools:
 
     def test_initialize_tools_skips_if_already_initialized(self, caplog: pytest.LogCaptureFixture) -> None:
         """Test that _initialize_tools skips if already initialized."""
-        from reachy_mini_conversation_app.tools import core_tools
         import logging
+
+        from reachy_mini_conversation_app.tools import core_tools
 
         # Tools are already initialized at module import
         assert core_tools._TOOLS_INITIALIZED is True
@@ -495,7 +495,7 @@ class TestToolsLoggerSetup:
     def test_tools_logger_already_has_handlers(self) -> None:
         """Test that logger setup is skipped if handlers already exist."""
         import logging
-        from reachy_mini_conversation_app.tools import core_tools
+
 
         # The logger is set up at module import time
         tools_logger = logging.getLogger("reachy_mini_conversation_app.tools")
@@ -539,7 +539,6 @@ class TestLoadProfileToolsErrorHandling:
 
     def test_load_profile_tools_import_errors_coverage(self, caplog: pytest.LogCaptureFixture) -> None:
         """Test that various import errors are handled correctly."""
-        from reachy_mini_conversation_app.tools import core_tools
         import logging
 
         # This tests the exception branches in _load_profile_tools
@@ -555,7 +554,7 @@ class TestLoadProfileToolsImportExceptions:
     """Tests that specifically target import exception branches."""
 
     def _create_profile(self, tmp_path: Path, profile_name: str, tools_content: str) -> Path:
-        """Helper to create a profile directory with tools.txt."""
+        """Create a profile directory with tools.txt."""
         profile_dir = tmp_path / "profiles" / profile_name
         profile_dir.mkdir(parents=True)
         tools_txt = profile_dir / "tools.txt"
@@ -564,9 +563,9 @@ class TestLoadProfileToolsImportExceptions:
 
     def test_module_not_found_with_dependency_error(self, tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test ModuleNotFoundError where dependency is missing (not tool itself)."""
-        from reachy_mini_conversation_app.tools import core_tools
-        import importlib
         import logging
+
+        from reachy_mini_conversation_app.tools import core_tools
 
         self._create_profile(tmp_path, "dep_missing", "my_tool\n")
 
@@ -594,8 +593,9 @@ class TestLoadProfileToolsImportExceptions:
 
     def test_import_error_in_profile_tool(self, tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test ImportError when loading profile-local tool (lines 151-154)."""
-        from reachy_mini_conversation_app.tools import core_tools
         import logging
+
+        from reachy_mini_conversation_app.tools import core_tools
 
         self._create_profile(tmp_path, "import_err", "broken_tool\n")
         fake_file = tmp_path / "tools" / "core_tools.py"
@@ -618,8 +618,9 @@ class TestLoadProfileToolsImportExceptions:
 
     def test_general_exception_in_profile_tool(self, tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test general Exception when loading profile-local tool (lines 155-158)."""
-        from reachy_mini_conversation_app.tools import core_tools
         import logging
+
+        from reachy_mini_conversation_app.tools import core_tools
 
         self._create_profile(tmp_path, "gen_err", "error_tool\n")
         fake_file = tmp_path / "tools" / "core_tools.py"
@@ -642,8 +643,9 @@ class TestLoadProfileToolsImportExceptions:
 
     def test_import_error_in_shared_tool(self, tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test ImportError when loading shared tool (lines 173-175)."""
-        from reachy_mini_conversation_app.tools import core_tools
         import logging
+
+        from reachy_mini_conversation_app.tools import core_tools
 
         self._create_profile(tmp_path, "shared_import_err", "shared_broken\n")
         fake_file = tmp_path / "tools" / "core_tools.py"
@@ -669,8 +671,9 @@ class TestLoadProfileToolsImportExceptions:
 
     def test_general_exception_in_shared_tool(self, tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test general Exception when loading shared tool (lines 176-178)."""
-        from reachy_mini_conversation_app.tools import core_tools
         import logging
+
+        from reachy_mini_conversation_app.tools import core_tools
 
         self._create_profile(tmp_path, "shared_gen_err", "shared_error\n")
         fake_file = tmp_path / "tools" / "core_tools.py"
@@ -696,8 +699,9 @@ class TestLoadProfileToolsImportExceptions:
 
     def test_profile_tool_not_found_and_shared_not_found_no_profile_error(self, tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test tool not found in profile (no dependency error) and not in shared (lines 171-172)."""
-        from reachy_mini_conversation_app.tools import core_tools
         import logging
+
+        from reachy_mini_conversation_app.tools import core_tools
 
         self._create_profile(tmp_path, "not_found_test", "nonexistent_tool\n")
         fake_file = tmp_path / "tools" / "core_tools.py"
@@ -719,8 +723,9 @@ class TestLoadProfileToolsImportExceptions:
 
     def test_profile_error_and_shared_not_found(self, tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test profile has error and shared tool also not found (lines 168-170)."""
-        from reachy_mini_conversation_app.tools import core_tools
         import logging
+
+        from reachy_mini_conversation_app.tools import core_tools
 
         self._create_profile(tmp_path, "double_fail", "fail_tool\n")
         fake_file = tmp_path / "tools" / "core_tools.py"
@@ -745,8 +750,9 @@ class TestLoadProfileToolsImportExceptions:
 
     def test_profile_tool_loaded_successfully(self, tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test successful profile tool load (lines 140-141)."""
-        from reachy_mini_conversation_app.tools import core_tools
         import logging
+
+        from reachy_mini_conversation_app.tools import core_tools
 
         self._create_profile(tmp_path, "success_test", "success_tool\n")
         fake_file = tmp_path / "tools" / "core_tools.py"
@@ -776,7 +782,6 @@ class TestToolsLoggerBranch:
     def test_tools_logger_no_existing_handlers(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test logger setup when no handlers exist (branch 21->29)."""
         import logging
-        import importlib
 
         # Remove all handlers from the tools logger
         tools_logger = logging.getLogger("reachy_mini_conversation_app.tools")
@@ -804,8 +809,7 @@ class TestToolsLoggerBranch:
         """Test logger setup when handlers already exist (branch 21->29)."""
         import logging
         import importlib
-        import sys
-        import os
+
         from reachy_mini_conversation_app.config import config
 
         tools_logger = logging.getLogger("reachy_mini_conversation_app.tools")
@@ -830,7 +834,6 @@ class TestToolsLoggerBranch:
         # Clear any custom profile setting to avoid issues with reimport
         monkeypatch.delenv("REACHY_MINI_CUSTOM_PROFILE", raising=False)
         # Also reset the config object's profile setting
-        original_profile = config.REACHY_MINI_CUSTOM_PROFILE
         monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
 
         try:

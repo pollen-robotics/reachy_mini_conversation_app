@@ -1,8 +1,8 @@
 """GitHub log tool - show commit history using GitPython."""
 
 import logging
+from typing import Any, Dict, List
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 from git import Repo, InvalidGitRepositoryError
 

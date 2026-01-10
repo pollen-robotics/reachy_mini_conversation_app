@@ -6,13 +6,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.execute_code import (
-    ExecuteCodeTool,
     CODE_OUTPUT_DIR,
     ALLOWED_EXTENSIONS,
     MAX_EXECUTION_TIME,
+    ExecuteCodeTool,
 )
-from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 
 
 class TestExecuteCodeToolAttributes:

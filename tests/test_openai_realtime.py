@@ -1,20 +1,20 @@
-import asyncio
-import base64
-import logging
 import time
-from pathlib import Path
+import base64
+import asyncio
+import logging
 from typing import Any
+from pathlib import Path
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 import numpy as np
+import pytest
 
 import reachy_mini_conversation_app.openai_realtime as rt_mod
 from reachy_mini_conversation_app.openai_realtime import (
-    OpenaiRealtimeHandler,
     OPEN_AI_INPUT_SAMPLE_RATE,
     OPEN_AI_OUTPUT_SAMPLE_RATE,
+    OpenaiRealtimeHandler,
 )
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 
@@ -3394,7 +3394,6 @@ class TestPersistApiKeyOsEnvironException:
 
     def test_persist_api_key_os_environ_exception_caught(self, tmp_path: Path) -> None:
         """Test lines 821-822: exception during os.environ assignment is caught."""
-        import os
         handler = _build_handler_simple()
         handler.instance_path = str(tmp_path)
         handler.gradio_mode = True
@@ -3424,7 +3423,6 @@ class TestStartUpGradioModeConfigFallback:
     async def test_start_up_gradio_mode_uses_config_key(self, monkeypatch: Any) -> None:
         """Test line 169: when gradio_mode and textbox is empty, uses config.OPENAI_API_KEY."""
         # Import config module to patch it
-        import reachy_mini_conversation_app.config as config_mod
 
         # Track access count to config.OPENAI_API_KEY
         access_count = {"count": 0}
@@ -3571,7 +3569,6 @@ class TestReceiveAudioMultiChannel:
     @pytest.mark.asyncio
     async def test_receive_multichannel_audio_first_channel(self, monkeypatch: Any) -> None:
         """Test lines 555-556: when audio has multiple channels, use first channel only."""
-
         handler = _build_handler_simple()
         handler.input_sample_rate = OPEN_AI_INPUT_SAMPLE_RATE
 
@@ -3609,7 +3606,6 @@ class TestCollectExceptionInVoices:
     @pytest.mark.asyncio
     async def test_get_available_voices_collect_exception(self, monkeypatch: Any) -> None:
         """Test lines 698-699: exception during _collect is caught."""
-
         handler = _build_handler_simple()
 
         # Create a dict-like object that raises when items() is called (for nested access)
@@ -3660,9 +3656,6 @@ class TestRestartSessionOuterExceptionCoverage:
 
         # We can make the initial check fail by making _shutdown_requested raise
         handler._shutdown_requested = property(lambda self: (_ for _ in ()).throw(RuntimeError("test")))  # type: ignore[assignment]
-
-        # Actually, let's patch the method to trigger the exception
-        original_restart = handler._restart_session
 
         async def patched_restart() -> None:
             # Make something fail that triggers lines 244-245

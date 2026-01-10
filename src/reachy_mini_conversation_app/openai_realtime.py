@@ -19,12 +19,12 @@ from websockets.exceptions import ConnectionClosedError
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
+from reachy_mini_conversation_app.background_tasks import BackgroundTaskManager
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_tool_specs,
     dispatch_tool_call,
 )
-from reachy_mini_conversation_app.background_tasks import BackgroundTaskManager
 
 
 logger = logging.getLogger(__name__)

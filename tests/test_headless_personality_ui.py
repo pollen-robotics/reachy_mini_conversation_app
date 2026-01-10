@@ -1,12 +1,11 @@
 """Unit tests for headless_personality_ui module."""
 
 from __future__ import annotations
-
-import asyncio
 import os
 import sys
-from pathlib import Path
+import asyncio
 from typing import Any, Callable
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -460,7 +459,6 @@ class TestListEndpoint:
         """Test that list endpoint returns correct structure."""
         from reachy_mini_conversation_app.headless_personality_ui import (
             DEFAULT_OPTION,
-            list_personalities,
         )
 
         with patch(
@@ -480,12 +478,6 @@ class TestLoadEndpoint:
 
     def test_load_returns_profile_data(self, tmp_path: Path) -> None:
         """Test that load endpoint returns profile data."""
-        from reachy_mini_conversation_app.headless_personality_ui import (
-            available_tools_for,
-            read_instructions_for,
-            resolve_profile_dir,
-        )
-
         # Create a test profile
         profile_dir = tmp_path / "my_profile"
         profile_dir.mkdir()
@@ -506,11 +498,9 @@ class TestLoadEndpoint:
                     return_value=["tool1", "tool2", "tool3"],
                 ):
                     # Simulate endpoint logic
-                    name = "my_profile"
                     instr = "Test instructions"
                     tools_txt = (profile_dir / "tools.txt").read_text()
                     voice = (profile_dir / "voice.txt").read_text().strip()
-                    avail = ["tool1", "tool2", "tool3"]
                     enabled = [
                         ln.strip()
                         for ln in tools_txt.splitlines()
@@ -1598,8 +1588,6 @@ class TestUpdateEnvFileFunction:
 
         set_config_handler = registered_handlers.get("POST /config/{key}")
 
-        env_file = tmp_path / ".env"
-
         # When find_dotenv returns empty string, it should create in cwd
         with patch("dotenv.find_dotenv", return_value=""):
             with patch("pathlib.Path.cwd", return_value=tmp_path):
@@ -1620,8 +1608,8 @@ class TestCurrentChoiceFunction:
     def test_current_choice_exception_handling(self) -> None:
         """Test _current_choice handles exceptions."""
         from reachy_mini_conversation_app.headless_personality_ui import (
-            mount_personality_routes,
             DEFAULT_OPTION,
+            mount_personality_routes,
         )
 
         mock_app = MagicMock()
@@ -2429,8 +2417,8 @@ class TestStartupChoiceBranches:
     def test_startup_choice_exception(self) -> None:
         """Test startup choice when get_persisted raises."""
         from reachy_mini_conversation_app.headless_personality_ui import (
-            mount_personality_routes,
             DEFAULT_OPTION,
+            mount_personality_routes,
         )
 
         mock_app = MagicMock()
@@ -2706,7 +2694,6 @@ class TestApplyEndpointRequestBody:
         """Test apply endpoint falls back to DEFAULT_OPTION (line 231)."""
         from reachy_mini_conversation_app.headless_personality_ui import (
             mount_personality_routes,
-            DEFAULT_OPTION,
         )
 
         mock_app = MagicMock()
@@ -2778,11 +2765,11 @@ class TestVoicesInnerException:
 
         mount_personality_routes(mock_app, mock_handler, mock_get_loop)
 
-        voices_handler = registered_handlers.get("GET /voices")
+        _ = registered_handlers.get("GET /voices")
 
         # We need to actually run the inner coroutine in the loop
         # The issue is the test needs the inner _get_v function to run and handle exception
-        with patch("asyncio.run_coroutine_threadsafe") as mock_run:
+        with patch("asyncio.run_coroutine_threadsafe"):
             # This time we need to actually run the coroutine to test inner exception
             async def run_coro_and_raise(coro: Any, loop: Any) -> Any:
                 # Run the coroutine which will call get_available_voices and catch exception

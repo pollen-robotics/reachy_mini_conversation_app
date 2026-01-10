@@ -217,8 +217,8 @@ class TestDanceImportFailure:
 
     def test_import_failure_sets_dance_not_available(self, caplog: pytest.LogCaptureFixture) -> None:
         """Test ImportError during dance library import sets DANCE_AVAILABLE to False."""
-        import importlib
         import sys
+        import importlib
 
         # Save original modules
         modules_to_remove = [

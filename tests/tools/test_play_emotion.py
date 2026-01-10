@@ -1,6 +1,6 @@
 """Unit tests for the play_emotion tool."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -187,8 +187,8 @@ class TestPlayEmotionImportFailure:
 
     def test_import_failure_sets_emotion_not_available(self, caplog: pytest.LogCaptureFixture) -> None:
         """Test ImportError during emotion library import sets EMOTION_AVAILABLE to False."""
-        import importlib
         import sys
+        import importlib
 
         # Save original modules to restore later
         modules_to_remove = [

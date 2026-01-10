@@ -2,8 +2,8 @@
 
 import shutil
 import logging
-from pathlib import Path
 from typing import Any, Dict
+from pathlib import Path
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
@@ -126,7 +126,7 @@ class CodeMoveToRepoTool(Tool):
 
             return {
                 "status": "success",
-                "message": f"File moved successfully!",
+                "message": "File moved successfully!",
                 "source": str(source_file),
                 "destination": str(dest_full),
                 "repo": local_name,

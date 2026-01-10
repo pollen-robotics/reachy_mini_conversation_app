@@ -1,10 +1,9 @@
 """Unit tests for gradio_personality module."""
 
 from __future__ import annotations
-
 import sys
-from pathlib import Path
 from typing import Any
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -290,8 +289,6 @@ class TestCreateComponents:
 
     def test_create_components_creates_all_components(self) -> None:
         """Test that create_components creates all UI components."""
-        import gradio as gr
-
         from reachy_mini_conversation_app.gradio_personality import PersonalityUI
 
         with patch("reachy_mini_conversation_app.gradio_personality.config") as mock_config:
@@ -990,8 +987,9 @@ class TestFetchVoicesHandler:
     @pytest.mark.asyncio
     async def test_fetch_voices_success(self, tmp_path: Path) -> None:
         """Test fetch voices success."""
-        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
         from unittest.mock import AsyncMock
+
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
 
         with patch("reachy_mini_conversation_app.gradio_personality.config") as mock_config:
             mock_config.REACHY_MINI_CUSTOM_PROFILE = None
@@ -1027,8 +1025,9 @@ class TestFetchVoicesHandler:
     @pytest.mark.asyncio
     async def test_fetch_voices_exception(self, tmp_path: Path) -> None:
         """Test fetch voices exception handling."""
-        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
         from unittest.mock import AsyncMock
+
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
 
         with patch("reachy_mini_conversation_app.gradio_personality.config") as mock_config:
             mock_config.REACHY_MINI_CUSTOM_PROFILE = None
@@ -1068,8 +1067,9 @@ class TestApplyPersonalityHandler:
     @pytest.mark.asyncio
     async def test_apply_personality_default(self, tmp_path: Path) -> None:
         """Test apply personality for default option."""
-        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
         from unittest.mock import AsyncMock
+
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
 
         with patch("reachy_mini_conversation_app.gradio_personality.config") as mock_config:
             mock_config.REACHY_MINI_CUSTOM_PROFILE = None
@@ -1130,8 +1130,9 @@ class TestApplyPersonalityHandler:
     @pytest.mark.asyncio
     async def test_apply_personality_custom(self, tmp_path: Path) -> None:
         """Test apply personality for custom profile."""
-        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
         from unittest.mock import AsyncMock
+
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
 
         with patch("reachy_mini_conversation_app.gradio_personality.config") as mock_config:
             mock_config.REACHY_MINI_CUSTOM_PROFILE = None
@@ -1197,8 +1198,9 @@ class TestReadVoiceForFunction:
     @pytest.mark.asyncio
     async def test_read_voice_for_custom_profile_with_voice(self, tmp_path: Path) -> None:
         """Test read voice for custom profile with voice.txt."""
-        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
         from unittest.mock import AsyncMock
+
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
 
         with patch("reachy_mini_conversation_app.gradio_personality.config") as mock_config:
             mock_config.REACHY_MINI_CUSTOM_PROFILE = None
@@ -1238,8 +1240,9 @@ class TestReadVoiceForFunction:
     @pytest.mark.asyncio
     async def test_read_voice_for_profile_without_voice_file(self, tmp_path: Path) -> None:
         """Test read voice for profile without voice.txt."""
-        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
         from unittest.mock import AsyncMock
+
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
 
         with patch("reachy_mini_conversation_app.gradio_personality.config") as mock_config:
             mock_config.REACHY_MINI_CUSTOM_PROFILE = None
@@ -1278,8 +1281,9 @@ class TestReadVoiceForFunction:
     @pytest.mark.asyncio
     async def test_read_voice_for_voice_not_in_available(self, tmp_path: Path) -> None:
         """Test read voice when voice is not in available voices."""
-        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
         from unittest.mock import AsyncMock
+
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
 
         with patch("reachy_mini_conversation_app.gradio_personality.config") as mock_config:
             mock_config.REACHY_MINI_CUSTOM_PROFILE = None
@@ -1324,8 +1328,9 @@ class TestReadVoiceForExceptionHandling:
     @pytest.mark.asyncio
     async def test_read_voice_for_exception_returns_cedar(self, tmp_path: Path) -> None:
         """Test read voice returns cedar when exception occurs (lines 140-141)."""
-        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
         from unittest.mock import AsyncMock
+
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
 
         with patch("reachy_mini_conversation_app.gradio_personality.config") as mock_config:
             mock_config.REACHY_MINI_CUSTOM_PROFILE = None
@@ -1630,8 +1635,9 @@ class TestNewPersonalityExceptionPath:
 
     def test_new_personality_gr_update_exception(self, tmp_path: Path) -> None:
         """Test _new_personality handles gr.update exception (lines 214-215)."""
-        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
         import gradio as gr
+
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
 
         with patch("reachy_mini_conversation_app.gradio_personality.config") as mock_config:
             mock_config.REACHY_MINI_CUSTOM_PROFILE = None
@@ -1679,7 +1685,6 @@ class TestNewPersonalityExceptionPath:
             assert captured_new_personality is not None
 
             # Make gr.update raise an exception
-            original_update = gr.update
             call_count = [0]
 
             def failing_update(**kwargs: Any) -> dict[str, Any]:

@@ -2,9 +2,9 @@
 
 import logging
 import subprocess
-from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Dict, List, Optional
+from pathlib import Path
+from dataclasses import field, dataclass
 
 import yaml
 
@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class CheckResult:
     """Result of a single pre-commit check."""
+
     name: str
     command: str
     required: bool
@@ -26,6 +27,7 @@ class CheckResult:
 @dataclass
 class PreCommitCheck:
     """A single pre-commit check configuration."""
+
     name: str
     command: str
     required: bool = True
@@ -35,6 +37,7 @@ class PreCommitCheck:
 @dataclass
 class AutoFixConfig:
     """Auto-fix configuration."""
+
     enabled: bool = False
     commands: List[str] = field(default_factory=list)
 
@@ -42,6 +45,7 @@ class AutoFixConfig:
 @dataclass
 class CommitRules:
     """Full commit rules configuration."""
+
     pre_commit: List[PreCommitCheck] = field(default_factory=list)
     auto_fix: AutoFixConfig = field(default_factory=AutoFixConfig)
 
@@ -176,6 +180,7 @@ def run_pre_commit_checks(
         - checks: List[Dict] - Individual check results
         - auto_fix_results: List[Dict] - Auto-fix command results
         - summary: str - Human-readable summary
+
     """
     results: Dict[str, Any] = {
         "passed": True,

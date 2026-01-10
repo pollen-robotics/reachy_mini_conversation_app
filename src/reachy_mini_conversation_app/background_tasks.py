@@ -6,15 +6,15 @@ completion is announced vocally via a silent notification queue.
 """
 
 from __future__ import annotations
-
-import asyncio
-import logging
 import time
 import uuid
+import asyncio
+import logging
 import weakref
-from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Coroutine, Dict, Optional
+from typing import Any, Dict, Optional, Coroutine
+from dataclasses import field, dataclass
+
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +73,7 @@ class BackgroundTaskManager:
     _instance: Optional["BackgroundTaskManager"] = None
 
     def __init__(self) -> None:
+        """Initialize the background task manager."""
         self._tasks: Dict[str, BackgroundTask] = {}
         self._notification_queue: asyncio.Queue[TaskNotification] = asyncio.Queue()
         self._connection_ref: Optional[weakref.ref[Any]] = None
@@ -103,6 +104,7 @@ class BackgroundTaskManager:
             connection: The OpenAI realtime connection object
             output_queue: The async queue for UI updates
             loop: The event loop (defaults to current running loop)
+
         """
         self._connection_ref = weakref.ref(connection)
         self._output_queue_ref = weakref.ref(output_queue)
@@ -150,6 +152,7 @@ class BackgroundTaskManager:
 
         Returns:
             BackgroundTask object with task ID
+
         """
         task_id = str(uuid.uuid4())[:8]
         bg_task = BackgroundTask(
@@ -256,6 +259,7 @@ class BackgroundTaskManager:
 
         Returns:
             True if updated successfully, False if task not found or not tracking progress
+
         """
         task = self._tasks.get(task_id)
         if task is None:
@@ -278,6 +282,7 @@ class BackgroundTaskManager:
 
         Returns:
             True if cancelled, False if task not found or not running
+
         """
         task = self._tasks.get(task_id)
         if task is None:
@@ -311,6 +316,7 @@ class BackgroundTaskManager:
 
         Returns:
             List of tasks sorted by start time (most recent first)
+
         """
         sorted_tasks = sorted(
             self._tasks.values(),
@@ -324,6 +330,7 @@ class BackgroundTaskManager:
 
         Returns:
             TaskNotification if available, None otherwise
+
         """
         try:
             return self._notification_queue.get_nowait()
@@ -338,6 +345,7 @@ class BackgroundTaskManager:
 
         Returns:
             TaskNotification if available within timeout, None otherwise
+
         """
         try:
             if timeout is not None:
@@ -362,6 +370,7 @@ class BackgroundTaskManager:
 
         Returns:
             Number of tasks removed
+
         """
         now = time.monotonic()
         to_remove = []
@@ -384,6 +393,7 @@ class BackgroundTaskManager:
 
         Returns:
             Dict with counts by status and list of running tasks
+
         """
         running = []
         counts = {status.value: 0 for status in TaskStatus}

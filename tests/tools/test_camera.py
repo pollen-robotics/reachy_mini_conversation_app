@@ -1,7 +1,7 @@
 """Unit tests for the camera tool."""
 
 import base64
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest

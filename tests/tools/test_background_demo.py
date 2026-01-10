@@ -1,13 +1,12 @@
 """Unit tests for the background_demo tool."""
 
-import asyncio
 from typing import Any
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from reachy_mini_conversation_app.tools.background_demo import BackgroundDemoTool
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.tools.background_demo import BackgroundDemoTool
 
 
 class TestBackgroundDemoToolAttributes:

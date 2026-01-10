@@ -4,10 +4,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from git import InvalidGitRepositoryError, GitCommandError
+from git import GitCommandError, InvalidGitRepositoryError
 
-from reachy_mini_conversation_app.tools.github_commit import GitHubCommitTool, REPOS_DIR, COMMIT_TYPES
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.tools.github_commit import COMMIT_TYPES, GitHubCommitTool
 
 
 class TestGitHubCommitToolAttributes:
@@ -1059,8 +1059,8 @@ class TestGitHubCommitToolGeneralException:
         assert "Failed to create commit" in result["error"]
 
 
-class TestParseResponse:
-    """Tests for _parse_response method."""
+class TestParseResponseCodeBlocks:
+    """Tests for _parse_response method with code blocks."""
 
     def test_parse_response_with_code_block_ending(self) -> None:
         """Test _parse_response handles content ending with ```."""

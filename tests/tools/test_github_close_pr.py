@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from github import GithubException
 
-from reachy_mini_conversation_app.tools.github_close_pr import GitHubClosePRTool
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.tools.github_close_pr import GitHubClosePRTool
 
 
 class TestGitHubClosePRToolAttributes:

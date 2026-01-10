@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from git import GitCommandError
 
-from reachy_mini_conversation_app.tools.github_clone import GitHubCloneTool, REPOS_DIR
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.tools.github_clone import GitHubCloneTool
 
 
 class TestGitHubCloneToolAttributes:

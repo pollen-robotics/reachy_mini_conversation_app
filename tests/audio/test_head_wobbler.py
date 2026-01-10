@@ -2,21 +2,20 @@
 
 import math
 import time
+import queue
 import base64
 import logging
-import queue
 import threading
 from typing import Any, List, Tuple
-from collections.abc import Callable
 from unittest.mock import MagicMock, patch
+from collections.abc import Callable
 
-import pytest
 import numpy as np
 
 from reachy_mini_conversation_app.audio.head_wobbler import (
-    HeadWobbler,
     SAMPLE_RATE,
     MOVEMENT_LATENCY_S,
+    HeadWobbler,
 )
 
 
@@ -436,11 +435,11 @@ class TestHeadWobblerIntegration:
             sample_audio = np.zeros(2400, dtype=np.int16)
             b64_audio = base64.b64encode(sample_audio.tobytes()).decode()
             wobbler.feed(b64_audio)
-            
+
             wobbler._state_lock.acquire()
             wobbler._generation += 1
             wobbler._state_lock.release()
-            
+
             time.sleep(0.3)
         finally:
             wobbler.stop()
@@ -454,7 +453,7 @@ class TestHeadWobblerIntegration:
                 sample_audio = np.random.randint(-100, 100, 2400, dtype=np.int16)
                 b64_audio = base64.b64encode(sample_audio.tobytes()).decode()
                 wobbler.feed(b64_audio)
-            
+
             time.sleep(0.5)
         finally:
             wobbler.stop()
@@ -468,7 +467,7 @@ class TestHeadWobblerIntegration:
                 sample_audio = np.random.randint(-100, 100, 2400, dtype=np.int16)
                 b64_audio = base64.b64encode(sample_audio.tobytes()).decode()
                 wobbler.feed(b64_audio)
-            
+
             time.sleep(0.3)
         finally:
             wobbler.stop()
@@ -511,13 +510,13 @@ class TestHeadWobblerIntegration:
             # Set base_ts far in the past so system is lagged
             wobbler._base_ts = time.monotonic() - 10.0
             wobbler._hops_done = 0
-            
+
             # Feed audio to trigger processing
             wobbler.feed(_make_audio_chunk(duration_s=0.5))
-            
+
             # Give it time to process and skip lagged hops
             time.sleep(0.4)
-            
+
             # Verify wobbler is still running and processed something
             assert wobbler._thread is not None and wobbler._thread.is_alive()
         finally:
@@ -527,25 +526,25 @@ class TestHeadWobblerIntegration:
         """Test that generation change after sleep causes break in processing loop."""
         wobbler, captured = _start_wobbler()
         ready_to_sleep = threading.Event()
-        
+
         original_sleep = time.sleep
-        
+
         def patched_sleep(duration: float) -> None:
             ready_to_sleep.set()
             original_sleep(duration)
-        
+
         with patch("time.sleep", patched_sleep):
             try:
                 wobbler.feed(_make_audio_chunk(duration_s=0.5))
-                
+
                 # Wait for sleep to be called (meaning target > now)
                 if ready_to_sleep.wait(timeout=1.0):
                     # While sleeping, trigger reset which increments generation
                     wobbler.reset()
-                
+
                 # Give it time to detect generation change and break
                 time.sleep(0.2)
-                
+
                 # Verify wobbler still running
                 assert wobbler._thread is not None and wobbler._thread.is_alive()
             finally:
@@ -665,7 +664,6 @@ class TestHeadWobblerIntegration:
         the generation check (line 137) fails, causing a break.
         """
         captured: List[Any] = []
-        break_triggered = threading.Event()
 
         original_apply_offsets_called = threading.Event()
 

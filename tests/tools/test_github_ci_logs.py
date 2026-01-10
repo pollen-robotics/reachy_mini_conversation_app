@@ -1,16 +1,16 @@
 """Unit tests for the github_ci_logs tool."""
 
-from unittest.mock import MagicMock, patch
-from datetime import datetime
-import zipfile
 import io
+import zipfile
+from datetime import datetime
+from unittest.mock import MagicMock, patch
 
 import pytest
-from github import GithubException
 import requests
+from github import GithubException
 
-from reachy_mini_conversation_app.tools.github_ci_logs import GitHubCILogsTool
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.tools.github_ci_logs import GitHubCILogsTool
 
 
 class TestGitHubCILogsToolAttributes:

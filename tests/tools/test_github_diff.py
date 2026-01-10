@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from git import InvalidGitRepositoryError
 
-from reachy_mini_conversation_app.tools.github_diff import GitHubDiffTool, REPOS_DIR
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.tools.github_diff import GitHubDiffTool
 
 
 class TestGitHubDiffToolAttributes:

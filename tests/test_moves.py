@@ -2,10 +2,10 @@
 
 import time
 import threading
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
-import pytest
 import numpy as np
+import pytest
 from numpy.typing import NDArray
 
 
@@ -17,9 +17,6 @@ def mock_reachy_mini():
     mock_utils = MagicMock()
     mock_motion = MagicMock()
     mock_interpolation = MagicMock()
-
-    # Create a realistic head pose (4x4 identity matrix)
-    identity_pose = np.eye(4, dtype=np.float32)
 
     def mock_create_head_pose(
         x=0, y=0, z=0, roll=0, pitch=0, yaw=0, degrees=True, mm=True
@@ -384,7 +381,7 @@ class TestMovementManagerInit:
 
     def test_init_creates_state(self, mock_reachy_mini: dict) -> None:
         """Test MovementManager creates initial state."""
-        from reachy_mini_conversation_app.moves import MovementManager, MovementState
+        from reachy_mini_conversation_app.moves import MovementState, MovementManager
 
         mock_robot = MagicMock()
         manager = MovementManager(current_robot=mock_robot)
@@ -535,8 +532,8 @@ class TestMovementManagerHandleCommand:
 
     def test_handle_queue_move(self, mock_reachy_mini: dict) -> None:
         """Test handling queue_move command."""
-        from reachy_mini_conversation_app.moves import MovementManager
         from reachy_mini.motion.move import Move
+        from reachy_mini_conversation_app.moves import MovementManager
 
         mock_robot = MagicMock()
         manager = MovementManager(current_robot=mock_robot)
@@ -842,8 +839,8 @@ class TestMovementManagerWorkingLoop:
 
     def test_working_loop_processes_commands(self, mock_reachy_mini: dict) -> None:
         """Test working_loop processes queued commands."""
-        from reachy_mini_conversation_app.moves import MovementManager
         from reachy_mini.motion.move import Move
+        from reachy_mini_conversation_app.moves import MovementManager
 
         mock_robot = MagicMock()
         manager = MovementManager(current_robot=mock_robot)
@@ -946,8 +943,8 @@ class TestMovementManagerHandleCommandExtended:
 
     def test_handle_queue_move_with_duration_conversion_error(self, mock_reachy_mini: dict) -> None:
         """Test handling queue_move when duration conversion fails."""
-        from reachy_mini_conversation_app.moves import MovementManager
         from reachy_mini.motion.move import Move
+        from reachy_mini_conversation_app.moves import MovementManager
 
         mock_robot = MagicMock()
         manager = MovementManager(current_robot=mock_robot)
@@ -962,8 +959,8 @@ class TestMovementManagerHandleCommandExtended:
 
     def test_handle_queue_move_without_duration(self, mock_reachy_mini: dict) -> None:
         """Test handling queue_move without duration attribute."""
-        from reachy_mini_conversation_app.moves import MovementManager
         from reachy_mini.motion.move import Move
+        from reachy_mini_conversation_app.moves import MovementManager
 
         mock_robot = MagicMock()
         manager = MovementManager(current_robot=mock_robot)
@@ -1113,7 +1110,7 @@ class TestMovementManagerBreathing:
 
     def test_breathing_stops_on_new_move(self, mock_reachy_mini: dict) -> None:
         """Test breathing stops when new move is queued."""
-        from reachy_mini_conversation_app.moves import MovementManager, BreathingMove
+        from reachy_mini_conversation_app.moves import BreathingMove, MovementManager
 
         mock_robot = MagicMock()
         manager = MovementManager(current_robot=mock_robot)
@@ -1433,7 +1430,7 @@ class TestMovementManagerBranchCoverage:
         manager._antenna_blend_start = time.monotonic() - 1.0
 
         target = (0.1, -0.1)
-        result = manager._calculate_blended_antennas(target)
+        _ = manager._calculate_blended_antennas(target)
 
         # Blend should be partially mixed
         # The new_blend will advance from 0.3 but not reach 1.0
@@ -1466,8 +1463,9 @@ class TestMovementManagerBranchCoverage:
 
     def test_working_loop_zero_sleep_skips_sleep(self) -> None:
         """Test working_loop skips sleep when sleep_time <= 0 (branch 846->812)."""
-        from reachy_mini_conversation_app.moves import MovementManager, LoopFrequencyStats
         import threading
+
+        from reachy_mini_conversation_app.moves import MovementManager, LoopFrequencyStats
 
         mock_robot = MagicMock()
         manager = MovementManager(current_robot=mock_robot)

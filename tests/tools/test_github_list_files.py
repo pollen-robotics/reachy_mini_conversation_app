@@ -1,13 +1,13 @@
 """Unit tests for the github_list_files tool."""
 
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-import subprocess
 
 import pytest
 
-from reachy_mini_conversation_app.tools.github_list_files import GitHubListFilesTool, REPOS_DIR
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.tools.github_list_files import GitHubListFilesTool
 
 
 class TestGitHubListFilesToolAttributes:

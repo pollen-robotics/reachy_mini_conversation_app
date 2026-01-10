@@ -1,10 +1,10 @@
 """GitHub exec tool - execute commands in a local repository."""
 
+import shlex
 import asyncio
 import logging
-import shlex
+from typing import Any, Dict
 from pathlib import Path
-from typing import Any, Dict, List
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
@@ -86,10 +86,11 @@ class GitHubExecTool(Tool):
     }
 
     def _check_command(self, command: str) -> tuple[str, str]:
-        """
-        Check command safety status.
+        """Check command safety status.
+
         Returns: (status, reason)
-        - status: "allowed" (whitelisted), "blocked" (dangerous), "requires_confirmation" (not whitelisted)
+            - status: "allowed" (whitelisted), "blocked" (dangerous),
+              "requires_confirmation" (not whitelisted).
         """
         cmd_lower = command.lower().strip()
 

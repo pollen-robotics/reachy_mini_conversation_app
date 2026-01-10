@@ -1,8 +1,8 @@
 """GitHub diff tool - show file differences using GitPython."""
 
 import logging
-from pathlib import Path
 from typing import Any, Dict, List, Optional
+from pathlib import Path
 
 from git import Repo, InvalidGitRepositoryError
 

@@ -7,15 +7,25 @@ callable to avoid cross-thread issues.
 """
 
 from __future__ import annotations
+import os
 import asyncio
 import logging
-import os
-from pathlib import Path
 from typing import Any, Callable, Optional
+from pathlib import Path
 
 from fastapi import FastAPI
 
 from .config import config, reload_config
+from .openai_realtime import OpenaiRealtimeHandler
+from .headless_personality import (
+    DEFAULT_OPTION,
+    _sanitize_name,
+    _write_profile,
+    list_personalities,
+    available_tools_for,
+    resolve_profile_dir,
+    read_instructions_for,
+)
 
 
 # Configuration variables that can be managed via the UI
@@ -34,17 +44,6 @@ CONFIG_VARS = [
     ("REACHY_MINI_CUSTOM_PROFILE", "REACHY_MINI_CUSTOM_PROFILE", False, "Custom profile name"),
 ]
 
-from .openai_realtime import OpenaiRealtimeHandler
-from .headless_personality import (
-    DEFAULT_OPTION,
-    _sanitize_name,
-    _write_profile,
-    list_personalities,
-    available_tools_for,
-    resolve_profile_dir,
-    read_instructions_for,
-)
-
 
 def mount_personality_routes(
     app: FastAPI,
@@ -56,9 +55,9 @@ def mount_personality_routes(
 ) -> None:
     """Register personality management endpoints on a FastAPI app."""
     try:
-        from fastapi import Request, Body
-        from fastapi.responses import JSONResponse
+        from fastapi import Body, Request
         from pydantic import BaseModel
+        from fastapi.responses import JSONResponse
     except Exception:  # pragma: no cover - only when settings app not available
         return
 

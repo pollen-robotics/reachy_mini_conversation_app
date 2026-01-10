@@ -1,8 +1,8 @@
 """GitHub status tool - show repository status using GitPython."""
 
 import logging
-from pathlib import Path
 from typing import Any, Dict, List
+from pathlib import Path
 
 from git import Repo, InvalidGitRepositoryError
 

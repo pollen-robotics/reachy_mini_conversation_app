@@ -1,17 +1,16 @@
 """Unit tests for the github_read_file tool."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.github_read_file import (
-    GitHubReadFileTool,
-    REPOS_DIR,
     MAX_FILE_SIZE,
     TEXT_EXTENSIONS,
+    GitHubReadFileTool,
 )
-from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 
 
 class TestGitHubReadFileToolAttributes:

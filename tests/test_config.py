@@ -2,8 +2,7 @@
 
 import os
 import sys
-import importlib
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -331,34 +330,12 @@ class TestConfigSingleton:
         # Restore
         config.MODEL_NAME = original
 
-class TestSetCustomProfile:
-    """Tests for the set_custom_profile function."""
-
-    def test_set_custom_profile_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test successfully setting a custom profile."""
-        from reachy_mini_conversation_app.config import set_custom_profile, config
-
-        # Set a profile
-        set_custom_profile("developer_linus")
-        assert config.REACHY_MINI_CUSTOM_PROFILE == "developer_linus"
-        assert os.getenv("REACHY_MINI_CUSTOM_PROFILE") == "developer_linus"
-
-    def test_set_custom_profile_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test setting custom profile to None clears it."""
-        from reachy_mini_conversation_app.config import set_custom_profile, config
-
-        # First set a profile
-        set_custom_profile("developer_linus")
-        assert config.REACHY_MINI_CUSTOM_PROFILE == "developer_linus"
-
-        # Then clear it
-        set_custom_profile(None)
-        assert config.REACHY_MINI_CUSTOM_PROFILE is None
-        assert os.getenv("REACHY_MINI_CUSTOM_PROFILE") is None
+class TestSetCustomProfileExceptionHandling:
+    """Tests for set_custom_profile exception handling."""
 
     def test_set_custom_profile_exception_on_config_update(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that exceptions during config update are caught (lines 58-59)."""
-        from reachy_mini_conversation_app.config import set_custom_profile, config
+        from reachy_mini_conversation_app.config import config, set_custom_profile
 
         # Make config.REACHY_MINI_CUSTOM_PROFILE property raise on assignment
         original_setattr = type(config).__setattr__
@@ -382,7 +359,7 @@ class TestSetCustomProfile:
 
     def test_set_custom_profile_exception_on_env_update(self) -> None:
         """Test that exceptions during env update are caught (lines 68-69)."""
-        from reachy_mini_conversation_app.config import set_custom_profile, config
+        from reachy_mini_conversation_app.config import config, set_custom_profile
 
         # First set successfully
         set_custom_profile("test_profile")

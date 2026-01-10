@@ -1,9 +1,9 @@
 """GitHub list files tool."""
 
-import subprocess
 import logging
-from pathlib import Path
+import subprocess
 from typing import Any, Dict, List
+from pathlib import Path
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 

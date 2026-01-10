@@ -100,7 +100,7 @@ class GitHubListIssuesTool(Tool):
                     "title": issue.title,
                     "state": issue.state,
                     "author": issue.user.login if issue.user else None,
-                    "labels": [l.name for l in issue.labels],
+                    "labels": [label.name for label in issue.labels],
                     "created_at": issue.created_at.isoformat() if issue.created_at else None,
                     "comments": issue.comments,
                     "url": issue.html_url,

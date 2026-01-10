@@ -5,9 +5,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from reachy_mini_conversation_app.tools.task_status import TaskStatusTool
-from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.background_tasks import TaskStatus
+from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.tools.task_status import TaskStatusTool
 
 
 class TestTaskStatusToolAttributes:

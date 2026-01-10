@@ -2,12 +2,12 @@
 
 import sys
 import asyncio
-from pathlib import Path
 from typing import Any, Dict, Generator
-from unittest.mock import MagicMock, AsyncMock
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 import numpy as np
+import pytest
 from numpy.typing import NDArray
 
 
@@ -189,6 +189,7 @@ def sample_frame() -> NDArray[np.uint8]:
 def sample_frame_base64(sample_frame: NDArray[np.uint8]) -> str:
     """Create a base64 encoded sample frame."""
     import base64
+
     import cv2
 
     _, buffer = cv2.imencode(".jpg", sample_frame)

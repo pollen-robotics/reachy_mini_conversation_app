@@ -102,7 +102,7 @@ class GitHubIssueTool(Tool):
 
             return {
                 "status": "success",
-                "message": f"Issue created successfully!",
+                "message": "Issue created successfully!",
                 "issue_number": issue.number,
                 "issue_url": issue.html_url,
                 "title": issue.title,

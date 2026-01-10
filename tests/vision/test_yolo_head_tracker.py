@@ -3,8 +3,8 @@
 import sys
 from unittest.mock import MagicMock, patch
 
-import pytest
 import numpy as np
+import pytest
 from numpy.typing import NDArray
 
 
@@ -16,7 +16,8 @@ class MockDetections:
         self,
         xyxy: NDArray[np.float32],
         confidence: NDArray[np.float32] | None = None,
-    ):
+    ) -> None:
+        """Initialize mock detections."""
         self.xyxy = xyxy
         self.confidence = confidence
 

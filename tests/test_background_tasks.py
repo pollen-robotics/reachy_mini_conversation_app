@@ -1,15 +1,15 @@
 """Unit tests for the background_tasks module."""
 
-import asyncio
 import time
-from unittest.mock import MagicMock, AsyncMock, patch
+import asyncio
+from unittest.mock import MagicMock
 
 import pytest
 
 from reachy_mini_conversation_app.background_tasks import (
     TaskStatus,
-    TaskNotification,
     BackgroundTask,
+    TaskNotification,
     BackgroundTaskManager,
 )
 

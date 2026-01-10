@@ -1,10 +1,10 @@
 """GitHub add tool - stage files using GitPython."""
 
 import logging
-from pathlib import Path
 from typing import Any, Dict, List
+from pathlib import Path
 
-from git import Repo, InvalidGitRepositoryError, GitCommandError
+from git import Repo, GitCommandError, InvalidGitRepositoryError
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 

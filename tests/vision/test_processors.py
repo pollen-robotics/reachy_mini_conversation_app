@@ -2,12 +2,10 @@
 
 import sys
 import time
-import threading
 from unittest.mock import MagicMock, patch
 
-import pytest
 import numpy as np
-from numpy.typing import NDArray
+import pytest
 
 
 # Create a real exception class for torch.cuda.OutOfMemoryError
@@ -142,13 +140,10 @@ class TestVisionProcessorDetermineDevice:
         mock_heavy_imports["torch"].cuda.is_available.return_value = True
         mock_heavy_imports["torch"].backends.mps.is_available.return_value = False
 
-        from reachy_mini_conversation_app.vision.processors import (
-            VisionConfig,
-            VisionProcessor,
-        )
 
         # Need to reimport to get fresh instance with updated mock
         import importlib
+
         import reachy_mini_conversation_app.vision.processors as proc_module
 
         importlib.reload(proc_module)

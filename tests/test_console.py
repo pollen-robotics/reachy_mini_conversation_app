@@ -1,12 +1,11 @@
 """Unit tests for console module (LocalStream)."""
 
 from __future__ import annotations
-
-import asyncio
 import os
 import sys
+import asyncio
+from typing import Any
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Generator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
@@ -358,7 +357,7 @@ class TestPersistLinusConfig:
         stream = LocalStream(MagicMock(), MagicMock())
 
         with patch.dict(os.environ, {}, clear=True):
-            with patch("reachy_mini_conversation_app.console.config") as mock_config:
+            with patch("reachy_mini_conversation_app.console.config"):
                 stream._persist_linus_config(
                     anthropic_key="ant-key",
                     github_token="gh-token",
@@ -515,8 +514,8 @@ class TestClearAudioQueue:
 
     def test_clear_audio_queue_gstreamer_backend(self) -> None:
         """Test clear queue with GStreamer backend."""
-        from reachy_mini_conversation_app.console import LocalStream
         from reachy_mini.media.media_manager import MediaBackend
+        from reachy_mini_conversation_app.console import LocalStream
 
         mock_robot = MagicMock()
         mock_robot.media.backend = MediaBackend.GSTREAMER
@@ -530,8 +529,8 @@ class TestClearAudioQueue:
 
     def test_clear_audio_queue_default_backend(self) -> None:
         """Test clear queue with DEFAULT backend."""
-        from reachy_mini_conversation_app.console import LocalStream
         from reachy_mini.media.media_manager import MediaBackend
+        from reachy_mini_conversation_app.console import LocalStream
 
         mock_robot = MagicMock()
         mock_robot.media.backend = MediaBackend.DEFAULT
@@ -544,8 +543,8 @@ class TestClearAudioQueue:
 
     def test_clear_audio_queue_default_no_video_backend(self) -> None:
         """Test clear queue with DEFAULT_NO_VIDEO backend."""
-        from reachy_mini_conversation_app.console import LocalStream
         from reachy_mini.media.media_manager import MediaBackend
+        from reachy_mini_conversation_app.console import LocalStream
 
         mock_robot = MagicMock()
         mock_robot.media.backend = MediaBackend.DEFAULT_NO_VIDEO
@@ -621,8 +620,9 @@ class TestPlayLoop:
     @pytest.mark.asyncio
     async def test_play_loop_handles_additional_outputs(self) -> None:
         """Test that AdditionalOutputs are logged."""
-        from reachy_mini_conversation_app.console import LocalStream
         from fastrtc import AdditionalOutputs
+
+        from reachy_mini_conversation_app.console import LocalStream
 
         mock_handler = MagicMock()
 
@@ -837,7 +837,7 @@ class TestPersistApiKeyExtended:
         # Mock os.environ to raise on set
         with patch.dict(os.environ, {}, clear=True):
             with patch.object(os.environ, "__setitem__", side_effect=Exception("denied")):
-                with patch("reachy_mini_conversation_app.console.config") as mock_config:
+                with patch("reachy_mini_conversation_app.console.config"):
                     # Should not raise
                     stream._persist_api_key("test-key")
 
@@ -1059,6 +1059,7 @@ class TestSettingsEndpoints:
     def test_set_key_endpoint_and_validate(self) -> None:
         """Test POST /openai_api_key and POST /validate_api_key endpoints."""
         from types import SimpleNamespace
+
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_app = MagicMock()
@@ -1125,6 +1126,7 @@ class TestSettingsEndpoints:
     def test_post_linus_config_calls_persist(self) -> None:
         """Test POST /linus_config triggers _persist_linus_config."""
         from types import SimpleNamespace
+
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_app = MagicMock()
@@ -1293,6 +1295,7 @@ class TestSettingsEndpointsExtended:
     def test_set_key_endpoint_with_valid_key(self) -> None:
         """Test POST /openai_api_key with valid key (line 328-329)."""
         from types import SimpleNamespace
+
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_app = MagicMock()
@@ -1321,6 +1324,7 @@ class TestSettingsEndpointsExtended:
     def test_validate_api_key_empty_key(self) -> None:
         """Test POST /validate_api_key with empty key (line 336)."""
         from types import SimpleNamespace
+
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_app = MagicMock()
@@ -1353,6 +1357,7 @@ class TestSettingsEndpointsExtended:
     async def test_validate_api_key_401_response(self) -> None:
         """Test POST /validate_api_key with 401 response (line 348)."""
         from types import SimpleNamespace
+
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_app = MagicMock()
@@ -1394,6 +1399,7 @@ class TestSettingsEndpointsExtended:
     async def test_validate_api_key_other_status_code(self) -> None:
         """Test POST /validate_api_key with other status code (lines 350-352)."""
         from types import SimpleNamespace
+
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_app = MagicMock()
@@ -1434,6 +1440,7 @@ class TestSettingsEndpointsExtended:
     async def test_validate_api_key_exception(self) -> None:
         """Test POST /validate_api_key with exception (lines 353-355)."""
         from types import SimpleNamespace
+
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_app = MagicMock()
@@ -1559,8 +1566,8 @@ class TestLaunch:
 
     def test_console_import_handles_fastapi_missing(self, monkeypatch: Any) -> None:
         """Reload console with missing FastAPI/pydantic modules to trigger fallback."""
-        import importlib
         import types
+        import importlib
 
         # Backup any existing modules
         backup = {}
@@ -1703,7 +1710,7 @@ class TestPersistApiKeyEdgeCases:
         env_file = tmp_path / ".env"
         env_file.write_text("OTHER_VAR=value\n")
 
-        with patch("reachy_mini_conversation_app.console.config") as mock_config:
+        with patch("reachy_mini_conversation_app.console.config"):
             with patch("dotenv.load_dotenv"):
                 stream._persist_api_key("new-key")
 
@@ -1724,7 +1731,7 @@ class TestPersistApiKeyEdgeCases:
         env_file = tmp_path / ".env"
         env_file.write_text("OPENAI_API_KEY=old-key\n")
 
-        with patch("reachy_mini_conversation_app.console.config") as mock_config:
+        with patch("reachy_mini_conversation_app.console.config"):
             with patch("dotenv.load_dotenv", side_effect=RuntimeError("Load failed")):
                 # Should not raise, just continue
                 stream._persist_api_key("new-key")
@@ -1755,7 +1762,7 @@ class TestPersistPersonalityEdgeCases:
                 stream._persist_personality("test_profile")
 
 
-class TestReadPersistedPersonality:
+class TestReadPersistedPersonalityEdgeCases:
     """Tests for _read_persisted_personality edge cases."""
 
     def test_read_persisted_personality_success(self, tmp_path: Path) -> None:
@@ -1832,7 +1839,7 @@ class TestPersistLinusConfigEdgeCases:
         env_file = tmp_path / ".env"
         env_file.write_text("OPENAI_API_KEY=test\n")
 
-        with patch("reachy_mini_conversation_app.console.config") as mock_config:
+        with patch("reachy_mini_conversation_app.console.config"):
             with patch("dotenv.load_dotenv", side_effect=RuntimeError("Load failed")):
                 # Should not raise
                 stream._persist_linus_config(
@@ -2003,13 +2010,13 @@ class TestLaunchEdgeCases:
         mock_robot.media.start_recording.assert_not_called()
 
 
-class TestClearAudioQueue:
+class TestClearAudioQueueEdgeCases:
     """Tests for clear_audio_queue edge cases."""
 
     def test_clear_audio_queue_gstreamer_backend(self) -> None:
         """Test clear_audio_queue with GSTREAMER backend (line 517)."""
-        from reachy_mini_conversation_app.console import LocalStream
         from reachy_mini.media.media_manager import MediaBackend
+        from reachy_mini_conversation_app.console import LocalStream
 
         mock_handler = MagicMock()
         mock_robot = MagicMock()
@@ -2023,8 +2030,8 @@ class TestClearAudioQueue:
 
     def test_clear_audio_queue_default_backend(self) -> None:
         """Test clear_audio_queue with DEFAULT backend (line 518-519)."""
-        from reachy_mini_conversation_app.console import LocalStream
         from reachy_mini.media.media_manager import MediaBackend
+        from reachy_mini_conversation_app.console import LocalStream
 
         mock_handler = MagicMock()
         mock_robot = MagicMock()
@@ -2038,8 +2045,8 @@ class TestClearAudioQueue:
 
     def test_clear_audio_queue_default_no_video_backend(self) -> None:
         """Test clear_audio_queue with DEFAULT_NO_VIDEO backend (line 518)."""
-        from reachy_mini_conversation_app.console import LocalStream
         from reachy_mini.media.media_manager import MediaBackend
+        from reachy_mini_conversation_app.console import LocalStream
 
         mock_handler = MagicMock()
         mock_robot = MagicMock()
@@ -2058,8 +2065,9 @@ class TestPlayLoopEdgeCases:
     @pytest.mark.asyncio
     async def test_play_loop_audio_with_2d_shape_transpose(self) -> None:
         """Test play_loop with 2D audio that needs transpose (lines 555-556)."""
-        from reachy_mini_conversation_app.console import LocalStream
         import numpy as np
+
+        from reachy_mini_conversation_app.console import LocalStream
 
         mock_handler = MagicMock()
         mock_robot = MagicMock()
@@ -2087,8 +2095,9 @@ class TestPlayLoopEdgeCases:
     @pytest.mark.asyncio
     async def test_play_loop_audio_with_multiple_channels(self) -> None:
         """Test play_loop with 2D audio with multiple channels (lines 558-559)."""
-        from reachy_mini_conversation_app.console import LocalStream
         import numpy as np
+
+        from reachy_mini_conversation_app.console import LocalStream
 
         mock_handler = MagicMock()
         mock_robot = MagicMock()
@@ -2137,8 +2146,8 @@ class TestCloseEdgeCases:
         mock_task2.cancel.assert_not_called()
 
 
-class TestReadPersistedPersonalityEdgeCases:
-    """Tests for _read_persisted_personality edge cases."""
+class TestReadPersistedPersonalityNoInstancePath:
+    """Tests for _read_persisted_personality without instance path."""
 
     def test_read_persisted_personality_no_instance_path(self) -> None:
         """Test _read_persisted_personality returns None when no instance path (line 206)."""
@@ -2177,7 +2186,7 @@ class TestReadEnvLinesPackagedEdgeCases:
 
         # Patch cwd_example and packaged file
         with patch("pathlib.Path.cwd", return_value=tmp_path / "fake_cwd"):
-            with patch("pathlib.Path.exists") as mock_exists:
+            with patch("pathlib.Path.exists"):
                 # packaged .env.example exists (returns True for specific path check)
                 def exists_side_effect(self: Path = None) -> bool:
                     path_str = str(self) if self else ""
@@ -2208,8 +2217,9 @@ class TestPlayLoopContentEdgeCases:
     @pytest.mark.asyncio
     async def test_play_loop_with_non_string_content(self) -> None:
         """Test play_loop handles AdditionalOutputs with non-string content (line 541)."""
-        from reachy_mini_conversation_app.console import LocalStream
         from fastrtc import AdditionalOutputs
+
+        from reachy_mini_conversation_app.console import LocalStream
 
         mock_handler = MagicMock()
         mock_robot = MagicMock()
@@ -2234,8 +2244,9 @@ class TestPlayLoopContentEdgeCases:
     @pytest.mark.asyncio
     async def test_play_loop_with_no_content_key(self) -> None:
         """Test play_loop handles AdditionalOutputs with missing content key (line 540)."""
-        from reachy_mini_conversation_app.console import LocalStream
         from fastrtc import AdditionalOutputs
+
+        from reachy_mini_conversation_app.console import LocalStream
 
         mock_handler = MagicMock()
         mock_robot = MagicMock()
@@ -2296,7 +2307,7 @@ class TestLaunchRunnerFunction:
                 with patch.object(stream, "_init_settings_ui_if_needed"):
                     with patch("asyncio.run", side_effect=capture_asyncio_run):
                         with patch("time.sleep"):
-                            with patch("reachy_mini_conversation_app.console.mount_personality_routes") as mock_mount:
+                            with patch("reachy_mini_conversation_app.console.mount_personality_routes"):
                                 stream.launch()
 
         # Verify start_recording was called (media started)

@@ -1,12 +1,12 @@
 """GitHub CI logs tool - get workflow run logs using PyGithub."""
 
+import io
 import logging
 import zipfile
-import io
 from typing import Any, Dict, List, Optional
 
-from github import Github, GithubException
 import requests
+from github import Github, GithubException
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
@@ -204,7 +204,7 @@ class GitHubCILogsTool(Tool):
                     "message": "Logs not available (may have expired or run is still in progress).",
                     "run_id": run_id,
                     "workflow": run.name,
-                    "status": run.status,
+                    "run_status": run.status,
                     "conclusion": run.conclusion,
                     "jobs": job_info,
                 }

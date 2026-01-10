@@ -1,24 +1,22 @@
 """Unit tests for the speech_tapper module."""
 
-import math
 
-import pytest
 import numpy as np
-from numpy.typing import NDArray
+import pytest
 
 from reachy_mini_conversation_app.audio.speech_tapper import (
     SR,
-    FRAME_MS,
-    HOP_MS,
     HOP,
     FRAME,
+    HOP_MS,
+    FRAME_MS,
     VAD_DB_ON,
     VAD_DB_OFF,
     SwayRollRT,
     _rms_dbfs,
     _loudness_gain,
-    _to_float32_mono,
     _resample_linear,
+    _to_float32_mono,
 )
 
 

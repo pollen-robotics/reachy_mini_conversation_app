@@ -1,11 +1,10 @@
 """Unit tests for the camera_worker module."""
 
-import threading
 import time
-from unittest.mock import MagicMock, patch, PropertyMock
+import threading
+from unittest.mock import MagicMock
 
 import numpy as np
-import pytest
 
 from reachy_mini_conversation_app.camera_worker import CameraWorker
 
@@ -396,7 +395,7 @@ class TestCameraWorkerFaceLostInterpolation:
         worker.stop()
 
         # After interpolation completes, offsets should be near neutral
-        offsets = worker.get_face_tracking_offsets()
+        _ = worker.get_face_tracking_offsets()
         # The interpolation should have run
         assert worker.last_face_detected_time is None or True  # Check state was reset
 
@@ -560,7 +559,7 @@ class TestCameraWorkerFaceLostInterpolation:
         time.sleep(0.2)
 
         # Capture offsets during interpolation
-        mid_offsets = worker.get_face_tracking_offsets()
+        _ = worker.get_face_tracking_offsets()
 
         worker.stop()
 

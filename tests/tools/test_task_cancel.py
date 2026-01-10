@@ -1,12 +1,12 @@
 """Unit tests for the task_cancel tool."""
 
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from reachy_mini_conversation_app.tools.task_cancel import TaskCancelTool
-from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.background_tasks import TaskStatus
+from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.tools.task_cancel import TaskCancelTool
 
 
 class TestTaskCancelToolAttributes:

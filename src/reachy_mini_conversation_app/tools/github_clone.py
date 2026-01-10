@@ -1,8 +1,8 @@
 """GitHub repository clone tool using GitPython."""
 
 import logging
-from pathlib import Path
 from typing import Any, Dict
+from pathlib import Path
 
 from git import Repo, GitCommandError
 

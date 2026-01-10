@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from reachy_mini_conversation_app.tools.do_nothing import DoNothing
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.tools.do_nothing import DoNothing
 
 
 class TestDoNothingToolAttributes:

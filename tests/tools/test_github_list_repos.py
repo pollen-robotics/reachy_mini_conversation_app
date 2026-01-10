@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from reachy_mini_conversation_app.tools.github_list_repos import GitHubListReposTool, REPOS_DIR
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.tools.github_list_repos import GitHubListReposTool
 
 
 class TestGitHubListReposToolAttributes:

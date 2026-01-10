@@ -1,13 +1,13 @@
 """Unit tests for the github_list_issues tool."""
 
-from unittest.mock import MagicMock, patch
 from datetime import datetime
+from unittest.mock import MagicMock, patch
 
 import pytest
 from github import GithubException
 
-from reachy_mini_conversation_app.tools.github_list_issues import GitHubListIssuesTool
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.tools.github_list_issues import GitHubListIssuesTool
 
 
 class TestGitHubListIssuesToolAttributes:

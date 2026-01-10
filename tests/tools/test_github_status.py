@@ -1,13 +1,13 @@
 """Unit tests for the github_status tool."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 from git import InvalidGitRepositoryError
 
-from reachy_mini_conversation_app.tools.github_status import GitHubStatusTool, REPOS_DIR
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.tools.github_status import GitHubStatusTool
 
 
 class TestGitHubStatusToolAttributes:

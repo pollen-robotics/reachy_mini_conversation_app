@@ -1,11 +1,11 @@
 """GitHub edit file tool - AI-assisted file editing with optional model file reference."""
 
 import logging
-from pathlib import Path
 from typing import Any, Dict, Optional
+from pathlib import Path
 
-import anthropic
 import openai
+import anthropic
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies

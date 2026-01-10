@@ -4,10 +4,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from git import InvalidGitRepositoryError, GitCommandError
+from git import GitCommandError, InvalidGitRepositoryError
 
-from reachy_mini_conversation_app.tools.github_push import GitHubPushTool, REPOS_DIR
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.tools.github_push import GitHubPushTool
 
 
 class TestGitHubPushToolAttributes:
@@ -526,7 +526,7 @@ class TestGitHubPushToolExecution:
                 mock_config.GITHUB_TOKEN = "ghp_token"
 
                 with patch("reachy_mini_conversation_app.tools.github_push.Repo", return_value=mock_repo):
-                    result = await tool(mock_deps, repo="myrepo", confirmed=True)
+                    await tool(mock_deps, repo="myrepo", confirmed=True)
 
         # Verify set_url was called twice: once for auth, once to restore
         calls = mock_origin.set_url.call_args_list

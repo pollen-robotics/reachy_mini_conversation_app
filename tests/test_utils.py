@@ -1,9 +1,8 @@
 """Unit tests for the utils module."""
 
-import argparse
 import logging
-import warnings
-from unittest.mock import patch, MagicMock, PropertyMock
+import argparse
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -220,6 +219,7 @@ class TestHandleVisionStuff:
         try:
             # Re-import the function to trigger the mediapipe branch
             from importlib import reload
+
             import reachy_mini_conversation_app.utils as utils_module
             reload(utils_module)
 
@@ -236,6 +236,7 @@ class TestHandleVisionStuff:
             sys.modules.pop("reachy_mini_toolbox.vision", None)
             # Reload to restore original state
             from importlib import reload
+
             import reachy_mini_conversation_app.utils as utils_module
             reload(utils_module)
 
@@ -335,7 +336,6 @@ class TestSetupLogger:
         # Clear any existing handlers to ensure clean state
         root_logger = logging.getLogger()
         original_level = root_logger.level
-        original_handlers = root_logger.handlers.copy()
 
         try:
             logger = setup_logger(debug=True)

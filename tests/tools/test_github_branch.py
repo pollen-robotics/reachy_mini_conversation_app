@@ -1,13 +1,13 @@
 """Unit tests for the github_branch tool."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
-from git import InvalidGitRepositoryError, GitCommandError
+from git import GitCommandError, InvalidGitRepositoryError
 
-from reachy_mini_conversation_app.tools.github_branch import GitHubBranchTool, REPOS_DIR
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.tools.github_branch import GitHubBranchTool
 
 
 class TestGitHubBranchToolAttributes:

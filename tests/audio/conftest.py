@@ -2,10 +2,10 @@
 
 import math
 import base64
-from typing import Tuple, List
+from typing import List, Tuple
 
-import pytest
 import numpy as np
+import pytest
 from numpy.typing import NDArray
 
 from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
@@ -13,13 +13,13 @@ from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
 
 @pytest.fixture
 def sample_rate() -> int:
-    """Standard sample rate for tests."""
+    """Return standard sample rate for tests."""
     return 24000
 
 
 @pytest.fixture
 def sine_wave_generator(sample_rate: int):
-    """Factory fixture to generate sine wave PCM data."""
+    """Create a factory fixture to generate sine wave PCM data."""
 
     def _generate(
         duration_s: float = 0.3,
@@ -37,7 +37,7 @@ def sine_wave_generator(sample_rate: int):
 
 @pytest.fixture
 def base64_audio_generator(sine_wave_generator):
-    """Factory fixture to generate base64-encoded audio chunks."""
+    """Create a factory fixture to generate base64-encoded audio chunks."""
 
     def _generate(
         duration_s: float = 0.3,

@@ -4,18 +4,16 @@ import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from reachy_mini_conversation_app.tools.commit_rules import (
     CheckResult,
-    PreCommitCheck,
-    AutoFixConfig,
     CommitRules,
-    load_commit_rules,
+    AutoFixConfig,
+    PreCommitCheck,
     run_command,
     run_auto_fix,
-    run_pre_commit_checks,
+    load_commit_rules,
     format_check_results,
+    run_pre_commit_checks,
 )
 
 

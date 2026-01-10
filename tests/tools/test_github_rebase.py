@@ -4,10 +4,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from git import InvalidGitRepositoryError, GitCommandError
+from git import GitCommandError, InvalidGitRepositoryError
 
-from reachy_mini_conversation_app.tools.github_rebase import GitHubRebaseTool, REPOS_DIR
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.tools.github_rebase import GitHubRebaseTool
 
 
 class TestGitHubRebaseToolAttributes:

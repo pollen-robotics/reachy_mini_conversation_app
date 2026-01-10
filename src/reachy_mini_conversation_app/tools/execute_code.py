@@ -1,10 +1,10 @@
 """Execute code tool with safety measures."""
 
 import os
-import subprocess
 import logging
-from pathlib import Path
+import subprocess
 from typing import Any, Dict
+from pathlib import Path
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
