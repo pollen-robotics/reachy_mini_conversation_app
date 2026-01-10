@@ -73,6 +73,223 @@ class TestEnvVar:
         assert result == ("SIMPLE_VAR", "SIMPLE_VAR", False, "")
 
 
+class TestBaseConfigVars:
+    """Tests for BASE_CONFIG_VARS."""
+
+    def test_base_config_vars_contains_required_vars(self) -> None:
+        """Test that BASE_CONFIG_VARS contains the essential variables."""
+        from reachy_mini_conversation_app.tools.core_tools import BASE_CONFIG_VARS
+
+        var_names = [v.name for v in BASE_CONFIG_VARS]
+
+        assert "OPENAI_API_KEY" in var_names
+        assert "MODEL_NAME" in var_names
+        assert "HF_TOKEN" in var_names
+        assert "HF_HOME" in var_names
+        assert "LOCAL_VISION_MODEL" in var_names
+        assert "REACHY_MINI_CUSTOM_PROFILE" in var_names
+
+    def test_base_config_vars_are_envvar_instances(self) -> None:
+        """Test that BASE_CONFIG_VARS contains EnvVar instances."""
+        from reachy_mini_conversation_app.tools.core_tools import BASE_CONFIG_VARS
+
+        for var in BASE_CONFIG_VARS:
+            assert isinstance(var, EnvVar)
+
+    def test_openai_api_key_is_secret(self) -> None:
+        """Test that OPENAI_API_KEY is marked as secret."""
+        from reachy_mini_conversation_app.tools.core_tools import BASE_CONFIG_VARS
+
+        openai_var = next(v for v in BASE_CONFIG_VARS if v.name == "OPENAI_API_KEY")
+        assert openai_var.is_secret is True
+
+
+class TestCollectAllEnvVars:
+    """Tests for collect_all_env_vars function."""
+
+    def test_collect_all_env_vars_returns_base_vars(self) -> None:
+        """Test that collect_all_env_vars includes base config vars."""
+        from reachy_mini_conversation_app.tools.core_tools import (
+            BASE_CONFIG_VARS,
+            collect_all_env_vars,
+        )
+
+        result = collect_all_env_vars()
+        result_names = [v.name for v in result]
+
+        for base_var in BASE_CONFIG_VARS:
+            assert base_var.name in result_names
+
+    def test_collect_all_env_vars_deduplicates(self) -> None:
+        """Test that collect_all_env_vars removes duplicates."""
+        from reachy_mini_conversation_app.tools.core_tools import collect_all_env_vars
+
+        result = collect_all_env_vars()
+        names = [v.name for v in result]
+
+        # No duplicates
+        assert len(names) == len(set(names))
+
+    def test_collect_all_env_vars_includes_tool_vars(self) -> None:
+        """Test that collect_all_env_vars includes variables from tools."""
+        from reachy_mini_conversation_app.tools.core_tools import (
+            ALL_TOOLS,
+            collect_all_env_vars,
+        )
+
+        result = collect_all_env_vars()
+        result_names = [v.name for v in result]
+
+        # Check if any tool has required_env_vars and they're included
+        for tool in ALL_TOOLS.values():
+            for env_var in getattr(tool, "required_env_vars", []):
+                assert env_var.name in result_names
+
+    def test_collect_all_env_vars_warns_on_conflict(
+        self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that conflicting EnvVar declarations log a warning."""
+        import logging
+
+        from reachy_mini_conversation_app.tools import core_tools
+
+        # Create a mock tool with conflicting EnvVar declaration
+        class ConflictingTool(Tool):
+            name = "conflicting_tool"
+            description = "Tool with conflicting env var"
+            parameters_schema = {"type": "object", "properties": {}}
+            # OPENAI_API_KEY already in BASE_CONFIG_VARS with is_secret=True
+            # Declare it differently here
+            required_env_vars = [
+                EnvVar("OPENAI_API_KEY", is_secret=False, description="Different description"),
+            ]
+
+            async def __call__(self, deps: Any, **kwargs: Any) -> dict[str, Any]:
+                return {}
+
+        # Temporarily add to ALL_TOOLS
+        original_tools = core_tools.ALL_TOOLS.copy()
+        core_tools.ALL_TOOLS["conflicting_tool"] = ConflictingTool()
+
+        try:
+            with caplog.at_level(logging.WARNING):
+                core_tools.collect_all_env_vars()
+
+            assert "declared differently" in caplog.text
+            assert "OPENAI_API_KEY" in caplog.text
+        finally:
+            core_tools.ALL_TOOLS.clear()
+            core_tools.ALL_TOOLS.update(original_tools)
+
+    def test_collect_all_env_vars_adds_new_tool_vars(self) -> None:
+        """Test that new tool-specific env vars are added to the result."""
+        from reachy_mini_conversation_app.tools import core_tools
+
+        # Create a mock tool with a unique EnvVar
+        class ToolWithUniqueVar(Tool):
+            name = "tool_with_unique_var"
+            description = "Tool with unique env var"
+            parameters_schema = {"type": "object", "properties": {}}
+            required_env_vars = [
+                EnvVar("UNIQUE_TEST_VAR", is_secret=True, description="A unique test variable"),
+            ]
+
+            async def __call__(self, deps: Any, **kwargs: Any) -> dict[str, Any]:
+                return {}
+
+        # Temporarily add to ALL_TOOLS
+        original_tools = core_tools.ALL_TOOLS.copy()
+        core_tools.ALL_TOOLS["tool_with_unique_var"] = ToolWithUniqueVar()
+
+        try:
+            result = core_tools.collect_all_env_vars()
+            result_names = [v.name for v in result]
+
+            assert "UNIQUE_TEST_VAR" in result_names
+            # Verify it was added correctly
+            unique_var = next(v for v in result if v.name == "UNIQUE_TEST_VAR")
+            assert unique_var.is_secret is True
+            assert unique_var.description == "A unique test variable"
+        finally:
+            core_tools.ALL_TOOLS.clear()
+            core_tools.ALL_TOOLS.update(original_tools)
+
+    def test_collect_all_env_vars_duplicate_same_declaration_no_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test that duplicate EnvVar with same values doesn't warn."""
+        import logging
+
+        from reachy_mini_conversation_app.tools import core_tools
+
+        # Create a tool that declares the same var with same values
+        class ToolWithSameVar(Tool):
+            name = "tool_with_same_var"
+            description = "Tool with same env var declaration"
+            parameters_schema = {"type": "object", "properties": {}}
+            # Same as BASE_CONFIG_VARS
+            required_env_vars = [
+                EnvVar("OPENAI_API_KEY", is_secret=True, description="OpenAI API key (required for voice)"),
+            ]
+
+            async def __call__(self, deps: Any, **kwargs: Any) -> dict[str, Any]:
+                return {}
+
+        original_tools = core_tools.ALL_TOOLS.copy()
+        core_tools.ALL_TOOLS["tool_with_same_var"] = ToolWithSameVar()
+
+        try:
+            with caplog.at_level(logging.WARNING):
+                result = core_tools.collect_all_env_vars()
+
+            # Should not warn because declaration is identical
+            assert "declared differently" not in caplog.text
+            # Should still only have one OPENAI_API_KEY
+            names = [v.name for v in result]
+            assert names.count("OPENAI_API_KEY") == 1
+        finally:
+            core_tools.ALL_TOOLS.clear()
+            core_tools.ALL_TOOLS.update(original_tools)
+
+
+class TestGetConfigVars:
+    """Tests for get_config_vars function."""
+
+    def test_get_config_vars_returns_tuples(self) -> None:
+        """Test that get_config_vars returns list of tuples."""
+        from reachy_mini_conversation_app.tools.core_tools import get_config_vars
+
+        result = get_config_vars()
+
+        assert isinstance(result, list)
+        for item in result:
+            assert isinstance(item, tuple)
+            assert len(item) == 4
+
+    def test_get_config_vars_tuple_format(self) -> None:
+        """Test that get_config_vars tuples have correct format."""
+        from reachy_mini_conversation_app.tools.core_tools import get_config_vars
+
+        result = get_config_vars()
+
+        for env_key, config_attr, is_secret, description in result:
+            assert isinstance(env_key, str)
+            assert isinstance(config_attr, str)
+            assert isinstance(is_secret, bool)
+            assert isinstance(description, str)
+            # env_key and config_attr should be the same
+            assert env_key == config_attr
+
+    def test_get_config_vars_contains_openai_key(self) -> None:
+        """Test that get_config_vars includes OPENAI_API_KEY."""
+        from reachy_mini_conversation_app.tools.core_tools import get_config_vars
+
+        result = get_config_vars()
+        keys = [t[0] for t in result]
+
+        assert "OPENAI_API_KEY" in keys
+
+
 class TestToolDependencies:
     """Tests for ToolDependencies dataclass."""
 

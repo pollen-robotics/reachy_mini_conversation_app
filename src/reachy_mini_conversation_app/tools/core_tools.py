@@ -35,9 +35,12 @@ __all__ = [
     "ToolDependencies",
     "ALL_TOOLS",
     "ALL_TOOL_SPECS",
+    "BASE_CONFIG_VARS",
     "get_concrete_subclasses",
     "get_tool_specs",
     "dispatch_tool_call",
+    "collect_all_env_vars",
+    "get_config_vars",
     "_safe_load_obj",
     "_load_profile_tools",
     "_initialize_tools",
@@ -51,6 +54,11 @@ __all__ = [
 ALL_TOOLS: Dict[str, "Tool"] = {}
 ALL_TOOL_SPECS: List[Dict[str, Any]] = []
 _TOOLS_INITIALIZED = False
+
+# Base configuration variables that are always needed (not tool-specific)
+# These are shown in the UI regardless of which tools are loaded
+# Format: EnvVar instances for consistency
+BASE_CONFIG_VARS: List["EnvVar"] = []  # Populated after EnvVar is defined
 
 
 
@@ -98,6 +106,76 @@ class EnvVar:
 
         """
         return (self.name, self.name, self.is_secret, self.description)
+
+
+# Populate BASE_CONFIG_VARS now that EnvVar is defined
+BASE_CONFIG_VARS.extend([
+    EnvVar("OPENAI_API_KEY", is_secret=True, description="OpenAI API key (required for voice)"),
+    EnvVar("MODEL_NAME", is_secret=False, description="OpenAI model name", required=False),
+    EnvVar("HF_TOKEN", is_secret=True, description="Hugging Face token (optional, for vision)", required=False),
+    EnvVar("HF_HOME", is_secret=False, description="Hugging Face cache directory", required=False),
+    EnvVar("LOCAL_VISION_MODEL", is_secret=False, description="Local vision model path", required=False),
+    EnvVar(
+        "REACHY_MINI_CUSTOM_PROFILE",
+        is_secret=False,
+        description="Custom profile name",
+        required=False,
+    ),
+])
+
+
+def collect_all_env_vars() -> List[EnvVar]:
+    """Collect all environment variables from base config and loaded tools.
+
+    Returns a deduplicated list of EnvVar instances, with base config vars
+    first, followed by tool-specific vars. If the same variable is declared
+    by multiple tools, only the first occurrence is kept and a warning is logged.
+
+    Returns:
+        List of unique EnvVar instances.
+
+    """
+    seen: Dict[str, EnvVar] = {}
+    result: List[EnvVar] = []
+
+    # Add base config vars first
+    for env_var in BASE_CONFIG_VARS:
+        if env_var.name not in seen:
+            seen[env_var.name] = env_var
+            result.append(env_var)
+
+    # Collect from all loaded tools
+    for tool_name, tool in ALL_TOOLS.items():
+        for env_var in getattr(tool, "required_env_vars", []):
+            if env_var.name in seen:
+                existing = seen[env_var.name]
+                # Log warning if declarations differ
+                if (
+                    existing.is_secret != env_var.is_secret
+                    or existing.description != env_var.description
+                ):
+                    logger.warning(
+                        f"EnvVar '{env_var.name}' declared differently by tool '{tool_name}'. "
+                        f"Using first declaration."
+                    )
+            else:
+                seen[env_var.name] = env_var
+                result.append(env_var)
+
+    return result
+
+
+def get_config_vars() -> List[tuple[str, str, bool, str]]:
+    """Get configuration variables in CONFIG_VARS tuple format.
+
+    This function provides backward compatibility with the existing CONFIG_VARS
+    format used by headless_personality_ui.py.
+
+    Returns:
+        List of tuples: (env_var_name, config_attr_name, is_secret, description)
+
+    """
+    return [env_var.to_config_tuple() for env_var in collect_all_env_vars()]
 
 
 @dataclass
