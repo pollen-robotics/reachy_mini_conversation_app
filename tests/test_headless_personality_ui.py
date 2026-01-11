@@ -3656,7 +3656,7 @@ class TestCollectProfileEnvVarsSharedTools:
 
         # Create a mock module that has no Tool class
         mock_module = types.ModuleType("fake_tool_module")
-        mock_module.SomeClass = type("SomeClass", (), {})  # Not a Tool subclass
+        mock_module.SomeClass = type("SomeClass", (), {})  # type: ignore[attr-defined]
 
         with patch(
             "reachy_mini_conversation_app.headless_personality_ui.resolve_profile_dir"
