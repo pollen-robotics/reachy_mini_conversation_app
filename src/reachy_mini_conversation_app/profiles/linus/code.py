@@ -10,7 +10,7 @@ import anthropic
 from anthropic.types import TextBlock
 
 from reachy_mini_conversation_app.config import config
-from reachy_mini_conversation_app.tools.core_tools import EnvVar, Tool, ToolDependencies
+from reachy_mini_conversation_app.tools.core_tools import Tool, EnvVar, ToolDependencies
 
 
 logger = logging.getLogger(__name__)

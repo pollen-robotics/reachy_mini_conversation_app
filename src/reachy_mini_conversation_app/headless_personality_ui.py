@@ -17,7 +17,7 @@ from fastapi import FastAPI
 
 from .config import config, reload_config
 from .openai_realtime import OpenaiRealtimeHandler
-from .tools.core_tools import get_config_vars, EnvVar, BASE_CONFIG_VARS
+from .tools.core_tools import BASE_CONFIG_VARS, EnvVar, get_config_vars
 from .headless_personality import (
     DEFAULT_OPTION,
     _sanitize_name,
@@ -58,13 +58,11 @@ def collect_profile_env_vars(profile_name: str) -> list[EnvVar]:
         List of unique EnvVar instances (base vars + profile tool vars)
 
     """
-    import importlib
     import inspect
-    import logging
+    import importlib
 
     from .tools.core_tools import Tool
 
-    logger = logging.getLogger(__name__)
     seen: dict[str, EnvVar] = {}
     result: list[EnvVar] = []
 

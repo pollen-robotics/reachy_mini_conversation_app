@@ -3273,10 +3273,10 @@ class TestCollectProfileEnvVars:
 
     def test_collect_returns_base_vars(self) -> None:
         """Test that collect_profile_env_vars returns base config vars."""
+        from reachy_mini_conversation_app.tools.core_tools import BASE_CONFIG_VARS
         from reachy_mini_conversation_app.headless_personality_ui import (
             collect_profile_env_vars,
         )
-        from reachy_mini_conversation_app.tools.core_tools import BASE_CONFIG_VARS
 
         result = collect_profile_env_vars("nonexistent_profile")
 
@@ -3314,10 +3314,10 @@ class TestCollectProfileEnvVars:
 
     def test_collect_returns_envvar_instances(self) -> None:
         """Test that collect_profile_env_vars returns EnvVar instances."""
+        from reachy_mini_conversation_app.tools.core_tools import EnvVar
         from reachy_mini_conversation_app.headless_personality_ui import (
             collect_profile_env_vars,
         )
-        from reachy_mini_conversation_app.tools.core_tools import EnvVar
 
         result = collect_profile_env_vars("default")
 
@@ -3597,8 +3597,8 @@ class TestGetProfileConfigEndpoint:
     def test_profile_config_default_option_skips_exists_check(self) -> None:
         """Test that DEFAULT_OPTION profile skips the existence check (branch 484->492)."""
         from reachy_mini_conversation_app.headless_personality_ui import (
-            mount_personality_routes,
             DEFAULT_OPTION,
+            mount_personality_routes,
         )
 
         mock_app = MagicMock()
@@ -3694,11 +3694,11 @@ class TestCollectProfileEnvVarsDuplicateInBase:
 
         This tests when BASE_CONFIG_VARS contains duplicates (unusual case).
         """
+        from reachy_mini_conversation_app.tools import core_tools
+        from reachy_mini_conversation_app.tools.core_tools import EnvVar
         from reachy_mini_conversation_app.headless_personality_ui import (
             collect_profile_env_vars,
         )
-        from reachy_mini_conversation_app.tools import core_tools
-        from reachy_mini_conversation_app.tools.core_tools import EnvVar
 
         # Save original
         original_base_vars = core_tools.BASE_CONFIG_VARS.copy()

@@ -2,6 +2,7 @@
 
 from reachy_mini_conversation_app.tools.core_tools import EnvVar
 
+
 # Environment variables required by GitHub tools
 # These are shared across all GitHub-related tools to avoid duplication
 GITHUB_ENV_VARS = [

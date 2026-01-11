@@ -10,6 +10,7 @@ import anthropic
 from git import Repo, GitCommandError, InvalidGitRepositoryError
 from anthropic.types import TextBlock
 
+from .github_env_vars import GITHUB_ENV_VARS
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 from reachy_mini_conversation_app.profiles.linus.commit_rules import (
@@ -17,8 +18,6 @@ from reachy_mini_conversation_app.profiles.linus.commit_rules import (
     format_check_results,
     run_pre_commit_checks,
 )
-
-from .github_env_vars import GITHUB_ENV_VARS
 
 
 logger = logging.getLogger(__name__)

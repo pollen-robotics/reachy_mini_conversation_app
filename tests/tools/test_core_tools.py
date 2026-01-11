@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from reachy_mini_conversation_app.tools.core_tools import EnvVar, Tool
+from reachy_mini_conversation_app.tools.core_tools import Tool, EnvVar
 
 
 class TestEnvVar:

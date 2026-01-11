@@ -6,9 +6,8 @@ from pathlib import Path
 
 from git import Repo, GitCommandError, InvalidGitRepositoryError
 
-from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
-
 from .github_env_vars import GITHUB_ENV_VARS
+from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
 
 logger = logging.getLogger(__name__)

@@ -1874,10 +1874,9 @@ class TestGetEnvFilePath:
     def test_get_env_file_path_with_dotenv_not_found(self) -> None:
         """Test get env file path when dotenv doesn't find a file."""
         # Bypass the module-level mock to test the real implementation
-        import importlib
-
         # Temporarily clear the module to get fresh import
         import sys
+        import importlib
 
         mods_to_clear = [
             k for k in sys.modules if "gradio_personality" in k
