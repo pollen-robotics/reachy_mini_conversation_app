@@ -5,12 +5,14 @@ conversation "personalities" (profiles) so that `main.py` stays lean.
 """
 
 from __future__ import annotations
+import os
 from typing import Any
 from pathlib import Path
 
 import gradio as gr
 
-from .config import config
+from .config import config, reload_config
+from .tools.core_tools import get_config_vars
 
 
 class PersonalityUI:
@@ -36,6 +38,12 @@ class PersonalityUI:
         self.new_personality_btn: gr.Button
         self.available_tools_cg: gr.CheckboxGroup
         self.save_btn: gr.Button
+
+        # Config components (initialized in create_config_components)
+        self.config_textboxes: dict[str, gr.Textbox] = {}
+        self.config_save_btn: gr.Button
+        self.config_reload_btn: gr.Button
+        self.config_status_md: gr.Markdown
 
     # ---------- Filesystem helpers ----------
     def _list_personalities(self) -> list[str]:
@@ -82,6 +90,70 @@ class PersonalityUI:
         s = re.sub(r"[^a-zA-Z0-9_-]", "", s)
         return s
 
+    # ---------- Config helpers ----------
+    @staticmethod
+    def _mask_secret(value: str | None, is_secret: bool) -> str:
+        """Mask secret values for display."""
+        if value is None or not value:
+            return ""
+        if not is_secret:
+            return value
+        if len(value) <= 8:
+            return "***"
+        return f"{value[:4]}...{value[-4:]}"
+
+    @staticmethod
+    def _get_env_file_path() -> Path | None:
+        """Find the .env file path."""
+        try:
+            from dotenv import find_dotenv
+            dotenv_path = find_dotenv(usecwd=True)
+            return Path(dotenv_path) if dotenv_path else None
+        except ImportError:  # pragma: no cover - dotenv is a required dependency
+            return None
+
+    def _update_env_file(self, key: str, value: str | None) -> bool:
+        """Update or add a key in the .env file."""
+        env_path = self._get_env_file_path()
+        if env_path is None:
+            env_path = Path.cwd() / ".env"
+
+        try:
+            lines = []
+            key_found = False
+
+            if env_path.exists():
+                with open(env_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        stripped = line.strip()
+                        if stripped.startswith(f"{key}=") or stripped.startswith(f"{key} ="):
+                            key_found = True
+                            if value is not None and value != "":
+                                lines.append(f"{key}={value}\n")
+                        else:
+                            lines.append(line)
+
+            if not key_found and value is not None and value != "":
+                lines.append(f"{key}={value}\n")
+
+            with open(env_path, "w", encoding="utf-8") as f:
+                f.writelines(lines)
+
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _update_runtime_config(key: str, value: str | None) -> None:
+        """Update config and environment at runtime."""
+        if value is not None and value != "":
+            os.environ[key] = value
+        else:
+            os.environ.pop(key, None)
+
+        if hasattr(config, key):
+            setattr(config, key, value if value else None)
+
     # ---------- Public API ----------
     def create_components(self) -> None:
         """Instantiate Gradio components for the personality UI."""
@@ -102,6 +174,27 @@ class PersonalityUI:
         self.new_personality_btn = gr.Button("New personality")
         self.available_tools_cg = gr.CheckboxGroup(label="Available tools (helper)", choices=[], value=[])
         self.save_btn = gr.Button("Save personality (instructions + tools)")
+
+    def create_config_components(self) -> None:
+        """Instantiate Gradio components for environment configuration."""
+        config_vars = get_config_vars()
+        self.config_textboxes = {}
+
+        for env_key, config_attr, is_secret, description in config_vars:
+            current_value = getattr(config, config_attr, None)
+            display_value = self._mask_secret(current_value, is_secret)
+
+            self.config_textboxes[env_key] = gr.Textbox(
+                label=env_key,
+                value=display_value,
+                placeholder=description,
+                type="password" if is_secret else "text",
+                info=description,
+            )
+
+        self.config_save_btn = gr.Button("Save Configuration")
+        self.config_reload_btn = gr.Button("Reload from .env")
+        self.config_status_md = gr.Markdown(visible=True)
 
     def additional_inputs_ordered(self) -> list[Any]:
         """Return the additional inputs in the expected order for Stream."""
@@ -298,4 +391,53 @@ class PersonalityUI:
                 fn=_apply_personality,
                 inputs=[self.personalities_dropdown],
                 outputs=[self.status_md, self.preview_md],
+            )
+
+    def wire_config_events(self, blocks: gr.Blocks) -> None:
+        """Attach event handlers for configuration components."""
+        config_vars = get_config_vars()
+
+        def _save_config(*values: str) -> str:
+            """Save all configuration values."""
+            updated = []
+            for i, (env_key, _, is_secret, _) in enumerate(config_vars):
+                value = values[i] if i < len(values) else ""
+                # Skip masked values (user didn't change them)
+                if is_secret and value and ("..." in value or value == "***"):
+                    continue
+                # Update runtime and persist
+                self._update_runtime_config(env_key, value if value else None)
+                self._update_env_file(env_key, value if value else None)
+                if value:
+                    updated.append(env_key)
+            if updated:
+                return f"Configuration saved: {', '.join(updated)}"
+            return "No changes to save."
+
+        def _reload_config() -> tuple[str, ...]:
+            """Reload configuration from .env file."""
+            reload_config()
+            # Return updated values for all textboxes
+            results = []
+            for env_key, config_attr, is_secret, _ in config_vars:
+                current_value = getattr(config, config_attr, None)
+                display_value = self._mask_secret(current_value, is_secret)
+                results.append(display_value)
+            return tuple(results) + ("Configuration reloaded from .env",)
+
+        with blocks:
+            # Collect all textbox inputs in order
+            textbox_inputs = [self.config_textboxes[env_key] for env_key, _, _, _ in config_vars]
+            textbox_outputs = textbox_inputs + [self.config_status_md]
+
+            self.config_save_btn.click(
+                fn=_save_config,
+                inputs=textbox_inputs,
+                outputs=[self.config_status_md],
+            )
+
+            self.config_reload_btn.click(
+                fn=_reload_config,
+                inputs=[],
+                outputs=textbox_outputs,
             )

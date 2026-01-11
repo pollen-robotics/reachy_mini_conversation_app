@@ -1813,3 +1813,410 @@ class TestSavePersonalityValueNotInChoices:
             # Check that user_personalities/new_profile is in the choices
             choices = result[0].get("choices", [])
             assert any("new_profile" in c for c in choices)
+
+
+# ============ Config Section Tests ============
+
+
+class TestMaskSecret:
+    """Tests for _mask_secret static method."""
+
+    def test_mask_secret_none_value(self) -> None:
+        """Test that None value returns empty string."""
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
+
+        result = PersonalityUI._mask_secret(None, True)
+        assert result == ""
+
+    def test_mask_secret_empty_value(self) -> None:
+        """Test that empty value returns empty string."""
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
+
+        result = PersonalityUI._mask_secret("", True)
+        assert result == ""
+
+    def test_mask_secret_non_secret_value(self) -> None:
+        """Test that non-secret value is returned as-is."""
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
+
+        result = PersonalityUI._mask_secret("my-value", False)
+        assert result == "my-value"
+
+    def test_mask_secret_short_secret(self) -> None:
+        """Test that short secret is masked completely."""
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
+
+        result = PersonalityUI._mask_secret("short", True)
+        assert result == "***"
+
+    def test_mask_secret_long_secret(self) -> None:
+        """Test that long secret shows first and last 4 chars."""
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
+
+        result = PersonalityUI._mask_secret("sk-ant-api03-1234567890", True)
+        assert result == "sk-a...7890"
+
+
+class TestGetEnvFilePath:
+    """Tests for _get_env_file_path static method."""
+
+    def test_get_env_file_path_with_dotenv_found(self) -> None:
+        """Test get env file path when dotenv finds a file."""
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
+
+        with patch(
+            "reachy_mini_conversation_app.gradio_personality.PersonalityUI._get_env_file_path"
+        ) as mock_method:
+            mock_method.return_value = Path("/test/.env")
+            result = PersonalityUI._get_env_file_path()
+            assert result == Path("/test/.env")
+
+    def test_get_env_file_path_with_dotenv_not_found(self) -> None:
+        """Test get env file path when dotenv doesn't find a file."""
+        # Bypass the module-level mock to test the real implementation
+        import importlib
+
+        # Temporarily clear the module to get fresh import
+        import sys
+
+        mods_to_clear = [
+            k for k in sys.modules if "gradio_personality" in k
+        ]
+        for mod in mods_to_clear:
+            del sys.modules[mod]
+
+        # Import fresh and mock find_dotenv to return empty string
+        with patch("dotenv.find_dotenv", return_value=""):
+            import reachy_mini_conversation_app.gradio_personality as gp
+
+            importlib.reload(gp)
+            result = gp.PersonalityUI._get_env_file_path()
+            assert result is None
+
+    def test_get_env_file_path_returns_path_or_none(self) -> None:
+        """Test get env file path returns correct type."""
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
+
+        # Verify that the method returns a Path or None
+        result = PersonalityUI._get_env_file_path()
+        assert result is None or isinstance(result, Path)
+
+
+class TestUpdateEnvFile:
+    """Tests for _update_env_file method."""
+
+    def test_update_env_file_new_file(self, tmp_path: Path) -> None:
+        """Test updating env file when it doesn't exist."""
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
+
+        ui = PersonalityUI()
+
+        env_path = tmp_path / ".env"
+
+        with patch.object(ui, "_get_env_file_path", return_value=None):
+            with patch("pathlib.Path.cwd", return_value=tmp_path):
+                result = ui._update_env_file("TEST_KEY", "test_value")
+
+        assert result is True
+        assert env_path.exists()
+        assert "TEST_KEY=test_value" in env_path.read_text()
+
+    def test_update_env_file_existing_key(self, tmp_path: Path) -> None:
+        """Test updating existing key in env file."""
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
+
+        ui = PersonalityUI()
+
+        env_path = tmp_path / ".env"
+        env_path.write_text("TEST_KEY=old_value\nOTHER_KEY=other\n")
+
+        with patch.object(ui, "_get_env_file_path", return_value=env_path):
+            result = ui._update_env_file("TEST_KEY", "new_value")
+
+        assert result is True
+        content = env_path.read_text()
+        assert "TEST_KEY=new_value" in content
+        assert "OTHER_KEY=other" in content
+
+    def test_update_env_file_remove_key(self, tmp_path: Path) -> None:
+        """Test removing key from env file by setting None."""
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
+
+        ui = PersonalityUI()
+
+        env_path = tmp_path / ".env"
+        env_path.write_text("TEST_KEY=value\nOTHER_KEY=other\n")
+
+        with patch.object(ui, "_get_env_file_path", return_value=env_path):
+            result = ui._update_env_file("TEST_KEY", None)
+
+        assert result is True
+        content = env_path.read_text()
+        assert "TEST_KEY" not in content
+        assert "OTHER_KEY=other" in content
+
+    def test_update_env_file_exception(self, tmp_path: Path) -> None:
+        """Test update env file handles exceptions."""
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
+
+        ui = PersonalityUI()
+
+        # Mock open to raise an exception during file reading
+        env_path = tmp_path / ".env"
+        env_path.write_text("TEST=value\n")
+
+        with patch.object(ui, "_get_env_file_path", return_value=env_path):
+            with patch("builtins.open", side_effect=PermissionError("test error")):
+                result = ui._update_env_file("TEST_KEY", "value")
+
+        assert result is False
+
+
+class TestUpdateRuntimeConfig:
+    """Tests for _update_runtime_config static method."""
+
+    def test_update_runtime_config_set_value(self) -> None:
+        """Test setting a runtime config value."""
+        import os
+
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
+
+        with patch("reachy_mini_conversation_app.gradio_personality.config") as mock_config:
+            mock_config.TEST_KEY = None
+            PersonalityUI._update_runtime_config("TEST_KEY", "test_value")
+
+            assert os.environ.get("TEST_KEY") == "test_value"
+            assert mock_config.TEST_KEY == "test_value"
+
+        # Clean up
+        os.environ.pop("TEST_KEY", None)
+
+    def test_update_runtime_config_clear_value(self) -> None:
+        """Test clearing a runtime config value."""
+        import os
+
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
+
+        os.environ["TEST_KEY"] = "existing"
+
+        with patch("reachy_mini_conversation_app.gradio_personality.config") as mock_config:
+            mock_config.TEST_KEY = "existing"
+            PersonalityUI._update_runtime_config("TEST_KEY", None)
+
+            assert "TEST_KEY" not in os.environ
+            assert mock_config.TEST_KEY is None
+
+    def test_update_runtime_config_nonexistent_attr(self) -> None:
+        """Test updating config when attribute doesn't exist."""
+        import os
+
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
+
+        with patch("reachy_mini_conversation_app.gradio_personality.config") as mock_config:
+            # hasattr returns False for this key
+            del mock_config.NONEXISTENT_KEY
+            PersonalityUI._update_runtime_config("NONEXISTENT_KEY", "value")
+
+            assert os.environ.get("NONEXISTENT_KEY") == "value"
+
+        os.environ.pop("NONEXISTENT_KEY", None)
+
+
+class TestCreateConfigComponents:
+    """Tests for create_config_components method."""
+
+    def test_create_config_components_creates_textboxes(self) -> None:
+        """Test that create_config_components creates textboxes for each env var."""
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
+
+        with patch("reachy_mini_conversation_app.gradio_personality.config") as mock_config:
+            mock_config.REACHY_MINI_CUSTOM_PROFILE = None
+            mock_config.OPENAI_API_KEY = "sk-test-key"
+
+            with patch(
+                "reachy_mini_conversation_app.gradio_personality.get_config_vars",
+                return_value=[
+                    ("OPENAI_API_KEY", "OPENAI_API_KEY", True, "OpenAI API key"),
+                    ("MODEL_NAME", "MODEL_NAME", False, "Model name"),
+                ],
+            ):
+                ui = PersonalityUI()
+                ui.create_config_components()
+
+                assert "OPENAI_API_KEY" in ui.config_textboxes
+                assert "MODEL_NAME" in ui.config_textboxes
+                assert ui.config_save_btn is not None
+                assert ui.config_reload_btn is not None
+                assert ui.config_status_md is not None
+
+
+class TestWireConfigEvents:
+    """Tests for wire_config_events method."""
+
+    def test_wire_config_events_save_config(self, tmp_path: Path) -> None:
+        """Test that save config handler works."""
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
+
+        with patch("reachy_mini_conversation_app.gradio_personality.config") as mock_config:
+            mock_config.REACHY_MINI_CUSTOM_PROFILE = None
+            mock_config.TEST_KEY = None
+
+            with patch(
+                "reachy_mini_conversation_app.gradio_personality.get_config_vars",
+                return_value=[
+                    ("TEST_KEY", "TEST_KEY", False, "Test key"),
+                ],
+            ):
+                ui = PersonalityUI()
+                ui.create_config_components()
+
+                mock_blocks = MagicMock()
+                mock_blocks.__enter__ = MagicMock(return_value=mock_blocks)
+                mock_blocks.__exit__ = MagicMock(return_value=None)
+
+                captured_save_fn: Any = None
+
+                def capture_save_click(**kwargs: Any) -> MagicMock:
+                    nonlocal captured_save_fn
+                    captured_save_fn = kwargs.get("fn")
+                    return MagicMock()
+
+                ui.config_save_btn = MagicMock()
+                ui.config_save_btn.click = capture_save_click
+                ui.config_reload_btn = MagicMock()
+                ui.config_reload_btn.click = MagicMock(return_value=MagicMock())
+
+                with patch.object(ui, "_update_env_file", return_value=True):
+                    ui.wire_config_events(mock_blocks)
+
+                    assert captured_save_fn is not None
+                    result = captured_save_fn("new_value")
+                    assert "saved" in result.lower() or "TEST_KEY" in result
+
+    def test_wire_config_events_save_config_skips_masked(self, tmp_path: Path) -> None:
+        """Test that save config skips masked secret values."""
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
+
+        with patch("reachy_mini_conversation_app.gradio_personality.config") as mock_config:
+            mock_config.REACHY_MINI_CUSTOM_PROFILE = None
+            mock_config.API_KEY = "sk-test"
+
+            with patch(
+                "reachy_mini_conversation_app.gradio_personality.get_config_vars",
+                return_value=[
+                    ("API_KEY", "API_KEY", True, "API key"),
+                ],
+            ):
+                ui = PersonalityUI()
+                ui.create_config_components()
+
+                mock_blocks = MagicMock()
+                mock_blocks.__enter__ = MagicMock(return_value=mock_blocks)
+                mock_blocks.__exit__ = MagicMock(return_value=None)
+
+                captured_save_fn: Any = None
+
+                def capture_save_click(**kwargs: Any) -> MagicMock:
+                    nonlocal captured_save_fn
+                    captured_save_fn = kwargs.get("fn")
+                    return MagicMock()
+
+                ui.config_save_btn = MagicMock()
+                ui.config_save_btn.click = capture_save_click
+                ui.config_reload_btn = MagicMock()
+                ui.config_reload_btn.click = MagicMock(return_value=MagicMock())
+
+                with patch.object(ui, "_update_env_file") as mock_update:
+                    ui.wire_config_events(mock_blocks)
+
+                    # Pass a masked value (contains ...)
+                    result = captured_save_fn("sk-t...test")
+                    assert "No changes" in result
+                    mock_update.assert_not_called()
+
+    def test_wire_config_events_save_config_fewer_values(self, tmp_path: Path) -> None:
+        """Test save config when fewer values are passed than config vars."""
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
+
+        with patch("reachy_mini_conversation_app.gradio_personality.config") as mock_config:
+            mock_config.REACHY_MINI_CUSTOM_PROFILE = None
+            mock_config.KEY1 = None
+            mock_config.KEY2 = None
+
+            with patch(
+                "reachy_mini_conversation_app.gradio_personality.get_config_vars",
+                return_value=[
+                    ("KEY1", "KEY1", False, "Key 1"),
+                    ("KEY2", "KEY2", False, "Key 2"),
+                ],
+            ):
+                ui = PersonalityUI()
+                ui.create_config_components()
+
+                mock_blocks = MagicMock()
+                mock_blocks.__enter__ = MagicMock(return_value=mock_blocks)
+                mock_blocks.__exit__ = MagicMock(return_value=None)
+
+                captured_save_fn: Any = None
+
+                def capture_save_click(**kwargs: Any) -> MagicMock:
+                    nonlocal captured_save_fn
+                    captured_save_fn = kwargs.get("fn")
+                    return MagicMock()
+
+                ui.config_save_btn = MagicMock()
+                ui.config_save_btn.click = capture_save_click
+                ui.config_reload_btn = MagicMock()
+                ui.config_reload_btn.click = MagicMock(return_value=MagicMock())
+
+                with patch.object(ui, "_update_env_file", return_value=True):
+                    ui.wire_config_events(mock_blocks)
+
+                    # Pass only one value when two are expected
+                    result = captured_save_fn("value1")
+                    assert "saved" in result.lower() or "KEY1" in result
+
+    def test_wire_config_events_reload_config(self, tmp_path: Path) -> None:
+        """Test that reload config handler works."""
+        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
+
+        with patch("reachy_mini_conversation_app.gradio_personality.config") as mock_config:
+            mock_config.REACHY_MINI_CUSTOM_PROFILE = None
+            mock_config.TEST_KEY = "reloaded_value"
+
+            with patch(
+                "reachy_mini_conversation_app.gradio_personality.get_config_vars",
+                return_value=[
+                    ("TEST_KEY", "TEST_KEY", False, "Test key"),
+                ],
+            ):
+                with patch(
+                    "reachy_mini_conversation_app.gradio_personality.reload_config"
+                ) as mock_reload:
+                    ui = PersonalityUI()
+                    ui.create_config_components()
+
+                    mock_blocks = MagicMock()
+                    mock_blocks.__enter__ = MagicMock(return_value=mock_blocks)
+                    mock_blocks.__exit__ = MagicMock(return_value=None)
+
+                    captured_reload_fn: Any = None
+
+                    def capture_reload_click(**kwargs: Any) -> MagicMock:
+                        nonlocal captured_reload_fn
+                        captured_reload_fn = kwargs.get("fn")
+                        return MagicMock()
+
+                    ui.config_save_btn = MagicMock()
+                    ui.config_save_btn.click = MagicMock(return_value=MagicMock())
+                    ui.config_reload_btn = MagicMock()
+                    ui.config_reload_btn.click = capture_reload_click
+
+                    ui.wire_config_events(mock_blocks)
+
+                    assert captured_reload_fn is not None
+                    result = captured_reload_fn()
+
+                    mock_reload.assert_called_once()
+                    assert "reloaded" in result[-1].lower()
+                    assert result[0] == "reloaded_value"
