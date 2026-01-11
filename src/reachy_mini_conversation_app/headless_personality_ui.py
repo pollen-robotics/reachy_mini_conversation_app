@@ -232,7 +232,7 @@ def mount_personality_routes(
         instructions: str = Body("", embed=True),
         tools_text: str = Body("", embed=True),
         voice: Optional[str] = Body("cedar", embed=True),
-    ) -> dict[str, Any] | JSONResponse:
+    ) -> Any:
         name_s = _sanitize_name(name)
         if not name_s:
             return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)
@@ -258,7 +258,7 @@ def mount_personality_routes(
         instructions: str = Body("", embed=True),
         tools_text: str = Body("", embed=True),
         voice: Optional[str] = Body("cedar", embed=True),
-    ) -> dict[str, Any] | JSONResponse:
+    ) -> Any:
         name_s = _sanitize_name(name)
         if not name_s:
             return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)
@@ -277,7 +277,7 @@ def mount_personality_routes(
     @app.get("/personalities/save_raw")
     async def _save_raw_get(
         name: str, instructions: str = "", tools_text: str = "", voice: str = "cedar"
-    ) -> dict[str, Any] | JSONResponse:
+    ) -> Any:
         name_s = _sanitize_name(name)
         if not name_s:
             return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)
@@ -304,7 +304,7 @@ def mount_personality_routes(
         name: str | None = None,
         persist: Optional[bool] = None,
         request: Optional[Request] = None,
-    ) -> dict[str, Any] | JSONResponse:
+    ) -> Any:
         loop = get_loop()
         if loop is None:
             return JSONResponse({"ok": False, "error": "loop_unavailable"}, status_code=503)
@@ -454,7 +454,7 @@ def mount_personality_routes(
         return {"variables": variables}
 
     @app.post("/config/reload")
-    def _reload_config() -> dict[str, Any] | JSONResponse:
+    def _reload_config() -> Any:
         """Reload configuration from .env file."""
         try:
             reload_config()
@@ -474,7 +474,7 @@ def mount_personality_routes(
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
     @app.get("/config/profile/{profile_name}")
-    def _get_profile_config(profile_name: str) -> dict[str, Any] | JSONResponse:
+    def _get_profile_config(profile_name: str) -> Any:
         """Get environment variables required by a specific profile.
 
         This endpoint allows the UI to show which env vars are needed
@@ -508,7 +508,7 @@ def mount_personality_routes(
         }
 
     @app.get("/config/{key}")
-    def _get_config_key(key: str) -> dict[str, Any] | JSONResponse:
+    def _get_config_key(key: str) -> Any:
         """Get a specific configuration variable."""
         for env_key, config_attr, is_secret, description in _get_config_vars_list():
             if env_key == key:
@@ -527,7 +527,7 @@ def mount_personality_routes(
         key: str,
         value: Optional[str] = Body(None, embed=True),
         persist: bool = Body(True, embed=True),
-    ) -> dict[str, Any] | JSONResponse:
+    ) -> Any:
         """Set a configuration variable."""
         # Find the config variable
         config_info = None
@@ -559,7 +559,7 @@ def mount_personality_routes(
         }
 
     @app.delete("/config/{key}")
-    def _delete_config_key(key: str, persist: bool = True) -> dict[str, Any] | JSONResponse:
+    def _delete_config_key(key: str, persist: bool = True) -> Any:
         """Remove a configuration variable."""
         # Find the config variable
         config_info = None

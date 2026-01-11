@@ -94,6 +94,18 @@ async function reloadConfig() {
   return await resp.json();
 }
 
+async function getProfileConfig(profileName) {
+  try {
+    const url = new URL(`/config/profile/${encodeURIComponent(profileName)}`, window.location.origin);
+    url.searchParams.set("_", Date.now().toString());
+    const resp = await fetchWithTimeout(url, {}, 3000);
+    if (!resp.ok) return { variables: [] };
+    return await resp.json();
+  } catch (e) {
+    return { variables: [] };
+  }
+}
+
 // ---------- Personalities API ----------
 async function getPersonalities() {
   const url = new URL("/personalities", window.location.origin);
@@ -213,6 +225,11 @@ async function init() {
   const pStatus = document.getElementById("personality-status");
   const pVoice = document.getElementById("voice-select");
   const pAvail = document.getElementById("tools-available");
+
+  // Profile requirements elements
+  const pReqSection = document.getElementById("profile-requirements");
+  const pReqSummary = document.getElementById("profile-req-summary");
+  const pEnvVars = document.getElementById("profile-env-vars");
 
   const AUTO_WITH = {
     dance: ["stop_dance"],
@@ -442,6 +459,78 @@ async function init() {
       });
     }
 
+    async function renderProfileEnvVars(profileName) {
+      // Fetch and display environment variables required by this profile
+      const profileConfig = await getProfileConfig(profileName);
+      const variables = profileConfig.variables || [];
+
+      // Filter to show only profile-specific vars (beyond base vars like OPENAI_API_KEY)
+      // We show all vars but highlight tool-specific ones
+      if (variables.length === 0) {
+        show(pReqSection, false);
+        return;
+      }
+
+      pEnvVars.innerHTML = "";
+      let configured = 0;
+      let missing = 0;
+      let missingRequired = 0;
+
+      for (const v of variables) {
+        const tag = document.createElement("span");
+        const isConfigured = v.is_set;
+        const isMissing = !isConfigured;
+        const isRequired = v.required !== false;
+
+        if (isConfigured) {
+          configured++;
+          tag.className = "env-var-tag configured";
+        } else if (isRequired) {
+          missing++;
+          missingRequired++;
+          tag.className = "env-var-tag missing required";
+        } else {
+          missing++;
+          tag.className = "env-var-tag missing";
+        }
+
+        tag.title = v.description || v.key;
+
+        const dot = document.createElement("span");
+        dot.className = "dot";
+
+        const varName = document.createElement("span");
+        varName.className = "var-name";
+        varName.textContent = v.key;
+
+        tag.appendChild(dot);
+        tag.appendChild(varName);
+
+        if (v.description && v.description.length <= 30) {
+          const desc = document.createElement("span");
+          desc.className = "var-desc";
+          desc.textContent = v.description;
+          tag.appendChild(desc);
+        }
+
+        pEnvVars.appendChild(tag);
+      }
+
+      // Update summary chip
+      if (missingRequired > 0) {
+        pReqSummary.textContent = `${missingRequired} required missing`;
+        pReqSummary.className = "chip chip-warn";
+      } else if (missing > 0) {
+        pReqSummary.textContent = `${missing} optional missing`;
+        pReqSummary.className = "chip";
+      } else {
+        pReqSummary.textContent = `All ${configured} configured`;
+        pReqSummary.className = "chip chip-ok";
+      }
+
+      show(pReqSection, true);
+    }
+
     async function loadSelected() {
       const selected = pSelect.value;
       const data = await loadPersonality(selected);
@@ -456,6 +545,9 @@ async function init() {
       pName.value = idx >= 0 ? selected.slice(idx + 1) : "";
       pStatus.textContent = `Loaded ${selected}`;
       pStatus.className = "status";
+
+      // Load and display profile environment requirements
+      await renderProfileEnvVars(selected);
     }
 
     pSelect.addEventListener("change", loadSelected);
