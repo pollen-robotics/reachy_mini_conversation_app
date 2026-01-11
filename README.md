@@ -105,6 +105,9 @@ Some wheels (e.g. PyTorch) are large and require compatible CUDA or CPU buildsâ€
 1. Copy `.env.example` to `.env`.
 2. Fill in the required values, notably the OpenAI API key.
 
+> [!NOTE]
+> Environment variables are dynamically discovered from tools. The headless UI and Gradio UI automatically show which variables are needed for the active profile. Profile-specific variables (like `ANTHROPIC_API_KEY` for the `linus` profile) are only shown when that profile is selected.
+
 | Variable | Description |
 |----------|-------------|
 | `OPENAI_API_KEY` | Required. Grants access to the OpenAI realtime endpoint.
@@ -112,6 +115,7 @@ Some wheels (e.g. PyTorch) are large and require compatible CUDA or CPU buildsâ€
 | `HF_HOME` | Cache directory for local Hugging Face downloads (only used with `--local-vision` flag, defaults to `./cache`).
 | `HF_TOKEN` | Optional token for Hugging Face models (only used with `--local-vision` flag, falls back to `huggingface-cli login`).
 | `LOCAL_VISION_MODEL` | Hugging Face model path for local vision processing (only used with `--local-vision` flag, defaults to `HuggingFaceTB/SmolVLM2-2.2B-Instruct`).
+| `REACHY_MINI_CUSTOM_PROFILE` | Profile to use (defaults to `default`). Set to `linus` for developer features.
 | `ANTHROPIC_API_KEY` | Anthropic API key for Claude (only used with `linus` developer profile).
 | `ANTHROPIC_MODEL` | Claude model to use (only used with `linus` profile, defaults to `claude-sonnet-4-20250514`).
 | `GITHUB_TOKEN` | GitHub Personal Access Token with `repo`, `issues`, `pull_requests` scopes (only used with `linus` profile).
@@ -451,6 +455,98 @@ The `ToolDependencies` dataclass provides access to robot systems:
 | `head_wobbler` | `HeadWobbler \| None` | Audio-reactive head motion |
 | `motion_duration_s` | `float` | Default motion duration |
 | `background_task_manager` | `BackgroundTaskManager \| None` | Manage background tasks |
+
+### Declaring Environment Variables
+
+Tools can declare their required environment variables using the `required_env_vars` class attribute. This enables:
+- **Dynamic discovery**: The UI shows which variables are needed for each profile
+- **Visual indicators**: Users see which variables are configured vs missing
+- **Profile-specific config**: Only relevant variables are shown per profile
+
+```python
+from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies, EnvVar
+
+class MyAPITool(Tool):
+    """Tool that requires an API key."""
+
+    name = "my_api_tool"
+    description = "Calls an external API."
+
+    # Declare required environment variables
+    required_env_vars = [
+        EnvVar(
+            name="MY_API_KEY",
+            is_secret=True,  # Masked in UI
+            description="API key for MyService",
+            required=True,  # Must be set for tool to work
+        ),
+        EnvVar(
+            name="MY_API_ENDPOINT",
+            is_secret=False,
+            description="API endpoint URL",
+            required=False,  # Optional
+            default="https://api.myservice.com",
+        ),
+    ]
+
+    parameters_schema = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Query to send"},
+        },
+        "required": ["query"],
+    }
+
+    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
+        from reachy_mini_conversation_app.config import config
+
+        api_key = config.MY_API_KEY
+        if not api_key:
+            return {"error": "MY_API_KEY not configured"}
+
+        # Use the API...
+        return {"status": "success"}
+```
+
+#### EnvVar Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | `str` | Required | Environment variable name (e.g., `MY_API_KEY`) |
+| `is_secret` | `bool` | `False` | If `True`, value is masked in the UI |
+| `description` | `str` | `""` | Human-readable description |
+| `required` | `bool` | `True` | If `True`, tool may not work without it |
+| `default` | `str \| None` | `None` | Default value if not set |
+
+#### Sharing Environment Variables
+
+For tools that share the same variables (e.g., multiple GitHub tools), create a shared module:
+
+```python
+# my_profile/shared_env_vars.py
+from reachy_mini_conversation_app.tools.core_tools import EnvVar
+
+MY_SERVICE_ENV_VARS = [
+    EnvVar("MY_SERVICE_KEY", is_secret=True, description="API key"),
+    EnvVar("MY_SERVICE_URL", description="Service URL"),
+]
+
+# my_profile/tool_a.py
+from .shared_env_vars import MY_SERVICE_ENV_VARS
+
+class ToolA(Tool):
+    required_env_vars = MY_SERVICE_ENV_VARS
+    # ...
+
+# my_profile/tool_b.py
+from .shared_env_vars import MY_SERVICE_ENV_VARS
+
+class ToolB(Tool):
+    required_env_vars = MY_SERVICE_ENV_VARS
+    # ...
+```
+
+The UI automatically deduplicates variables, so shared variables only appear once.
 
 ### Background Task Execution
 
