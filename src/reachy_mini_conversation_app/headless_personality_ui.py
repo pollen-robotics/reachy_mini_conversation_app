@@ -17,7 +17,7 @@ from fastapi import FastAPI
 
 from .config import config, reload_config
 from .openai_realtime import OpenaiRealtimeHandler
-from .tools.core_tools import get_config_vars
+from .tools.core_tools import get_config_vars, EnvVar, BASE_CONFIG_VARS
 from .headless_personality import (
     DEFAULT_OPTION,
     _sanitize_name,
@@ -41,7 +41,94 @@ __all__ = [
     "resolve_profile_dir",
     "read_instructions_for",
     "get_config_vars",
+    "collect_profile_env_vars",
 ]
+
+
+def collect_profile_env_vars(profile_name: str) -> list[EnvVar]:
+    """Collect environment variables required by a specific profile.
+
+    Parses the profile's tools.txt file and collects required_env_vars
+    from each tool without fully initializing the tool registry.
+
+    Args:
+        profile_name: Name of the profile (e.g., "linus", "default")
+
+    Returns:
+        List of unique EnvVar instances (base vars + profile tool vars)
+
+    """
+    import importlib
+    import inspect
+    import logging
+
+    from .tools.core_tools import Tool
+
+    logger = logging.getLogger(__name__)
+    seen: dict[str, EnvVar] = {}
+    result: list[EnvVar] = []
+
+    # Add base config vars first
+    for env_var in BASE_CONFIG_VARS:
+        if env_var.name not in seen:
+            seen[env_var.name] = env_var
+            result.append(env_var)
+
+    # Resolve profile directory
+    profile_dir = resolve_profile_dir(profile_name)
+    tools_txt = profile_dir / "tools.txt"
+
+    if not tools_txt.exists():
+        return result
+
+    # Parse tool names from tools.txt
+    try:
+        lines = tools_txt.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return result
+
+    tool_names = [
+        line.strip()
+        for line in lines
+        if line.strip() and not line.strip().startswith("#")
+    ]
+
+    # Try to load each tool and collect env vars
+    profiles_pkg = "reachy_mini_conversation_app.profiles"
+    shared_pkg = "reachy_mini_conversation_app.tools"
+
+    for tool_name in tool_names:
+        tool_class = None
+
+        # Try profile-local tool first
+        try:
+            mod = importlib.import_module(f"{profiles_pkg}.{profile_name}.{tool_name}")
+            for _, cls in inspect.getmembers(mod, inspect.isclass):
+                if issubclass(cls, Tool) and cls is not Tool and hasattr(cls, "name"):
+                    tool_class = cls
+                    break
+        except Exception:
+            pass
+
+        # Try shared tools if not found
+        if tool_class is None:
+            try:
+                mod = importlib.import_module(f"{shared_pkg}.{tool_name}")
+                for _, cls in inspect.getmembers(mod, inspect.isclass):
+                    if issubclass(cls, Tool) and cls is not Tool and hasattr(cls, "name"):
+                        tool_class = cls
+                        break
+            except Exception:
+                pass
+
+        # Collect env vars from tool
+        if tool_class is not None:
+            for env_var in getattr(tool_class, "required_env_vars", []):
+                if env_var.name not in seen:
+                    seen[env_var.name] = env_var
+                    result.append(env_var)
+
+    return result
 
 
 def _get_config_vars_list() -> list[tuple[str, str, bool, str]]:
@@ -385,6 +472,40 @@ def mount_personality_routes(
             return {"ok": True, "message": "Configuration reloaded", "variables": variables}
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    @app.get("/config/profile/{profile_name}")
+    def _get_profile_config(profile_name: str) -> dict[str, Any] | JSONResponse:
+        """Get environment variables required by a specific profile.
+
+        This endpoint allows the UI to show which env vars are needed
+        before applying a profile.
+        """
+        # Check if profile exists
+        if profile_name != DEFAULT_OPTION:
+            profile_dir = resolve_profile_dir(profile_name)
+            if not profile_dir.exists() or not profile_dir.is_dir():
+                return JSONResponse(
+                    {"error": f"Profile not found: {profile_name}"},
+                    status_code=404,
+                )
+
+        env_vars = collect_profile_env_vars(profile_name)
+        variables = []
+        for env_var in env_vars:
+            value = getattr(config, env_var.name, None)
+            variables.append({
+                "key": env_var.name,
+                "value": _mask_secret(value, env_var.is_secret),
+                "is_set": value is not None and value != "",
+                "is_secret": env_var.is_secret,
+                "description": env_var.description,
+                "required": env_var.required,
+                "default": env_var.default,
+            })
+        return {
+            "profile": profile_name,
+            "variables": variables,
+        }
 
     @app.get("/config/{key}")
     def _get_config_key(key: str) -> dict[str, Any] | JSONResponse:

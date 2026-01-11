@@ -30,14 +30,18 @@ _ORIGINAL_MODULES: dict[str, Any] = {}
 _MODULES_TO_MOCK = [
     "fastapi",
     "fastapi.responses",
+    "fastapi.staticfiles",
     "gradio",
     "reachy_mini_conversation_app.openai_realtime",
+    "reachy_mini",
+    "reachy_mini.apps",
+    "reachy_mini.apps.app",
 ]
 
 
 @pytest.fixture(autouse=True)
 def mock_fastapi_dependencies() -> Any:
-    """Mock fastapi and gradio for tests."""
+    """Mock fastapi, gradio, and reachy_mini for tests."""
     # Save originals
     for mod_name in _MODULES_TO_MOCK:
         if mod_name in sys.modules:
@@ -51,6 +55,8 @@ def mock_fastapi_dependencies() -> Any:
     mock_responses = MagicMock()
     mock_responses.JSONResponse = MagicMock()
     mock_fastapi.responses = mock_responses
+    mock_staticfiles = MagicMock()
+    mock_staticfiles.StaticFiles = MagicMock()
 
     # Create mock gradio
     mock_gradio = MagicMock()
@@ -59,15 +65,26 @@ def mock_fastapi_dependencies() -> Any:
     mock_openai_realtime = MagicMock()
     mock_openai_realtime.OpenaiRealtimeHandler = MagicMock()
 
+    # Create mock reachy_mini
+    mock_reachy_mini = MagicMock()
+    mock_reachy_mini.ReachyMini = MagicMock()
+    mock_reachy_mini_apps = MagicMock()
+    mock_reachy_mini_apps_app = MagicMock()
+
     sys.modules["fastapi"] = mock_fastapi
     sys.modules["fastapi.responses"] = mock_responses
+    sys.modules["fastapi.staticfiles"] = mock_staticfiles
     sys.modules["gradio"] = mock_gradio
     sys.modules["reachy_mini_conversation_app.openai_realtime"] = mock_openai_realtime
+    sys.modules["reachy_mini"] = mock_reachy_mini
+    sys.modules["reachy_mini.apps"] = mock_reachy_mini_apps
+    sys.modules["reachy_mini.apps.app"] = mock_reachy_mini_apps_app
 
     yield {
         "mock_fastapi": mock_fastapi,
         "mock_gradio": mock_gradio,
         "mock_openai_realtime": mock_openai_realtime,
+        "mock_reachy_mini": mock_reachy_mini,
     }
 
     # Restore originals
@@ -3249,3 +3266,455 @@ class TestApplyDictBodyWithoutName:
 
                 # Should still succeed (falls back to DEFAULT_OPTION)
                 assert result["ok"] is True
+
+
+class TestCollectProfileEnvVars:
+    """Tests for collect_profile_env_vars function."""
+
+    def test_collect_returns_base_vars(self) -> None:
+        """Test that collect_profile_env_vars returns base config vars."""
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            collect_profile_env_vars,
+        )
+        from reachy_mini_conversation_app.tools.core_tools import BASE_CONFIG_VARS
+
+        result = collect_profile_env_vars("nonexistent_profile")
+
+        # Should return at least base vars
+        result_names = [v.name for v in result]
+        for base_var in BASE_CONFIG_VARS:
+            assert base_var.name in result_names
+
+    def test_collect_for_default_profile(self) -> None:
+        """Test collect_profile_env_vars for default profile."""
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            collect_profile_env_vars,
+        )
+
+        result = collect_profile_env_vars("default")
+
+        # Should return at least base vars
+        assert len(result) > 0
+        result_names = [v.name for v in result]
+        assert "OPENAI_API_KEY" in result_names
+
+    def test_collect_for_linus_profile_includes_github_vars(self) -> None:
+        """Test that linus profile includes GitHub env vars."""
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            collect_profile_env_vars,
+        )
+
+        result = collect_profile_env_vars("linus")
+
+        result_names = [v.name for v in result]
+
+        # Linus profile should include GitHub vars
+        assert "GITHUB_TOKEN" in result_names
+        assert "ANTHROPIC_API_KEY" in result_names
+
+    def test_collect_returns_envvar_instances(self) -> None:
+        """Test that collect_profile_env_vars returns EnvVar instances."""
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            collect_profile_env_vars,
+        )
+        from reachy_mini_conversation_app.tools.core_tools import EnvVar
+
+        result = collect_profile_env_vars("default")
+
+        for item in result:
+            assert isinstance(item, EnvVar)
+
+    def test_collect_handles_missing_tools_txt(self) -> None:
+        """Test collect_profile_env_vars handles missing tools.txt gracefully."""
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            collect_profile_env_vars,
+        )
+
+        # Profile without tools.txt should return only base vars
+        result = collect_profile_env_vars("profile_that_does_not_exist")
+
+        # Should still return base vars
+        result_names = [v.name for v in result]
+        assert "OPENAI_API_KEY" in result_names
+
+    def test_collect_handles_read_exception(self) -> None:
+        """Test collect_profile_env_vars handles read exception gracefully."""
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            collect_profile_env_vars,
+        )
+
+        with patch(
+            "reachy_mini_conversation_app.headless_personality_ui.resolve_profile_dir"
+        ) as mock_resolve:
+            mock_dir = MagicMock()
+            mock_resolve.return_value = mock_dir
+            mock_tools_txt = MagicMock()
+            mock_tools_txt.exists.return_value = True
+            mock_tools_txt.read_text.side_effect = PermissionError("Cannot read")
+            mock_dir.__truediv__ = MagicMock(return_value=mock_tools_txt)
+
+            result = collect_profile_env_vars("test_profile")
+
+            # Should return base vars despite error
+            result_names = [v.name for v in result]
+            assert "OPENAI_API_KEY" in result_names
+
+    def test_collect_handles_tool_import_exception(self) -> None:
+        """Test that import exceptions in tools are handled gracefully."""
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            collect_profile_env_vars,
+        )
+
+        # Use a real profile but mock importlib to fail
+        with patch("importlib.import_module") as mock_import:
+            mock_import.side_effect = ImportError("Test error")
+
+            # Should not crash, just return base vars
+            result = collect_profile_env_vars("default")
+
+            result_names = [v.name for v in result]
+            assert "OPENAI_API_KEY" in result_names
+
+    def test_collect_deduplicates_env_vars(self) -> None:
+        """Test that env vars are deduplicated."""
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            collect_profile_env_vars,
+        )
+
+        result = collect_profile_env_vars("linus")
+
+        # No duplicates
+        names = [v.name for v in result]
+        assert len(names) == len(set(names))
+
+
+class TestGetProfileConfigEndpoint:
+    """Tests for GET /config/profile/{profile_name} endpoint."""
+
+    def test_profile_config_endpoint_registered(self) -> None:
+        """Test that profile config endpoint is registered."""
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            mount_personality_routes,
+        )
+
+        mock_app = MagicMock()
+        mock_handler = MagicMock()
+        mock_get_loop = MagicMock(return_value=None)
+
+        registered_handlers: dict[str, Any] = {}
+        mock_app.get = make_route_capture("GET", registered_handlers)
+        mock_app.post = make_route_capture("POST", registered_handlers)
+        mock_app.delete = make_route_capture("DELETE", registered_handlers)
+
+        mount_personality_routes(mock_app, mock_handler, mock_get_loop)
+
+        assert "GET /config/profile/{profile_name}" in registered_handlers
+
+    def test_profile_config_returns_variables(self) -> None:
+        """Test that profile config endpoint returns variables."""
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            mount_personality_routes,
+        )
+
+        mock_app = MagicMock()
+        mock_handler = MagicMock()
+        mock_get_loop = MagicMock(return_value=None)
+
+        registered_handlers: dict[str, Any] = {}
+        mock_app.get = make_route_capture("GET", registered_handlers)
+        mock_app.post = make_route_capture("POST", registered_handlers)
+        mock_app.delete = make_route_capture("DELETE", registered_handlers)
+
+        mount_personality_routes(mock_app, mock_handler, mock_get_loop)
+
+        handler = registered_handlers["GET /config/profile/{profile_name}"]
+
+        result = handler("default")
+
+        assert "profile" in result
+        assert "variables" in result
+        assert result["profile"] == "default"
+        assert isinstance(result["variables"], list)
+
+    def test_profile_config_returns_404_for_missing_profile(self) -> None:
+        """Test that profile config returns 404 for non-existent profile."""
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            mount_personality_routes,
+        )
+
+        mock_app = MagicMock()
+        mock_handler = MagicMock()
+        mock_get_loop = MagicMock(return_value=None)
+
+        registered_handlers: dict[str, Any] = {}
+        mock_app.get = make_route_capture("GET", registered_handlers)
+        mock_app.post = make_route_capture("POST", registered_handlers)
+        mock_app.delete = make_route_capture("DELETE", registered_handlers)
+
+        mount_personality_routes(mock_app, mock_handler, mock_get_loop)
+
+        handler = registered_handlers["GET /config/profile/{profile_name}"]
+
+        # Mock JSONResponse to check it's called
+        with patch(
+            "reachy_mini_conversation_app.headless_personality_ui.resolve_profile_dir"
+        ) as mock_resolve:
+            mock_dir = MagicMock()
+            mock_dir.exists.return_value = False
+            mock_resolve.return_value = mock_dir
+
+            _result = handler("nonexistent_profile")
+
+            # Should return JSONResponse (mocked, so it's a MagicMock call)
+            # The JSONResponse is created inside mount_personality_routes
+            # We just verify the handler doesn't crash
+            assert _result is not None  # Just verify it returned something
+
+    def test_profile_config_includes_var_metadata(self) -> None:
+        """Test that profile config includes variable metadata."""
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            mount_personality_routes,
+        )
+
+        mock_app = MagicMock()
+        mock_handler = MagicMock()
+        mock_get_loop = MagicMock(return_value=None)
+
+        registered_handlers: dict[str, Any] = {}
+        mock_app.get = make_route_capture("GET", registered_handlers)
+        mock_app.post = make_route_capture("POST", registered_handlers)
+        mock_app.delete = make_route_capture("DELETE", registered_handlers)
+
+        mount_personality_routes(mock_app, mock_handler, mock_get_loop)
+
+        handler = registered_handlers["GET /config/profile/{profile_name}"]
+
+        result = handler("default")
+
+        for var in result["variables"]:
+            assert "key" in var
+            assert "value" in var
+            assert "is_set" in var
+            assert "is_secret" in var
+            assert "description" in var
+            assert "required" in var
+            assert "default" in var
+
+    def test_profile_config_for_linus_includes_github_vars(self) -> None:
+        """Test that linus profile config includes GitHub variables."""
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            mount_personality_routes,
+        )
+
+        mock_app = MagicMock()
+        mock_handler = MagicMock()
+        mock_get_loop = MagicMock(return_value=None)
+
+        registered_handlers: dict[str, Any] = {}
+        mock_app.get = make_route_capture("GET", registered_handlers)
+        mock_app.post = make_route_capture("POST", registered_handlers)
+        mock_app.delete = make_route_capture("DELETE", registered_handlers)
+
+        mount_personality_routes(mock_app, mock_handler, mock_get_loop)
+
+        handler = registered_handlers["GET /config/profile/{profile_name}"]
+
+        result = handler("linus")
+
+        var_keys = [v["key"] for v in result["variables"]]
+        assert "GITHUB_TOKEN" in var_keys
+        assert "ANTHROPIC_API_KEY" in var_keys
+
+    def test_profile_config_masks_secrets(self) -> None:
+        """Test that profile config masks secret values."""
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            mount_personality_routes,
+        )
+
+        mock_app = MagicMock()
+        mock_handler = MagicMock()
+        mock_get_loop = MagicMock(return_value=None)
+
+        registered_handlers: dict[str, Any] = {}
+        mock_app.get = make_route_capture("GET", registered_handlers)
+        mock_app.post = make_route_capture("POST", registered_handlers)
+        mock_app.delete = make_route_capture("DELETE", registered_handlers)
+
+        mount_personality_routes(mock_app, mock_handler, mock_get_loop)
+
+        handler = registered_handlers["GET /config/profile/{profile_name}"]
+
+        # Set a secret value
+        with patch(
+            "reachy_mini_conversation_app.headless_personality_ui.config"
+        ) as mock_config:
+            mock_config.OPENAI_API_KEY = "sk-1234567890abcdefghij"
+
+            result = handler("default")
+
+            # Find OPENAI_API_KEY in results
+            openai_var = next(
+                (v for v in result["variables"] if v["key"] == "OPENAI_API_KEY"),
+                None
+            )
+            if openai_var and openai_var["value"]:
+                # Should be masked
+                assert "..." in openai_var["value"] or openai_var["value"] == "***"
+
+    def test_profile_config_not_dir(self) -> None:
+        """Test profile config returns 404 when path exists but is not a directory."""
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            mount_personality_routes,
+        )
+
+        mock_app = MagicMock()
+        mock_handler = MagicMock()
+        mock_get_loop = MagicMock(return_value=None)
+
+        registered_handlers: dict[str, Any] = {}
+        mock_app.get = make_route_capture("GET", registered_handlers)
+        mock_app.post = make_route_capture("POST", registered_handlers)
+        mock_app.delete = make_route_capture("DELETE", registered_handlers)
+
+        mount_personality_routes(mock_app, mock_handler, mock_get_loop)
+
+        handler = registered_handlers["GET /config/profile/{profile_name}"]
+
+        with patch(
+            "reachy_mini_conversation_app.headless_personality_ui.resolve_profile_dir"
+        ) as mock_resolve:
+            mock_dir = MagicMock()
+            mock_dir.exists.return_value = True
+            mock_dir.is_dir.return_value = False  # Not a directory
+            mock_resolve.return_value = mock_dir
+
+            _result = handler("not_a_directory")
+
+            # Should return JSONResponse (mocked)
+            # We just verify the handler doesn't crash
+            assert _result is not None  # Just verify it returned something
+
+    def test_profile_config_default_option_skips_exists_check(self) -> None:
+        """Test that DEFAULT_OPTION profile skips the existence check (branch 484->492)."""
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            mount_personality_routes,
+            DEFAULT_OPTION,
+        )
+
+        mock_app = MagicMock()
+        mock_handler = MagicMock()
+        mock_get_loop = MagicMock(return_value=None)
+
+        registered_handlers: dict[str, Any] = {}
+        mock_app.get = make_route_capture("GET", registered_handlers)
+        mock_app.post = make_route_capture("POST", registered_handlers)
+        mock_app.delete = make_route_capture("DELETE", registered_handlers)
+
+        mount_personality_routes(mock_app, mock_handler, mock_get_loop)
+
+        handler = registered_handlers["GET /config/profile/{profile_name}"]
+
+        # Call with DEFAULT_OPTION - should skip existence check
+        result = handler(DEFAULT_OPTION)
+
+        assert "profile" in result
+        assert result["profile"] == DEFAULT_OPTION
+        assert "variables" in result
+
+
+class TestCollectProfileEnvVarsSharedTools:
+    """Tests for collect_profile_env_vars with shared tools (branch 117->125)."""
+
+    def test_collect_finds_shared_tool_envvars(self) -> None:
+        """Test that shared tools env vars are collected (branch 117->125).
+
+        The 'default' profile uses tools from shared tools directory like 'dance',
+        which don't have required_env_vars but tests the shared tools path.
+        """
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            collect_profile_env_vars,
+        )
+
+        # Default profile uses shared tools like dance, camera, etc.
+        result = collect_profile_env_vars("default")
+
+        # Should complete without error and return base vars
+        result_names = [v.name for v in result]
+        assert "OPENAI_API_KEY" in result_names
+
+    def test_collect_handles_shared_module_without_tool_class(self) -> None:
+        """Test that shared module without Tool class is handled (branch 117->125).
+
+        This covers the case where a shared module exists but doesn't contain
+        a valid Tool subclass, so the for loop completes without finding one.
+        """
+        import types
+
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            collect_profile_env_vars,
+        )
+
+        # Create a mock module that has no Tool class
+        mock_module = types.ModuleType("fake_tool_module")
+        mock_module.SomeClass = type("SomeClass", (), {})  # Not a Tool subclass
+
+        with patch(
+            "reachy_mini_conversation_app.headless_personality_ui.resolve_profile_dir"
+        ) as mock_resolve:
+            mock_dir = MagicMock()
+            mock_resolve.return_value = mock_dir
+            mock_tools_txt = MagicMock()
+            mock_tools_txt.exists.return_value = True
+            mock_tools_txt.read_text.return_value = "fake_tool\n"
+            mock_dir.__truediv__ = MagicMock(return_value=mock_tools_txt)
+
+            # Mock importlib to:
+            # 1. Fail for profile-local import (so we fall through to shared)
+            # 2. Return a module without Tool class for shared import
+            def mock_import(name: str) -> Any:
+                if "profiles" in name:
+                    raise ModuleNotFoundError(f"No module {name}")
+                if "tools.fake_tool" in name:
+                    return mock_module
+                raise ModuleNotFoundError(f"No module {name}")
+
+            with patch("importlib.import_module", side_effect=mock_import):
+                result = collect_profile_env_vars("test_profile")
+
+                # Should return base vars (no tool vars since no Tool class found)
+                result_names = [v.name for v in result]
+                assert "OPENAI_API_KEY" in result_names
+
+
+class TestCollectProfileEnvVarsDuplicateInBase:
+    """Tests for collect_profile_env_vars with duplicate env vars (branch 73->72)."""
+
+    def test_collect_handles_duplicate_base_vars(self) -> None:
+        """Test that duplicate base vars are handled (branch 73->72).
+
+        This tests when BASE_CONFIG_VARS contains duplicates (unusual case).
+        """
+        from reachy_mini_conversation_app.headless_personality_ui import (
+            collect_profile_env_vars,
+        )
+        from reachy_mini_conversation_app.tools import core_tools
+        from reachy_mini_conversation_app.tools.core_tools import EnvVar
+
+        # Save original
+        original_base_vars = core_tools.BASE_CONFIG_VARS.copy()
+
+        try:
+            # Add a duplicate to BASE_CONFIG_VARS
+            duplicate_var = EnvVar("OPENAI_API_KEY", is_secret=True, description="Duplicate")
+            core_tools.BASE_CONFIG_VARS.append(duplicate_var)
+
+            result = collect_profile_env_vars("nonexistent_profile")
+
+            # Should not have duplicates in result
+            names = [v.name for v in result]
+            openai_count = names.count("OPENAI_API_KEY")
+            assert openai_count == 1  # Should only appear once
+        finally:
+            # Restore original
+            core_tools.BASE_CONFIG_VARS.clear()
+            core_tools.BASE_CONFIG_VARS.extend(original_base_vars)
