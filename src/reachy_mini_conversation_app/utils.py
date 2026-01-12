@@ -31,6 +31,12 @@ def parse_args() -> Tuple[argparse.Namespace, list]:  # type: ignore
         default=None,
         help="[Optional] Robot name/prefix for Zenoh topics (must match daemon's --robot-name). Only needed for development with multiple robots.",
     )
+    parser.add_argument(
+        "--speaker-identification",
+        default=False,
+        action="store_true",
+        help="Enable speaker identification (requires: uv sync --group speaker_id)",
+    )
     return parser.parse_known_args()
 
 
@@ -103,20 +109,16 @@ def setup_logger(debug: bool) -> logging.Logger:
         logging.getLogger("aioice").setLevel(logging.WARNING)
     return logger
 
+
 def log_connection_troubleshooting(logger: logging.Logger, robot_name: Optional[str]) -> None:
     """Log troubleshooting steps for connection issues."""
     logger.error("Troubleshooting steps:")
     logger.error("  1. Verify reachy-mini-daemon is running")
 
     if robot_name is not None:
-        logger.error(
-            f"  2. Daemon must be started with: --robot-name '{robot_name}'"
-        )
+        logger.error(f"  2. Daemon must be started with: --robot-name '{robot_name}'")
     else:
-        logger.error(
-            "  2. If daemon uses --robot-name, add the same flag here: "
-            "--robot-name <name>"
-        )
+        logger.error("  2. If daemon uses --robot-name, add the same flag here: --robot-name <name>")
 
     logger.error("  3. For wireless: check network connectivity")
     logger.error("  4. Review daemon logs")
