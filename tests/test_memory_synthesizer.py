@@ -1,12 +1,13 @@
 """Tests for memory synthesizer module."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
 class TestSynthesizeConversation:
     """Tests for synthesize_conversation function."""
 
-    def test_empty_transcript_returns_existing(self, tmp_path) -> None:
+    def test_empty_transcript_returns_existing(self, tmp_path: Path) -> None:
         """Test that empty transcript returns existing memories without API call."""
         memory_file = tmp_path / "memory.txt"
         memory_file.write_text("Existing memories", encoding="utf-8")
@@ -27,7 +28,7 @@ class TestSynthesizeConversation:
 
             assert result == "Existing memories"
 
-    def test_empty_transcript_whitespace_only(self, tmp_path) -> None:
+    def test_empty_transcript_whitespace_only(self, tmp_path: Path) -> None:
         """Test that whitespace-only transcript is treated as empty."""
         memory_file = tmp_path / "memory.txt"
         memory_file.write_text("Existing memories", encoding="utf-8")
@@ -48,7 +49,7 @@ class TestSynthesizeConversation:
 
             assert result == "Existing memories"
 
-    def test_synthesize_calls_openai(self, tmp_path) -> None:
+    def test_synthesize_calls_openai(self, tmp_path: Path) -> None:
         """Test that synthesize_conversation calls OpenAI API."""
         memory_file = tmp_path / "memory.txt"
 
@@ -80,7 +81,7 @@ class TestSynthesizeConversation:
             assert call_kwargs["model"] == "gpt-4o-mini"
             assert "Hello" in call_kwargs["messages"][0]["content"]
 
-    def test_synthesize_saves_result(self, tmp_path) -> None:
+    def test_synthesize_saves_result(self, tmp_path: Path) -> None:
         """Test that synthesize_conversation saves the result to file."""
         memory_file = tmp_path / "memory.txt"
 
@@ -110,7 +111,7 @@ class TestSynthesizeConversation:
             assert memory_file.exists()
             assert memory_file.read_text(encoding="utf-8") == "New memory content"
 
-    def test_synthesize_empty_response_keeps_existing(self, tmp_path) -> None:
+    def test_synthesize_empty_response_keeps_existing(self, tmp_path: Path) -> None:
         """Test that empty LLM response preserves existing memory."""
         memory_file = tmp_path / "memory.txt"
         memory_file.write_text("Existing content", encoding="utf-8")
@@ -140,7 +141,7 @@ class TestSynthesizeConversation:
 
             assert result == "Existing content"
 
-    def test_synthesize_none_response_keeps_existing(self, tmp_path) -> None:
+    def test_synthesize_none_response_keeps_existing(self, tmp_path: Path) -> None:
         """Test that None LLM response preserves existing memory."""
         memory_file = tmp_path / "memory.txt"
         memory_file.write_text("Existing content", encoding="utf-8")
@@ -215,7 +216,7 @@ class TestCondenseMemory:
 class TestTokenLimitHandling:
     """Tests for token limit handling in synthesize_conversation."""
 
-    def test_exceeds_token_limit_triggers_condensation(self, tmp_path) -> None:
+    def test_exceeds_token_limit_triggers_condensation(self, tmp_path: Path) -> None:
         """Test that exceeding token limit triggers condensation."""
         memory_file = tmp_path / "memory.txt"
 
