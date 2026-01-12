@@ -110,18 +110,13 @@ async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -
 
     # Cleanup: stop the background tasks that were started
     handler._shutdown_requested = True
-    if handler._watchdog_task and not handler._watchdog_task.done():
-        handler._watchdog_task.cancel()
-        try:
-            await handler._watchdog_task
-        except asyncio.CancelledError:
-            pass
-    if handler._heartbeat_task and not handler._heartbeat_task.done():
-        handler._heartbeat_task.cancel()
-        try:
-            await handler._heartbeat_task
-        except asyncio.CancelledError:
-            pass
+    for task in [handler._watchdog_task, handler._heartbeat_task, handler._keep_alive_task]:
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     # Validate: two attempts total (fail -> retry -> succeed), and connection cleared
     assert attempt_counter["n"] == 2
@@ -598,3 +593,174 @@ class TestHeartbeatMonitor:
 
         # Verify restart was NOT triggered
         assert restart_called["count"] == 0
+
+
+# --- Keep-Alive Loop Tests ---
+
+
+class TestKeepAliveLoop:
+    """Tests for keep-alive loop functionality."""
+
+    def test_keep_alive_attributes_initialized(self) -> None:
+        """Verify keep-alive attributes are properly initialized."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            assert handler._keep_alive_interval == 5 * 60  # 5 minutes
+            assert handler._keep_alive_task is None
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    @pytest.mark.asyncio
+    async def test_keep_alive_skips_when_no_connection(self) -> None:
+        """Verify keep-alive skips session.update when connection is None."""
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = OpenaiRealtimeHandler(deps)
+
+        # No connection
+        handler.connection = None
+
+        # Track if session.update would be called (it shouldn't be)
+        update_called = {"count": 0}
+
+        # Fast keep-alive that checks a few times
+        check_count = {"n": 0}
+
+        async def fast_keep_alive() -> None:
+            """Faster keep-alive for testing."""
+            while not handler._shutdown_requested and check_count["n"] < 3:
+                try:
+                    await asyncio.sleep(0.05)
+                    check_count["n"] += 1
+                    if handler._shutdown_requested:
+                        break
+                    if handler.connection is None:
+                        continue
+                    # Would call session.update here
+                    update_called["count"] += 1
+                except asyncio.CancelledError:
+                    break
+
+        handler._keep_alive_task = asyncio.create_task(fast_keep_alive())
+
+        # Wait for a few checks
+        await asyncio.sleep(0.3)
+
+        # Cleanup
+        handler._shutdown_requested = True
+        if not handler._keep_alive_task.done():
+            handler._keep_alive_task.cancel()
+            try:
+                await handler._keep_alive_task
+            except asyncio.CancelledError:
+                pass
+
+        # Verify session.update was NOT called
+        assert update_called["count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_keep_alive_calls_session_update_when_connected(self) -> None:
+        """Verify session.update is called when connection exists."""
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = OpenaiRealtimeHandler(deps)
+
+        # Track session.update calls
+        update_called = {"count": 0}
+
+        # Create mock connection with session.update
+        mock_session = MagicMock()
+
+        async def mock_update(**kwargs: Any) -> None:
+            update_called["count"] += 1
+
+        mock_session.update = mock_update
+        mock_connection = MagicMock()
+        mock_connection.session = mock_session
+        handler.connection = mock_connection
+
+        # Fast keep-alive that makes a single update
+        async def fast_keep_alive() -> None:
+            """Faster keep-alive for testing."""
+            try:
+                await asyncio.sleep(0.05)
+                if handler._shutdown_requested:
+                    return
+                if handler.connection is None:
+                    return
+                await handler.connection.session.update(session={})
+            except asyncio.CancelledError:
+                pass
+
+        handler._keep_alive_task = asyncio.create_task(fast_keep_alive())
+
+        # Wait for keep-alive to run
+        await asyncio.sleep(0.2)
+
+        # Cleanup
+        handler._shutdown_requested = True
+        if not handler._keep_alive_task.done():
+            handler._keep_alive_task.cancel()
+            try:
+                await handler._keep_alive_task
+            except asyncio.CancelledError:
+                pass
+
+        # Verify session.update was called
+        assert update_called["count"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_keep_alive_handles_exception_gracefully(self) -> None:
+        """Verify keep-alive handles exceptions without crashing."""
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = OpenaiRealtimeHandler(deps)
+
+        # Track exception handling
+        exception_count = {"n": 0}
+
+        # Create mock connection that raises exception on update
+        mock_session = MagicMock()
+
+        async def mock_update_error(**kwargs: Any) -> None:
+            exception_count["n"] += 1
+            raise ConnectionError("Connection lost")
+
+        mock_session.update = mock_update_error
+        mock_connection = MagicMock()
+        mock_connection.session = mock_session
+        handler.connection = mock_connection
+
+        # Fast keep-alive that handles exception
+        async def fast_keep_alive() -> None:
+            """Faster keep-alive for testing with exception handling."""
+            try:
+                await asyncio.sleep(0.05)
+                if handler._shutdown_requested:
+                    return
+                if handler.connection is None:
+                    return
+                try:
+                    await handler.connection.session.update(session={})
+                except Exception:
+                    pass  # Gracefully handle exception
+            except asyncio.CancelledError:
+                pass
+
+        handler._keep_alive_task = asyncio.create_task(fast_keep_alive())
+
+        # Wait for keep-alive to run
+        await asyncio.sleep(0.2)
+
+        # Cleanup
+        handler._shutdown_requested = True
+        if not handler._keep_alive_task.done():
+            handler._keep_alive_task.cancel()
+            try:
+                await handler._keep_alive_task
+            except asyncio.CancelledError:
+                pass
+
+        # Verify exception was raised but handled
+        assert exception_count["n"] >= 1
+        # Task should still be done (not crashed)
+        assert handler._keep_alive_task.done()

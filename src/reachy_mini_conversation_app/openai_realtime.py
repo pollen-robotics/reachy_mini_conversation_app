@@ -84,6 +84,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self._heartbeat_timeout: float = 30.0  # 30 seconds without server events = dead connection
         self._heartbeat_task: asyncio.Task[None] | None = None
 
+        # Keep-alive mechanism (periodic session.update to prevent server-side timeout)
+        self._keep_alive_interval: float = 5 * 60  # 5 minutes between keep-alive updates
+        self._keep_alive_task: asyncio.Task[None] | None = None
+
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
         return OpenaiRealtimeHandler(self.deps, self.gradio_mode, self.instance_path)
@@ -186,6 +190,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
         # Start heartbeat monitor for detecting dead connections
         self._heartbeat_task = asyncio.create_task(self._heartbeat_monitor(), name="heartbeat-monitor")
+
+        # Start keep-alive loop to prevent server-side timeout during silence
+        self._keep_alive_task = asyncio.create_task(self._keep_alive_loop(), name="keep-alive-loop")
 
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
@@ -333,6 +340,40 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 break
             except Exception as e:
                 logger.warning("Heartbeat monitor error: %s", e)
+
+    async def _keep_alive_loop(self) -> None:
+        """Send periodic session.update to keep connection alive during silence.
+
+        According to OpenAI documentation, session.update can be used to extend
+        the session and prevent server-side timeout during periods of inactivity.
+        """
+        while not self._shutdown_requested:
+            try:
+                await asyncio.sleep(self._keep_alive_interval)
+
+                if self._shutdown_requested:
+                    break
+
+                if self.connection is None:
+                    # No active connection, skip
+                    continue
+
+                try:
+                    # Send a minimal session.update to keep the connection alive
+                    # We just re-send the current voice setting as a no-op update
+                    await self.connection.session.update(
+                        session={
+                            "type": "realtime",
+                        }
+                    )
+                    logger.debug("Keep-alive session.update sent successfully")
+                except Exception as e:
+                    logger.warning("Keep-alive session.update failed: %s. Connection may be closing.", e)
+            except asyncio.CancelledError:
+                logger.debug("Keep-alive loop cancelled")
+                break
+            except Exception as e:
+                logger.warning("Keep-alive loop error: %s", e)
 
     async def _run_realtime_session(self) -> None:
         """Establish and manage a single realtime session."""
@@ -656,6 +697,14 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             self._heartbeat_task.cancel()
             try:
                 await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
+
+        # Cancel keep-alive task
+        if self._keep_alive_task and not self._keep_alive_task.done():
+            self._keep_alive_task.cancel()
+            try:
+                await self._keep_alive_task
             except asyncio.CancelledError:
                 pass
 
