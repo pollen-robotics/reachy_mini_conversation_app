@@ -48,6 +48,7 @@ class BackgroundTask:
     id: str
     name: str
     description: str
+    display_name: Optional[str] = None  # Human-readable name (custom or auto-generated)
     status: TaskStatus = TaskStatus.PENDING
     progress: Optional[float] = None  # 0.0 - 1.0, None if not tracking progress
     progress_message: Optional[str] = None
@@ -56,6 +57,11 @@ class BackgroundTask:
     started_at: float = field(default_factory=time.monotonic)
     completed_at: Optional[float] = None
     _task: Optional[asyncio.Task[None]] = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        """Auto-generate display_name if not provided."""
+        if self.display_name is None:
+            self.display_name = f"{self.name}-{self.id}"
 
 
 class BackgroundTaskManager:
@@ -141,6 +147,7 @@ class BackgroundTaskManager:
         description: str,
         coroutine: Coroutine[Any, Any, Dict[str, Any]],
         with_progress: bool = False,
+        display_name: Optional[str] = None,
     ) -> BackgroundTask:
         """Start a new background task.
 
@@ -149,6 +156,8 @@ class BackgroundTaskManager:
             description: Human-readable description (e.g., "Cloning repository X")
             coroutine: The async coroutine to execute
             with_progress: Whether to track progress (0.0-1.0)
+            display_name: Optional custom display name. If not provided,
+                         auto-generates as "{name}-{short_id}" (e.g., "github_clone-a1b2c3d4")
 
         Returns:
             BackgroundTask object with task ID
@@ -159,6 +168,7 @@ class BackgroundTaskManager:
             id=task_id,
             name=name,
             description=description,
+            display_name=display_name,  # __post_init__ will auto-generate if None
             progress=0.0 if with_progress else None,
         )
         self._tasks[task_id] = bg_task
@@ -171,7 +181,7 @@ class BackgroundTaskManager:
         bg_task._task = async_task
         bg_task.status = TaskStatus.RUNNING
 
-        logger.info(f"Started background task: {name} (id={task_id})")
+        logger.info(f"Started background task: {bg_task.display_name} (id={task_id})")
 
         return bg_task
 
@@ -189,33 +199,35 @@ class BackgroundTaskManager:
 
             # Build completion message
             message = self._summarize_result(result)
-            logger.info(f"Background task completed: {bg_task.name} (id={bg_task.id})")
+            logger.info(f"Background task completed: {bg_task.display_name} (id={bg_task.id})")
 
         except asyncio.CancelledError:
             bg_task.status = TaskStatus.CANCELLED
             bg_task.completed_at = time.monotonic()
-            message = f"Task '{bg_task.name}' was cancelled."
-            logger.info(f"Background task cancelled: {bg_task.name} (id={bg_task.id})")
+            message = f"Task '{bg_task.display_name}' was cancelled."
+            logger.info(f"Background task cancelled: {bg_task.display_name} (id={bg_task.id})")
             raise
 
         except Exception as e:
             bg_task.error = str(e)
             bg_task.status = TaskStatus.FAILED
             bg_task.completed_at = time.monotonic()
-            message = f"Task '{bg_task.name}' failed: {e}"
-            logger.error(f"Background task failed: {bg_task.name} (id={bg_task.id}): {e}")
+            message = f"Task '{bg_task.display_name}' failed: {e}"
+            logger.error(f"Background task failed: {bg_task.display_name} (id={bg_task.id}): {e}")
 
         # Queue notification for silent delivery
+        # display_name is guaranteed to be set by __post_init__
+        assert bg_task.display_name is not None
         notification = TaskNotification(
             task_id=bg_task.id,
-            task_name=bg_task.name,
+            task_name=bg_task.display_name,
             status=bg_task.status,
             message=message,
             result=bg_task.result,
             error=bg_task.error,
         )
         await self._notification_queue.put(notification)
-        logger.debug(f"Queued notification for task: {bg_task.name} (id={bg_task.id})")
+        logger.debug(f"Queued notification for task: {bg_task.display_name} (id={bg_task.id})")
 
     def _summarize_result(self, result: Optional[Dict[str, Any]]) -> str:
         """Create a brief summary of the task result for vocalization."""
@@ -405,6 +417,7 @@ class BackgroundTaskManager:
                 running.append({
                     "id": task.id,
                     "name": task.name,
+                    "display_name": task.display_name,
                     "description": task.description,
                     "elapsed_seconds": round(elapsed, 1),
                     "progress": task.progress,

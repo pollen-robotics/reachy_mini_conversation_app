@@ -260,7 +260,8 @@ class TestBackgroundTaskManager:
         # Check notification was queued
         notification = manager.get_pending_notification()
         assert notification is not None
-        assert notification.task_name == "success_task"
+        # task_name is now display_name which includes the task ID suffix
+        assert notification.task_name.startswith("success_task-")
         assert notification.status == TaskStatus.COMPLETED
         assert notification.message == "Done!"
 

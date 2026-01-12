@@ -66,7 +66,7 @@ class TestBackgroundDemoToolExecution:
             result = await tool(mock_deps, duration=1, background=False)
 
         assert result["status"] == "success"
-        mock_run.assert_called_once_with(1, with_progress=False)
+        mock_run.assert_called_once_with(1, with_progress=False, task_name=None)
 
     @pytest.mark.asyncio
     async def test_background_demo_async(self, mock_deps: ToolDependencies) -> None:
@@ -107,7 +107,7 @@ class TestBackgroundDemoToolExecution:
         with patch.object(tool, "_run_demo", mock_run):
             await tool(mock_deps, background=False)
 
-        mock_run.assert_called_once_with(5, with_progress=False)
+        mock_run.assert_called_once_with(5, with_progress=False, task_name=None)
 
     @pytest.mark.asyncio
     async def test_background_demo_invalid_duration_uses_default(self, mock_deps: ToolDependencies) -> None:
@@ -118,7 +118,7 @@ class TestBackgroundDemoToolExecution:
         with patch.object(tool, "_run_demo", mock_run):
             await tool(mock_deps, duration=-1, background=False)
 
-        mock_run.assert_called_once_with(5, with_progress=False)
+        mock_run.assert_called_once_with(5, with_progress=False, task_name=None)
 
     @pytest.mark.asyncio
     async def test_background_demo_caps_duration_at_60(self, mock_deps: ToolDependencies) -> None:
@@ -129,7 +129,7 @@ class TestBackgroundDemoToolExecution:
         with patch.object(tool, "_run_demo", mock_run):
             await tool(mock_deps, duration=120, background=False)
 
-        mock_run.assert_called_once_with(60, with_progress=False)
+        mock_run.assert_called_once_with(60, with_progress=False, task_name=None)
 
     @pytest.mark.asyncio
     async def test_background_demo_with_progress(self, mock_deps: ToolDependencies) -> None:

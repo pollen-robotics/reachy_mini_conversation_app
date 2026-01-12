@@ -35,6 +35,10 @@ class BackgroundDemoTool(Tool):
                 "type": "boolean",
                 "description": "Track progress updates during execution (default: false)",
             },
+            "task_name": {
+                "type": "string",
+                "description": "Custom name for the task (optional). If not provided, auto-generates a name.",
+            },
         },
         "required": [],
     }
@@ -44,6 +48,7 @@ class BackgroundDemoTool(Tool):
         duration = kwargs.get("duration", 5)
         background = kwargs.get("background", True)
         with_progress = kwargs.get("with_progress", False)
+        task_name = kwargs.get("task_name")  # Optional custom name
 
         # Validate duration
         if not isinstance(duration, int) or duration < 1:
@@ -51,8 +56,15 @@ class BackgroundDemoTool(Tool):
         if duration > 60:
             duration = 60  # Cap at 60 seconds for safety
 
+        # Validate task_name if provided
+        if task_name is not None and not isinstance(task_name, str):
+            task_name = None
+        if task_name is not None:
+            task_name = task_name.strip() or None
+
         logger.info(
-            f"Tool call: background_demo duration={duration} background={background} with_progress={with_progress}"
+            f"Tool call: background_demo duration={duration} background={background} "
+            f"with_progress={with_progress} task_name={task_name}"
         )
 
         if background:
@@ -62,25 +74,29 @@ class BackgroundDemoTool(Tool):
             task = await manager.start_task(
                 name="background_demo",
                 description=f"Demo task running for {duration} seconds",
-                coroutine=self._run_demo(duration, with_progress),
+                coroutine=self._run_demo(duration, with_progress, task_name),
                 with_progress=with_progress,
+                display_name=task_name,
             )
 
             return {
                 "status": "started",
                 "task_id": task.id,
+                "task_name": task.display_name,
                 "duration": duration,
                 "with_progress": with_progress,
-                "message": f"Demo task started in background for {duration} seconds. I'll notify you when it's done.",
+                "message": f"Demo task '{task.display_name}' started in background for {duration} seconds. I'll notify you when it's done.",
             }
         else:
             # Run synchronously (blocking)
-            result = await self._run_demo(duration, with_progress=False)
+            result = await self._run_demo(duration, with_progress=False, task_name=None)
             return result
 
-    async def _run_demo(self, duration: int, with_progress: bool = False) -> Dict[str, Any]:
+    async def _run_demo(
+        self, duration: int, with_progress: bool = False, task_name: str | None = None
+    ) -> Dict[str, Any]:
         """Run the actual demo task."""
-        logger.info(f"Demo task started: duration={duration}s, with_progress={with_progress}")
+        logger.info(f"Demo task started: duration={duration}s, with_progress={with_progress}, task_name={task_name}")
 
         if with_progress:
             manager = BackgroundTaskManager.get_instance()

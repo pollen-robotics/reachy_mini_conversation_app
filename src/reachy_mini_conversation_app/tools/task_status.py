@@ -50,6 +50,7 @@ class TaskStatusTool(Tool):
             result: Dict[str, Any] = {
                 "task_id": task.id,
                 "name": task.name,
+                "display_name": task.display_name,
                 "description": task.description,
                 "status": task.status.value,
                 "elapsed_seconds": round(elapsed, 1),
@@ -84,6 +85,7 @@ class TaskStatusTool(Tool):
             task_info: Dict[str, Any] = {
                 "task_id": task.id,
                 "name": task.name,
+                "display_name": task.display_name,
                 "description": task.description,
                 "elapsed_seconds": round(elapsed, 1),
             }
