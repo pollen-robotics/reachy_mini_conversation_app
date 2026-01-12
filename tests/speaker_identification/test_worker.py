@@ -16,21 +16,22 @@ class TestSpeakerIDWorker:
     """Tests for the SpeakerIDWorker class."""
 
     def test_init(self, tmp_path: Path) -> None:
-        """Test worker initialization."""
+        """Test worker initialization without preloading model."""
         worker = SpeakerIDWorker(
             model_source="speechbrain/spkrec-ecapa-voxceleb",
             threshold=0.3,
             embeddings_path=tmp_path / "embeddings.npz",
             device="cpu",
+            preload_model=False,
         )
 
         assert worker._threshold == 0.3
         assert worker._device == "cpu"
-        assert worker._encoder is None  # Lazy loading
+        assert worker._encoder is None  # Not preloaded
 
     def test_start_stop(self, tmp_path: Path) -> None:
         """Test starting and stopping the worker thread."""
-        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz")
+        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz", preload_model=False)
 
         worker.start()
         assert worker._thread is not None
@@ -41,7 +42,7 @@ class TestSpeakerIDWorker:
 
     def test_start_already_running(self, tmp_path: Path) -> None:
         """Test that starting an already running worker logs a warning."""
-        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz")
+        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz", preload_model=False)
 
         worker.start()
         worker.start()  # Should not raise, just warn
@@ -50,7 +51,7 @@ class TestSpeakerIDWorker:
 
     def test_feed_audio(self, tmp_path: Path) -> None:
         """Test feeding audio to the worker."""
-        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz")
+        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz", preload_model=False)
 
         audio = np.random.randint(-32768, 32767, size=16000, dtype=np.int16)
         worker.feed_audio(audio, 16000)
@@ -59,7 +60,7 @@ class TestSpeakerIDWorker:
 
     def test_feed_audio_queue_full(self, tmp_path: Path) -> None:
         """Test that old audio is dropped when queue is full."""
-        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz")
+        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz", preload_model=False)
 
         # Fill the queue
         for i in range(15):  # More than maxsize (10)
@@ -71,7 +72,7 @@ class TestSpeakerIDWorker:
 
     def test_get_current_speaker_default(self, tmp_path: Path) -> None:
         """Test that current speaker is None by default."""
-        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz")
+        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz", preload_model=False)
 
         speaker, confidence = worker.get_current_speaker()
 
@@ -80,7 +81,7 @@ class TestSpeakerIDWorker:
 
     def test_resample_audio(self, tmp_path: Path) -> None:
         """Test audio resampling."""
-        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz")
+        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz", preload_model=False)
 
         # 1 second of audio at 24kHz
         audio = np.random.rand(24000).astype(np.float32)
@@ -93,7 +94,7 @@ class TestSpeakerIDWorker:
 
     def test_resample_audio_same_rate(self, tmp_path: Path) -> None:
         """Test that resampling with same rate returns original."""
-        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz")
+        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz", preload_model=False)
 
         audio = np.random.rand(16000).astype(np.float32)
 
@@ -103,7 +104,7 @@ class TestSpeakerIDWorker:
 
     def test_start_registration(self, tmp_path: Path) -> None:
         """Test starting speaker registration."""
-        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz")
+        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz", preload_model=False)
 
         worker.start_registration("Alice")
 
@@ -112,7 +113,7 @@ class TestSpeakerIDWorker:
 
     def test_cancel_registration(self, tmp_path: Path) -> None:
         """Test cancelling speaker registration."""
-        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz")
+        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz", preload_model=False)
 
         worker.start_registration("Alice")
         worker.cancel_registration()
@@ -122,7 +123,7 @@ class TestSpeakerIDWorker:
 
     def test_finish_registration_no_audio(self, tmp_path: Path) -> None:
         """Test finishing registration with no audio collected."""
-        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz")
+        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz", preload_model=False)
 
         worker.start_registration("Alice")
         result = worker.finish_registration()
@@ -131,7 +132,7 @@ class TestSpeakerIDWorker:
 
     def test_finish_registration_no_registration(self, tmp_path: Path) -> None:
         """Test finishing registration when none is in progress."""
-        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz")
+        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz", preload_model=False)
 
         result = worker.finish_registration()
 
@@ -139,7 +140,7 @@ class TestSpeakerIDWorker:
 
     def test_list_speakers(self, tmp_path: Path) -> None:
         """Test listing registered speakers."""
-        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz")
+        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz", preload_model=False)
 
         # Manually register a speaker via the embeddings store
         embedding = np.random.rand(192).astype(np.float32)
@@ -151,7 +152,7 @@ class TestSpeakerIDWorker:
 
     def test_remove_speaker(self, tmp_path: Path) -> None:
         """Test removing a registered speaker."""
-        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz")
+        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz", preload_model=False)
 
         # Register and then remove
         embedding = np.random.rand(192).astype(np.float32)
@@ -177,7 +178,7 @@ class TestSpeakerIDWorkerWithMockedModel:
         mock_encoder.encode_batch.return_value = mock_embedding
         mock_load_encoder.return_value = mock_encoder
 
-        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz")
+        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz", preload_model=False)
 
         audio = np.random.rand(16000).astype(np.float32)
         embedding = worker._compute_embedding(audio)
@@ -191,7 +192,7 @@ class TestSpeakerIDWorkerWithMockedModel:
         """Test embedding computation failure handling."""
         mock_load_encoder.side_effect = Exception("Model loading failed")
 
-        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz")
+        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz", preload_model=False)
 
         audio = np.random.rand(16000).astype(np.float32)
         embedding = worker._compute_embedding(audio)
@@ -205,7 +206,7 @@ class TestSpeakerIDWorkerWithMockedModel:
         mock_embedding = np.random.rand(192).astype(np.float32)
         mock_compute.return_value = mock_embedding
 
-        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz")
+        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz", preload_model=False)
 
         # Register a speaker
         worker._embeddings_store.register("Alice", mock_embedding)
@@ -231,7 +232,7 @@ class TestSpeakerIDWorkerWithMockedModel:
         mock_embedding = np.random.rand(192).astype(np.float32)
         mock_compute.return_value = mock_embedding
 
-        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz")
+        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz", preload_model=False)
         worker.start()
 
         # Start registration
@@ -260,7 +261,7 @@ class TestSpeakerIDWorkerThreadSafety:
 
     def test_concurrent_access(self, tmp_path: Path) -> None:
         """Test concurrent access to worker state."""
-        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz")
+        worker = SpeakerIDWorker(embeddings_path=tmp_path / "embeddings.npz", preload_model=False)
         worker.start()
 
         errors: list[Exception] = []

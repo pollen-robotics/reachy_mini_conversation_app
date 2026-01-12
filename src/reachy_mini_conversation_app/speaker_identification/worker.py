@@ -36,6 +36,7 @@ class SpeakerIDWorker:
         threshold: float = 0.25,
         embeddings_path: Path | str = "~/.reachy_mini/speaker_embeddings.npz",
         device: str = "cpu",
+        preload_model: bool = True,
     ) -> None:
         """Initialize the speaker identification worker.
 
@@ -44,13 +45,14 @@ class SpeakerIDWorker:
             threshold: Minimum cosine similarity to consider a speaker match.
             embeddings_path: Path to store registered speaker embeddings.
             device: Device for model inference ('cpu' or 'cuda').
+            preload_model: If True, load the model immediately during init.
 
         """
         self._model_source = model_source
         self._device = device
         self._threshold = threshold
 
-        # Lazy-loaded encoder
+        # Encoder (can be preloaded or lazy-loaded)
         self._encoder: "EncoderClassifier | None" = None
         self._encoder_lock = threading.Lock()
 
@@ -74,8 +76,24 @@ class SpeakerIDWorker:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
+        # Preload model if requested
+        if preload_model:
+            self.load_model()
+
+    def load_model(self) -> None:
+        """Load the SpeechBrain encoder model.
+
+        Call this method to preload the model at startup instead of lazy loading.
+        This avoids delays during the first speaker identification.
+
+        Raises:
+            ImportError: If speechbrain is not installed.
+
+        """
+        self._load_encoder()
+
     def _load_encoder(self) -> "EncoderClassifier":
-        """Lazy-load the SpeechBrain encoder model.
+        """Load or return the cached SpeechBrain encoder model.
 
         Returns:
             The loaded EncoderClassifier model.
