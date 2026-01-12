@@ -1,0 +1,15 @@
+# Basic tools
+dance
+stop_dance
+play_emotion
+stop_emotion
+do_nothing
+move_head
+
+# Speaker identification tools (requires --speaker-identification flag)
+register_speaker
+finish_speaker_registration
+cancel_speaker_registration
+identify_speaker
+list_speakers
+remove_speaker
