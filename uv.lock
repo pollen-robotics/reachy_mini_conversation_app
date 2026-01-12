@@ -3917,7 +3917,7 @@ wheels = [
 [[package]]
 name = "reachy-mini"
 version = "1.2.8"
-source = { git = "https://github.com/pollen-robotics/reachy_mini.git?rev=bump-up-huggingface-hub#76b6ac78b84850a906d877eec765854d2cde92f3" }
+source = { git = "https://github.com/pollen-robotics/reachy_mini.git?rev=develop#7fe09d829949a3cd649969e7f9669f6c716d1c06" }
 dependencies = [
     { name = "aiohttp" },
     { name = "asgiref" },
@@ -4020,7 +4020,7 @@ requires-dist = [
     { name = "opencv-python", specifier = ">=4.12.0.88" },
     { name = "pygobject", marker = "extra == 'reachy-mini-wireless'", specifier = ">=3.42.2,<=3.46.0" },
     { name = "python-dotenv" },
-    { name = "reachy-mini", git = "https://github.com/pollen-robotics/reachy_mini.git?rev=bump-up-huggingface-hub" },
+    { name = "reachy-mini", git = "https://github.com/pollen-robotics/reachy_mini.git?rev=develop" },
     { name = "reachy-mini-dances-library" },
     { name = "reachy-mini-toolbox" },
     { name = "supervision", marker = "extra == 'all-vision'" },
