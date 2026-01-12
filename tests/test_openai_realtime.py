@@ -115,3 +115,135 @@ async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -
     # Optional: confirm we logged the unexpected close once
     warnings = [r for r in caplog.records if r.levelname == "WARNING" and "closed unexpectedly" in r.msg]
     assert len(warnings) == 1
+
+
+# --- Session Duration Tracking Tests ---
+
+
+class TestSessionDurationTracking:
+    """Tests for session duration tracking."""
+
+    def test_session_start_time_initialized_to_none(self) -> None:
+        """Verify _session_start_time is None before session starts."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            assert handler._session_start_time is None
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def test_session_max_duration_default_value(self) -> None:
+        """Verify default max duration is 55 minutes (3300 seconds)."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            assert handler._session_max_duration == 55 * 60  # 3300 seconds
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def test_get_session_elapsed_time_returns_none_before_start(self) -> None:
+        """Verify get_session_elapsed_time returns None before session starts."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            assert handler.get_session_elapsed_time() is None
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def test_get_session_remaining_time_returns_none_before_start(self) -> None:
+        """Verify get_session_remaining_time returns None before session starts."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            assert handler.get_session_remaining_time() is None
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def test_get_session_elapsed_time_after_start(self) -> None:
+        """Verify get_session_elapsed_time returns elapsed time after session starts."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            # Simulate session start
+            handler._session_start_time = loop.time()
+            elapsed = handler.get_session_elapsed_time()
+            assert elapsed is not None
+            assert elapsed >= 0.0
+            assert elapsed < 1.0  # Should be very small since we just started
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def test_get_session_remaining_time_after_start(self) -> None:
+        """Verify get_session_remaining_time returns remaining time after session starts."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            # Simulate session start
+            handler._session_start_time = loop.time()
+            remaining = handler.get_session_remaining_time()
+            assert remaining is not None
+            # Should be close to max duration since we just started
+            assert remaining > handler._session_max_duration - 1.0
+            assert remaining <= handler._session_max_duration
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def test_get_session_remaining_time_clamps_to_zero(self) -> None:
+        """Verify get_session_remaining_time clamps to zero when exceeded."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            # Simulate session that started a long time ago (past max duration)
+            handler._session_start_time = loop.time() - (handler._session_max_duration + 100)
+            remaining = handler.get_session_remaining_time()
+            assert remaining == 0.0
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+
+class TestSessionStartTimeReset:
+    """Tests for session start time reset on restart."""
+
+    @pytest.mark.asyncio
+    async def test_restart_session_resets_start_time(self) -> None:
+        """Verify _restart_session resets _session_start_time to None initially."""
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = OpenaiRealtimeHandler(deps)
+
+        # Simulate an active session with a specific start time
+        original_start_time = asyncio.get_event_loop().time() - 1000  # 1000 seconds ago
+        handler._session_start_time = original_start_time
+
+        # Create a mock connection with async close method
+        mock_connection = MagicMock()
+
+        async def mock_close() -> None:
+            pass
+
+        mock_connection.close = mock_close
+        handler.connection = mock_connection
+
+        # Mock the client to avoid actual connection
+        handler.client = MagicMock()
+
+        # Mock _run_realtime_session to prevent it from actually running
+        # and setting a new _session_start_time
+        async def mock_run_realtime_session() -> None:
+            # Simulate delay without setting _session_start_time
+            await asyncio.sleep(10)  # This will timeout
+
+        handler._run_realtime_session = mock_run_realtime_session  # type: ignore[method-assign]
+
+        # Call restart - should reset start time immediately then try to reconnect
+        await handler._restart_session()
+
+        # After restart attempt (which timed out), the start time should still be None
+        # because mock_run_realtime_session doesn't set it
+        assert handler._session_start_time is None

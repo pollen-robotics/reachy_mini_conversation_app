@@ -73,6 +73,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self._shutdown_requested: bool = False
         self._connected_event: asyncio.Event = asyncio.Event()
 
+        # Session duration tracking (for 60-minute limit handling)
+        self._session_start_time: float | None = None
+        self._session_max_duration: float = 55 * 60  # 55 minutes (5 min safety margin before 60min limit)
+
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
         return OpenaiRealtimeHandler(self.deps, self.gradio_mode, self.instance_path)
@@ -202,6 +206,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         Does not block the caller while the new session is establishing.
         """
         try:
+            # Reset session start time (will be set again in _run_realtime_session)
+            self._session_start_time = None
+
             if self.connection is not None:
                 try:
                     await self.connection.close()
@@ -274,6 +281,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 return
 
             logger.info("Realtime session updated successfully")
+
+            # Track session start time for 60-minute limit handling
+            self._session_start_time = asyncio.get_event_loop().time()
+            logger.debug("Session start time recorded: %.1f", self._session_start_time)
 
             # Manage event received from the openai server
             self.connection = conn
@@ -561,6 +572,25 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         elapsed_seconds = loop_time - self.start_time
         dt = datetime.now()  # wall-clock
         return f"[{dt.strftime('%Y-%m-%d %H:%M:%S')} | +{elapsed_seconds:.1f}s]"
+
+    def get_session_elapsed_time(self) -> float | None:
+        """Get elapsed time in seconds since session started.
+
+        Returns None if session hasn't started yet.
+        """
+        if self._session_start_time is None:
+            return None
+        return asyncio.get_event_loop().time() - self._session_start_time
+
+    def get_session_remaining_time(self) -> float | None:
+        """Get remaining time in seconds before session max duration.
+
+        Returns None if session hasn't started yet.
+        """
+        elapsed = self.get_session_elapsed_time()
+        if elapsed is None:
+            return None
+        return max(0.0, self._session_max_duration - elapsed)
 
     async def get_available_voices(self) -> list[str]:
         """Try to discover available voices for the configured realtime model.
