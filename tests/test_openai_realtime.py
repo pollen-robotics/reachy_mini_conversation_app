@@ -956,3 +956,98 @@ class TestReconnectionBackoff:
         # Verify we got 1001 logs
         info_logs = [r for r in caplog.records if r.levelname == "INFO" and "1001" in r.msg]
         assert len(info_logs) >= 1
+
+
+# --- WebRTC Session Tracking Tests ---
+
+
+class TestWebRTCSessionTracking:
+    """Tests for WebRTC/fastrtc session tracking."""
+
+    def test_webrtc_session_attributes_initialized(self) -> None:
+        """Verify WebRTC session attributes are properly initialized."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            assert handler._webrtc_session_start_time is None
+            assert handler._shutdown_reason is None
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def test_get_webrtc_session_elapsed_time_returns_none_before_start(self) -> None:
+        """Verify get_webrtc_session_elapsed_time returns None before session starts."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            assert handler.get_webrtc_session_elapsed_time() is None
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def test_get_webrtc_session_elapsed_time_after_start(self) -> None:
+        """Verify get_webrtc_session_elapsed_time returns elapsed time after session starts."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            # Simulate WebRTC session start
+            handler._webrtc_session_start_time = loop.time()
+            elapsed = handler.get_webrtc_session_elapsed_time()
+            assert elapsed is not None
+            assert elapsed >= 0.0
+            assert elapsed < 1.0  # Should be very small since we just started
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_logs_session_diagnostics(self, caplog: Any) -> None:
+        """Verify shutdown logs WebRTC session duration and diagnostics."""
+        caplog.set_level(logging.INFO)
+
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = OpenaiRealtimeHandler(deps)
+
+        # Simulate WebRTC session started 60 seconds ago
+        handler._webrtc_session_start_time = asyncio.get_event_loop().time() - 60
+        handler._session_start_time = asyncio.get_event_loop().time() - 50
+
+        await handler.shutdown()
+
+        # Verify shutdown logged session info
+        info_logs = [r for r in caplog.records if "Handler shutdown initiated" in r.msg]
+        assert len(info_logs) >= 1
+
+    @pytest.mark.asyncio
+    async def test_shutdown_warns_on_potential_webrtc_timeout(self, caplog: Any) -> None:
+        """Verify shutdown warns when session ends in 90-180s range (potential WebRTC timeout)."""
+        caplog.set_level(logging.WARNING)
+
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = OpenaiRealtimeHandler(deps)
+
+        # Simulate WebRTC session started ~2 minutes ago (in the warning range)
+        handler._webrtc_session_start_time = asyncio.get_event_loop().time() - 120
+
+        await handler.shutdown()
+
+        # Verify warning was logged about potential WebRTC timeout
+        warning_logs = [r for r in caplog.records if "WebRTC/ICE timeout" in r.msg]
+        assert len(warning_logs) >= 1
+
+    @pytest.mark.asyncio
+    async def test_shutdown_no_warning_outside_timeout_range(self, caplog: Any) -> None:
+        """Verify shutdown doesn't warn when session ends outside 90-180s range."""
+        caplog.set_level(logging.WARNING)
+
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = OpenaiRealtimeHandler(deps)
+
+        # Simulate WebRTC session started 5 minutes ago (outside warning range)
+        handler._webrtc_session_start_time = asyncio.get_event_loop().time() - 300
+
+        await handler.shutdown()
+
+        # Verify no warning about WebRTC timeout
+        warning_logs = [r for r in caplog.records if "WebRTC/ICE timeout" in r.msg]
+        assert len(warning_logs) == 0

@@ -93,6 +93,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self._keep_alive_interval: float = 5 * 60  # 5 minutes between keep-alive updates
         self._keep_alive_task: asyncio.Task[None] | None = None
 
+        # WebRTC/fastrtc connection state tracking (for diagnosing 2-minute timeout issues)
+        self._webrtc_session_start_time: float | None = None
+        self._shutdown_reason: str | None = None
+
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
         return OpenaiRealtimeHandler(self.deps, self.gradio_mode, self.instance_path)
@@ -189,6 +193,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 openai_api_key = "DUMMY"
 
         self.client = AsyncOpenAI(api_key=openai_api_key)
+
+        # Track WebRTC session start for diagnostics
+        self._webrtc_session_start_time = asyncio.get_event_loop().time()
+        logger.info("WebRTC/fastrtc session starting (gradio_mode=%s)", self.gradio_mode)
 
         # Start session watchdog for 60-minute limit handling
         self._watchdog_task = asyncio.create_task(self._session_watchdog(), name="session-watchdog")
@@ -721,7 +729,37 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
 
     async def shutdown(self) -> None:
-        """Shutdown the handler."""
+        """Shutdown the handler.
+
+        Called by fastrtc when the WebRTC/audio stream ends. This can happen due to:
+        - User disconnecting (closing browser tab)
+        - WebRTC ICE connection timeout (~2 minutes of inactivity)
+        - Network issues causing peer connection to fail
+        - Explicit user action (clicking stop)
+        """
+        # Log session diagnostics for debugging WebRTC timeout issues
+        webrtc_duration: float | None = None
+        if self._webrtc_session_start_time is not None:
+            webrtc_duration = asyncio.get_event_loop().time() - self._webrtc_session_start_time
+
+        openai_duration = self.get_session_elapsed_time()
+
+        logger.info(
+            "Handler shutdown initiated. "
+            "WebRTC session duration: %.1fs, OpenAI session duration: %s, gradio_mode: %s",
+            webrtc_duration if webrtc_duration else 0,
+            f"{openai_duration:.1f}s" if openai_duration else "N/A",
+            self.gradio_mode,
+        )
+
+        # Check for potential WebRTC ~2 minute timeout pattern
+        if webrtc_duration and 90 < webrtc_duration < 180:
+            logger.warning(
+                "Session ended after %.1fs - this may indicate a WebRTC/ICE timeout issue. "
+                "Check network connectivity and WebRTC signalling.",
+                webrtc_duration,
+            )
+
         self._shutdown_requested = True
 
         # Cancel session watchdog task
@@ -798,6 +836,17 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         if elapsed is None:
             return None
         return max(0.0, self._session_max_duration - elapsed)
+
+    def get_webrtc_session_elapsed_time(self) -> float | None:
+        """Get elapsed time since WebRTC/fastrtc session started.
+
+        Returns None if WebRTC session hasn't started yet.
+        This tracks the outer connection layer (browser <-> server),
+        separate from the OpenAI Realtime session.
+        """
+        if self._webrtc_session_start_time is None:
+            return None
+        return asyncio.get_event_loop().time() - self._webrtc_session_start_time
 
     async def get_available_voices(self) -> list[str]:
         """Try to discover available voices for the configured realtime model.
