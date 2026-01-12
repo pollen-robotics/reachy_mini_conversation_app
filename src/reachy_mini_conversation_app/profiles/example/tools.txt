@@ -11,3 +11,8 @@ stop_emotion
 
 # AN EXAMPLE OF A CUSTOM TOOL DEFINED LOCALLY
 sweep_look
+
+# Background task management
+task_status
+task_cancel
+background_demo
