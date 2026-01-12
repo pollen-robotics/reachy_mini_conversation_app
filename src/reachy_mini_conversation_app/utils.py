@@ -84,12 +84,30 @@ def handle_vision_stuff(args: argparse.Namespace, current_robot: ReachyMini) -> 
 
 
 def setup_logger(debug: bool) -> logging.Logger:
-    """Setups the logger."""
-    log_level = "DEBUG" if debug else "INFO"
-    logging.basicConfig(
-        level=getattr(logging, log_level, logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s:%(lineno)d | %(message)s",
-    )
+    """Setups the logger.
+
+    This function configures the root logger with a consistent format.
+    It forces reconfiguration even if handlers already exist (e.g., from
+    modules imported before this function is called).
+    """
+    log_level = logging.DEBUG if debug else logging.INFO
+    log_format = "%(asctime)s %(levelname)s %(name)s:%(lineno)d | %(message)s"
+
+    # Get the root logger
+    root_logger = logging.getLogger()
+
+    # Remove any existing handlers to ensure consistent configuration
+    # This fixes the issue where modules imported before setup_logger()
+    # may have added default handlers
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
+    # Configure the root logger with our format
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(log_format))
+    root_logger.addHandler(handler)
+    root_logger.setLevel(log_level)
+
     logger = logging.getLogger(__name__)
 
     # Suppress WebRTC warnings
@@ -97,7 +115,7 @@ def setup_logger(debug: bool) -> logging.Logger:
     warnings.filterwarnings("ignore", category=UserWarning, module="aiortc")
 
     # Tame third-party noise (looser in DEBUG)
-    if log_level == "DEBUG":
+    if debug:
         logging.getLogger("aiortc").setLevel(logging.INFO)
         logging.getLogger("fastrtc").setLevel(logging.INFO)
         logging.getLogger("aioice").setLevel(logging.INFO)
