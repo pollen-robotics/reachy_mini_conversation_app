@@ -55,10 +55,12 @@ from reachy_mini.utils.interpolation import (
 logger = logging.getLogger(__name__)
 
 # Configuration constants
-CONTROL_LOOP_FREQUENCY_HZ = 100.0  # Hz - Target frequency for the movement control loop
+# Hz - Target frequency for the movement control loop
+CONTROL_LOOP_FREQUENCY_HZ = 100.0
 
 # Type definitions
-FullBodyPose = Tuple[NDArray[np.float32], Tuple[float, float], float]  # (head_pose_4x4, antennas, body_yaw)
+# (head_pose_4x4, antennas, body_yaw)
+FullBodyPose = Tuple[NDArray[np.float32], Tuple[float, float], float]
 
 
 class BreathingMove(Move):  # type: ignore
@@ -105,7 +107,9 @@ class BreathingMove(Move):  # type: ignore
 
             # Interpolate head pose
             head_pose = linear_pose_interpolation(
-                self.interpolation_start_pose, self.neutral_head_pose, interpolation_t,
+                self.interpolation_start_pose,
+                self.neutral_head_pose,
+                interpolation_t,
             )
 
             # Interpolate antennas
@@ -632,7 +636,9 @@ class MovementManager:
 
         return antennas_cmd
 
-    def _issue_control_command(self, head: NDArray[np.float32], antennas: Tuple[float, float], body_yaw: float) -> None:
+    def _issue_control_command(
+        self, head: NDArray[np.float32], antennas: Tuple[float, float], body_yaw: float
+    ) -> None:
         """Send the fused pose to the robot with throttled error logging."""
         try:
             self.current_robot.set_target(head=head, antennas=antennas, body_yaw=body_yaw)
@@ -652,7 +658,10 @@ class MovementManager:
                 self._last_commanded_pose = clone_full_body_pose((head, antennas, body_yaw))
 
     def _update_frequency_stats(
-        self, loop_start: float, prev_loop_start: float, stats: LoopFrequencyStats,
+        self,
+        loop_start: float,
+        prev_loop_start: float,
+        stats: LoopFrequencyStats,
     ) -> LoopFrequencyStats:
         """Update frequency statistics based on the current loop start time."""
         period = loop_start - prev_loop_start
@@ -828,6 +837,9 @@ class MovementManager:
 
             # 4) Build primary and secondary full-body poses, then fuse them
             head, antennas, body_yaw = self._compose_full_body_pose(loop_start)
+
+            # Keep body yaw aligned with head yaw
+            body_yaw = float(np.arctan2(head[1, 0], head[0, 0]))
 
             # 5) Apply listening antenna freeze or blend-back
             antennas_cmd = self._calculate_blended_antennas(antennas)

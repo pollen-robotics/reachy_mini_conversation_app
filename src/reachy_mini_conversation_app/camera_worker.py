@@ -11,6 +11,7 @@ import logging
 import threading
 from typing import Any, List, Tuple
 
+import cv2
 import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation as R
@@ -25,10 +26,25 @@ logger = logging.getLogger(__name__)
 class CameraWorker:
     """Thread-safe camera worker with frame buffering and face tracking."""
 
-    def __init__(self, reachy_mini: ReachyMini, head_tracker: Any = None) -> None:
+    def __init__(
+        self,
+        reachy_mini: ReachyMini,
+        head_tracker: Any = None,
+        enable_preview: bool = False,
+        preview_window_name: str = "ReachyMini POV",
+        preview_window_normal: bool = True,
+    ) -> None:
         """Initialize."""
         self.reachy_mini = reachy_mini
         self.head_tracker = head_tracker
+
+        # Preview vision params
+        self._last_eye_center: NDArray[np.float32] | None = None
+        self.enable_preview = enable_preview
+        self.preview_window_name = preview_window_name
+        self.preview_window_normal = preview_window_normal
+        self._preview_initialized = False
+        self.show_head_overlay = False
 
         # Thread-safe frame storage
         self.latest_frame: NDArray[np.uint8] | None = None
@@ -57,6 +73,87 @@ class CameraWorker:
 
         # Track state changes
         self.previous_head_tracking_state = self.is_head_tracking_enabled
+
+    def eye_center_pixels(
+        self,
+        frame: NDArray[np.uint8],
+        eye_center: NDArray[np.float32],
+    ) -> list[float]:
+        h, w, _ = frame.shape
+        eye_center_norm = (eye_center + 1) / 2
+        return [
+            eye_center_norm[0] * w,
+            eye_center_norm[1] * h,
+        ]
+
+    def handle_preview_keys(self) -> None:
+        key = cv2.waitKey(1) & 0xFF
+
+        # Disable preview by showing black screen
+        if key == ord("d"):
+            self.enable_preview = False
+            blank = np.zeros((240, 320, 3), dtype=np.uint8)
+            self.init_preview_window()
+            cv2.imshow(self.preview_window_name, blank)
+        # Enable preview
+        elif key == ord("p"):
+            self.enable_preview = True
+        # Enable head tracking
+        elif key == ord("h"):
+            self.show_head_overlay = not self.show_head_overlay
+
+    def init_preview_window(self) -> None:
+        if self._preview_initialized:
+            return
+        flags = cv2.WINDOW_NORMAL if self.preview_window_normal else cv2.WINDOW_AUTOSIZE
+        cv2.namedWindow(self.preview_window_name, flags)
+        self._preview_initialized = True
+
+    def destroy_preview_window(self) -> None:
+        if not self._preview_initialized:
+            return
+        try:
+            cv2.destroyWindow(self.preview_window_name)
+        except Exception:
+            try:
+                cv2.destroyAllWindows()
+            except Exception:
+                pass
+        self._preview_initialized = False
+
+    def preview_step(self, frame: NDArray[np.uint8]) -> None:
+        self.init_preview_window()
+
+        display = frame
+        if self.show_head_overlay and self.head_tracker is not None:
+            display = frame.copy()
+
+            eye_center = self._last_eye_center
+            if eye_center is not None:
+                eye_center_pixels = self.eye_center_pixels(frame, eye_center)
+                cx, cy = int(eye_center_pixels[0]), int(eye_center_pixels[1])
+
+                box_size = 300
+                x1, y1 = cx - box_size // 2, cy - box_size // 2
+                x2, y2 = cx + box_size // 2, cy + box_size // 2
+
+                cv2.rectangle(display, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(
+                    display, "Head overlay ON", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA
+                )
+            else:
+                cv2.putText(
+                    display,
+                    "Head overlay ON (no head)",
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.8,
+                    (0, 255, 255),
+                    2,
+                    cv2.LINE_AA,
+                )
+
+        cv2.imshow(self.preview_window_name, display)
 
     def get_latest_frame(self) -> NDArray[np.uint8] | None:
         """Get the latest frame (thread-safe)."""
@@ -91,7 +188,7 @@ class CameraWorker:
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join()
-
+        self.destroy_preview_window()
         logger.debug("Camera worker stopped")
 
     def working_loop(self) -> None:
@@ -117,11 +214,18 @@ class CameraWorker:
                     with self.frame_lock:
                         self.latest_frame = frame  # .copy()
 
+                    # Preview the frame
+                    if self.enable_preview or self._preview_initialized:
+                        self.handle_preview_keys()
+                        if self.enable_preview:
+                            self.preview_step(frame)
+
                     # Check if face tracking was just disabled
                     if self.previous_head_tracking_state and not self.is_head_tracking_enabled:
                         # Face tracking was just disabled - start interpolation to neutral
                         self.last_face_detected_time = current_time  # Trigger the face-lost logic
-                        self.interpolation_start_time = None  # Will be set by the face-lost interpolation
+                        # Will be set by the face-lost interpolation
+                        self.interpolation_start_time = None
                         self.interpolation_start_pose = None
 
                     # Update tracking state
@@ -130,6 +234,7 @@ class CameraWorker:
                     # Handle face tracking if enabled and head tracker available
                     if self.is_head_tracking_enabled and self.head_tracker is not None:
                         eye_center, _ = self.head_tracker.get_head_position(frame)
+                        self._last_eye_center = eye_center
 
                         if eye_center is not None:
                             # Face detected - immediately switch to tracking
@@ -137,12 +242,7 @@ class CameraWorker:
                             self.interpolation_start_time = None  # Stop any interpolation
 
                             # Convert normalized coordinates to pixel coordinates
-                            h, w, _ = frame.shape
-                            eye_center_norm = (eye_center + 1) / 2
-                            eye_center_pixels = [
-                                eye_center_norm[0] * w,
-                                eye_center_norm[1] * h,
-                            ]
+                            eye_center_pixels = self.eye_center_pixels(frame, eye_center)
 
                             # Get the head pose needed to look at the target, but don't perform movement
                             target_pose = self.reachy_mini.look_at_image(
@@ -237,5 +337,8 @@ class CameraWorker:
             except Exception as e:
                 logger.error(f"Camera worker error: {e}")
                 time.sleep(0.1)  # Longer sleep on error
+
+        # OpenCV cleanup
+        self.destroy_preview_window()
 
         logger.debug("Camera worker thread exited")
