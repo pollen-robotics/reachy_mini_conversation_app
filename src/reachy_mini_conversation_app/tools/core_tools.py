@@ -19,13 +19,6 @@ logger = logging.getLogger(__name__)
 
 PROFILES_DIRECTORY = "reachy_mini_conversation_app.profiles"
 
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s:%(lineno)d | %(message)s")
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-
 
 ALL_TOOLS: Dict[str, "Tool"] = {}
 ALL_TOOL_SPECS: List[Dict[str, Any]] = []
