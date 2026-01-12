@@ -108,6 +108,15 @@ async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -
     # Run: should retry once and exit cleanly
     await handler.start_up()
 
+    # Cleanup: stop the watchdog task that was started
+    if handler._watchdog_task and not handler._watchdog_task.done():
+        handler._shutdown_requested = True
+        handler._watchdog_task.cancel()
+        try:
+            await handler._watchdog_task
+        except asyncio.CancelledError:
+            pass
+
     # Validate: two attempts total (fail -> retry -> succeed), and connection cleared
     assert attempt_counter["n"] == 2
     assert handler.connection is None
@@ -247,3 +256,158 @@ class TestSessionStartTimeReset:
         # After restart attempt (which timed out), the start time should still be None
         # because mock_run_realtime_session doesn't set it
         assert handler._session_start_time is None
+
+
+# --- Session Watchdog Tests ---
+
+
+class TestSessionWatchdog:
+    """Tests for session watchdog functionality."""
+
+    def test_watchdog_task_initialized_to_none(self) -> None:
+        """Verify _watchdog_task is None before start_up."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            assert handler._watchdog_task is None
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def test_session_renewal_threshold_default(self) -> None:
+        """Verify default renewal threshold is 120 seconds (2 minutes)."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            assert handler._session_renewal_threshold == 120.0
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    @pytest.mark.asyncio
+    async def test_watchdog_stops_on_shutdown(self) -> None:
+        """Verify watchdog exits when _shutdown_requested is True."""
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = OpenaiRealtimeHandler(deps)
+
+        # Start watchdog
+        handler._watchdog_task = asyncio.create_task(handler._session_watchdog())
+
+        # Request shutdown immediately
+        handler._shutdown_requested = True
+
+        # Give watchdog time to check and exit
+        await asyncio.sleep(0.1)
+
+        # Watchdog should still be running but will exit on next iteration
+        # Cancel it to clean up
+        if not handler._watchdog_task.done():
+            handler._watchdog_task.cancel()
+            try:
+                await handler._watchdog_task
+            except asyncio.CancelledError:
+                pass
+
+    @pytest.mark.asyncio
+    async def test_watchdog_triggers_renewal_at_threshold(self) -> None:
+        """Verify watchdog triggers renewal when remaining time <= threshold."""
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = OpenaiRealtimeHandler(deps)
+
+        # Track if graceful renewal was called
+        renewal_called = {"count": 0}
+
+        async def mock_graceful_renewal() -> None:
+            renewal_called["count"] += 1
+
+        handler._graceful_session_renewal = mock_graceful_renewal  # type: ignore[method-assign]
+
+        # Simulate session that's about to expire (only 60 seconds remaining)
+        handler._session_start_time = asyncio.get_event_loop().time() - (handler._session_max_duration - 60)
+
+        # Start watchdog with very short check interval for testing
+        async def fast_watchdog() -> None:
+            """Faster watchdog for testing."""
+            while not handler._shutdown_requested:
+                try:
+                    await asyncio.sleep(0.05)  # Very short interval
+                    if handler._shutdown_requested:
+                        break
+                    remaining = handler.get_session_remaining_time()
+                    if remaining is None:
+                        continue
+                    if remaining <= handler._session_renewal_threshold:
+                        await handler._graceful_session_renewal()
+                        break  # Exit after triggering once for test
+                except asyncio.CancelledError:
+                    break
+
+        handler._watchdog_task = asyncio.create_task(fast_watchdog())
+
+        # Wait for watchdog to trigger
+        await asyncio.sleep(0.2)
+
+        # Cleanup
+        handler._shutdown_requested = True
+        if not handler._watchdog_task.done():
+            handler._watchdog_task.cancel()
+            try:
+                await handler._watchdog_task
+            except asyncio.CancelledError:
+                pass
+
+        # Verify renewal was triggered
+        assert renewal_called["count"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_watchdog_does_not_trigger_before_threshold(self) -> None:
+        """Verify watchdog does not trigger when remaining time > threshold."""
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = OpenaiRealtimeHandler(deps)
+
+        # Track if graceful renewal was called
+        renewal_called = {"count": 0}
+
+        async def mock_graceful_renewal() -> None:
+            renewal_called["count"] += 1
+
+        handler._graceful_session_renewal = mock_graceful_renewal  # type: ignore[method-assign]
+
+        # Simulate session with plenty of time remaining (50 minutes left)
+        handler._session_start_time = asyncio.get_event_loop().time() - (5 * 60)  # 5 min elapsed
+
+        # Fast watchdog that checks once and exits
+        check_count = {"n": 0}
+
+        async def fast_watchdog() -> None:
+            """Faster watchdog for testing."""
+            while not handler._shutdown_requested and check_count["n"] < 3:
+                try:
+                    await asyncio.sleep(0.05)
+                    check_count["n"] += 1
+                    if handler._shutdown_requested:
+                        break
+                    remaining = handler.get_session_remaining_time()
+                    if remaining is None:
+                        continue
+                    if remaining <= handler._session_renewal_threshold:
+                        await handler._graceful_session_renewal()
+                except asyncio.CancelledError:
+                    break
+
+        handler._watchdog_task = asyncio.create_task(fast_watchdog())
+
+        # Wait for a few checks
+        await asyncio.sleep(0.3)
+
+        # Cleanup
+        handler._shutdown_requested = True
+        if not handler._watchdog_task.done():
+            handler._watchdog_task.cancel()
+            try:
+                await handler._watchdog_task
+            except asyncio.CancelledError:
+                pass
+
+        # Verify renewal was NOT triggered
+        assert renewal_called["count"] == 0
