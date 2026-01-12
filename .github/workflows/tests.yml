@@ -70,5 +70,5 @@ jobs:
           )
           PY
 
-      - name: Run tests
-        run: .venv/bin/pytest -q
+      - name: Run tests with coverage
+        run: .venv/bin/pytest -q --cov --cov-report=term-missing

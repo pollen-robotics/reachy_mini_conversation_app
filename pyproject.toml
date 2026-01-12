@@ -61,11 +61,41 @@ all_vision = [
 dev = [
   "pytest",
   "pytest-asyncio",
+  "pytest-cov",
   "ruff==0.12.0",
   "mypy==1.18.2",
   "pre-commit",
   "types-requests",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+markers = [
+  "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+  "integration: marks tests requiring hardware or external services",
+]
+
+[tool.coverage.run]
+source = ["src/reachy_mini_conversation_app"]
+branch = true
+omit = [
+  "*/tests/*",
+  "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  "def __repr__",
+  "raise NotImplementedError",
+  "if TYPE_CHECKING:",
+  "if __name__ == .__main__.:",
+]
+show_missing = true
+skip_covered = false
 
 [project.scripts]
 reachy-mini-conversation-app = "reachy_mini_conversation_app.main:main"
