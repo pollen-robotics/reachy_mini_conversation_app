@@ -108,12 +108,18 @@ async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -
     # Run: should retry once and exit cleanly
     await handler.start_up()
 
-    # Cleanup: stop the watchdog task that was started
+    # Cleanup: stop the background tasks that were started
+    handler._shutdown_requested = True
     if handler._watchdog_task and not handler._watchdog_task.done():
-        handler._shutdown_requested = True
         handler._watchdog_task.cancel()
         try:
             await handler._watchdog_task
+        except asyncio.CancelledError:
+            pass
+    if handler._heartbeat_task and not handler._heartbeat_task.done():
+        handler._heartbeat_task.cancel()
+        try:
+            await handler._heartbeat_task
         except asyncio.CancelledError:
             pass
 
@@ -411,3 +417,184 @@ class TestSessionWatchdog:
 
         # Verify renewal was NOT triggered
         assert renewal_called["count"] == 0
+
+
+# --- Heartbeat Monitor Tests ---
+
+
+class TestHeartbeatMonitor:
+    """Tests for heartbeat monitor functionality."""
+
+    def test_heartbeat_attributes_initialized(self) -> None:
+        """Verify heartbeat attributes are properly initialized."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            assert handler._last_server_event_time is None
+            assert handler._heartbeat_timeout == 30.0
+            assert handler._heartbeat_task is None
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_detects_dead_connection(self) -> None:
+        """Verify heartbeat triggers restart after timeout with no events."""
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = OpenaiRealtimeHandler(deps)
+
+        # Track if restart was called
+        restart_called = {"count": 0}
+
+        async def mock_restart() -> None:
+            restart_called["count"] += 1
+
+        handler._restart_session = mock_restart  # type: ignore[method-assign]
+
+        # Simulate last event was a long time ago (past timeout)
+        handler._last_server_event_time = asyncio.get_event_loop().time() - 60  # 60 seconds ago
+        handler._heartbeat_timeout = 30.0  # 30 second timeout
+
+        # Fast heartbeat monitor for testing
+        async def fast_heartbeat() -> None:
+            """Faster heartbeat for testing."""
+            while not handler._shutdown_requested:
+                try:
+                    await asyncio.sleep(0.05)
+                    if handler._shutdown_requested:
+                        break
+                    if handler._last_server_event_time is None:
+                        continue
+                    time_since = asyncio.get_event_loop().time() - handler._last_server_event_time
+                    if time_since > handler._heartbeat_timeout:
+                        handler._last_server_event_time = None
+                        await handler._restart_session()
+                        break  # Exit after triggering once
+                except asyncio.CancelledError:
+                    break
+
+        handler._heartbeat_task = asyncio.create_task(fast_heartbeat())
+
+        # Wait for heartbeat to trigger
+        await asyncio.sleep(0.2)
+
+        # Cleanup
+        handler._shutdown_requested = True
+        if not handler._heartbeat_task.done():
+            handler._heartbeat_task.cancel()
+            try:
+                await handler._heartbeat_task
+            except asyncio.CancelledError:
+                pass
+
+        # Verify restart was triggered
+        assert restart_called["count"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_does_not_trigger_with_recent_activity(self) -> None:
+        """Verify no restart when receiving regular events."""
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = OpenaiRealtimeHandler(deps)
+
+        # Track if restart was called
+        restart_called = {"count": 0}
+
+        async def mock_restart() -> None:
+            restart_called["count"] += 1
+
+        handler._restart_session = mock_restart  # type: ignore[method-assign]
+
+        # Simulate recent event (within timeout)
+        handler._last_server_event_time = asyncio.get_event_loop().time() - 5  # 5 seconds ago
+        handler._heartbeat_timeout = 30.0  # 30 second timeout
+
+        # Fast heartbeat that checks a few times
+        check_count = {"n": 0}
+
+        async def fast_heartbeat() -> None:
+            """Faster heartbeat for testing."""
+            while not handler._shutdown_requested and check_count["n"] < 3:
+                try:
+                    await asyncio.sleep(0.05)
+                    check_count["n"] += 1
+                    if handler._shutdown_requested:
+                        break
+                    if handler._last_server_event_time is None:
+                        continue
+                    time_since = asyncio.get_event_loop().time() - handler._last_server_event_time
+                    if time_since > handler._heartbeat_timeout:
+                        handler._last_server_event_time = None
+                        await handler._restart_session()
+                except asyncio.CancelledError:
+                    break
+
+        handler._heartbeat_task = asyncio.create_task(fast_heartbeat())
+
+        # Wait for a few checks
+        await asyncio.sleep(0.3)
+
+        # Cleanup
+        handler._shutdown_requested = True
+        if not handler._heartbeat_task.done():
+            handler._heartbeat_task.cancel()
+            try:
+                await handler._heartbeat_task
+            except asyncio.CancelledError:
+                pass
+
+        # Verify restart was NOT triggered
+        assert restart_called["count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_skips_check_before_first_event(self) -> None:
+        """Verify heartbeat doesn't trigger when no events received yet."""
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = OpenaiRealtimeHandler(deps)
+
+        # Track if restart was called
+        restart_called = {"count": 0}
+
+        async def mock_restart() -> None:
+            restart_called["count"] += 1
+
+        handler._restart_session = mock_restart  # type: ignore[method-assign]
+
+        # No events yet
+        handler._last_server_event_time = None
+
+        # Fast heartbeat that checks a few times
+        check_count = {"n": 0}
+
+        async def fast_heartbeat() -> None:
+            """Faster heartbeat for testing."""
+            while not handler._shutdown_requested and check_count["n"] < 3:
+                try:
+                    await asyncio.sleep(0.05)
+                    check_count["n"] += 1
+                    if handler._shutdown_requested:
+                        break
+                    if handler._last_server_event_time is None:
+                        continue
+                    time_since = asyncio.get_event_loop().time() - handler._last_server_event_time
+                    if time_since > handler._heartbeat_timeout:
+                        handler._last_server_event_time = None
+                        await handler._restart_session()
+                except asyncio.CancelledError:
+                    break
+
+        handler._heartbeat_task = asyncio.create_task(fast_heartbeat())
+
+        # Wait for a few checks
+        await asyncio.sleep(0.3)
+
+        # Cleanup
+        handler._shutdown_requested = True
+        if not handler._heartbeat_task.done():
+            handler._heartbeat_task.cancel()
+            try:
+                await handler._heartbeat_task
+            except asyncio.CancelledError:
+                pass
+
+        # Verify restart was NOT triggered
+        assert restart_called["count"] == 0

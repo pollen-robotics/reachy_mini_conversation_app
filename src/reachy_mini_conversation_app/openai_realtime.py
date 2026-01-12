@@ -79,6 +79,11 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self._session_renewal_threshold: float = 120.0  # Renew 2 minutes before max duration
         self._watchdog_task: asyncio.Task[None] | None = None
 
+        # Heartbeat monitoring (for detecting dead connections)
+        self._last_server_event_time: float | None = None
+        self._heartbeat_timeout: float = 30.0  # 30 seconds without server events = dead connection
+        self._heartbeat_task: asyncio.Task[None] | None = None
+
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
         return OpenaiRealtimeHandler(self.deps, self.gradio_mode, self.instance_path)
@@ -179,6 +184,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         # Start session watchdog for 60-minute limit handling
         self._watchdog_task = asyncio.create_task(self._session_watchdog(), name="session-watchdog")
 
+        # Start heartbeat monitor for detecting dead connections
+        self._heartbeat_task = asyncio.create_task(self._heartbeat_monitor(), name="heartbeat-monitor")
+
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
             try:
@@ -211,8 +219,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         Does not block the caller while the new session is establishing.
         """
         try:
-            # Reset session start time (will be set again in _run_realtime_session)
+            # Reset session tracking (will be set again in _run_realtime_session)
             self._session_start_time = None
+            self._last_server_event_time = None
 
             if self.connection is not None:
                 try:
@@ -290,6 +299,41 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         except Exception as e:
             logger.error("Graceful session renewal failed: %s", e)
 
+    async def _heartbeat_monitor(self) -> None:
+        """Monitor for server activity and detect zombie connections.
+
+        Runs as a background task and checks every 10 seconds if we've received
+        any events from the server. If no events for _heartbeat_timeout seconds,
+        triggers a session restart.
+        """
+        check_interval = 10.0  # Check every 10 seconds
+        while not self._shutdown_requested:
+            try:
+                await asyncio.sleep(check_interval)
+
+                if self._shutdown_requested:
+                    break
+
+                if self._last_server_event_time is None:
+                    # No events received yet, skip check
+                    continue
+
+                time_since_event = asyncio.get_event_loop().time() - self._last_server_event_time
+
+                if time_since_event > self._heartbeat_timeout:
+                    logger.warning(
+                        "No server events for %.0fs. Connection may be dead. Restarting...",
+                        time_since_event,
+                    )
+                    # Reset to avoid repeated restarts
+                    self._last_server_event_time = None
+                    await self._restart_session()
+            except asyncio.CancelledError:
+                logger.debug("Heartbeat monitor cancelled")
+                break
+            except Exception as e:
+                logger.warning("Heartbeat monitor error: %s", e)
+
     async def _run_realtime_session(self) -> None:
         """Establish and manage a single realtime session."""
         async with self.client.realtime.connect(model=config.MODEL_NAME) as conn:
@@ -347,6 +391,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             except Exception:
                 pass
             async for event in self.connection:
+                # Update heartbeat timestamp on every server event
+                self._last_server_event_time = asyncio.get_event_loop().time()
+
                 logger.debug(f"OpenAI event: {event.type}")
                 if event.type == "input_audio_buffer.speech_started":
                     if hasattr(self, "_clear_queue") and callable(self._clear_queue):
@@ -601,6 +648,14 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             self._watchdog_task.cancel()
             try:
                 await self._watchdog_task
+            except asyncio.CancelledError:
+                pass
+
+        # Cancel heartbeat monitor task
+        if self._heartbeat_task and not self._heartbeat_task.done():
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
             except asyncio.CancelledError:
                 pass
 
