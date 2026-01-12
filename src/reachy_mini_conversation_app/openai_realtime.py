@@ -30,6 +30,11 @@ logger = logging.getLogger(__name__)
 OPEN_AI_INPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
 OPEN_AI_OUTPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
 
+# Reconnection constants
+MAX_RECONNECT_ATTEMPTS: Final[int] = 10
+BASE_RECONNECT_DELAY: Final[float] = 1.0  # seconds
+MAX_RECONNECT_DELAY: Final[float] = 60.0  # cap at 1 minute
+
 
 class OpenaiRealtimeHandler(AsyncStreamHandler):
     """An OpenAI realtime handler for fastrtc Stream."""
@@ -194,20 +199,36 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         # Start keep-alive loop to prevent server-side timeout during silence
         self._keep_alive_task = asyncio.create_task(self._keep_alive_loop(), name="keep-alive-loop")
 
-        max_attempts = 3
-        for attempt in range(1, max_attempts + 1):
+        attempt = 0
+        while attempt < MAX_RECONNECT_ATTEMPTS:
+            attempt += 1
             try:
                 await self._run_realtime_session()
                 # Normal exit from the session, stop retrying
                 return
             except ConnectionClosedError as e:
-                # Abrupt close (e.g., "no close frame received or sent") → retry
-                logger.warning("Realtime websocket closed unexpectedly (attempt %d/%d): %s", attempt, max_attempts, e)
-                if attempt < max_attempts:
-                    # exponential backoff with jitter
-                    base_delay = 2 ** (attempt - 1)  # 1s, 2s, 4s, 8s, etc.
-                    jitter = random.uniform(0, 0.5)
-                    delay = base_delay + jitter
+                # Extract WebSocket close code if available
+                close_code = getattr(e, "code", None)
+
+                if close_code == 1001:
+                    # 1001 = "going away" - server-initiated close (e.g., 60min limit)
+                    # This is expected behavior, reset attempt counter for fresh start
+                    logger.info(
+                        "Session ended by server (code 1001 - going away). Starting new session..."
+                    )
+                    attempt = 0  # Reset counter for intentional server closures
+                else:
+                    # Unexpected close - log with attempt count
+                    logger.warning(
+                        "Realtime websocket closed unexpectedly (attempt %d/%d, code=%s): %s",
+                        attempt,
+                        MAX_RECONNECT_ATTEMPTS,
+                        close_code,
+                        e,
+                    )
+
+                if attempt < MAX_RECONNECT_ATTEMPTS:
+                    delay = self._calculate_backoff_delay(attempt)
                     logger.info("Retrying in %.1f seconds...", delay)
                     await asyncio.sleep(delay)
                     continue
@@ -374,6 +395,25 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 break
             except Exception as e:
                 logger.warning("Keep-alive loop error: %s", e)
+
+    def _calculate_backoff_delay(self, attempt: int) -> float:
+        """Calculate exponential backoff delay with jitter.
+
+        Args:
+            attempt: Current attempt number (1-based)
+
+        Returns:
+            Delay in seconds, capped at MAX_RECONNECT_DELAY
+
+        """
+        # Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, then capped
+        base_delay: float = BASE_RECONNECT_DELAY * (2 ** (attempt - 1))
+        # Cap at maximum delay
+        capped_delay: float = min(base_delay, MAX_RECONNECT_DELAY)
+        # Add jitter (0-30% of delay) to prevent thundering herd
+        jitter: float = random.uniform(0, capped_delay * 0.3)
+        result: float = capped_delay + jitter
+        return result
 
     async def _run_realtime_session(self) -> None:
         """Establish and manage a single realtime session."""

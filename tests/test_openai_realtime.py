@@ -764,3 +764,195 @@ class TestKeepAliveLoop:
         assert exception_count["n"] >= 1
         # Task should still be done (not crashed)
         assert handler._keep_alive_task.done()
+
+
+# --- Reconnection Backoff Tests ---
+
+
+class TestReconnectionBackoff:
+    """Tests for reconnection backoff functionality."""
+
+    def test_reconnect_constants_defined(self) -> None:
+        """Verify reconnection constants are defined with correct values."""
+        import reachy_mini_conversation_app.openai_realtime as rt
+
+        assert rt.MAX_RECONNECT_ATTEMPTS == 10
+        assert rt.BASE_RECONNECT_DELAY == 1.0
+        assert rt.MAX_RECONNECT_DELAY == 60.0
+
+    def test_backoff_calculation_first_attempt(self) -> None:
+        """Verify backoff for first attempt is around BASE_RECONNECT_DELAY."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            delay = handler._calculate_backoff_delay(1)
+            # First attempt: base_delay = 1.0, max jitter = 0.3
+            # Expected range: 1.0 to 1.3
+            assert delay >= 1.0
+            assert delay <= 1.3
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def test_backoff_calculation_exponential_growth(self) -> None:
+        """Verify backoff grows exponentially with attempts."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+
+            # Calculate delays for different attempts (without jitter randomness issue)
+            # We check that base values double each time
+            # Attempt 1: 1s, Attempt 2: 2s, Attempt 3: 4s, Attempt 4: 8s
+            delay1 = handler._calculate_backoff_delay(1)
+            delay2 = handler._calculate_backoff_delay(2)
+            delay3 = handler._calculate_backoff_delay(3)
+
+            # Minimum values (no jitter): 1, 2, 4
+            # Maximum values (max jitter): 1.3, 2.6, 5.2
+            assert delay1 >= 1.0
+            assert delay2 >= 2.0
+            assert delay3 >= 4.0
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def test_backoff_max_delay_cap(self) -> None:
+        """Verify backoff is capped at MAX_RECONNECT_DELAY."""
+        import reachy_mini_conversation_app.openai_realtime as rt
+
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+
+            # Attempt 10 would have base_delay = 1 * 2^9 = 512s without cap
+            # With cap at 60s, max would be 60 + 18 (30% jitter) = 78
+            delay = handler._calculate_backoff_delay(10)
+
+            # Should be capped: 60 + jitter (up to 18)
+            assert delay >= rt.MAX_RECONNECT_DELAY
+            assert delay <= rt.MAX_RECONNECT_DELAY * 1.3  # cap + 30% jitter
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def test_backoff_includes_jitter(self) -> None:
+        """Verify backoff includes randomized jitter."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+
+            # Call multiple times and verify some variation
+            delays = [handler._calculate_backoff_delay(3) for _ in range(10)]
+
+            # All should be >= base (4.0) and <= base + 30% jitter (5.2)
+            for d in delays:
+                assert d >= 4.0
+                assert d <= 5.2
+
+            # Should have some variation (extremely unlikely all identical)
+            unique_delays = {round(d, 6) for d in delays}
+            assert len(unique_delays) > 1, "Expected jitter to produce variation"
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    @pytest.mark.asyncio
+    async def test_code_1001_handling_in_start_up(self, monkeypatch: Any, caplog: Any) -> None:
+        """Verify code 1001 (going away) is handled specially."""
+        caplog.set_level(logging.INFO)
+
+        # Create a custom ConnectionClosedError with code 1001
+        class FakeCCE1001(Exception):
+            code = 1001
+
+        monkeypatch.setattr(rt_mod, "ConnectionClosedError", FakeCCE1001)
+
+        # Track attempts
+        attempt_counter = {"n": 0}
+
+        class FakeConn:
+            def __init__(self) -> None:
+                class _Session:
+                    async def update(self, **_kw: Any) -> None:
+                        return None
+
+                self.session = _Session()
+
+                class _InputAudioBuffer:
+                    async def append(self, **_kw: Any) -> None:
+                        return None
+
+                self.input_audio_buffer = _InputAudioBuffer()
+
+                class _Item:
+                    async def create(self, **_kw: Any) -> None:
+                        return None
+
+                class _Conversation:
+                    item = _Item()
+
+                self.conversation = _Conversation()
+
+                class _Response:
+                    async def create(self, **_kw: Any) -> None:
+                        return None
+
+                    async def cancel(self, **_kw: Any) -> None:
+                        return None
+
+                self.response = _Response()
+
+            async def __aenter__(self) -> "FakeConn":
+                return self
+
+            async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+                return False
+
+            async def close(self) -> None:
+                return None
+
+            def __aiter__(self) -> "FakeConn":
+                return self
+
+            async def __anext__(self) -> None:
+                attempt_counter["n"] += 1
+                if attempt_counter["n"] <= 2:
+                    # First two: raise 1001 (should reset counter)
+                    raise FakeCCE1001("going away")
+                # Third: succeed
+                raise StopAsyncIteration
+
+        class FakeRealtime:
+            def connect(self, **_kw: Any) -> FakeConn:
+                return FakeConn()
+
+        class FakeClient:
+            def __init__(self, **_kw: Any) -> None:
+                self.realtime = FakeRealtime()
+
+        monkeypatch.setattr(rt_mod, "AsyncOpenAI", FakeClient)
+
+        # Fast sleep
+        async def _fast_sleep(*_a: Any, **_kw: Any) -> None:
+            return None
+
+        monkeypatch.setattr(asyncio, "sleep", _fast_sleep, raising=False)
+
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = rt_mod.OpenaiRealtimeHandler(deps)
+
+        await handler.start_up()
+
+        # Cleanup
+        handler._shutdown_requested = True
+        for task in [handler._watchdog_task, handler._heartbeat_task, handler._keep_alive_task]:
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+        # Verify we got 1001 logs
+        info_logs = [r for r in caplog.records if r.levelname == "INFO" and "1001" in r.msg]
+        assert len(info_logs) >= 1
