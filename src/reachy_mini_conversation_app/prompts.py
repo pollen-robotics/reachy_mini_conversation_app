@@ -59,6 +59,26 @@ def _expand_prompt_includes(content: str) -> str:
     return '\n'.join(expanded_lines)
 
 
+def _inject_memories(instructions: str) -> str:
+    """Inject long-term memories into the instructions if available.
+
+    Args:
+        instructions: The base instructions to augment.
+
+    Returns:
+        Instructions with memories appended, or original if no memories exist.
+
+    """
+    from reachy_mini_conversation_app.memory import load_memories
+
+    memories = load_memories()
+    if memories:
+        logger.info(f"Injecting {len(memories)} chars of memories into prompt")
+        instructions += "\n\n## What you remember about the user from previous sessions:\n"
+        instructions += memories
+    return instructions
+
+
 def get_session_instructions() -> str:
     """Get session instructions, loading from REACHY_MINI_CUSTOM_PROFILE if set."""
     profile = config.REACHY_MINI_CUSTOM_PROFILE
@@ -75,6 +95,10 @@ def get_session_instructions() -> str:
             if instructions:
                 # Expand [<name>] placeholders with content from prompts library
                 expanded_instructions = _expand_prompt_includes(instructions)
+
+                # Inject long-term memories if available
+                expanded_instructions = _inject_memories(expanded_instructions)
+
                 return expanded_instructions
             logger.error(f"Profile '{profile}' has empty {INSTRUCTIONS_FILENAME}")
             sys.exit(1)
