@@ -214,8 +214,12 @@ class TestSpeakerIDWorkerWithMockedModel:
         # Start worker and feed audio
         worker.start()
 
-        audio = np.random.rand(16000).astype(np.float32)  # 1 second at 16kHz
-        worker.feed_audio(audio, TARGET_SAMPLE_RATE)
+        # Feed enough audio (need at least 1.5 seconds for accumulation buffer)
+        # Feed in chunks to simulate real-time audio streaming
+        for _ in range(4):  # 4 x 0.5s = 2 seconds total
+            audio = np.random.rand(8000).astype(np.float32)  # 0.5 second at 16kHz
+            worker.feed_audio(audio, TARGET_SAMPLE_RATE)
+            time.sleep(0.1)
 
         # Wait for processing
         time.sleep(0.5)

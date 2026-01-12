@@ -72,6 +72,11 @@ class SpeakerIDWorker:
         self._registration_audio: list[NDArray[np.float32]] = []
         self._registration_lock = threading.Lock()
 
+        # Audio accumulation buffer for identification (need enough audio for embedding)
+        self._audio_buffer: list[NDArray[np.float32]] = []
+        self._audio_buffer_samples: int = 0
+        self._min_samples_for_embedding: int = int(TARGET_SAMPLE_RATE * 1.5)  # 1.5 seconds
+
         # Worker thread control
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -253,17 +258,39 @@ class SpeakerIDWorker:
                     self._registration_audio.append(audio_f32)
                     continue
 
-            # Skip if audio is too short (less than 0.5 seconds)
-            if len(audio_f32) < TARGET_SAMPLE_RATE * 0.5:
+            # Accumulate audio in buffer
+            self._audio_buffer.append(audio_f32)
+            self._audio_buffer_samples += len(audio_f32)
+
+            # Skip if not enough audio accumulated (need at least 1.5 seconds)
+            if self._audio_buffer_samples < self._min_samples_for_embedding:
                 continue
 
+            # Concatenate accumulated audio
+            accumulated_audio = np.concatenate(self._audio_buffer)
+
+            # Keep only the last 3 seconds of audio (sliding window)
+            max_samples = int(TARGET_SAMPLE_RATE * 3.0)
+            if len(accumulated_audio) > max_samples:
+                accumulated_audio = accumulated_audio[-max_samples:]
+
+            # Clear buffer but keep some overlap for continuity
+            overlap_samples = int(TARGET_SAMPLE_RATE * 0.5)  # 0.5 second overlap
+            self._audio_buffer = [accumulated_audio[-overlap_samples:]]
+            self._audio_buffer_samples = overlap_samples
+
             # Compute embedding and identify speaker
-            embedding = self._compute_embedding(audio_f32)
+            embedding = self._compute_embedding(accumulated_audio)
             if embedding is not None:
                 speaker, confidence = self._embeddings_store.identify(embedding, self._threshold)
                 with self._state_lock:
                     self._current_speaker = speaker
                     self._current_confidence = confidence
+                logger.debug(
+                    "Speaker identification: %s (confidence: %.2f)",
+                    speaker if speaker else "unknown",
+                    confidence,
+                )
 
     def _resample_audio(
         self,
