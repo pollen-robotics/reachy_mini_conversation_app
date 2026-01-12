@@ -1,0 +1,42 @@
+name: Sync to Hugging Face Hub
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  bump_version:
+    if: "startsWith(github.event.head_commit.message, 'chore: release a new version') && !startsWith(github.event.head_commit.message, 'bump:')"
+    runs-on: ubuntu-latest
+    name: Bump version, create changelog and sync to HF
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: commitizen-tools/commitizen-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          changelog_increment_filename: changes.md
+          changelog: true
+          debug: false
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: changes.md
+          tag_name: ${{ env.REVISION }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync to Hugging Face Hub
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_REPO_ID: ${{ vars.HF_REPO_ID }}
+        run: |
+          git remote add hf https://huggingface.co/spaces/${HF_REPO_ID} || true
+          git remote set-url hf https://user:${HF_TOKEN}@huggingface.co/spaces/${HF_REPO_ID}
+          git push hf main --force
+          git push hf --tags --force

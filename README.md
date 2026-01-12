@@ -227,5 +227,12 @@ Note: The “Personality” panel updates the conversation instructions. Tool se
 - Execute the test suite: `pytest`.
 - When iterating on robot motions, keep the control loop responsive => offload blocking work using the helpers in `tools.py`.
 
+### Triggering a release
+To trigger the CI/CD pipeline (version bump, changelog generation, and Hugging Face sync), push an empty commit:
+```bash
+git commit --allow-empty -m "chore: release a new version"
+git push
+```
+
 ## License
 Apache 2.0
