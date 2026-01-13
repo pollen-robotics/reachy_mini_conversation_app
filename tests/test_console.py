@@ -348,72 +348,6 @@ class TestReadPersistedPersonality:
         assert result is None
 
 
-class TestPersistLinusConfig:
-    """Tests for _persist_linus_config method."""
-
-    def test_persist_linus_config_sets_env_vars(self) -> None:
-        """Test that Linus config sets environment variables."""
-        from reachy_mini_conversation_app.console import LocalStream
-
-        stream = LocalStream(MagicMock(), MagicMock())
-
-        with patch.dict(os.environ, {}, clear=True):
-            with patch("reachy_mini_conversation_app.console.config"):
-                stream._persist_linus_config(
-                    anthropic_key="ant-key",
-                    github_token="gh-token",
-                    github_owner="owner",
-                )
-
-                assert os.environ.get("ANTHROPIC_API_KEY") == "ant-key"
-                assert os.environ.get("GITHUB_TOKEN") == "gh-token"
-                assert os.environ.get("GITHUB_DEFAULT_OWNER") == "owner"
-
-    def test_persist_linus_config_writes_to_env(self, tmp_path: Path) -> None:
-        """Test that Linus config is written to .env file."""
-        from reachy_mini_conversation_app.console import LocalStream
-
-        stream = LocalStream(MagicMock(), MagicMock(), instance_path=str(tmp_path))
-
-        with patch("reachy_mini_conversation_app.console.config"):
-            with patch("reachy_mini_conversation_app.console.load_dotenv", create=True):
-                stream._persist_linus_config(
-                    anthropic_key="ant-key",
-                    github_token="gh-token",
-                    github_owner="owner",
-                )
-
-        env_file = tmp_path / ".env"
-        content = env_file.read_text()
-        assert "ANTHROPIC_API_KEY=ant-key" in content
-        assert "GITHUB_TOKEN=gh-token" in content
-        assert "GITHUB_DEFAULT_OWNER=owner" in content
-
-    def test_persist_linus_config_skips_empty_values(self, tmp_path: Path) -> None:
-        """Test that empty values are not written to new env file."""
-        from reachy_mini_conversation_app.console import LocalStream
-
-        # Create an empty .env file (not from template)
-        env_file = tmp_path / ".env"
-        env_file.write_text("")  # Start with empty file
-
-        stream = LocalStream(MagicMock(), MagicMock(), instance_path=str(tmp_path))
-
-        with patch("reachy_mini_conversation_app.console.config"):
-            with patch("dotenv.load_dotenv", create=True):
-                stream._persist_linus_config(
-                    anthropic_key="ant-key",
-                    github_token="",
-                    github_owner="",
-                )
-
-        content = env_file.read_text()
-        assert "ANTHROPIC_API_KEY=ant-key" in content
-        # Empty values should not add new lines
-        assert "GITHUB_TOKEN=ant-key" not in content  # Not set to wrong value
-        assert "GITHUB_DEFAULT_OWNER=ant-key" not in content  # Not set to wrong value
-
-
 class TestInitSettingsUiIfNeeded:
     """Tests for _init_settings_ui_if_needed method."""
 
@@ -451,8 +385,8 @@ class TestInitSettingsUiIfNeeded:
         assert stream._settings_initialized is True
         mock_app.mount.assert_called_once()
         # Check that routes were registered
-        assert mock_app.get.call_count >= 4  # /, /favicon.ico, /status, /ready, /linus_config
-        assert mock_app.post.call_count >= 3  # /openai_api_key, /validate_api_key, /linus_config
+        assert mock_app.get.call_count >= 4  # /, /favicon.ico, /status, /ready
+        assert mock_app.post.call_count >= 2  # /openai_api_key, /validate_api_key
 
 
 class TestClose:
@@ -926,32 +860,6 @@ class TestReadPersistedPersonalityExtended:
         assert result is None
 
 
-class TestPersistLinusConfigExtended:
-    """Extended tests for _persist_linus_config method."""
-
-    def test_persist_linus_config_handles_env_set_error(self) -> None:
-        """Test that env var set errors are handled."""
-        from reachy_mini_conversation_app.console import LocalStream
-
-        stream = LocalStream(MagicMock(), MagicMock())
-
-        with patch.dict(os.environ, {}, clear=True):
-            with patch.object(os.environ, "__setitem__", side_effect=Exception("denied")):
-                # Should not raise
-                stream._persist_linus_config(anthropic_key="key", github_token="token")
-
-    def test_persist_linus_config_handles_write_error(self, tmp_path: Path) -> None:
-        """Test that file write errors are handled."""
-        from reachy_mini_conversation_app.console import LocalStream
-
-        stream = LocalStream(MagicMock(), MagicMock(), instance_path=str(tmp_path))
-
-        with patch("reachy_mini_conversation_app.console.config"):
-            with patch.object(Path, "write_text", side_effect=PermissionError("denied")):
-                # Should not raise
-                stream._persist_linus_config(anthropic_key="key")
-
-
 class TestInitSettingsUiExtended:
     """Extended tests for _init_settings_ui_if_needed method."""
 
@@ -1028,35 +936,6 @@ class TestSettingsEndpoints:
             result = registered_handlers["/ready"]()
             assert hasattr(result, "body") or isinstance(result, MagicMock)
 
-    def test_linus_config_get_endpoint(self) -> None:
-        """Test that linus_config GET endpoint returns config status."""
-        from reachy_mini_conversation_app.console import LocalStream
-
-        mock_app = MagicMock()
-
-        registered_handlers: dict[str, Any] = {}
-
-        def capture_get(path: str) -> Any:
-            def decorator(fn: Any) -> Any:
-                registered_handlers[path] = fn
-                return fn
-            return decorator
-
-        mock_app.get.side_effect = capture_get
-
-        stream = LocalStream(MagicMock(), MagicMock(), settings_app=mock_app)
-
-        with patch("reachy_mini_conversation_app.console.StaticFiles"):
-            with patch("reachy_mini_conversation_app.console.config") as mock_config:
-                mock_config.ANTHROPIC_API_KEY = "test-key"
-                mock_config.GITHUB_TOKEN = "test-token"
-                mock_config.GITHUB_DEFAULT_OWNER = "owner"
-                stream._init_settings_ui_if_needed()
-
-        if "/linus_config" in registered_handlers:
-            result = registered_handlers["/linus_config"]()
-            assert hasattr(result, "body") or isinstance(result, MagicMock)
-
     def test_set_key_endpoint_and_validate(self) -> None:
         """Test POST /openai_api_key and POST /validate_api_key endpoints."""
         from types import SimpleNamespace
@@ -1123,36 +1002,6 @@ class TestSettingsEndpoints:
 
             # Cleanup fake httpx
             del sys.modules["httpx"]
-
-    def test_post_linus_config_calls_persist(self) -> None:
-        """Test POST /linus_config triggers _persist_linus_config."""
-        from types import SimpleNamespace
-
-        from reachy_mini_conversation_app.console import LocalStream
-
-        mock_app = MagicMock()
-        registered_post: dict[str, Any] = {}
-
-        def capture_post(path: str) -> Any:
-            def decorator(fn: Any) -> Any:
-                registered_post[path] = fn
-                return fn
-            return decorator
-
-        mock_app.post.side_effect = capture_post
-
-        stream = LocalStream(MagicMock(), MagicMock(), settings_app=mock_app)
-
-        with patch("reachy_mini_conversation_app.console.StaticFiles"):
-            stream._init_settings_ui_if_needed()
-
-        if "/linus_config" in registered_post:
-            # Patch the instance method to observe calls
-            with patch.object(stream, "_persist_linus_config") as mock_persist:
-                payload = SimpleNamespace(anthropic_key="a", github_token="t", github_owner="o")
-                res = registered_post["/linus_config"](payload)
-                mock_persist.assert_called()
-                assert hasattr(res, "status_code") or isinstance(res, MagicMock)
 
     def test_root_and_favicon_registered(self) -> None:
         """Ensure root and favicon handlers are registered when settings_app provided."""
@@ -1758,59 +1607,6 @@ class TestReadPersistedPersonalityEdgeCases:
 
         result = stream._read_persisted_personality()
         assert result is None
-
-
-class TestPersistLinusConfigEdgeCases:
-    """Tests for _persist_linus_config edge cases."""
-
-    def test_persist_linus_config_setattr_exception(self, tmp_path: Path) -> None:
-        """Test exception when setting config attr (lines 238-239)."""
-        from reachy_mini_conversation_app.console import LocalStream
-
-        mock_handler = MagicMock()
-        mock_robot = MagicMock()
-
-        stream = LocalStream(mock_handler, mock_robot, instance_path=str(tmp_path))
-
-        env_file = tmp_path / ".env"
-        env_file.write_text("OPENAI_API_KEY=test\n")
-
-        # Create a custom class that raises on setattr for specific attrs
-        class FailingConfig:
-            def __setattr__(self, name: str, value: Any) -> None:
-                if name in ("ANTHROPIC_API_KEY", "GITHUB_TOKEN", "GITHUB_DEFAULT_OWNER"):
-                    raise RuntimeError("Cannot set config")
-                object.__setattr__(self, name, value)
-
-        with patch("reachy_mini_conversation_app.console.config", FailingConfig()):
-            with patch("dotenv.load_dotenv"):
-                # Should not raise
-                stream._persist_linus_config(
-                    anthropic_key="test-key",
-                    github_token="ghp_test",
-                    github_owner="test-owner",
-                )
-
-    def test_persist_linus_config_dotenv_load_exception(self, tmp_path: Path) -> None:
-        """Test exception when loading dotenv in _persist_linus_config (lines 267-268)."""
-        from reachy_mini_conversation_app.console import LocalStream
-
-        mock_handler = MagicMock()
-        mock_robot = MagicMock()
-
-        stream = LocalStream(mock_handler, mock_robot, instance_path=str(tmp_path))
-
-        env_file = tmp_path / ".env"
-        env_file.write_text("OPENAI_API_KEY=test\n")
-
-        with patch("reachy_mini_conversation_app.console.config"):
-            with patch("dotenv.load_dotenv", side_effect=RuntimeError("Load failed")):
-                # Should not raise
-                stream._persist_linus_config(
-                    anthropic_key="test-key",
-                    github_token="ghp_test",
-                    github_owner="test-owner",
-                )
 
 
 class TestLaunchEdgeCases:

@@ -840,8 +840,8 @@ class TestVisionProcessorEdgeCases:
                 image = np.zeros((8, 8, 3), dtype=np.uint8)
                 result = processor.process_image(image)
 
-                # With zero retries, the for loop doesn't execute and returns an error message
-                assert result == "Vision processing failed unexpectedly"
+                # With zero retries, the for loop doesn't execute and returns None
+                assert result is None
 
 
 class TestVisionManagerEdgeCases:

@@ -42,6 +42,45 @@ class TestConfigModuleLoad:
                 # Reimport the original module
                 import reachy_mini_conversation_app.config  # noqa: F401
 
+    def test_module_loads_with_dotenv_file(self, tmp_path: Any) -> None:
+        """Test module-level code when .env file is found (lines 14-15).
+
+        This covers the if branch at lines 12-15.
+        """
+        # Create a temporary .env file
+        env_file = tmp_path / ".env"
+        env_file.write_text("TEST_VAR=test_value\n")
+
+        # Save original module references
+        module_name = "reachy_mini_conversation_app.config"
+        original_module = sys.modules.get(module_name)
+
+        try:
+            # Remove the module from cache to force reload
+            if module_name in sys.modules:
+                del sys.modules[module_name]
+
+            # Patch find_dotenv to return our temp .env file path
+            with patch("dotenv.find_dotenv", return_value=str(env_file)):
+                with patch("dotenv.load_dotenv") as mock_load:
+                    # Import will trigger module-level code
+                    import reachy_mini_conversation_app.config as config_module
+
+                    # Verify load_dotenv was called with the correct path
+                    mock_load.assert_called_once_with(dotenv_path=str(env_file), override=True)
+
+                    # Verify the module loaded successfully
+                    assert hasattr(config_module, "config")
+                    assert hasattr(config_module, "Config")
+        finally:
+            # Restore the original module to avoid side effects on other tests
+            if original_module is not None:
+                sys.modules[module_name] = original_module
+            elif module_name in sys.modules:
+                del sys.modules[module_name]
+                # Reimport the original module
+                import reachy_mini_conversation_app.config  # noqa: F401
+
 
 class TestConfig:
     """Tests for the Config class."""
@@ -59,15 +98,6 @@ class TestConfig:
         assert hasattr(config, "LOCAL_VISION_MODEL")
         assert hasattr(config, "HF_TOKEN")
 
-        # Anthropic attributes
-        assert hasattr(config, "ANTHROPIC_API_KEY")
-        assert hasattr(config, "ANTHROPIC_MODEL")
-
-        # GitHub attributes
-        assert hasattr(config, "GITHUB_TOKEN")
-        assert hasattr(config, "GITHUB_DEFAULT_OWNER")
-        assert hasattr(config, "GITHUB_OWNER_EMAIL")
-
         # Profile attribute
         assert hasattr(config, "REACHY_MINI_CUSTOM_PROFILE")
 
@@ -77,14 +107,12 @@ class TestConfig:
         monkeypatch.delenv("MODEL_NAME", raising=False)
         monkeypatch.delenv("HF_HOME", raising=False)
         monkeypatch.delenv("LOCAL_VISION_MODEL", raising=False)
-        monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
 
         # Re-import to get fresh defaults (module-level code already ran)
         # We test the defaults defined in the class
         assert os.getenv("MODEL_NAME", "gpt-realtime") == "gpt-realtime"
         assert os.getenv("HF_HOME", "./cache") == "./cache"
         assert os.getenv("LOCAL_VISION_MODEL", "HuggingFaceTB/SmolVLM2-2.2B-Instruct") == "HuggingFaceTB/SmolVLM2-2.2B-Instruct"
-        assert os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514") == "claude-sonnet-4-20250514"
 
 
 class TestSetCustomProfile:
@@ -127,183 +155,6 @@ class TestSetCustomProfile:
 
         # Cleanup
         set_custom_profile(None)
-
-
-class TestSetConfigValue:
-    """Tests for set_config_value function."""
-
-    def test_set_config_value_success(self) -> None:
-        """Test successfully setting a config value."""
-        from reachy_mini_conversation_app.config import config, set_config_value
-
-        original = config.MODEL_NAME
-
-        result = set_config_value("MODEL_NAME", "test-model")
-
-        assert result is True
-        assert config.MODEL_NAME == "test-model"
-        assert os.environ.get("MODEL_NAME") == "test-model"
-
-        # Restore
-        set_config_value("MODEL_NAME", original)
-
-    def test_set_config_value_with_none_removes_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test that setting None removes the env var."""
-        from reachy_mini_conversation_app.config import config, set_config_value
-
-        # Set a value first
-        monkeypatch.setenv("HF_TOKEN", "test-token")
-        config.HF_TOKEN = "test-token"
-
-        result = set_config_value("HF_TOKEN", None)
-
-        assert result is True
-        assert config.HF_TOKEN is None
-        assert os.environ.get("HF_TOKEN") is None
-
-    def test_set_config_value_with_empty_string_removes_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test that setting empty string removes the env var."""
-        from reachy_mini_conversation_app.config import config, set_config_value
-
-        monkeypatch.setenv("HF_TOKEN", "test-token")
-        config.HF_TOKEN = "test-token"
-
-        result = set_config_value("HF_TOKEN", "")
-
-        assert result is True
-        assert config.HF_TOKEN == ""
-        assert os.environ.get("HF_TOKEN") is None
-
-    def test_set_config_value_nonexistent_key(self) -> None:
-        """Test setting a key that doesn't exist in config."""
-        from reachy_mini_conversation_app.config import set_config_value
-
-        # Should still succeed (env var gets set even if not in config)
-        result = set_config_value("NONEXISTENT_KEY", "value")
-
-        assert result is True
-        assert os.environ.get("NONEXISTENT_KEY") == "value"
-
-        # Cleanup
-        os.environ.pop("NONEXISTENT_KEY", None)
-
-    def test_set_config_value_handles_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test that exceptions are handled gracefully."""
-        from reachy_mini_conversation_app.config import config, set_config_value
-
-        # Make setattr on config raise an exception
-        original_setattr = config.__class__.__setattr__
-
-        def raise_on_setattr(self: object, name: str, value: object) -> None:
-            if name == "TEST_FAIL_KEY":
-                raise RuntimeError("Test error")
-            original_setattr(self, name, value)
-
-        monkeypatch.setattr(config.__class__, "__setattr__", raise_on_setattr)
-
-        # Also make os.environ raise
-        original_environ_setitem = os.environ.__class__.__setitem__
-
-        def raise_on_environ(self: Any, key: str, value: str) -> None:
-            if key == "TEST_FAIL_KEY":
-                raise RuntimeError("Test error")
-            original_environ_setitem(self, key, value)
-
-        monkeypatch.setattr(os.environ.__class__, "__setitem__", raise_on_environ)
-
-        result = set_config_value("TEST_FAIL_KEY", "test")
-
-        assert result is False
-
-
-class TestReloadConfig:
-    """Tests for reload_config function."""
-
-    @patch("reachy_mini_conversation_app.config.find_dotenv")
-    def test_reload_config_updates_values(
-        self, mock_find_dotenv: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Test that reload_config updates config values from environment."""
-        from reachy_mini_conversation_app.config import config, reload_config
-
-        # Prevent loading .env file
-        mock_find_dotenv.return_value = ""
-
-        # Set new values in environment
-        monkeypatch.setenv("OPENAI_API_KEY", "new-openai-key")
-        monkeypatch.setenv("MODEL_NAME", "new-model")
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "new-anthropic-key")
-
-        reload_config()
-
-        assert config.OPENAI_API_KEY == "new-openai-key"
-        assert config.MODEL_NAME == "new-model"
-        assert config.ANTHROPIC_API_KEY == "new-anthropic-key"
-
-    def test_reload_config_uses_defaults_when_env_not_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test that reload_config uses defaults when env vars not set."""
-        from reachy_mini_conversation_app.config import config, reload_config
-
-        # Clear env vars
-        monkeypatch.delenv("MODEL_NAME", raising=False)
-        monkeypatch.delenv("HF_HOME", raising=False)
-
-        reload_config()
-
-        assert config.MODEL_NAME == "gpt-realtime"
-        assert config.HF_HOME == "./cache"
-
-    @patch("reachy_mini_conversation_app.config.find_dotenv")
-    def test_reload_config_clears_optional_values(
-        self, mock_find_dotenv: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Test that reload_config clears values when env vars removed."""
-        from reachy_mini_conversation_app.config import config, reload_config
-
-        # Prevent loading .env file
-        mock_find_dotenv.return_value = ""
-
-        # Set a value first
-        config.HF_TOKEN = "old-token"
-        monkeypatch.delenv("HF_TOKEN", raising=False)
-
-        reload_config()
-
-        assert config.HF_TOKEN is None
-
-    @patch("reachy_mini_conversation_app.config.find_dotenv")
-    @patch("reachy_mini_conversation_app.config.load_dotenv")
-    def test_reload_config_loads_dotenv_when_found(
-        self,
-        mock_load_dotenv: MagicMock,
-        mock_find_dotenv: MagicMock,
-    ) -> None:
-        """Test that reload_config loads .env file when found."""
-        from reachy_mini_conversation_app.config import reload_config
-
-        mock_find_dotenv.return_value = "/path/to/.env"
-
-        reload_config()
-
-        mock_find_dotenv.assert_called_once_with(usecwd=True)
-        mock_load_dotenv.assert_called_once_with(dotenv_path="/path/to/.env", override=True)
-
-    @patch("reachy_mini_conversation_app.config.find_dotenv")
-    @patch("reachy_mini_conversation_app.config.load_dotenv")
-    def test_reload_config_skips_dotenv_when_not_found(
-        self,
-        mock_load_dotenv: MagicMock,
-        mock_find_dotenv: MagicMock,
-    ) -> None:
-        """Test that reload_config skips loading when no .env found."""
-        from reachy_mini_conversation_app.config import reload_config
-
-        mock_find_dotenv.return_value = ""
-
-        reload_config()
-
-        mock_find_dotenv.assert_called_once_with(usecwd=True)
-        mock_load_dotenv.assert_not_called()
 
 
 class TestConfigSingleton:

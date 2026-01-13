@@ -181,18 +181,17 @@ def run(
     if vision_manager:
         vision_manager.start()
 
-    def poll_stop_event() -> None:
-        """Poll the stop event to allow graceful shutdown."""
-        if app_stop_event is not None:
-            app_stop_event.wait()
-
-        logger.info("App stop event detected, shutting down...")
-        try:
-            stream_manager.close()
-        except Exception as e:
-            logger.error(f"Error while closing stream manager: {e}")
-
     if app_stop_event:
+
+        def poll_stop_event() -> None:
+            """Poll the stop event to allow graceful shutdown."""
+            app_stop_event.wait()
+            logger.info("App stop event detected, shutting down...")
+            try:
+                stream_manager.close()
+            except Exception as e:
+                logger.error(f"Error while closing stream manager: {e}")
+
         threading.Thread(target=poll_stop_event, daemon=True).start()
 
     try:

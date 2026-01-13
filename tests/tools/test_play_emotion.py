@@ -124,11 +124,11 @@ class TestPlayEmotionToolExecution:
         """Test play_emotion queues the emotion move."""
         from reachy_mini_conversation_app.tools import play_emotion
 
-        if not play_emotion.EMOTION_AVAILABLE or play_emotion._RECORDED_MOVES is None:
+        if not play_emotion.EMOTION_AVAILABLE or play_emotion.RECORDED_MOVES is None:
             pytest.skip("Emotion library not available")
 
         # Get a valid emotion name
-        available_emotions = play_emotion._RECORDED_MOVES.list_moves()
+        available_emotions = play_emotion.RECORDED_MOVES.list_moves()
         if not available_emotions:
             pytest.skip("No emotions available")
 
@@ -146,11 +146,11 @@ class TestPlayEmotionToolExecution:
         """Test play_emotion handles exceptions gracefully."""
         from reachy_mini_conversation_app.tools import play_emotion
 
-        if not play_emotion.EMOTION_AVAILABLE or play_emotion._RECORDED_MOVES is None:
+        if not play_emotion.EMOTION_AVAILABLE or play_emotion.RECORDED_MOVES is None:
             pytest.skip("Emotion library not available")
 
         # Get a valid emotion name
-        available_emotions = play_emotion._RECORDED_MOVES.list_moves()
+        available_emotions = play_emotion.RECORDED_MOVES.list_moves()
         if not available_emotions:
             pytest.skip("No emotions available")
 
@@ -177,10 +177,10 @@ class TestEmotionAvailability:
         assert isinstance(play_emotion.EMOTION_AVAILABLE, bool)
 
     def test_recorded_moves_exists(self) -> None:
-        """Test _RECORDED_MOVES exists."""
+        """Test RECORDED_MOVES exists."""
         from reachy_mini_conversation_app.tools import play_emotion
 
-        assert hasattr(play_emotion, "_RECORDED_MOVES")
+        assert hasattr(play_emotion, "RECORDED_MOVES")
         # Could be RecordedMoves object or None depending on library availability
 
 
@@ -226,7 +226,7 @@ class TestPlayEmotionImportFailure:
 
                 # Check that EMOTION_AVAILABLE is False
                 assert play_emotion_module.EMOTION_AVAILABLE is False
-                assert play_emotion_module._RECORDED_MOVES is None
+                assert play_emotion_module.RECORDED_MOVES is None
                 assert "not available" in caplog.text.lower()
             finally:
                 builtins.__import__ = original_import
@@ -283,15 +283,15 @@ class TestGetAvailableEmotionsAndDescriptions:
         if not play_emotion.EMOTION_AVAILABLE:
             pytest.skip("Emotion library not available")
 
-        original_recorded = play_emotion._RECORDED_MOVES
+        original_recorded = play_emotion.RECORDED_MOVES
 
         # Mock RECORDED_MOVES to raise exception
         mock_moves = MagicMock()
         mock_moves.list_moves.side_effect = RuntimeError("Test error")
-        play_emotion._RECORDED_MOVES = mock_moves
+        play_emotion.RECORDED_MOVES = mock_moves
 
         try:
             result = play_emotion.get_available_emotions_and_descriptions()
             assert "Error" in result
         finally:
-            play_emotion._RECORDED_MOVES = original_recorded
+            play_emotion.RECORDED_MOVES = original_recorded

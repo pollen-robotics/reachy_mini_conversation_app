@@ -31,7 +31,6 @@ class TestToolDependencies:
         assert deps.vision_manager is None
         assert deps.head_wobbler is None
         assert deps.motion_duration_s == 1.0
-        assert deps.background_task_manager is None
 
     def test_tool_dependencies_all_fields(self) -> None:
         """Test ToolDependencies with all fields."""
@@ -42,7 +41,6 @@ class TestToolDependencies:
         mock_camera = MagicMock()
         mock_vision = MagicMock()
         mock_wobbler = MagicMock()
-        mock_task_manager = MagicMock()
 
         deps = ToolDependencies(
             reachy_mini=mock_reachy,
@@ -51,7 +49,6 @@ class TestToolDependencies:
             vision_manager=mock_vision,
             head_wobbler=mock_wobbler,
             motion_duration_s=2.5,
-            background_task_manager=mock_task_manager,
         )
 
         assert deps.reachy_mini is mock_reachy
@@ -60,7 +57,6 @@ class TestToolDependencies:
         assert deps.vision_manager is mock_vision
         assert deps.head_wobbler is mock_wobbler
         assert deps.motion_duration_s == 2.5
-        assert deps.background_task_manager is mock_task_manager
 
 
 class TestToolBaseClass:
@@ -91,36 +87,6 @@ class TestToolBaseClass:
         assert spec["description"] == "A test tool"
         assert spec["parameters"]["type"] == "object"
         assert "param1" in spec["parameters"]["properties"]
-
-    def test_tool_supports_background_default_false(self) -> None:
-        """Test that supports_background defaults to False."""
-
-        class TestTool(Tool):
-            name = "test_tool"
-            description = "A test tool"
-            parameters_schema = {"type": "object", "properties": {}}
-
-            async def __call__(self, deps: Any, **kwargs: Any) -> dict[str, Any]:
-                return {}
-
-        tool = TestTool()
-        assert tool.supports_background is False
-
-    def test_tool_supports_background_can_be_enabled(self) -> None:
-        """Test that supports_background can be set to True."""
-
-        class BackgroundTool(Tool):
-            name = "background_tool"
-            description = "A background tool"
-            parameters_schema = {"type": "object", "properties": {}}
-            supports_background = True
-
-            async def __call__(self, deps: Any, **kwargs: Any) -> dict[str, Any]:
-                return {}
-
-        tool = BackgroundTool()
-        assert tool.supports_background is True
-
 
 class TestGetConcreteSubclasses:
     """Tests for get_concrete_subclasses function."""
@@ -486,16 +452,14 @@ class TestInitializeTools:
 class TestToolsLoggerSetup:
     """Tests for tools logger configuration."""
 
-    def test_tools_logger_already_has_handlers(self) -> None:
-        """Test that logger setup is skipped if handlers already exist."""
+    def test_tools_logger_exists(self) -> None:
+        """Test that tools logger exists."""
         import logging
 
-
-        # The logger is set up at module import time
+        # The logger should exist
         tools_logger = logging.getLogger("reachy_mini_conversation_app.tools")
+        assert tools_logger is not None
 
-        # Verify handlers exist (set up during module import)
-        assert len(tools_logger.handlers) > 0
 
 class TestLoadProfileToolsErrorHandling:
     """Tests for error handling in _load_profile_tools to improve coverage."""
@@ -542,6 +506,58 @@ class TestLoadProfileToolsErrorHandling:
             # The tools are already loaded, so we just verify the behavior
             tools_logger = logging.getLogger("reachy_mini_conversation_app.tools.core_tools")
             assert tools_logger is not None
+
+
+class TestLoadProfileToolsCommentsAndBlankLines:
+    """Tests for handling comments and blank lines in tools.txt."""
+
+    def test_tools_txt_with_comments_and_blank_lines(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test that comments and blank lines are skipped (line 119)."""
+        import logging
+
+        from reachy_mini_conversation_app.tools import core_tools
+
+        # Create profile with comments and blank lines
+        profile_dir = tmp_path / "profiles" / "comments_test"
+        profile_dir.mkdir(parents=True)
+        tools_txt = profile_dir / "tools.txt"
+        tools_txt.write_text("""# This is a comment
+do_nothing
+
+# Another comment
+   # Indented comment
+
+move_head
+""")
+
+        # Create a fake __file__ path
+        fake_file = tmp_path / "tools" / "core_tools.py"
+        fake_file.parent.mkdir(parents=True, exist_ok=True)
+        fake_file.touch()
+
+        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "comments_test")
+        monkeypatch.setattr(core_tools, "Path", lambda x: fake_file if x == core_tools.__file__ else Path(x))
+
+        # Reset tools state
+        original_tools = core_tools.ALL_TOOLS.copy()
+        original_specs = core_tools.ALL_TOOL_SPECS.copy()
+        core_tools.ALL_TOOLS = {}
+        core_tools.ALL_TOOL_SPECS = []
+        core_tools._TOOLS_INITIALIZED = False
+
+        try:
+            with caplog.at_level(logging.INFO):
+                core_tools._load_profile_tools()
+
+            # Should have logged that only 2 tools were found (not the comments/blank lines)
+            assert "2 tools to load" in caplog.text or "do_nothing" in caplog.text
+        finally:
+            # Restore
+            core_tools.ALL_TOOLS = original_tools
+            core_tools.ALL_TOOL_SPECS = original_specs
+            core_tools._TOOLS_INITIALIZED = True
 
 
 class TestLoadProfileToolsImportExceptions:

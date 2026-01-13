@@ -27,6 +27,13 @@ def _build_handler(loop: asyncio.AbstractEventLoop) -> OpenaiRealtimeHandler:
 
 def _build_handler_simple() -> OpenaiRealtimeHandler:
     """Build handler without needing explicit event loop."""
+    # Ensure an event loop exists for tests that aren't async
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop - create and set one for non-async tests
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
     return OpenaiRealtimeHandler(deps)
 
@@ -115,6 +122,10 @@ async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -
     # Patch the OpenAI client used by the handler
     monkeypatch.setattr(rt_mod, "AsyncOpenAI", FakeClient)
 
+    # Mock get_session_instructions to avoid profile loading
+    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test instructions")
+    monkeypatch.setattr(rt_mod, "get_session_voice", lambda: "cedar")
+
     # Build handler with minimal deps
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
     handler = rt_mod.OpenaiRealtimeHandler(deps)
@@ -199,15 +210,6 @@ class TestOpenaiRealtimeHandlerInit:
         assert handler.partial_transcript_task is None
         assert handler.partial_transcript_sequence == 0
         assert handler.partial_debounce_delay == 0.5
-
-    def test_init_session_renewal_settings(self) -> None:
-        """Test handler has session renewal settings."""
-        handler = _build_handler_simple()
-
-        assert handler._session_start_time == 0.0
-        assert handler._session_max_duration == 55 * 60
-        assert handler._session_renewal_task is None
-
 
 class TestOpenaiRealtimeHandlerCopy:
     """Tests for OpenaiRealtimeHandler copy method."""
@@ -380,20 +382,6 @@ class TestOpenaiRealtimeHandlerShutdown:
         assert handler.partial_transcript_task.cancelled() or handler.partial_transcript_task.done()
 
     @pytest.mark.asyncio
-    async def test_shutdown_cancels_renewal_task(self) -> None:
-        """Test shutdown cancels session renewal task."""
-        handler = _build_handler_simple()
-
-        async def fake_task() -> None:
-            await asyncio.sleep(10)
-
-        handler._session_renewal_task = asyncio.create_task(fake_task())
-
-        await handler.shutdown()
-
-        assert handler._session_renewal_task.cancelled() or handler._session_renewal_task.done()
-
-    @pytest.mark.asyncio
     async def test_shutdown_clears_output_queue(self) -> None:
         """Test shutdown clears output queue."""
         handler = _build_handler_simple()
@@ -497,6 +485,133 @@ class TestOpenaiRealtimeHandlerEmitDebouncedPartial:
         assert not handler.output_queue.empty()
 
 
+class TestOpenaiRealtimeHandlerEmitIdle:
+    """Tests for OpenaiRealtimeHandler emit method with idle handling."""
+
+    @pytest.mark.asyncio
+    async def test_emit_triggers_idle_signal(self) -> None:
+        """Test emit triggers idle signal when idle for > 15 seconds."""
+        handler = _build_handler_simple()
+
+        # Set up idle condition: > 15 seconds since last activity
+        handler.last_activity_time = asyncio.get_event_loop().time() - 20.0
+        handler.deps.movement_manager.is_idle = MagicMock(return_value=True)
+
+        # Mock send_idle_signal to track calls
+        send_idle_called = []
+
+        async def mock_send_idle(duration: float) -> None:
+            send_idle_called.append(duration)
+
+        handler.send_idle_signal = mock_send_idle
+
+        # Put an item in the queue so emit returns something
+        test_item = (24000, np.zeros(100, dtype=np.int16).reshape(1, -1))
+        await handler.output_queue.put(test_item)
+
+        result = await handler.emit()
+
+        # Should have called send_idle_signal
+        assert len(send_idle_called) > 0
+        assert send_idle_called[0] > 15.0
+        assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_emit_idle_signal_exception_returns_none(self) -> None:
+        """Test emit returns None when send_idle_signal raises exception."""
+        handler = _build_handler_simple()
+
+        # Set up idle condition
+        handler.last_activity_time = asyncio.get_event_loop().time() - 20.0
+        handler.deps.movement_manager.is_idle = MagicMock(return_value=True)
+
+        # Make send_idle_signal raise an exception
+        async def failing_send_idle(duration: float) -> None:
+            raise RuntimeError("Connection closed")
+
+        handler.send_idle_signal = failing_send_idle
+
+        result = await handler.emit()
+
+        # Should return None on exception
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_emit_updates_last_activity_after_idle(self) -> None:
+        """Test emit updates last_activity_time after sending idle signal."""
+        handler = _build_handler_simple()
+
+        # Set up idle condition
+        old_time = asyncio.get_event_loop().time() - 20.0
+        handler.last_activity_time = old_time
+        handler.deps.movement_manager.is_idle = MagicMock(return_value=True)
+
+        # Mock send_idle_signal
+        async def mock_send_idle(duration: float) -> None:
+            pass
+
+        handler.send_idle_signal = mock_send_idle
+
+        # Put an item in the queue
+        test_item = (24000, np.zeros(100, dtype=np.int16).reshape(1, -1))
+        await handler.output_queue.put(test_item)
+
+        await handler.emit()
+
+        # last_activity_time should be updated
+        assert handler.last_activity_time > old_time
+
+    @pytest.mark.asyncio
+    async def test_emit_no_idle_when_not_idle(self) -> None:
+        """Test emit doesn't trigger idle signal when movement_manager is not idle."""
+        handler = _build_handler_simple()
+
+        # Set up condition where enough time passed but not idle
+        handler.last_activity_time = asyncio.get_event_loop().time() - 20.0
+        handler.deps.movement_manager.is_idle = MagicMock(return_value=False)
+
+        send_idle_called = []
+
+        async def mock_send_idle(duration: float) -> None:
+            send_idle_called.append(duration)
+
+        handler.send_idle_signal = mock_send_idle
+
+        # Put an item in the queue
+        test_item = (24000, np.zeros(100, dtype=np.int16).reshape(1, -1))
+        await handler.output_queue.put(test_item)
+
+        await handler.emit()
+
+        # Should NOT have called send_idle_signal
+        assert len(send_idle_called) == 0
+
+    @pytest.mark.asyncio
+    async def test_emit_no_idle_when_recent_activity(self) -> None:
+        """Test emit doesn't trigger idle signal when activity is recent."""
+        handler = _build_handler_simple()
+
+        # Set up condition where not enough time passed
+        handler.last_activity_time = asyncio.get_event_loop().time() - 5.0  # Only 5 seconds
+        handler.deps.movement_manager.is_idle = MagicMock(return_value=True)
+
+        send_idle_called = []
+
+        async def mock_send_idle(duration: float) -> None:
+            send_idle_called.append(duration)
+
+        handler.send_idle_signal = mock_send_idle
+
+        # Put an item in the queue
+        test_item = (24000, np.zeros(100, dtype=np.int16).reshape(1, -1))
+        await handler.output_queue.put(test_item)
+
+        await handler.emit()
+
+        # Should NOT have called send_idle_signal
+        assert len(send_idle_called) == 0
+
+
 class TestOpenaiRealtimeHandlerApplyPersonality:
     """Tests for OpenaiRealtimeHandler apply_personality method."""
 
@@ -507,8 +622,8 @@ class TestOpenaiRealtimeHandlerApplyPersonality:
         handler.connection = None
 
         with patch("reachy_mini_conversation_app.config.set_custom_profile"):
-            with patch("reachy_mini_conversation_app.prompts.get_session_instructions", return_value="test"):
-                with patch("reachy_mini_conversation_app.prompts.get_session_voice", return_value="alloy"):
+            with patch("reachy_mini_conversation_app.openai_realtime.get_session_instructions", return_value="test"):
+                with patch("reachy_mini_conversation_app.openai_realtime.get_session_voice", return_value="alloy"):
                     result = await handler.apply_personality("test_profile")
 
         assert "Will take effect on next connection" in result
@@ -528,8 +643,8 @@ class TestOpenaiRealtimeHandlerApplyPersonality:
         handler.client = MagicMock()
 
         with patch("reachy_mini_conversation_app.config.set_custom_profile"):
-            with patch("reachy_mini_conversation_app.prompts.get_session_instructions", return_value="test"):
-                with patch("reachy_mini_conversation_app.prompts.get_session_voice", return_value="alloy"):
+            with patch("reachy_mini_conversation_app.openai_realtime.get_session_instructions", return_value="test"):
+                with patch("reachy_mini_conversation_app.openai_realtime.get_session_voice", return_value="alloy"):
                     with patch.object(handler, "_restart_session", new_callable=AsyncMock):
                         result = await handler.apply_personality("test_profile")
 
@@ -611,168 +726,8 @@ class TestOpenaiRealtimeHandlerPersistApiKey:
         handler._persist_api_key_if_needed()
 
 
-class TestOpenaiRealtimeHandlerCheckBackgroundCompletions:
-    """Tests for OpenaiRealtimeHandler _check_background_completions method."""
-
-    @pytest.mark.asyncio
-    async def test_check_background_completions_no_connection(self) -> None:
-        """Test _check_background_completions does nothing without connection."""
-        handler = _build_handler_simple()
-        handler.connection = None
-
-        # Should not raise
-        await handler._check_background_completions()
-
-    @pytest.mark.asyncio
-    async def test_check_background_completions_no_notifications(self) -> None:
-        """Test _check_background_completions with no notifications."""
-        handler = _build_handler_simple()
-
-        mock_conn = MagicMock()
-        handler.connection = mock_conn
-
-        with patch("reachy_mini_conversation_app.openai_realtime.BackgroundTaskManager") as mock_manager:
-            mock_instance = MagicMock()
-            mock_instance.get_pending_notification.return_value = None
-            mock_manager.get_instance.return_value = mock_instance
-
-            # Should not raise
-            await handler._check_background_completions()
-
-    @pytest.mark.asyncio
-    async def test_check_background_completions_with_notification(self) -> None:
-        """Test _check_background_completions with notification."""
-        handler = _build_handler_simple()
-
-        mock_conn = MagicMock()
-        mock_conn.conversation = MagicMock()
-        mock_conn.conversation.item = MagicMock()
-        mock_conn.conversation.item.create = AsyncMock()
-        mock_conn.response = MagicMock()
-        mock_conn.response.create = AsyncMock()
-        handler.connection = mock_conn
-
-        # Create a mock notification
-        mock_notification = MagicMock()
-        mock_notification.status.value = "completed"
-        mock_notification.task_name = "test_task"
-        mock_notification.task_id = "task123"
-        mock_notification.message = "Task finished"
-
-        with patch("reachy_mini_conversation_app.openai_realtime.BackgroundTaskManager") as mock_manager:
-            mock_instance = MagicMock()
-            # Return notification once then None
-            mock_instance.get_pending_notification.side_effect = [mock_notification, None]
-            mock_manager.get_instance.return_value = mock_instance
-
-            await handler._check_background_completions()
-
-            mock_conn.conversation.item.create.assert_called_once()
-            mock_conn.response.create.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_check_background_completions_exception(self) -> None:
-        """Test _check_background_completions handles exception."""
-        handler = _build_handler_simple()
-
-        mock_conn = MagicMock()
-        mock_conn.conversation = MagicMock()
-        mock_conn.conversation.item = MagicMock()
-        mock_conn.conversation.item.create = AsyncMock(side_effect=Exception("Connection error"))
-        handler.connection = mock_conn
-
-        mock_notification = MagicMock()
-        mock_notification.status.value = "completed"
-        mock_notification.task_name = "test_task"
-        mock_notification.task_id = "task123"
-        mock_notification.message = "Task finished"
-
-        with patch("reachy_mini_conversation_app.openai_realtime.BackgroundTaskManager") as mock_manager:
-            mock_instance = MagicMock()
-            mock_instance.get_pending_notification.side_effect = [mock_notification, None]
-            mock_manager.get_instance.return_value = mock_instance
-
-            # Should not raise, just log error
-            await handler._check_background_completions()
-
-
-class TestOpenaiRealtimeHandlerEmit:
-    """Tests for OpenaiRealtimeHandler emit method."""
-
-    @pytest.mark.asyncio
-    async def test_emit_checks_background_completions(self) -> None:
-        """Test emit calls _check_background_completions."""
-        handler = _build_handler_simple()
-
-        # Set up so idle signal is not triggered
-        handler.last_activity_time = time.monotonic()
-
-        # Add item to output queue so wait_for_item returns
-        test_item = (24000, np.zeros(100, dtype=np.int16).reshape(1, -1))
-        await handler.output_queue.put(test_item)
-
-        with patch.object(handler, "_check_background_completions", new_callable=AsyncMock) as mock_check:
-            result = await handler.emit()
-
-            mock_check.assert_called_once()
-            assert result is not None
-
-    @pytest.mark.asyncio
-    async def test_emit_sends_idle_signal_when_idle(self) -> None:
-        """Test emit sends idle signal when idle."""
-        handler = _build_handler_simple()
-
-        # Set up idle condition
-        handler.last_activity_time = time.monotonic() - 20.0  # > 15s idle
-        handler.deps.movement_manager.is_idle = MagicMock(return_value=True)
-
-        # Add item to output queue
-        test_item = (24000, np.zeros(100, dtype=np.int16).reshape(1, -1))
-        await handler.output_queue.put(test_item)
-
-        with patch.object(handler, "_check_background_completions", new_callable=AsyncMock):
-            with patch.object(handler, "send_idle_signal", new_callable=AsyncMock) as mock_idle:
-                await handler.emit()
-
-                mock_idle.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_emit_handles_idle_signal_exception(self) -> None:
-        """Test emit handles exception from send_idle_signal."""
-        handler = _build_handler_simple()
-
-        # Set up idle condition
-        handler.last_activity_time = time.monotonic() - 20.0
-        handler.deps.movement_manager.is_idle = MagicMock(return_value=True)
-
-        with patch.object(handler, "_check_background_completions", new_callable=AsyncMock):
-            with patch.object(handler, "send_idle_signal", new_callable=AsyncMock, side_effect=Exception("Error")):
-                # Should return None on exception
-                result = await handler.emit()
-                assert result is None
-
-
 class TestOpenaiRealtimeHandlerRestartSession:
     """Tests for OpenaiRealtimeHandler _restart_session method."""
-
-    @pytest.mark.asyncio
-    async def test_restart_session_cancels_renewal_task(self) -> None:
-        """Test _restart_session cancels existing renewal task."""
-        handler = _build_handler_simple()
-
-        # Create a fake renewal task
-        async def fake_task() -> None:
-            await asyncio.sleep(10)
-
-        handler._session_renewal_task = asyncio.create_task(fake_task())
-
-        # Create mock client
-        handler.client = MagicMock()
-
-        with patch.object(handler, "_run_realtime_session", new_callable=AsyncMock):
-            await handler._restart_session()
-
-        assert handler._session_renewal_task.cancelled() or handler._session_renewal_task.done()
 
     @pytest.mark.asyncio
     async def test_restart_session_closes_connection(self) -> None:
@@ -812,46 +767,6 @@ class TestOpenaiRealtimeHandlerRestartSession:
 
         with patch.object(handler, "_run_realtime_session", side_effect=mock_run_session):
             await handler._restart_session()
-
-
-class TestOpenaiRealtimeHandlerSessionRenewalLoop:
-    """Tests for OpenaiRealtimeHandler _session_renewal_loop method."""
-
-    @pytest.mark.asyncio
-    async def test_session_renewal_loop_cancellation(self) -> None:
-        """Test _session_renewal_loop handles cancellation."""
-        handler = _build_handler_simple()
-        handler._session_start_time = time.monotonic()
-        handler._session_max_duration = 10  # Short for testing
-
-        task = asyncio.create_task(handler._session_renewal_loop())
-
-        await asyncio.sleep(0.01)
-        task.cancel()
-
-        with pytest.raises(asyncio.CancelledError):
-            await task
-
-    @pytest.mark.asyncio
-    async def test_session_renewal_loop_shutdown(self) -> None:
-        """Test _session_renewal_loop exits on shutdown."""
-        handler = _build_handler_simple()
-        handler._shutdown_requested = True
-        handler._session_start_time = time.monotonic()
-
-        # Should exit immediately
-        await handler._session_renewal_loop()
-
-    @pytest.mark.asyncio
-    async def test_session_renewal_loop_triggers_restart(self) -> None:
-        """Test _session_renewal_loop triggers restart when time expires."""
-        handler = _build_handler_simple()
-        handler._session_start_time = time.monotonic() - 3600  # Already past duration
-        handler._session_max_duration = 60  # 1 minute
-
-        with patch.object(handler, "_restart_session", new_callable=AsyncMock) as mock_restart:
-            await handler._session_renewal_loop()
-            mock_restart.assert_called_once()
 
 
 class TestOpenaiRealtimeHandlerPersistApiKeyExtended:
@@ -1059,19 +974,6 @@ class TestOpenaiRealtimeHandlerGetAvailableVoicesExtended:
 
 class TestOpenaiRealtimeHandlerShutdownExtended:
     """Extended tests for shutdown method."""
-
-    @pytest.mark.asyncio
-    async def test_shutdown_clears_background_task_manager(self) -> None:
-        """Test shutdown clears BackgroundTaskManager connection."""
-        handler = _build_handler_simple()
-
-        with patch("reachy_mini_conversation_app.openai_realtime.BackgroundTaskManager") as mock_manager:
-            mock_instance = MagicMock()
-            mock_manager.get_instance.return_value = mock_instance
-
-            await handler.shutdown()
-
-            mock_instance.clear_connection.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_shutdown_handles_connection_closed_error(self) -> None:
@@ -2153,21 +2055,6 @@ class TestOpenaiRealtimeHandlerRunRealtimeSession:
         deps.head_wobbler.reset.assert_called()
 
 
-class TestOpenaiRealtimeHandlerSessionRenewalLoopExtended:
-    """Extended tests for _session_renewal_loop method."""
-
-    @pytest.mark.asyncio
-    async def test_session_renewal_loop_exception(self) -> None:
-        """Test _session_renewal_loop handles exception."""
-        handler = _build_handler_simple()
-        handler._session_start_time = time.monotonic() - 3600
-        handler._session_max_duration = 60
-
-        with patch.object(handler, "_restart_session", new_callable=AsyncMock, side_effect=Exception("Restart error")):
-            # Should handle exception gracefully
-            await handler._session_renewal_loop()
-
-
 class TestOpenaiRealtimeHandlerRestartSessionExtended:
     """Extended tests for _restart_session method."""
 
@@ -2887,27 +2774,6 @@ class TestReceiveResample:
         await handler.receive(frame)
 
         mock_input_audio_buffer.append.assert_called_once()
-
-
-class TestEmitBackgroundCompletionException:
-    """Tests for emit() background completion exception."""
-
-    @pytest.mark.asyncio
-    async def test_emit_handles_background_check_exception(self) -> None:
-        """Test emit() handles exception during background check (lines 581-582)."""
-        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
-        handler = rt_mod.OpenaiRealtimeHandler(deps)
-        handler.last_activity_time = time.monotonic()
-
-        # Make _check_background_completions raise
-        async def failing_check() -> None:
-            raise RuntimeError("Check failed")
-
-        with patch.object(handler, "_check_background_completions", failing_check):
-            # Should not raise, returns item from queue
-            handler.output_queue.put_nowait((24000, np.array([1, 2, 3], dtype=np.int16)))
-            result = await handler.emit()
-            assert result is not None
 
 
 class TestShutdownConnectionClosedError:
@@ -3643,149 +3509,61 @@ class TestCollectExceptionInVoices:
 
 
 class TestRestartSessionOuterExceptionCoverage:
-    """Test lines 244-245: exception in outer try block of _restart_session."""
+    """Test lines 229-230: exception in outer try block of _restart_session."""
 
     @pytest.mark.asyncio
-    async def test_restart_session_outer_exception_logged(self, monkeypatch: Any, caplog: Any) -> None:
-        """Test lines 244-245: outer exception is caught and logged."""
+    async def test_restart_session_outer_exception_from_create_task(self, monkeypatch: Any, caplog: Any) -> None:
+        """Test lines 229-230: outer exception when asyncio.create_task fails."""
         caplog.set_level(logging.WARNING)
 
         handler = _build_handler_simple()
+        handler.client = MagicMock()  # Has a client
 
-        # Make _shutdown_requested raise when accessed
-        def raise_on_shutdown_access() -> bool:
-            raise RuntimeError("Unexpected error in _restart_session")
+        # Make asyncio.create_task raise an exception
+        def failing_create_task(coro: Any, *, name: str | None = None) -> Any:
+            # Close the coroutine to avoid warning
+            coro.close()
+            raise RuntimeError("create_task failed")
 
-        # Actually, we need to make something inside the outer try block fail
-        # but not inside the inner try blocks. The outer try starts at line 207.
-        # Let me check what's in that outer try block that isn't already covered.
-
-        # We can make the initial check fail by making _shutdown_requested raise
-        # Use object.__setattr__ to bypass mypy's property assignment check
-        object.__setattr__(handler, "_shutdown_requested", property(lambda self: (_ for _ in ()).throw(RuntimeError("test"))))
-
-        async def patched_restart() -> None:
-            # Make something fail that triggers lines 244-245
-            raise RuntimeError("Outer exception")
-
-        # Actually we need to trigger the specific lines. Let me check: the outer
-        # try block catches exceptions at 244-245. We need to make something fail
-        # that's NOT caught by the inner exception handlers.
-
-        # The easiest way is to make self.client.realtime.connect() fail
-        # before entering the context manager.
-        handler.client = MagicMock()
-        handler.client.realtime.connect.side_effect = RuntimeError("Connect failed")
-
-        # Mock get_session_instructions to avoid profile loading
-        monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test instructions")
+        monkeypatch.setattr(asyncio, "create_task", failing_create_task)
 
         await handler._restart_session()
 
-        assert "failed" in caplog.text.lower() or len(caplog.records) >= 0
-
-
-class TestRestartSessionOuterExceptionBeforeInnerTry:
-    """Test lines 244-245: exception before inner try blocks in _restart_session."""
+        # Should have logged the warning at lines 229-230
+        assert "_restart_session failed" in caplog.text or "create_task failed" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_restart_session_exception_accessing_renewal_task(self, monkeypatch: Any, caplog: Any) -> None:
-        """Test lines 244-245: exception when accessing _session_renewal_task.
-
-        We make _session_renewal_task a property that raises on access.
-        """
+    async def test_restart_session_outer_exception_from_event_wait(self, monkeypatch: Any, caplog: Any) -> None:
+        """Test lines 229-230: outer exception when wait_for raises non-TimeoutError."""
         caplog.set_level(logging.WARNING)
 
         handler = _build_handler_simple()
+        handler.client = MagicMock()  # Has a client
 
-        # Make _session_renewal_task raise when accessed
-        class RaisingOnAccess:
-            def __bool__(self) -> bool:
-                raise RuntimeError("Cannot access renewal task")
-
-        object.__setattr__(handler, "_session_renewal_task", RaisingOnAccess())
-
-        await handler._restart_session()
-
-        # Should have logged the warning at line 245
-        assert any("failed" in r.message.lower() for r in caplog.records)
-
-
-class TestRunRealtimeSessionRenewalTaskNone:
-    """Test line 524->exit: when _session_renewal_task is None or done()."""
-
-    @pytest.mark.asyncio
-    async def test_session_ends_with_renewal_task_done_at_finally(self, monkeypatch: Any) -> None:
-        """Test line 524->exit: renewal task is done when finally block runs.
-
-        We patch asyncio.create_task to return an already-completed task for
-        the session-renewal task, so done() returns True at line 524.
-        """
-        from reachy_mini_conversation_app.config import config
-
-        monkeypatch.setattr(config, "OPENAI_API_KEY", "test-key")
-        monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test instructions")
-
-        events: list[Any] = []
-
-        class FakeConn:
-            def __init__(self) -> None:
-                class _Session:
-                    async def update(self, **_kw: Any) -> None:
-                        pass
-                self.session = _Session()
-                self._events = iter(events)
-
-            def __aiter__(self) -> "FakeConn":
-                return self
-
-            async def __anext__(self) -> Any:
-                try:
-                    return next(self._events)
-                except StopIteration:
-                    raise StopAsyncIteration
-
-        class FakeRealtime:
-            @staticmethod
-            def connect(model: str) -> Any:
-                from contextlib import asynccontextmanager
-
-                @asynccontextmanager
-                async def _ctx() -> Any:
-                    yield FakeConn()
-                return _ctx()
-
-        class FakeClient:
-            def __init__(self, api_key: str) -> None:
-                self.realtime = FakeRealtime
-
-        monkeypatch.setattr(rt_mod, "AsyncOpenAI", FakeClient)
-
-        # Patch asyncio.create_task to return done task for renewal
-        original_create_task = asyncio.create_task
-        already_done_task: asyncio.Task[None] | None = None
-
-        async def noop() -> None:
-            pass
-
-        # Create a task that's already done
-        already_done_task = asyncio.create_task(noop())
-        await already_done_task  # Ensure it's done
-
-        def patched_create_task(coro: Any, *, name: str | None = None) -> asyncio.Task[Any]:
-            if name == "openai-session-renewal":
-                # Cancel the actual coro to avoid it running
+        # Make wait_for raise a non-TimeoutError exception
+        async def failing_wait_for(coro: Any, timeout: float) -> None:
+            # Close the awaitable
+            if hasattr(coro, "close"):
                 coro.close()
-                return already_done_task
-            return original_create_task(coro, name=name)
+            raise RuntimeError("wait_for failed unexpectedly")
+
+        # Also need to patch create_task to return a mock task
+        async def noop_coro() -> None:
+            await asyncio.sleep(0)
+
+        original_create_task = asyncio.create_task
+
+        def patched_create_task(coro: Any, *, name: str | None = None) -> Any:
+            coro.close()  # Close the passed coroutine
+            return original_create_task(noop_coro(), name=name)
 
         monkeypatch.setattr(asyncio, "create_task", patched_create_task)
+        monkeypatch.setattr(asyncio, "wait_for", failing_wait_for)
 
-        handler = _build_handler_simple()
+        await handler._restart_session()
 
-        await handler.start_up()
-
-        # The finally block ran with renewal task.done() == True (line 524 condition False)
+        # Should have logged the warning at lines 229-230
+        assert "_restart_session failed" in caplog.text or "wait_for failed" in caplog.text
 
 
 class TestReceiveAudioSingleChannelAfterTranspose:
