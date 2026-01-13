@@ -1,6 +1,7 @@
 """Unit tests for gradio_personality module."""
 
 from __future__ import annotations
+
 import sys
 from typing import Any, cast
 from pathlib import Path
@@ -47,9 +48,7 @@ def mock_gradio_dependencies() -> Any:
             del sys.modules[mod_name]
 
     # Clear cached module imports
-    mods_to_clear = [
-        k for k in sys.modules if k.startswith("reachy_mini_conversation_app.gradio_personality")
-    ]
+    mods_to_clear = [k for k in sys.modules if k.startswith("reachy_mini_conversation_app.gradio_personality")]
     for mod_name in mods_to_clear:
         del sys.modules[mod_name]
 

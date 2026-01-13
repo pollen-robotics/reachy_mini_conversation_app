@@ -103,9 +103,7 @@ class TestHeadTrackerInit:
         """Test HeadTracker raises on model load failure."""
         from reachy_mini_conversation_app.vision.yolo_head_tracker import HeadTracker
 
-        mock_heavy_imports["huggingface_hub"].hf_hub_download.side_effect = Exception(
-            "Download failed"
-        )
+        mock_heavy_imports["huggingface_hub"].hf_hub_download.side_effect = Exception("Download failed")
 
         with pytest.raises(Exception, match="Download failed"):
             HeadTracker()

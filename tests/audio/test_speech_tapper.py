@@ -1,6 +1,5 @@
 """Unit tests for the speech_tapper module."""
 
-
 import numpy as np
 import pytest
 
@@ -143,9 +142,7 @@ class TestResampleLinear:
     def test_resample_downsample(self) -> None:
         """Test downsampling."""
         # Create 1000 samples at 48kHz, resample to 16kHz
-        audio = np.sin(np.linspace(0, 2 * np.pi, 1000, dtype=np.float32)).astype(
-            np.float32
-        )
+        audio = np.sin(np.linspace(0, 2 * np.pi, 1000, dtype=np.float32)).astype(np.float32)
         result = _resample_linear(audio, 48000, 16000)
         expected_length = int(round(1000 * 16000 / 48000))
         assert len(result) == expected_length
@@ -451,6 +448,7 @@ class TestConstants:
         assert VAD_DB_ON > VAD_DB_OFF  # Hysteresis
         assert VAD_DB_ON < 0  # Both should be negative dB
         assert VAD_DB_OFF < 0
+
     def test_swayrollrt_with_empty_audio(self) -> None:
         """Test SwayRollRT with empty audio."""
         sway = SwayRollRT()
@@ -512,7 +510,7 @@ class TestConstants:
         if result:
             for item in result:
                 assert isinstance(item, dict)
-                expected_keys = {'x_mm', 'y_mm', 'z_mm', 'roll_rad', 'pitch_rad', 'yaw_rad'}
+                expected_keys = {"x_mm", "y_mm", "z_mm", "roll_rad", "pitch_rad", "yaw_rad"}
                 assert set(item.keys()) >= expected_keys
 
 

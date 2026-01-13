@@ -1,14 +1,20 @@
 import logging
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
 
+if TYPE_CHECKING:
+    from reachy_mini.motion.recorded_move import RecordedMoves
+
 logger = logging.getLogger(__name__)
 
 # Initialize emotion library
+RECORDED_MOVES: "RecordedMoves | None" = None
+EMOTION_AVAILABLE = False
 try:
     from reachy_mini.motion.recorded_move import RecordedMoves
+
     from reachy_mini_conversation_app.dance_emotion_moves import EmotionQueueMove
 
     # Note: huggingface_hub automatically reads HF_TOKEN from environment variables
@@ -16,13 +22,11 @@ try:
     EMOTION_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Emotion library not available: {e}")
-    RECORDED_MOVES = None
-    EMOTION_AVAILABLE = False
 
 
 def get_available_emotions_and_descriptions() -> str:
     """Get formatted list of available emotions with descriptions."""
-    if not EMOTION_AVAILABLE:
+    if not EMOTION_AVAILABLE or RECORDED_MOVES is None:
         return "Emotions not available"
 
     try:
@@ -57,7 +61,7 @@ class PlayEmotion(Tool):
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Play a pre-recorded emotion."""
-        if not EMOTION_AVAILABLE:
+        if not EMOTION_AVAILABLE or RECORDED_MOVES is None:
             return {"error": "Emotion system not available"}
 
         emotion_name = kwargs.get("emotion")

@@ -5,6 +5,7 @@ conversation "personalities" (profiles) so that `main.py` stays lean.
 """
 
 from __future__ import annotations
+
 from typing import Any
 from pathlib import Path
 

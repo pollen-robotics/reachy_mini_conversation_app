@@ -174,15 +174,15 @@ class TestMoveHeadToolExecution:
         assert result["status"] == "looking front"
 
     @pytest.mark.asyncio
-    async def test_move_head_unknown_direction_uses_fallback(self, mock_deps: ToolDependencies) -> None:
-        """Test move_head with unknown direction falls back to front."""
+    async def test_move_head_unknown_direction_returns_error(self, mock_deps: ToolDependencies) -> None:
+        """Test move_head with unknown direction returns an error."""
         tool = MoveHead()
 
         result = await tool(mock_deps, direction="unknown_direction")
 
-        # In develop-upstream, unknown directions use fallback to "front"
-        assert "status" in result
-        assert "looking unknown_direction" in result["status"]
+        # Unknown directions return an error with valid directions listed
+        assert "error" in result
+        assert "direction must be one of" in result["error"]
 
     @pytest.mark.asyncio
     async def test_move_head_queues_goto_move(self, mock_deps: ToolDependencies) -> None:

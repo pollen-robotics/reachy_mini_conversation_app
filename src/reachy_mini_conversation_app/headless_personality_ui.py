@@ -7,6 +7,7 @@ callable to avoid cross-thread issues.
 """
 
 from __future__ import annotations
+
 import asyncio
 import logging
 from typing import Any, Callable, Optional
@@ -79,12 +80,12 @@ def mount_personality_routes(
             return DEFAULT_OPTION
 
     @app.get("/personalities")
-    def _list() -> dict:  # type: ignore
+    def _list() -> dict[str, Any]:
         choices = [DEFAULT_OPTION, *list_personalities()]
         return {"choices": choices, "current": _current_choice(), "startup": _startup_choice()}
 
     @app.get("/personalities/load")
-    def _load(name: str) -> dict:  # type: ignore
+    def _load(name: str) -> dict[str, Any]:
         instr = read_instructions_for(name)
         tools_txt = ""
         voice = "cedar"
@@ -107,11 +108,11 @@ def mount_personality_routes(
             "enabled_tools": enabled,
         }
 
-    @app.post("/personalities/save")
-    def _save(payload: SavePayload) -> dict:  # type: ignore
+    @app.post("/personalities/save", response_model=None)
+    def _save(payload: SavePayload) -> dict[str, Any] | JSONResponse:
         name_s = _sanitize_name(payload.name)
         if not name_s:
-            return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)  # type: ignore
+            return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)
         try:
             voice = payload.voice or "cedar"
             logger.info(
@@ -126,18 +127,18 @@ def mount_personality_routes(
             choices = [DEFAULT_OPTION, *list_personalities()]
             return {"ok": True, "value": value, "choices": choices}
         except Exception as e:
-            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
-    @app.post("/personalities/save_raw")
+    @app.post("/personalities/save_raw", response_model=None)
     def _save_raw_post(
         name: str,
         instructions: str = "",
         tools_text: str = "",
         voice: str = "cedar",
-    ) -> dict:  # type: ignore
+    ) -> dict[str, Any] | JSONResponse:
         name_s = _sanitize_name(name)
         if not name_s:
-            return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)  # type: ignore
+            return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)
         try:
             logger.info(
                 "Headless save_raw(POST): name=%r voice=%r instr_len=%d tools_len=%d",
@@ -151,13 +152,15 @@ def mount_personality_routes(
             choices = [DEFAULT_OPTION, *list_personalities()]
             return {"ok": True, "value": value, "choices": choices}
         except Exception as e:
-            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
-    @app.get("/personalities/save_raw")
-    def _save_raw_get(name: str, instructions: str = "", tools_text: str = "", voice: str = "cedar") -> dict:  # type: ignore
+    @app.get("/personalities/save_raw", response_model=None)
+    def _save_raw_get(
+        name: str, instructions: str = "", tools_text: str = "", voice: str = "cedar"
+    ) -> dict[str, Any] | JSONResponse:
         name_s = _sanitize_name(name)
         if not name_s:
-            return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)  # type: ignore
+            return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)
         try:
             logger.info(
                 "Headless save_raw(GET): name=%r voice=%r instr_len=%d tools_len=%d",
@@ -171,17 +174,17 @@ def mount_personality_routes(
             choices = [DEFAULT_OPTION, *list_personalities()]
             return {"ok": True, "value": value, "choices": choices}
         except Exception as e:
-            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
-    @app.post("/personalities/apply")
+    @app.post("/personalities/apply", response_model=None)
     async def _apply(
         payload: ApplyPayload | None = None,
         name: str | None = None,
         persist: Optional[bool] = None,
-    ) -> dict:  # type: ignore
+    ) -> dict[str, Any] | JSONResponse:
         loop = get_loop()
         if loop is None:
-            return JSONResponse({"ok": False, "error": "loop_unavailable"}, status_code=503)  # type: ignore
+            return JSONResponse({"ok": False, "error": "loop_unavailable"}, status_code=503)
 
         # Accept both JSON payload and query param for convenience
         sel_name: Optional[str] = None
@@ -212,7 +215,7 @@ def mount_personality_routes(
                     logger.warning("Failed to persist startup personality: %s", e)
             return {"ok": True, "status": status, "startup": persisted_choice}
         except Exception as e:
-            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
     @app.get("/voices")
     def _voices() -> list[str]:

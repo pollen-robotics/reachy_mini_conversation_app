@@ -4,10 +4,11 @@ import warnings
 from typing import Any, Tuple, Optional
 
 from reachy_mini import ReachyMini
+
 from reachy_mini_conversation_app.camera_worker import CameraWorker
 
 
-def parse_args() -> Tuple[argparse.Namespace, list]:  # type: ignore
+def parse_args() -> Tuple[argparse.Namespace, list[str]]:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser("Reachy Mini Conversation App")
     parser.add_argument(
@@ -48,13 +49,15 @@ def handle_vision_stuff(args: argparse.Namespace, current_robot: ReachyMini) -> 
         # Initialize head tracker if specified
         if args.head_tracker is not None:
             if args.head_tracker == "yolo":
-                from reachy_mini_conversation_app.vision.yolo_head_tracker import HeadTracker
+                from reachy_mini_conversation_app.vision.yolo_head_tracker import (
+                    HeadTracker as YoloHeadTracker,
+                )
 
-                head_tracker = HeadTracker()
+                head_tracker = YoloHeadTracker()
             elif args.head_tracker == "mediapipe":
-                from reachy_mini_toolbox.vision import HeadTracker  # type: ignore[no-redef]
+                from reachy_mini_toolbox.vision import HeadTracker as MediapipeHeadTracker
 
-                head_tracker = HeadTracker()
+                head_tracker = MediapipeHeadTracker()
 
         # Initialize camera worker
         camera_worker = CameraWorker(current_robot, head_tracker)
@@ -103,20 +106,16 @@ def setup_logger(debug: bool) -> logging.Logger:
         logging.getLogger("aioice").setLevel(logging.WARNING)
     return logger
 
+
 def log_connection_troubleshooting(logger: logging.Logger, robot_name: Optional[str]) -> None:
     """Log troubleshooting steps for connection issues."""
     logger.error("Troubleshooting steps:")
     logger.error("  1. Verify reachy-mini-daemon is running")
 
     if robot_name is not None:
-        logger.error(
-            f"  2. Daemon must be started with: --robot-name '{robot_name}'"
-        )
+        logger.error(f"  2. Daemon must be started with: --robot-name '{robot_name}'")
     else:
-        logger.error(
-            "  2. If daemon uses --robot-name, add the same flag here: "
-            "--robot-name <name>"
-        )
+        logger.error("  2. If daemon uses --robot-name, add the same flag here: --robot-name <name>")
 
     logger.error("  3. For wireless: check network connectivity")
     logger.error("  4. Review daemon logs")

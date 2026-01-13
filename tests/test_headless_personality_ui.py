@@ -77,8 +77,10 @@ def running_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
 @pytest.fixture
 def mock_get_loop(running_loop: asyncio.AbstractEventLoop) -> Any:
     """Return a callable that provides the event loop."""
+
     def _get_loop() -> asyncio.AbstractEventLoop:
         return running_loop
+
     return _get_loop
 
 
@@ -589,6 +591,7 @@ class TestPersonalitiesApplyEndpoint:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test apply when persist_personality callback raises."""
+
         def failing_persist(value: Optional[str]) -> None:
             raise RuntimeError("Persist failed")
 
@@ -776,6 +779,7 @@ class TestVoicesEndpoint:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test /voices exception in run_coroutine_threadsafe."""
+
         def get_loop() -> asyncio.AbstractEventLoop:
             return running_loop
 
@@ -1027,6 +1031,7 @@ class TestExceptionBranches:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test _startup_choice exception handling."""
+
         def raise_error() -> None:
             raise RuntimeError("Get persisted error")
 
@@ -1056,6 +1061,7 @@ class TestExceptionBranches:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test _current_choice exception handling."""
+
         class BadConfig:
             def __getattribute__(self, name: str) -> Any:
                 if name == "REACHY_MINI_CUSTOM_PROFILE":

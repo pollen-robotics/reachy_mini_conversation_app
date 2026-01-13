@@ -220,9 +220,7 @@ class TestPlayEmotionImportFailure:
 
             try:
                 # Reimport the module
-                play_emotion_module = importlib.import_module(
-                    "reachy_mini_conversation_app.tools.play_emotion"
-                )
+                play_emotion_module = importlib.import_module("reachy_mini_conversation_app.tools.play_emotion")
 
                 # Check that EMOTION_AVAILABLE is False
                 assert play_emotion_module.EMOTION_AVAILABLE is False

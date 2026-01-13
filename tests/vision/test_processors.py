@@ -141,7 +141,6 @@ class TestVisionProcessorDetermineDevice:
         mock_heavy_imports["torch"].cuda.is_available.return_value = True
         mock_heavy_imports["torch"].backends.mps.is_available.return_value = False
 
-
         # Need to reimport to get fresh instance with updated mock
         import importlib
 
@@ -559,9 +558,7 @@ class TestInitializeVisionManager:
         mock_model = MagicMock()
         mock_model.to.return_value = mock_model
 
-        with patch(
-            "reachy_mini_conversation_app.vision.processors.snapshot_download"
-        ) as mock_download:
+        with patch("reachy_mini_conversation_app.vision.processors.snapshot_download") as mock_download:
             with patch(
                 "reachy_mini_conversation_app.vision.processors.AutoProcessor.from_pretrained",
                 return_value=mock_processor,
@@ -840,8 +837,8 @@ class TestVisionProcessorEdgeCases:
                 image = np.zeros((8, 8, 3), dtype=np.uint8)
                 result = processor.process_image(image)
 
-                # With zero retries, the for loop doesn't execute and returns None
-                assert result is None
+                # With zero retries, the for loop doesn't execute and returns fallback message
+                assert result == "Vision processing failed - no retries configured"
 
 
 class TestVisionManagerEdgeCases:
@@ -972,7 +969,9 @@ class TestVisionManagerEdgeCases:
                 manager.stop()
 
                 # Should have logged the error
-                assert "error" in caplog.text.lower() or "Camera error" in str(mock_camera.get_latest_frame.side_effect)
+                assert "error" in caplog.text.lower() or "Camera error" in str(
+                    mock_camera.get_latest_frame.side_effect
+                )
 
     def test_working_loop_valid_response(self, mock_heavy_imports: dict[str, Any]) -> None:
         """Test working loop with valid vision response."""

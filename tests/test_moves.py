@@ -20,7 +20,14 @@ def mock_reachy_mini() -> Generator[dict[str, Any], None, None]:
     mock_interpolation = MagicMock()
 
     def mock_create_head_pose(
-        x: float = 0, y: float = 0, z: float = 0, roll: float = 0, pitch: float = 0, yaw: float = 0, degrees: bool = True, mm: bool = True
+        x: float = 0,
+        y: float = 0,
+        z: float = 0,
+        roll: float = 0,
+        pitch: float = 0,
+        yaw: float = 0,
+        degrees: bool = True,
+        mm: bool = True,
     ) -> NDArray[np.floating[Any]]:
         """Mock create_head_pose that returns a 4x4 matrix."""
         pose = np.eye(4, dtype=np.float32)
@@ -105,9 +112,7 @@ class TestBreathingMove:
 
         assert move.interpolation_duration == 1.0
         np.testing.assert_array_equal(move.interpolation_start_pose, start_pose)
-        np.testing.assert_array_almost_equal(
-            move.interpolation_start_antennas, [0.1, -0.1]
-        )
+        np.testing.assert_array_almost_equal(move.interpolation_start_antennas, [0.1, -0.1])
 
     def test_init_custom_duration(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test BreathingMove with custom interpolation duration."""
@@ -347,9 +352,7 @@ class TestLoopFrequencyStats:
         """Test reset clears accumulator values."""
         from reachy_mini_conversation_app.moves import LoopFrequencyStats
 
-        stats = LoopFrequencyStats(
-            mean=50.0, m2=100.0, min_freq=45.0, count=100, last_freq=48.0
-        )
+        stats = LoopFrequencyStats(mean=50.0, m2=100.0, min_freq=45.0, count=100, last_freq=48.0)
 
         stats.reset()
 
@@ -538,6 +541,7 @@ class TestMovementManagerHandleCommand:
     def test_handle_queue_move(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test handling queue_move command."""
         from reachy_mini.motion.move import Move
+
         from reachy_mini_conversation_app.moves import MovementManager
 
         mock_robot = MagicMock()
@@ -848,6 +852,7 @@ class TestMovementManagerWorkingLoop:
     def test_working_loop_processes_commands(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test working_loop processes queued commands."""
         from reachy_mini.motion.move import Move
+
         from reachy_mini_conversation_app.moves import MovementManager
 
         mock_robot = MagicMock()
@@ -953,6 +958,7 @@ class TestMovementManagerHandleCommandExtended:
     def test_handle_queue_move_with_duration_conversion_error(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test handling queue_move when duration conversion fails."""
         from reachy_mini.motion.move import Move
+
         from reachy_mini_conversation_app.moves import MovementManager
 
         mock_robot = MagicMock()
@@ -969,6 +975,7 @@ class TestMovementManagerHandleCommandExtended:
     def test_handle_queue_move_without_duration(self, mock_reachy_mini: dict[str, Any]) -> None:
         """Test handling queue_move without duration attribute."""
         from reachy_mini.motion.move import Move
+
         from reachy_mini_conversation_app.moves import MovementManager
 
         mock_robot = MagicMock()
@@ -1251,9 +1258,7 @@ class TestMovementManagerIssueControlCommand:
         manager._last_set_target_err = 0  # Long time ago
 
         # Should not raise
-        manager._issue_control_command(
-            np.eye(4, dtype=np.float32), (0.0, 0.0), 0.0
-        )
+        manager._issue_control_command(np.eye(4, dtype=np.float32), (0.0, 0.0), 0.0)
 
         # Error should be logged
         mock_robot.set_target.assert_called_once()
@@ -1270,9 +1275,7 @@ class TestMovementManagerIssueControlCommand:
         manager._last_set_target_err = time.monotonic()
         manager._set_target_err_suppressed = 0
 
-        manager._issue_control_command(
-            np.eye(4, dtype=np.float32), (0.0, 0.0), 0.0
-        )
+        manager._issue_control_command(np.eye(4, dtype=np.float32), (0.0, 0.0), 0.0)
 
         # Error counter should be incremented
         assert manager._set_target_err_suppressed == 1
@@ -1289,9 +1292,7 @@ class TestMovementManagerIssueControlCommand:
         manager._last_set_target_err = time.monotonic() - 10.0
         manager._set_target_err_suppressed = 5  # Some suppressed errors
 
-        manager._issue_control_command(
-            np.eye(4, dtype=np.float32), (0.0, 0.0), 0.0
-        )
+        manager._issue_control_command(np.eye(4, dtype=np.float32), (0.0, 0.0), 0.0)
 
         # Suppressed count should be reset
         assert manager._set_target_err_suppressed == 0
@@ -1384,7 +1385,6 @@ class TestMovementManagerStopExtended:
 
         # Thread should be stopped despite error
         assert manager._thread is None or not manager._thread.is_alive()
-
 
 
 class TestMovementManagerBranchCoverage:
@@ -1481,7 +1481,9 @@ class TestMovementManagerBranchCoverage:
 
         loop_iterations = [0]
 
-        def mock_schedule_returning_zero(loop_start: float, stats: LoopFrequencyStats) -> tuple[float, LoopFrequencyStats]:
+        def mock_schedule_returning_zero(
+            loop_start: float, stats: LoopFrequencyStats
+        ) -> tuple[float, LoopFrequencyStats]:
             """Return 0 sleep time to skip sleep call."""
             loop_iterations[0] += 1
             # After a few iterations, stop the loop

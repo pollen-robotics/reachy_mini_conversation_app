@@ -144,7 +144,6 @@ ignore = [
 [tool.ruff.lint.isort]
 length-sort = true
 lines-after-imports = 2
-no-lines-before = ["standard-library", "local-folder"]
 known-local-folder = ["reachy_mini_conversation_app"]
 known-first-party = ["reachy_mini", "reachy_mini_dances_library", "reachy_mini_toolbox"]
 split-on-trailing-comma = true
@@ -157,7 +156,8 @@ line-ending = "auto"
 
 [tool.mypy]
 python_version = "3.12"
-files = ["src/"]
+files = ["src/", "tests/"]
+mypy_path = "stubs"
 ignore_missing_imports = true
 strict = true
 show_error_codes = true

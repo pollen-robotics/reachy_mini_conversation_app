@@ -112,7 +112,10 @@ class TestConfig:
         # We test the defaults defined in the class
         assert os.getenv("MODEL_NAME", "gpt-realtime") == "gpt-realtime"
         assert os.getenv("HF_HOME", "./cache") == "./cache"
-        assert os.getenv("LOCAL_VISION_MODEL", "HuggingFaceTB/SmolVLM2-2.2B-Instruct") == "HuggingFaceTB/SmolVLM2-2.2B-Instruct"
+        assert (
+            os.getenv("LOCAL_VISION_MODEL", "HuggingFaceTB/SmolVLM2-2.2B-Instruct")
+            == "HuggingFaceTB/SmolVLM2-2.2B-Instruct"
+        )
 
 
 class TestSetCustomProfile:
@@ -182,6 +185,7 @@ class TestConfigSingleton:
         # Restore
         config.MODEL_NAME = original
 
+
 class TestSetCustomProfileExceptionHandling:
     """Tests for set_custom_profile exception handling."""
 
@@ -190,12 +194,10 @@ class TestSetCustomProfileExceptionHandling:
         from reachy_mini_conversation_app.config import config, set_custom_profile
 
         # Make config.REACHY_MINI_CUSTOM_PROFILE property raise on assignment
-        original_setattr = type(config).__setattr__
-
         def raise_on_profile_setattr(self: Any, name: str, value: Any) -> None:
             if name == "REACHY_MINI_CUSTOM_PROFILE":
                 raise RuntimeError("Config update error")
-            original_setattr(self, name, value)
+            object.__setattr__(self, name, value)
 
         monkeypatch.setattr(type(config), "__setattr__", raise_on_profile_setattr)
 
@@ -204,6 +206,7 @@ class TestSetCustomProfileExceptionHandling:
 
         # Verify env var was still set (second try block succeeded)
         import os
+
         assert os.environ.get("REACHY_MINI_CUSTOM_PROFILE") == "test_profile"
 
         # Cleanup

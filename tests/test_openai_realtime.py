@@ -54,6 +54,7 @@ def test_format_timestamp_uses_wall_clock() -> None:
     year = int(formatted[1:5])
     assert year == datetime.now(timezone.utc).year
 
+
 @pytest.mark.asyncio
 async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -> None:
     """First connection dies with ConnectionClosedError during iteration -> retried.
@@ -68,7 +69,9 @@ async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -
     monkeypatch.setattr(rt_mod, "ConnectionClosedError", FakeCCE)
 
     # Make asyncio.sleep return immediately (for backoff)
-    async def _fast_sleep(*_a: Any, **_kw: Any) -> None: return None
+    async def _fast_sleep(*_a: Any, **_kw: Any) -> None:
+        return None
+
     monkeypatch.setattr(asyncio, "sleep", _fast_sleep, raising=False)
 
     attempt_counter = {"n": 0}
@@ -80,31 +83,48 @@ async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -
             self._mode = mode
 
             class _Session:
-                async def update(self, **_kw: Any) -> None: return None
+                async def update(self, **_kw: Any) -> None:
+                    return None
+
             self.session = _Session()
 
             class _InputAudioBuffer:
-                async def append(self, **_kw: Any) -> None: return None
+                async def append(self, **_kw: Any) -> None:
+                    return None
+
             self.input_audio_buffer = _InputAudioBuffer()
 
             class _Item:
-                async def create(self, **_kw: Any) -> None: return None
+                async def create(self, **_kw: Any) -> None:
+                    return None
 
             class _Conversation:
                 item = _Item()
+
             self.conversation = _Conversation()
 
             class _Response:
-                async def create(self, **_kw: Any) -> None: return None
-                async def cancel(self, **_kw: Any) -> None: return None
+                async def create(self, **_kw: Any) -> None:
+                    return None
+
+                async def cancel(self, **_kw: Any) -> None:
+                    return None
+
             self.response = _Response()
 
-        async def __aenter__(self) -> "FakeConn": return self
-        async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> bool: return False
-        async def close(self) -> None: return None
+        async def __aenter__(self) -> "FakeConn":
+            return self
+
+        async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+            return False
+
+        async def close(self) -> None:
+            return None
 
         # Async iterator protocol
-        def __aiter__(self) -> "FakeConn": return self
+        def __aiter__(self) -> "FakeConn":
+            return self
+
         async def __anext__(self) -> None:
             if self._mode == "raise_on_iter":
                 raise FakeCCE("abrupt close (simulated)")
@@ -117,7 +137,8 @@ async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -
             return FakeConn(mode)
 
     class FakeClient:
-        def __init__(self, **_kw: Any) -> None: self.realtime = FakeRealtime()
+        def __init__(self, **_kw: Any) -> None:
+            self.realtime = FakeRealtime()
 
     # Patch the OpenAI client used by the handler
     monkeypatch.setattr(rt_mod, "AsyncOpenAI", FakeClient)
@@ -210,6 +231,7 @@ class TestOpenaiRealtimeHandlerInit:
         assert handler.partial_transcript_task is None
         assert handler.partial_transcript_sequence == 0
         assert handler.partial_debounce_delay == 0.5
+
 
 class TestOpenaiRealtimeHandlerCopy:
     """Tests for OpenaiRealtimeHandler copy method."""
@@ -498,18 +520,17 @@ class TestOpenaiRealtimeHandlerEmitIdle:
         handler.deps.movement_manager.is_idle = MagicMock(return_value=True)
 
         # Mock send_idle_signal to track calls
-        send_idle_called = []
+        send_idle_called: list[float] = []
 
-        async def mock_send_idle(duration: float) -> None:
-            send_idle_called.append(duration)
-
-        handler.send_idle_signal = mock_send_idle  # type: ignore[method-assign, assignment]
+        async def mock_send_idle(idle_duration: float) -> None:
+            send_idle_called.append(idle_duration)
 
         # Put an item in the queue so emit returns something
         test_item = (24000, np.zeros(100, dtype=np.int16).reshape(1, -1))
         await handler.output_queue.put(test_item)
 
-        result = await handler.emit()
+        with patch.object(handler, "send_idle_signal", mock_send_idle):
+            result = await handler.emit()
 
         # Should have called send_idle_signal
         assert len(send_idle_called) > 0
@@ -526,12 +547,11 @@ class TestOpenaiRealtimeHandlerEmitIdle:
         handler.deps.movement_manager.is_idle = MagicMock(return_value=True)
 
         # Make send_idle_signal raise an exception
-        async def failing_send_idle(duration: float) -> None:
+        async def failing_send_idle(idle_duration: float) -> None:
             raise RuntimeError("Connection closed")
 
-        handler.send_idle_signal = failing_send_idle  # type: ignore[method-assign, assignment]
-
-        result = await handler.emit()
+        with patch.object(handler, "send_idle_signal", failing_send_idle):
+            result = await handler.emit()
 
         # Should return None on exception
         assert result is None
@@ -547,16 +567,15 @@ class TestOpenaiRealtimeHandlerEmitIdle:
         handler.deps.movement_manager.is_idle = MagicMock(return_value=True)
 
         # Mock send_idle_signal
-        async def mock_send_idle(duration: float) -> None:
+        async def mock_send_idle(idle_duration: float) -> None:
             pass
-
-        handler.send_idle_signal = mock_send_idle  # type: ignore[method-assign, assignment]
 
         # Put an item in the queue
         test_item = (24000, np.zeros(100, dtype=np.int16).reshape(1, -1))
         await handler.output_queue.put(test_item)
 
-        await handler.emit()
+        with patch.object(handler, "send_idle_signal", mock_send_idle):
+            await handler.emit()
 
         # last_activity_time should be updated
         assert handler.last_activity_time > old_time
@@ -570,18 +589,17 @@ class TestOpenaiRealtimeHandlerEmitIdle:
         handler.last_activity_time = asyncio.get_event_loop().time() - 20.0
         handler.deps.movement_manager.is_idle = MagicMock(return_value=False)
 
-        send_idle_called = []
+        send_idle_called: list[float] = []
 
-        async def mock_send_idle(duration: float) -> None:
-            send_idle_called.append(duration)
-
-        handler.send_idle_signal = mock_send_idle  # type: ignore[method-assign, assignment]
+        async def mock_send_idle(idle_duration: float) -> None:
+            send_idle_called.append(idle_duration)
 
         # Put an item in the queue
         test_item = (24000, np.zeros(100, dtype=np.int16).reshape(1, -1))
         await handler.output_queue.put(test_item)
 
-        await handler.emit()
+        with patch.object(handler, "send_idle_signal", mock_send_idle):
+            await handler.emit()
 
         # Should NOT have called send_idle_signal
         assert len(send_idle_called) == 0
@@ -595,18 +613,17 @@ class TestOpenaiRealtimeHandlerEmitIdle:
         handler.last_activity_time = asyncio.get_event_loop().time() - 5.0  # Only 5 seconds
         handler.deps.movement_manager.is_idle = MagicMock(return_value=True)
 
-        send_idle_called = []
+        send_idle_called: list[float] = []
 
-        async def mock_send_idle(duration: float) -> None:
-            send_idle_called.append(duration)
-
-        handler.send_idle_signal = mock_send_idle  # type: ignore[method-assign, assignment]
+        async def mock_send_idle(idle_duration: float) -> None:
+            send_idle_called.append(idle_duration)
 
         # Put an item in the queue
         test_item = (24000, np.zeros(100, dtype=np.int16).reshape(1, -1))
         await handler.output_queue.put(test_item)
 
-        await handler.emit()
+        with patch.object(handler, "send_idle_signal", mock_send_idle):
+            await handler.emit()
 
         # Should NOT have called send_idle_signal
         assert len(send_idle_called) == 0
@@ -835,7 +852,9 @@ class TestOpenaiRealtimeHandlerApplyPersonalityExtended:
         handler = _build_handler_simple()
         handler.connection = None
 
-        with patch("reachy_mini_conversation_app.openai_realtime.get_session_instructions", side_effect=SystemExit("error")):
+        with patch(
+            "reachy_mini_conversation_app.openai_realtime.get_session_instructions", side_effect=SystemExit("error")
+        ):
             result = await handler.apply_personality("test_profile")
 
         assert "Failed to apply personality" in result
@@ -872,7 +891,9 @@ class TestOpenaiRealtimeHandlerApplyPersonalityExtended:
 
         with patch("reachy_mini_conversation_app.openai_realtime.get_session_instructions", return_value="test"):
             with patch("reachy_mini_conversation_app.openai_realtime.get_session_voice", return_value="alloy"):
-                with patch.object(handler, "_restart_session", new_callable=AsyncMock, side_effect=Exception("Restart failed")):
+                with patch.object(
+                    handler, "_restart_session", new_callable=AsyncMock, side_effect=Exception("Restart failed")
+                ):
                     result = await handler.apply_personality("test_profile")
 
         assert "Will take effect on next connection" in result
@@ -938,9 +959,7 @@ class TestOpenaiRealtimeHandlerGetAvailableVoicesExtended:
         handler = _build_handler_simple()
 
         mock_model = MagicMock()
-        mock_model.model_dump = MagicMock(return_value={
-            "voices": ["voice1", "voice2", "cedar"]
-        })
+        mock_model.model_dump = MagicMock(return_value={"voices": ["voice1", "voice2", "cedar"]})
 
         mock_client = MagicMock()
         mock_client.models = MagicMock()
@@ -998,14 +1017,14 @@ class TestOpenaiRealtimeHandlerStartUpGradioMode:
     async def test_start_up_gradio_mode_textbox_api_key(self, monkeypatch: Any) -> None:
         """Test start_up uses API key from textbox in gradio mode."""
         # Patch config to have no API key
-        monkeypatch.setattr(rt_mod.config, "OPENAI_API_KEY", "")  # type: ignore[attr-defined]
+        monkeypatch.setattr(rt_mod.config, "OPENAI_API_KEY", "")
 
         deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
         handler = rt_mod.OpenaiRealtimeHandler(deps, gradio_mode=True)
 
         # Mock wait_for_args to provide textbox key
         object.__setattr__(handler, "wait_for_args", AsyncMock())
-        handler.latest_args = ["", "", "", "sk-from-textbox"]
+        handler.latest_args = ("", "", "", "sk-from-textbox")
 
         # Mock the OpenAI client
         class FakeConn:
@@ -1048,13 +1067,13 @@ class TestOpenaiRealtimeHandlerStartUpGradioMode:
     @pytest.mark.asyncio
     async def test_start_up_gradio_mode_empty_textbox(self, monkeypatch: Any) -> None:
         """Test start_up falls back to config when textbox is empty."""
-        monkeypatch.setattr(rt_mod.config, "OPENAI_API_KEY", "sk-from-config")  # type: ignore[attr-defined]
+        monkeypatch.setattr(rt_mod.config, "OPENAI_API_KEY", "sk-from-config")
 
         deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
         handler = rt_mod.OpenaiRealtimeHandler(deps, gradio_mode=True)
 
         object.__setattr__(handler, "wait_for_args", AsyncMock())
-        handler.latest_args = ["", "", "", ""]  # Empty textbox
+        handler.latest_args = ("", "", "", "")  # Empty textbox
 
         class FakeConn:
             def __init__(self) -> None:
@@ -1095,7 +1114,7 @@ class TestOpenaiRealtimeHandlerStartUpGradioMode:
     @pytest.mark.asyncio
     async def test_start_up_non_gradio_missing_key(self, monkeypatch: Any) -> None:
         """Test start_up uses placeholder when key missing in non-gradio mode."""
-        monkeypatch.setattr(rt_mod.config, "OPENAI_API_KEY", "")  # type: ignore[attr-defined]
+        monkeypatch.setattr(rt_mod.config, "OPENAI_API_KEY", "")
 
         deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
         handler = rt_mod.OpenaiRealtimeHandler(deps, gradio_mode=False)
@@ -1555,7 +1574,9 @@ class TestOpenaiRealtimeHandlerRunRealtimeSession:
         handler.client = MagicMock()
         handler.client.realtime = FakeRealtime()
 
-        with patch("reachy_mini_conversation_app.openai_realtime.dispatch_tool_call", new_callable=AsyncMock) as mock_dispatch:
+        with patch(
+            "reachy_mini_conversation_app.openai_realtime.dispatch_tool_call", new_callable=AsyncMock
+        ) as mock_dispatch:
             mock_dispatch.return_value = {"status": "ok"}
             await handler._run_realtime_session()
 
@@ -1633,7 +1654,9 @@ class TestOpenaiRealtimeHandlerRunRealtimeSession:
         handler.client = MagicMock()
         handler.client.realtime = FakeRealtime()
 
-        with patch("reachy_mini_conversation_app.openai_realtime.dispatch_tool_call", new_callable=AsyncMock) as mock_dispatch:
+        with patch(
+            "reachy_mini_conversation_app.openai_realtime.dispatch_tool_call", new_callable=AsyncMock
+        ) as mock_dispatch:
             mock_dispatch.side_effect = Exception("Tool failed")
             await handler._run_realtime_session()
 
@@ -1903,7 +1926,9 @@ class TestOpenaiRealtimeHandlerRunRealtimeSession:
         handler.client = MagicMock()
         handler.client.realtime = FakeRealtime()
 
-        with patch("reachy_mini_conversation_app.openai_realtime.dispatch_tool_call", new_callable=AsyncMock) as mock_dispatch:
+        with patch(
+            "reachy_mini_conversation_app.openai_realtime.dispatch_tool_call", new_callable=AsyncMock
+        ) as mock_dispatch:
             mock_dispatch.return_value = {"b64_im": "dGVzdA=="}  # "test" in base64
             await handler._run_realtime_session()
 
@@ -1986,7 +2011,9 @@ class TestOpenaiRealtimeHandlerRunRealtimeSession:
         handler.client = MagicMock()
         handler.client.realtime = FakeRealtime()
 
-        with patch("reachy_mini_conversation_app.openai_realtime.dispatch_tool_call", new_callable=AsyncMock) as mock_dispatch:
+        with patch(
+            "reachy_mini_conversation_app.openai_realtime.dispatch_tool_call", new_callable=AsyncMock
+        ) as mock_dispatch:
             mock_dispatch.return_value = {"status": "ok"}
             await handler._run_realtime_session()
 
@@ -2142,9 +2169,7 @@ class TestStartUpRetryExhausted:
             with patch("reachy_mini_conversation_app.openai_realtime.AsyncOpenAI"):
                 # Always throw connection closed error
                 with patch.object(
-                    handler, "_run_realtime_session",
-                    new_callable=AsyncMock,
-                    side_effect=FakeCCE("Connection closed")
+                    handler, "_run_realtime_session", new_callable=AsyncMock, side_effect=FakeCCE("Connection closed")
                 ):
                     with patch("asyncio.sleep", new_callable=AsyncMock):
                         with pytest.raises(FakeCCE):
@@ -2199,6 +2224,7 @@ class TestRunRealtimeSessionEdgeCases:
                 class _Session:
                     async def update(self, **_kw: Any) -> None:
                         return None
+
                 self.session = _Session()
 
             async def __aenter__(self) -> "FakeConn":
@@ -2224,7 +2250,9 @@ class TestRunRealtimeSessionEdgeCases:
         handler.client.realtime = FakeRealtime()
 
         # Patch get_session_instructions to avoid profile lookup
-        with patch("reachy_mini_conversation_app.openai_realtime.get_session_instructions", return_value="Test instructions"):
+        with patch(
+            "reachy_mini_conversation_app.openai_realtime.get_session_instructions", return_value="Test instructions"
+        ):
             # Should not raise despite _connected_event.set() exception
             await handler._run_realtime_session()
 
@@ -2251,6 +2279,7 @@ class TestRunRealtimeSessionEdgeCases:
                 class _Session:
                     async def update(self, **_kw: Any) -> None:
                         return None
+
                 self.session = _Session()
 
             async def __aenter__(self) -> "FakeConn":
@@ -2279,7 +2308,9 @@ class TestRunRealtimeSessionEdgeCases:
         handler.client = MagicMock()
         handler.client.realtime = FakeRealtime()
 
-        with patch("reachy_mini_conversation_app.openai_realtime.get_session_instructions", return_value="Test instructions"):
+        with patch(
+            "reachy_mini_conversation_app.openai_realtime.get_session_instructions", return_value="Test instructions"
+        ):
             await handler._run_realtime_session()
 
         # The second partial should have cancelled the first
@@ -2308,6 +2339,7 @@ class TestRunRealtimeSessionEdgeCases:
                 class _Session:
                     async def update(self, **_kw: Any) -> None:
                         return None
+
                 self.session = _Session()
 
             async def __aenter__(self) -> "FakeConn":
@@ -2336,7 +2368,9 @@ class TestRunRealtimeSessionEdgeCases:
         handler.client = MagicMock()
         handler.client.realtime = FakeRealtime()
 
-        with patch("reachy_mini_conversation_app.openai_realtime.get_session_instructions", return_value="Test instructions"):
+        with patch(
+            "reachy_mini_conversation_app.openai_realtime.get_session_instructions", return_value="Test instructions"
+        ):
             await handler._run_realtime_session()
 
         # Should have put the completed transcript in output queue
@@ -2359,12 +2393,7 @@ class TestToolCallEdgeCases:
                     setattr(self, k, v)
 
         events = [
-            FakeEvent(
-                "response.function_call_arguments.done",
-                name="camera",
-                arguments="{}",
-                call_id="call_123"
-            ),
+            FakeEvent("response.function_call_arguments.done", name="camera", arguments="{}", call_id="call_123"),
         ]
         event_index = {"idx": 0}
 
@@ -2385,6 +2414,7 @@ class TestToolCallEdgeCases:
                 class _Session:
                     async def update(self, **_kw: Any) -> None:
                         return None
+
                 self.session = _Session()
                 self.conversation = FakeConversation()
                 self.response = FakeResponse()
@@ -2418,7 +2448,10 @@ class TestToolCallEdgeCases:
         # Mock dispatch_tool_call to return b64_im as bytes instead of string
         with patch.object(rt_mod, "dispatch_tool_call", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"b64_im": 12345}  # Not a string!
-            with patch("reachy_mini_conversation_app.openai_realtime.get_session_instructions", return_value="Test instructions"):
+            with patch(
+                "reachy_mini_conversation_app.openai_realtime.get_session_instructions",
+                return_value="Test instructions",
+            ):
                 await handler._run_realtime_session()
 
             # Should have logged a warning but not crashed
@@ -2443,12 +2476,7 @@ class TestToolCallEdgeCases:
                     setattr(self, k, v)
 
         events = [
-            FakeEvent(
-                "response.function_call_arguments.done",
-                name="camera",
-                arguments="{}",
-                call_id="call_123"
-            ),
+            FakeEvent("response.function_call_arguments.done", name="camera", arguments="{}", call_id="call_123"),
         ]
         event_index = {"idx": 0}
 
@@ -2469,6 +2497,7 @@ class TestToolCallEdgeCases:
                 class _Session:
                     async def update(self, **_kw: Any) -> None:
                         return None
+
                 self.session = _Session()
                 self.conversation = FakeConversation()
                 self.response = FakeResponse()
@@ -2504,7 +2533,10 @@ class TestToolCallEdgeCases:
             mock_dispatch.return_value = {"b64_im": "dGVzdA=="}  # Base64 for "test"
             with patch("reachy_mini_conversation_app.openai_realtime.gr") as mock_gr:
                 mock_gr.Image.return_value = MagicMock()
-                with patch("reachy_mini_conversation_app.openai_realtime.get_session_instructions", return_value="Test instructions"):
+                with patch(
+                    "reachy_mini_conversation_app.openai_realtime.get_session_instructions",
+                    return_value="Test instructions",
+                ):
                     await handler._run_realtime_session()
 
                 # Should have created Image with None value
@@ -2829,13 +2861,7 @@ class TestGetAvailableVoicesCollect:
 
         # Mock client.models.retrieve to return nested structure
         mock_response = MagicMock()
-        mock_response.model_dump.return_value = {
-            "voices": {
-                "nested": {
-                    "deeper": ["alloy", "echo"]
-                }
-            }
-        }
+        mock_response.model_dump.return_value = {"voices": {"nested": {"deeper": ["alloy", "echo"]}}}
 
         mock_models = MagicMock()
         mock_models.retrieve = AsyncMock(return_value=mock_response)
@@ -2941,6 +2967,7 @@ class TestAudioDeltaNoHeadWobbler:
                 class _Session:
                     async def update(self, **_kw: Any) -> None:
                         pass
+
                 self.session = _Session()
                 self._events = iter(events)
 
@@ -3012,6 +3039,7 @@ class TestToolCallNoCallId:
                 class _Session:
                     async def update(self, **_kw: Any) -> None:
                         pass
+
                 self.session = _Session()
                 self.conversation = FakeConversation()
                 self.response = FakeResponse()
@@ -3041,7 +3069,9 @@ class TestToolCallNoCallId:
         handler.client.realtime = FakeRealtime()
 
         with patch("reachy_mini_conversation_app.openai_realtime.get_session_instructions", return_value="Test"):
-            with patch("reachy_mini_conversation_app.openai_realtime.dispatch_tool_call", new_callable=AsyncMock) as mock_dispatch:
+            with patch(
+                "reachy_mini_conversation_app.openai_realtime.dispatch_tool_call", new_callable=AsyncMock
+            ) as mock_dispatch:
                 mock_dispatch.return_value = {"result": "ok"}
                 await handler._run_realtime_session()
 
@@ -3066,7 +3096,9 @@ class TestToolCallWithHeadWobblerReset:
                 for k, v in kwargs.items():
                     setattr(self, k, v)
 
-        events = [FakeEvent("response.function_call_arguments.done", name="test_tool", arguments="{}", call_id="call-123")]
+        events = [
+            FakeEvent("response.function_call_arguments.done", name="test_tool", arguments="{}", call_id="call-123")
+        ]
 
         class FakeConversationItem:
             async def create(self, **_kw: Any) -> None:
@@ -3084,6 +3116,7 @@ class TestToolCallWithHeadWobblerReset:
                 class _Session:
                     async def update(self, **_kw: Any) -> None:
                         pass
+
                 self.session = _Session()
                 self.conversation = FakeConversation()
                 self.response = FakeResponse()
@@ -3113,7 +3146,9 @@ class TestToolCallWithHeadWobblerReset:
         handler.client.realtime = FakeRealtime()
 
         with patch("reachy_mini_conversation_app.openai_realtime.get_session_instructions", return_value="Test"):
-            with patch("reachy_mini_conversation_app.openai_realtime.dispatch_tool_call", new_callable=AsyncMock) as mock_dispatch:
+            with patch(
+                "reachy_mini_conversation_app.openai_realtime.dispatch_tool_call", new_callable=AsyncMock
+            ) as mock_dispatch:
                 mock_dispatch.return_value = {"result": "ok"}
                 await handler._run_realtime_session()
 
@@ -3136,13 +3171,14 @@ class TestSessionRenewalTaskAlreadyDone:
         done_task = asyncio.create_task(completed_task())
         await done_task  # Let it complete
 
-        handler._session_renewal_task = done_task  # type: ignore[attr-defined]
+        setattr(handler, "_session_renewal_task", done_task)
 
         class FakeConn:
             def __init__(self) -> None:
                 class _Session:
                     async def update(self, **_kw: Any) -> None:
                         pass
+
                 self.session = _Session()
                 self._events: list[Any] = []
 
@@ -3243,9 +3279,7 @@ class TestCollectExceptionInGetAvailableVoices:
             def __iter__(self) -> Any:
                 raise RuntimeError("Iteration failed")
 
-        mock_response.model_dump.return_value = {
-            "voices": BadIterable()
-        }
+        mock_response.model_dump.return_value = {"voices": BadIterable()}
 
         mock_models = MagicMock()
         mock_models.retrieve = AsyncMock(return_value=mock_response)
@@ -3326,6 +3360,7 @@ class TestStartUpGradioModeConfigFallback:
                 class _Session:
                     async def update(self, **_kw: Any) -> None:
                         pass
+
                 self.session = _Session()
                 self._events = iter(events)
 
@@ -3348,6 +3383,7 @@ class TestStartUpGradioModeConfigFallback:
                 @asynccontextmanager
                 async def _ctx() -> Any:
                     yield FakeConn()
+
                 return _ctx()
 
         class FakeClient:
@@ -3366,7 +3402,7 @@ class TestStartUpGradioModeConfigFallback:
 
         object.__setattr__(handler, "wait_for_args", fake_wait_for_args)
         # args[3] is the textbox API key - empty string means fallback to config
-        handler.latest_args = [None, None, None, ""]
+        handler.latest_args = (None, None, None, "")
 
         await handler.start_up()
         assert FakeRealtime.captured_api_key == "config-api-key"
@@ -3392,6 +3428,7 @@ class TestSessionRenewalTaskDone:
                 class _Session:
                     async def update(self, **_kw: Any) -> None:
                         pass
+
                 self.session = _Session()
                 self._events = iter(events)
 
@@ -3412,6 +3449,7 @@ class TestSessionRenewalTaskDone:
                 @asynccontextmanager
                 async def _ctx() -> Any:
                     yield FakeConn()
+
                 return _ctx()
 
         class FakeClient:
@@ -3428,7 +3466,7 @@ class TestSessionRenewalTaskDone:
 
         task = asyncio.create_task(already_done())
         await task  # Ensure it's done
-        handler._session_renewal_task = task  # type: ignore[attr-defined]
+        setattr(handler, "_session_renewal_task", task)
 
         await handler.start_up()
 
@@ -3702,5 +3740,3 @@ class TestPersistApiKeyOsEnvironRaises:
 
         # Verify the function completed (didn't raise)
         # The env file check should have prevented further file operations
-
-

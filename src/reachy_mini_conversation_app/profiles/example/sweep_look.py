@@ -4,6 +4,7 @@ from typing import Any, Dict
 import numpy as np
 
 from reachy_mini.utils import create_head_pose
+
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 from reachy_mini_conversation_app.dance_emotion_moves import GotoQueueMove
 
@@ -15,7 +16,9 @@ class SweepLook(Tool):
     """Sweep head from left to right and back to center, pausing at each position."""
 
     name = "sweep_look"
-    description = "Sweep head from left to right while rotating the body, pausing at each extreme, then return to center"
+    description = (
+        "Sweep head from left to right while rotating the body, pausing at each extreme, then return to center"
+    )
     parameters_schema = {
         "type": "object",
         "properties": {},

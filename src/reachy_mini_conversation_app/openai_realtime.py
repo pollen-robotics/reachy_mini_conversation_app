@@ -3,7 +3,7 @@ import base64
 import random
 import asyncio
 import logging
-from typing import Any, Final, Tuple, Literal, Optional
+from typing import Any, Final, Tuple, Literal, Callable, Optional, cast
 from pathlib import Path
 from datetime import datetime
 
@@ -26,6 +26,8 @@ from reachy_mini_conversation_app.tools.core_tools import (
 
 
 logger = logging.getLogger(__name__)
+
+__all__ = ["OpenaiRealtimeHandler", "config"]
 
 OPEN_AI_INPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
 OPEN_AI_OUTPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
@@ -72,6 +74,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         # Internal lifecycle flags
         self._shutdown_requested: bool = False
         self._connected_event: asyncio.Event = asyncio.Event()
+
+        # Optional callback to clear audio queue (set by LocalStream in headless mode)
+        self._clear_queue: Optional[Callable[[], None]] = None
 
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
@@ -151,7 +156,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         openai_api_key = config.OPENAI_API_KEY
         if self.gradio_mode and not openai_api_key:
             # api key was not found in .env or in the environment variables
-            await self.wait_for_args()  # type: ignore[no-untyped-call]
+            await self.wait_for_args()
             args = list(self.latest_args)
             textbox_api_key = args[3] if len(args[3]) > 0 else None
             if textbox_api_key is not None:
@@ -259,7 +264,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                 "voice": get_session_voice(),
                             },
                         },
-                        "tools": get_tool_specs(),  # type: ignore[typeddict-item]
+                        "tools": cast(Any, get_tool_specs()),
                         "tool_choice": "auto",
                     },
                 )
@@ -286,7 +291,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             async for event in self.connection:
                 logger.debug(f"OpenAI event: {event.type}")
                 if event.type == "input_audio_buffer.speech_started":
-                    if hasattr(self, "_clear_queue") and callable(self._clear_queue):
+                    if self._clear_queue is not None:
                         self._clear_queue()
                     if self.deps.head_wobbler is not None:
                         self.deps.head_wobbler.reset()
@@ -527,7 +532,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
             self.last_activity_time = asyncio.get_event_loop().time()  # avoid repeated resets
 
-        return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
+        result = await wait_for_item(self.output_queue)
+        return cast(Tuple[int, NDArray[np.int16]] | AdditionalOutputs | None, result)
 
     async def shutdown(self) -> None:
         """Shutdown the handler."""

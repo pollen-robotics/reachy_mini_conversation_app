@@ -102,7 +102,7 @@ class TestDanceToolExecution:
             pytest.skip("Dance library not available")
 
         # Get a valid move name
-        available_moves = list(dance.AVAILABLE_MOVES.keys())  # type: ignore[attr-defined]
+        available_moves = list(dance.AVAILABLE_MOVES.keys())
         if not available_moves:
             pytest.skip("No moves available")
 
@@ -124,7 +124,7 @@ class TestDanceToolExecution:
         if not dance.DANCE_AVAILABLE:
             pytest.skip("Dance library not available")
 
-        available_moves = list(dance.AVAILABLE_MOVES.keys())  # type: ignore[attr-defined]
+        available_moves = list(dance.AVAILABLE_MOVES.keys())
         if not available_moves:
             pytest.skip("No moves available")
 
@@ -145,13 +145,13 @@ class TestDanceToolExecution:
         if not dance.DANCE_AVAILABLE:
             pytest.skip("Dance library not available")
 
-        if not dance.AVAILABLE_MOVES:  # type: ignore[attr-defined]
+        if not dance.AVAILABLE_MOVES:
             pytest.skip("No moves available")
 
         tool = dance.Dance()
 
         with patch("random.choice") as mock_choice:
-            mock_choice.return_value = list(dance.AVAILABLE_MOVES.keys())[0]  # type: ignore[attr-defined]
+            mock_choice.return_value = list(dance.AVAILABLE_MOVES.keys())[0]
             result = await tool(mock_deps, move="random")
 
         assert result["status"] == "queued"
@@ -165,13 +165,13 @@ class TestDanceToolExecution:
         if not dance.DANCE_AVAILABLE:
             pytest.skip("Dance library not available")
 
-        if not dance.AVAILABLE_MOVES:  # type: ignore[attr-defined]
+        if not dance.AVAILABLE_MOVES:
             pytest.skip("No moves available")
 
         tool = dance.Dance()
 
         with patch("random.choice") as mock_choice:
-            mock_choice.return_value = list(dance.AVAILABLE_MOVES.keys())[0]  # type: ignore[attr-defined]
+            mock_choice.return_value = list(dance.AVAILABLE_MOVES.keys())[0]
             result = await tool(mock_deps)  # No move parameter
 
         assert result["status"] == "queued"
@@ -185,7 +185,7 @@ class TestDanceToolExecution:
         if not dance.DANCE_AVAILABLE:
             pytest.skip("Dance library not available")
 
-        available_moves = list(dance.AVAILABLE_MOVES.keys())  # type: ignore[attr-defined]
+        available_moves = list(dance.AVAILABLE_MOVES.keys())
         if not available_moves:
             pytest.skip("No moves available")
 

@@ -132,9 +132,7 @@ class TestHandleVisionStuff:
         assert vision_manager is None
 
     @patch("reachy_mini_conversation_app.utils.CameraWorker")
-    def test_handle_vision_stuff_camera_enabled_no_tracker(
-        self, mock_camera_worker_cls: MagicMock
-    ) -> None:
+    def test_handle_vision_stuff_camera_enabled_no_tracker(self, mock_camera_worker_cls: MagicMock) -> None:
         """Test handle_vision_stuff with camera but no head tracker."""
         from reachy_mini_conversation_app.utils import handle_vision_stuff
 
@@ -155,9 +153,7 @@ class TestHandleVisionStuff:
         mock_camera_worker_cls.assert_called_once_with(mock_robot, None)
 
     @patch("reachy_mini_conversation_app.utils.CameraWorker")
-    def test_handle_vision_stuff_yolo_tracker(
-        self, mock_camera_worker_cls: MagicMock
-    ) -> None:
+    def test_handle_vision_stuff_yolo_tracker(self, mock_camera_worker_cls: MagicMock) -> None:
         """Test handle_vision_stuff with YOLO head tracker."""
         from reachy_mini_conversation_app.utils import handle_vision_stuff
 
@@ -203,6 +199,7 @@ class TestHandleVisionStuff:
 
         # Need to set up mocks before the import happens
         import sys
+
         sys.modules["reachy_mini_toolbox"] = MagicMock()
         sys.modules["reachy_mini_toolbox.vision"] = mock_mediapipe_module
 
@@ -211,6 +208,7 @@ class TestHandleVisionStuff:
             from importlib import reload
 
             import reachy_mini_conversation_app.utils as utils_module
+
             reload(utils_module)
 
             # Patch CameraWorker after reload
@@ -228,12 +226,11 @@ class TestHandleVisionStuff:
             from importlib import reload
 
             import reachy_mini_conversation_app.utils as utils_module
+
             reload(utils_module)
 
     @patch("reachy_mini_conversation_app.utils.CameraWorker")
-    def test_handle_vision_stuff_local_vision_enabled(
-        self, mock_camera_worker_cls: MagicMock
-    ) -> None:
+    def test_handle_vision_stuff_local_vision_enabled(self, mock_camera_worker_cls: MagicMock) -> None:
         """Test handle_vision_stuff with local vision enabled."""
         from reachy_mini_conversation_app.utils import handle_vision_stuff
 
@@ -262,9 +259,7 @@ class TestHandleVisionStuff:
         mock_processors_module.initialize_vision_manager.assert_called_once_with(mock_camera_worker)
 
     @patch("reachy_mini_conversation_app.utils.CameraWorker")
-    def test_handle_vision_stuff_local_vision_import_error(
-        self, mock_camera_worker_cls: MagicMock
-    ) -> None:
+    def test_handle_vision_stuff_local_vision_import_error(self, mock_camera_worker_cls: MagicMock) -> None:
         """Test handle_vision_stuff raises ImportError when local vision deps missing."""
         from reachy_mini_conversation_app.utils import handle_vision_stuff
 
@@ -281,6 +276,7 @@ class TestHandleVisionStuff:
         with patch.dict("sys.modules", {"reachy_mini_conversation_app.vision.processors": None}):
             # Force ImportError by making the module unavailable
             import sys
+
             original_modules = sys.modules.copy()
 
             def mock_import(name: str, *args: object, **kwargs: object) -> object:
@@ -427,9 +423,7 @@ class TestHandleVisionStuffEdgeCases:
     """Tests for edge cases in handle_vision_stuff function."""
 
     @patch("reachy_mini_conversation_app.utils.CameraWorker")
-    def test_handle_vision_stuff_unknown_head_tracker(
-        self, mock_camera_worker_cls: MagicMock
-    ) -> None:
+    def test_handle_vision_stuff_unknown_head_tracker(self, mock_camera_worker_cls: MagicMock) -> None:
         """Test handle_vision_stuff with unknown head tracker value (branch 60->66)."""
         from reachy_mini_conversation_app.utils import handle_vision_stuff
 

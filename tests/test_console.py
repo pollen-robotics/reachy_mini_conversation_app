@@ -1,6 +1,7 @@
 """Unit tests for console module (LocalStream)."""
 
 from __future__ import annotations
+
 import os
 import sys
 import asyncio
@@ -450,6 +451,7 @@ class TestClearAudioQueue:
     def test_clear_audio_queue_gstreamer_backend(self) -> None:
         """Test clear queue with GStreamer backend."""
         from reachy_mini.media.media_manager import MediaBackend
+
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_robot = MagicMock()
@@ -465,6 +467,7 @@ class TestClearAudioQueue:
     def test_clear_audio_queue_default_backend(self) -> None:
         """Test clear queue with DEFAULT backend."""
         from reachy_mini.media.media_manager import MediaBackend
+
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_robot = MagicMock()
@@ -479,6 +482,7 @@ class TestClearAudioQueue:
     def test_clear_audio_queue_default_no_video_backend(self) -> None:
         """Test clear queue with DEFAULT_NO_VIDEO backend."""
         from reachy_mini.media.media_manager import MediaBackend
+
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_robot = MagicMock()
@@ -565,6 +569,7 @@ class TestPlayLoop:
         additional_output.args = [{"role": "assistant", "content": "Hello"}]
 
         call_count = 0
+
         async def mock_emit() -> Any:
             nonlocal call_count
             call_count += 1
@@ -597,6 +602,7 @@ class TestPlayLoop:
         audio_data = np.zeros(1024, dtype=np.float32)
 
         call_count = 0
+
         async def mock_emit() -> tuple[int, np.ndarray[Any, np.dtype[np.floating[Any]]]] | None:
             nonlocal call_count
             call_count += 1
@@ -633,6 +639,7 @@ class TestPlayLoop:
         audio_data = np.zeros(1024, dtype=np.float32)
 
         call_count = 0
+
         async def mock_emit() -> tuple[int, np.ndarray[Any, np.dtype[np.floating[Any]]]] | None:
             nonlocal call_count
             call_count += 1
@@ -673,6 +680,7 @@ class TestPlayLoop:
         audio_data = np.zeros((2, 1024), dtype=np.float32)
 
         call_count = 0
+
         async def mock_emit() -> tuple[int, np.ndarray[Any, np.dtype[np.floating[Any]]]] | None:
             nonlocal call_count
             call_count += 1
@@ -895,6 +903,7 @@ class TestSettingsEndpoints:
             def decorator(fn: Any) -> Any:
                 registered_handlers[path] = fn
                 return fn
+
             return decorator
 
         mock_app.get.side_effect = capture_get
@@ -923,6 +932,7 @@ class TestSettingsEndpoints:
             def decorator(fn: Any) -> Any:
                 registered_handlers[path] = fn
                 return fn
+
             return decorator
 
         mock_app.get.side_effect = capture_get
@@ -950,12 +960,14 @@ class TestSettingsEndpoints:
             def decorator(fn: Any) -> Any:
                 registered_get[path] = fn
                 return fn
+
             return decorator
 
         def capture_post(path: str) -> Any:
             def decorator(fn: Any) -> Any:
                 registered_post[path] = fn
                 return fn
+
             return decorator
 
         mock_app.get.side_effect = capture_get
@@ -976,8 +988,10 @@ class TestSettingsEndpoints:
         if "/validate_api_key" in registered_post:
             # Inject fake httpx into sys.modules so import inside handler picks it
             import sys
+
             fake_httpx = MagicMock()
             fake_client = MagicMock()
+
             async def fake_get_ok(url: Any, headers: Any = None) -> MagicMock:
                 return MagicMock(status_code=200)
 
@@ -1014,6 +1028,7 @@ class TestSettingsEndpoints:
             def decorator(fn: Any) -> Any:
                 registered_get[path] = fn
                 return fn
+
             return decorator
 
         mock_app.get.side_effect = capture_get
@@ -1041,6 +1056,7 @@ class TestSettingsEndpointsExtended:
             def decorator(fn: Any) -> Any:
                 registered_handlers[path] = fn
                 return fn
+
             return decorator
 
         mock_app.get.side_effect = capture_get
@@ -1067,6 +1083,7 @@ class TestSettingsEndpointsExtended:
             def decorator(fn: Any) -> Any:
                 registered_handlers[path] = fn
                 return fn
+
             return decorator
 
         mock_app.get.side_effect = capture_get
@@ -1092,6 +1109,7 @@ class TestSettingsEndpointsExtended:
             def decorator(fn: Any) -> Any:
                 registered_handlers[path] = fn
                 return fn
+
             return decorator
 
         mock_app.get.side_effect = capture_get
@@ -1122,6 +1140,7 @@ class TestSettingsEndpointsExtended:
             def decorator(fn: Any) -> Any:
                 registered_handlers[path] = fn
                 return fn
+
             return decorator
 
         mock_app.get.side_effect = capture_get
@@ -1155,6 +1174,7 @@ class TestSettingsEndpointsExtended:
             def decorator(fn: Any) -> Any:
                 registered_post[path] = fn
                 return fn
+
             return decorator
 
         mock_app.post.side_effect = capture_post
@@ -1184,6 +1204,7 @@ class TestSettingsEndpointsExtended:
             def decorator(fn: Any) -> Any:
                 registered_post[path] = fn
                 return fn
+
             return decorator
 
         mock_app.post.side_effect = capture_post
@@ -1217,6 +1238,7 @@ class TestSettingsEndpointsExtended:
             def decorator(fn: Any) -> Any:
                 registered_post[path] = fn
                 return fn
+
             return decorator
 
         mock_app.post.side_effect = capture_post
@@ -1235,10 +1257,12 @@ class TestSettingsEndpointsExtended:
             mock_client.get = AsyncMock(return_value=mock_response)
 
             mock_httpx = MagicMock()
-            mock_httpx.AsyncClient = MagicMock(return_value=MagicMock(
-                __aenter__=AsyncMock(return_value=mock_client),
-                __aexit__=AsyncMock(return_value=None),
-            ))
+            mock_httpx.AsyncClient = MagicMock(
+                return_value=MagicMock(
+                    __aenter__=AsyncMock(return_value=mock_client),
+                    __aexit__=AsyncMock(return_value=None),
+                )
+            )
 
             with patch.dict(sys.modules, {"httpx": mock_httpx}):
                 payload = SimpleNamespace(openai_api_key="invalid-key")
@@ -1259,6 +1283,7 @@ class TestSettingsEndpointsExtended:
             def decorator(fn: Any) -> Any:
                 registered_post[path] = fn
                 return fn
+
             return decorator
 
         mock_app.post.side_effect = capture_post
@@ -1276,10 +1301,12 @@ class TestSettingsEndpointsExtended:
             mock_client.get = AsyncMock(return_value=mock_response)
 
             mock_httpx = MagicMock()
-            mock_httpx.AsyncClient = MagicMock(return_value=MagicMock(
-                __aenter__=AsyncMock(return_value=mock_client),
-                __aexit__=AsyncMock(return_value=None),
-            ))
+            mock_httpx.AsyncClient = MagicMock(
+                return_value=MagicMock(
+                    __aenter__=AsyncMock(return_value=mock_client),
+                    __aexit__=AsyncMock(return_value=None),
+                )
+            )
 
             with patch.dict(sys.modules, {"httpx": mock_httpx}):
                 payload = SimpleNamespace(openai_api_key="some-key")
@@ -1300,6 +1327,7 @@ class TestSettingsEndpointsExtended:
             def decorator(fn: Any) -> Any:
                 registered_post[path] = fn
                 return fn
+
             return decorator
 
         mock_app.post.side_effect = capture_post
@@ -1366,9 +1394,7 @@ class TestLaunch:
 
         with patch("reachy_mini_conversation_app.console.config") as mock_config:
             # First call returns empty (no key), second call returns key (after download)
-            type(mock_config).OPENAI_API_KEY = property(
-                lambda self: "downloaded-key"
-            )
+            type(mock_config).OPENAI_API_KEY = property(lambda self: "downloaded-key")
             with patch("gradio_client.Client") as mock_client:
                 mock_client_instance = MagicMock()
                 mock_client_instance.predict.return_value = ("downloaded-key", "ok")
@@ -1390,6 +1416,7 @@ class TestLaunch:
         stream = LocalStream(mock_handler, mock_robot)
 
         call_count = 0
+
         def mock_key_getter() -> str:
             nonlocal call_count
             call_count += 1
@@ -1776,6 +1803,7 @@ class TestClearAudioQueueEdgeCases:
     def test_clear_audio_queue_gstreamer_backend(self) -> None:
         """Test clear_audio_queue with GSTREAMER backend (line 517)."""
         from reachy_mini.media.media_manager import MediaBackend
+
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_handler = MagicMock()
@@ -1791,6 +1819,7 @@ class TestClearAudioQueueEdgeCases:
     def test_clear_audio_queue_default_backend(self) -> None:
         """Test clear_audio_queue with DEFAULT backend (line 518-519)."""
         from reachy_mini.media.media_manager import MediaBackend
+
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_handler = MagicMock()
@@ -1806,6 +1835,7 @@ class TestClearAudioQueueEdgeCases:
     def test_clear_audio_queue_default_no_video_backend(self) -> None:
         """Test clear_audio_queue with DEFAULT_NO_VIDEO backend (line 518)."""
         from reachy_mini.media.media_manager import MediaBackend
+
         from reachy_mini_conversation_app.console import LocalStream
 
         mock_handler = MagicMock()
@@ -2041,11 +2071,7 @@ class TestLaunchRunnerFunction:
         env_file = tmp_path / ".env"
         env_file.write_text("OPENAI_API_KEY=test-key\n")
 
-        stream = LocalStream(
-            mock_handler, mock_robot,
-            settings_app=mock_settings_app,
-            instance_path=str(tmp_path)
-        )
+        stream = LocalStream(mock_handler, mock_robot, settings_app=mock_settings_app, instance_path=str(tmp_path))
 
         captured_loop: list[asyncio.AbstractEventLoop | None] = [None]
 
@@ -2084,18 +2110,15 @@ class TestLaunchRunnerFunction:
         env_file = tmp_path / ".env"
         env_file.write_text("OPENAI_API_KEY=test-key\n")
 
-        stream = LocalStream(
-            mock_handler, mock_robot,
-            settings_app=mock_settings_app,
-            instance_path=str(tmp_path)
-        )
+        stream = LocalStream(mock_handler, mock_robot, settings_app=mock_settings_app, instance_path=str(tmp_path))
 
         runner_executed = [False]
 
         async def mock_runner_coroutine() -> None:
             runner_executed[0] = True
             # Simulate an exception when mounting personality routes
-            from reachy_mini_conversation_app.console import mount_personality_routes  # type: ignore[attr-defined]
+            from reachy_mini_conversation_app.console import mount_personality_routes
+
             with patch.object(stream, "_settings_app", mock_settings_app):
                 loop = asyncio.get_running_loop()
                 object.__setattr__(stream, "_asyncio_loop", loop)
@@ -2103,7 +2126,7 @@ class TestLaunchRunnerFunction:
                     # This should raise but be caught
                     with patch(
                         "reachy_mini_conversation_app.console.mount_personality_routes",
-                        side_effect=RuntimeError("Mount failed")
+                        side_effect=RuntimeError("Mount failed"),
                     ):
                         # Execute the inner code that would be in runner()
                         try:
@@ -2215,11 +2238,7 @@ class TestInitSettingsUiMountException:
         # Remove the mount attribute so hasattr returns False
         del mock_settings_app.mount
 
-        stream = LocalStream(
-            mock_handler, mock_robot,
-            settings_app=mock_settings_app,
-            instance_path=str(tmp_path)
-        )
+        stream = LocalStream(mock_handler, mock_robot, settings_app=mock_settings_app, instance_path=str(tmp_path))
 
         with patch("reachy_mini_conversation_app.console.StaticFiles"):
             # Should not raise
@@ -2259,6 +2278,7 @@ class TestLaunchEnvExistsNoProfile:
                         if key == "REACHY_MINI_CUSTOM_PROFILE":
                             return None  # Not set
                         return default
+
                     mock_getenv.side_effect = getenv_side_effect
 
                     with patch.object(stream, "_init_settings_ui_if_needed"):
@@ -2290,8 +2310,7 @@ class TestLaunchConfigUpdateException:
             mock_config.OPENAI_API_KEY = "old-key"
             # Make setting OPENAI_API_KEY raise
             type(mock_config).OPENAI_API_KEY = property(
-                lambda self: "old-key",
-                lambda self, v: (_ for _ in ()).throw(RuntimeError("Cannot set"))
+                lambda self: "old-key", lambda self, v: (_ for _ in ()).throw(RuntimeError("Cannot set"))
             )
 
             with patch("dotenv.load_dotenv"):
@@ -2346,7 +2365,7 @@ class TestClearAudioQueueDefaultNoVideo:
 
     def test_clear_audio_queue_default_no_video_backend(self) -> None:
         """Test clear_audio_queue with DEFAULT_NO_VIDEO backend (branch 518->520)."""
-        from reachy_mini_conversation_app.console import LocalStream, MediaBackend  # type: ignore[attr-defined]
+        from reachy_mini_conversation_app.console import LocalStream, MediaBackend
 
         mock_handler = MagicMock()
         mock_handler.output_queue = asyncio.Queue()
@@ -2389,10 +2408,7 @@ class TestPlayLoopAudio2DMultiChannel:
             stream._stop_event.clear()
             while not stream._stop_event.is_set() and iterations[0] < 1:
                 try:
-                    item: Any = await asyncio.wait_for(
-                        stream.handler.output_queue.get(),
-                        timeout=0.1
-                    )
+                    item: Any = await asyncio.wait_for(stream.handler.output_queue.get(), timeout=0.1)
                     iterations[0] += 1
 
                     if "audio" in item:
@@ -2782,11 +2798,7 @@ class TestLaunchRunnerActual:
         env_file = tmp_path / ".env"
         env_file.write_text("OPENAI_API_KEY=test-key\n")
 
-        stream = LocalStream(
-            mock_handler, mock_robot,
-            settings_app=mock_settings_app,
-            instance_path=str(tmp_path)
-        )
+        stream = LocalStream(mock_handler, mock_robot, settings_app=mock_settings_app, instance_path=str(tmp_path))
 
         async def quick_start_up() -> None:
             stream._stop_event.set()
@@ -2806,7 +2818,9 @@ class TestLaunchRunnerActual:
                     with patch("dotenv.load_dotenv"):
                         with patch.object(stream, "_init_settings_ui_if_needed"):
                             with patch("time.sleep"):
-                                with patch("reachy_mini_conversation_app.console.mount_personality_routes") as mock_mount:
+                                with patch(
+                                    "reachy_mini_conversation_app.console.mount_personality_routes"
+                                ) as mock_mount:
                                     stream.launch()
 
         mock_handler.shutdown.assert_called_once()

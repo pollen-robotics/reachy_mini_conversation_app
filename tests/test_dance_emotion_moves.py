@@ -1,6 +1,7 @@
 """Unit tests for dance_emotion_moves module."""
 
 from __future__ import annotations
+
 import sys
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -44,9 +45,7 @@ def mock_dance_emotion_dependencies() -> Any:
     mock_utils = MagicMock()
     mock_utils.create_head_pose = MagicMock(return_value=np.eye(4, dtype=np.float32))
     mock_interpolation = MagicMock()
-    mock_interpolation.linear_pose_interpolation = MagicMock(
-        return_value=np.eye(4, dtype=np.float64)
-    )
+    mock_interpolation.linear_pose_interpolation = MagicMock(return_value=np.eye(4, dtype=np.float64))
     mock_dances_lib = MagicMock()
     mock_dance_move_mod = MagicMock()
 
@@ -74,9 +73,7 @@ def mock_dance_emotion_dependencies() -> Any:
             del sys.modules[mod_name]
 
     # Clear cached module imports
-    mods_to_clear = [
-        k for k in sys.modules if k.startswith("reachy_mini_conversation_app.dance_emotion")
-    ]
+    mods_to_clear = [k for k in sys.modules if k.startswith("reachy_mini_conversation_app.dance_emotion")]
     for mod_name in mods_to_clear:
         del sys.modules[mod_name]
 
@@ -92,9 +89,7 @@ class TestDanceQueueMoveInit:
         with patch.dict(
             "sys.modules",
             {
-                "reachy_mini_dances_library.dance_move": MagicMock(
-                    DanceMove=MagicMock(return_value=mock_dance_move)
-                ),
+                "reachy_mini_dances_library.dance_move": MagicMock(DanceMove=MagicMock(return_value=mock_dance_move)),
             },
         ):
             # Force reimport
@@ -116,9 +111,7 @@ class TestDanceQueueMoveInit:
         with patch.dict(
             "sys.modules",
             {
-                "reachy_mini_dances_library.dance_move": MagicMock(
-                    DanceMove=MagicMock(return_value=mock_dance_move)
-                ),
+                "reachy_mini_dances_library.dance_move": MagicMock(DanceMove=MagicMock(return_value=mock_dance_move)),
             },
         ):
             if "reachy_mini_conversation_app.dance_emotion_moves" in sys.modules:
@@ -142,9 +135,7 @@ class TestDanceQueueMoveDuration:
         with patch.dict(
             "sys.modules",
             {
-                "reachy_mini_dances_library.dance_move": MagicMock(
-                    DanceMove=MagicMock(return_value=mock_dance_move)
-                ),
+                "reachy_mini_dances_library.dance_move": MagicMock(DanceMove=MagicMock(return_value=mock_dance_move)),
             },
         ):
             if "reachy_mini_conversation_app.dance_emotion_moves" in sys.modules:
@@ -164,9 +155,7 @@ class TestDanceQueueMoveDuration:
         with patch.dict(
             "sys.modules",
             {
-                "reachy_mini_dances_library.dance_move": MagicMock(
-                    DanceMove=MagicMock(return_value=mock_dance_move)
-                ),
+                "reachy_mini_dances_library.dance_move": MagicMock(DanceMove=MagicMock(return_value=mock_dance_move)),
             },
         ):
             if "reachy_mini_conversation_app.dance_emotion_moves" in sys.modules:
@@ -195,9 +184,7 @@ class TestDanceQueueMoveEvaluate:
         with patch.dict(
             "sys.modules",
             {
-                "reachy_mini_dances_library.dance_move": MagicMock(
-                    DanceMove=MagicMock(return_value=mock_dance_move)
-                ),
+                "reachy_mini_dances_library.dance_move": MagicMock(DanceMove=MagicMock(return_value=mock_dance_move)),
             },
         ):
             if "reachy_mini_conversation_app.dance_emotion_moves" in sys.modules:
@@ -225,9 +212,7 @@ class TestDanceQueueMoveEvaluate:
         with patch.dict(
             "sys.modules",
             {
-                "reachy_mini_dances_library.dance_move": MagicMock(
-                    DanceMove=MagicMock(return_value=mock_dance_move)
-                ),
+                "reachy_mini_dances_library.dance_move": MagicMock(DanceMove=MagicMock(return_value=mock_dance_move)),
             },
         ):
             if "reachy_mini_conversation_app.dance_emotion_moves" in sys.modules:
@@ -255,9 +240,7 @@ class TestDanceQueueMoveEvaluate:
         with patch.dict(
             "sys.modules",
             {
-                "reachy_mini_dances_library.dance_move": MagicMock(
-                    DanceMove=MagicMock(return_value=mock_dance_move)
-                ),
+                "reachy_mini_dances_library.dance_move": MagicMock(DanceMove=MagicMock(return_value=mock_dance_move)),
                 "reachy_mini.utils": mock_utils,
             },
         ):
@@ -733,9 +716,7 @@ class TestGotoQueueMoveEvaluate:
         mock_utils = MagicMock()
         mock_utils.create_head_pose = MagicMock(side_effect=RuntimeError("Pose error"))
         mock_interpolation = MagicMock()
-        mock_interpolation.linear_pose_interpolation = MagicMock(
-            side_effect=RuntimeError("Interpolation error")
-        )
+        mock_interpolation.linear_pose_interpolation = MagicMock(side_effect=RuntimeError("Interpolation error"))
 
         with patch.dict(
             "sys.modules",
@@ -760,9 +741,7 @@ class TestGotoQueueMoveEvaluate:
             assert result[0] is not None
             assert result[0].dtype == np.float64
             assert result[1] is not None
-            np.testing.assert_array_almost_equal(
-                result[1], np.array([0.5, 0.6], dtype=np.float64)
-            )
+            np.testing.assert_array_almost_equal(result[1], np.array([0.5, 0.6], dtype=np.float64))
             assert result[2] == 0.3
 
     def test_evaluate_returns_correct_types(self) -> None:

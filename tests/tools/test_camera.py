@@ -120,9 +120,7 @@ class TestCameraToolExecution:
         assert "No frame available" in result["error"]
 
     @pytest.mark.asyncio
-    async def test_camera_returns_base64_image(
-        self, mock_deps: ToolDependencies, sample_frame: NDArray[Any]
-    ) -> None:
+    async def test_camera_returns_base64_image(self, mock_deps: ToolDependencies, sample_frame: NDArray[Any]) -> None:
         """Test that camera returns base64 encoded image."""
         assert mock_deps.camera_worker is not None
         mock_deps.camera_worker.get_latest_frame.return_value = sample_frame
@@ -157,9 +155,7 @@ class TestCameraToolExecution:
                 await tool(mock_deps, question="What do you see?")
 
     @pytest.mark.asyncio
-    async def test_camera_with_vision_manager(
-        self, mock_deps: ToolDependencies, sample_frame: NDArray[Any]
-    ) -> None:
+    async def test_camera_with_vision_manager(self, mock_deps: ToolDependencies, sample_frame: NDArray[Any]) -> None:
         """Test camera with vision manager processes image."""
         assert mock_deps.camera_worker is not None
         mock_deps.camera_worker.get_latest_frame.return_value = sample_frame

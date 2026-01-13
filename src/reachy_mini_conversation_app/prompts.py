@@ -28,9 +28,9 @@ def _expand_prompt_includes(content: str) -> str:
     # Pattern to match [<name>] where name is a valid file stem (alphanumeric, underscores, hyphens)
     # pattern = re.compile(r'^\[([a-zA-Z0-9_-]+)\]$')
     # Allow slashes for subdirectories
-    pattern = re.compile(r'^\[([a-zA-Z0-9/_-]+)\]$')
+    pattern = re.compile(r"^\[([a-zA-Z0-9/_-]+)\]$")
 
-    lines = content.split('\n')
+    lines = content.split("\n")
     expanded_lines = []
 
     for line in lines:
@@ -56,7 +56,7 @@ def _expand_prompt_includes(content: str) -> str:
         else:
             expanded_lines.append(line)
 
-    return '\n'.join(expanded_lines)
+    return "\n".join(expanded_lines)
 
 
 def get_session_instructions() -> str:

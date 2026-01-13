@@ -429,6 +429,7 @@ class TestHeadWobblerIntegration:
                 assert abs(yaw) < 0.5
         finally:
             wobbler.stop()
+
     def test_generation_mismatch_during_processing(self) -> None:
         """Test when generation changes mid-processing."""
         wobbler, captured = _start_wobbler()
@@ -586,14 +587,14 @@ class TestHeadWobblerIntegration:
             wobbler.feed(_make_audio_chunk(duration_s=0.3))
 
             # Wait for processing to occur which sets _base_ts
-            assert _wait_for(lambda: wobbler._base_ts is not None, timeout=1.0), \
+            assert _wait_for(lambda: wobbler._base_ts is not None, timeout=1.0), (
                 "_base_ts should be initialized during processing"
+            )
 
             # Verify wobbler is still running
             assert wobbler._thread is not None and wobbler._thread.is_alive()
         finally:
             wobbler.stop()
-
 
     def test_base_ts_none_in_inner_loop_fallback(self) -> None:
         """Test the fallback path when base_ts is None in inner loop (lines 100-105).
@@ -682,8 +683,7 @@ class TestHeadWobblerIntegration:
             wobbler.feed(_make_audio_chunk(duration_s=0.5))
 
             # Wait for at least one offset to be applied
-            assert original_apply_offsets_called.wait(timeout=1.0), \
-                "Should have applied at least one offset"
+            assert original_apply_offsets_called.wait(timeout=1.0), "Should have applied at least one offset"
 
             # Now increment generation after the first offset
             with wobbler._state_lock:
@@ -984,10 +984,7 @@ class TestHeadWobblerIntegration:
         object.__setattr__(wobbler, "_state_lock", Line136Lock())
 
         # Only 1 result to keep the lock sequence simple
-        mock_result = {
-            "x_mm": 1.0, "y_mm": 2.0, "z_mm": 3.0,
-            "roll_rad": 0.1, "pitch_rad": 0.2, "yaw_rad": 0.3
-        }
+        mock_result = {"x_mm": 1.0, "y_mm": 2.0, "z_mm": 3.0, "roll_rad": 0.1, "pitch_rad": 0.2, "yaw_rad": 0.3}
         object.__setattr__(wobbler.sway, "feed", MagicMock(return_value=[mock_result]))
 
         audio_chunk = np.zeros((1, 2400), dtype=np.int16)

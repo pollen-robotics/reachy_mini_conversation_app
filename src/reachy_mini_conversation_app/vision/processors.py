@@ -40,8 +40,8 @@ class VisionProcessor:
         self.vision_config = vision_config or VisionConfig()
         self.model_path = self.vision_config.model_path
         self.device = self._determine_device()
-        self.processor = None
-        self.model = None
+        self.processor: AutoProcessor | None = None
+        self.model: AutoModelForImageTextToText | None = None
         self._initialized = False
 
     def _determine_device(self) -> str:
@@ -176,6 +176,8 @@ class VisionProcessor:
                     time.sleep(self.vision_config.retry_delay)
                 else:
                     return f"Vision processing error after {self.vision_config.max_retries} attempts"
+
+        return "Vision processing failed - no retries configured"
 
     def _extract_response(self, full_text: str) -> str:
         """Extract the assistant's response from the full generated text."""

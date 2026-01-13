@@ -1,6 +1,7 @@
 """Unit tests for main module (entrypoint)."""
 
 from __future__ import annotations
+
 import sys
 import time
 import argparse
@@ -40,14 +41,18 @@ def mock_main_dependencies() -> Generator[None, None, None]:
     # Create mock modules
     mock_reachy_mini = MagicMock()
     mock_reachy_mini.ReachyMini = MagicMock
-    mock_reachy_mini.ReachyMiniApp = type("ReachyMiniApp", (), {
-        "custom_app_url": "",
-        "dont_start_webserver": False,
-        "settings_app": None,
-        "_get_instance_path": lambda self: Path("/tmp/test"),
-        "wrapped_run": lambda self: None,
-        "stop": lambda self: None,
-    })
+    mock_reachy_mini.ReachyMiniApp = type(
+        "ReachyMiniApp",
+        (),
+        {
+            "custom_app_url": "",
+            "dont_start_webserver": False,
+            "settings_app": None,
+            "_get_instance_path": lambda self: Path("/tmp/test"),
+            "wrapped_run": lambda self: None,
+            "stop": lambda self: None,
+        },
+    )
 
     mock_gradio = MagicMock()
     mock_gradio.Chatbot = MagicMock(return_value=MagicMock(avatar_images=None))
@@ -265,13 +270,22 @@ class TestRunWithMockedInternalImports:
         with patch("reachy_mini_conversation_app.main.ReachyMini", mock_robot_class):
             with patch("reachy_mini_conversation_app.main.setup_logger", return_value=MagicMock()):
                 with patch("reachy_mini_conversation_app.main.handle_vision_stuff", return_value=(None, None, None)):
-                    with patch.dict("sys.modules", {
-                        "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
-                        "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
-                        "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]),
-                        "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=mocks["ToolDependencies"]),
-                        "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=mocks["HeadWobbler"]),
-                    }):
+                    with patch.dict(
+                        "sys.modules",
+                        {
+                            "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
+                            "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
+                            "reachy_mini_conversation_app.openai_realtime": MagicMock(
+                                OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]
+                            ),
+                            "reachy_mini_conversation_app.tools.core_tools": MagicMock(
+                                ToolDependencies=mocks["ToolDependencies"]
+                            ),
+                            "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(
+                                HeadWobbler=mocks["HeadWobbler"]
+                            ),
+                        },
+                    ):
                         with patch("time.sleep"):
                             run(args)
 
@@ -293,13 +307,22 @@ class TestRunWithMockedInternalImports:
         with patch("reachy_mini_conversation_app.main.ReachyMini", mock_robot_class):
             with patch("reachy_mini_conversation_app.main.setup_logger", return_value=MagicMock()):
                 with patch("reachy_mini_conversation_app.main.handle_vision_stuff", return_value=(None, None, None)):
-                    with patch.dict("sys.modules", {
-                        "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
-                        "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
-                        "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]),
-                        "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=mocks["ToolDependencies"]),
-                        "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=mocks["HeadWobbler"]),
-                    }):
+                    with patch.dict(
+                        "sys.modules",
+                        {
+                            "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
+                            "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
+                            "reachy_mini_conversation_app.openai_realtime": MagicMock(
+                                OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]
+                            ),
+                            "reachy_mini_conversation_app.tools.core_tools": MagicMock(
+                                ToolDependencies=mocks["ToolDependencies"]
+                            ),
+                            "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(
+                                HeadWobbler=mocks["HeadWobbler"]
+                            ),
+                        },
+                    ):
                         with patch("time.sleep"):
                             run(args)
 
@@ -319,13 +342,22 @@ class TestRunWithMockedInternalImports:
         with patch("reachy_mini_conversation_app.main.ReachyMini") as mock_robot_class:
             with patch("reachy_mini_conversation_app.main.setup_logger", return_value=MagicMock()):
                 with patch("reachy_mini_conversation_app.main.handle_vision_stuff", return_value=(None, None, None)):
-                    with patch.dict("sys.modules", {
-                        "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
-                        "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
-                        "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]),
-                        "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=mocks["ToolDependencies"]),
-                        "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=mocks["HeadWobbler"]),
-                    }):
+                    with patch.dict(
+                        "sys.modules",
+                        {
+                            "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
+                            "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
+                            "reachy_mini_conversation_app.openai_realtime": MagicMock(
+                                OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]
+                            ),
+                            "reachy_mini_conversation_app.tools.core_tools": MagicMock(
+                                ToolDependencies=mocks["ToolDependencies"]
+                            ),
+                            "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(
+                                HeadWobbler=mocks["HeadWobbler"]
+                            ),
+                        },
+                    ):
                         with patch("time.sleep"):
                             run(args, robot=mock_robot)
 
@@ -345,19 +377,25 @@ class TestRunWithMockedInternalImports:
 
         with patch("reachy_mini_conversation_app.main.setup_logger", return_value=mock_logger):
             with patch("reachy_mini_conversation_app.main.handle_vision_stuff", return_value=(None, None, None)):
-                with patch.dict("sys.modules", {
-                    "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
-                    "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
-                    "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]),
-                    "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=mocks["ToolDependencies"]),
-                    "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=mocks["HeadWobbler"]),
-                }):
+                with patch.dict(
+                    "sys.modules",
+                    {
+                        "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
+                        "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
+                        "reachy_mini_conversation_app.openai_realtime": MagicMock(
+                            OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]
+                        ),
+                        "reachy_mini_conversation_app.tools.core_tools": MagicMock(
+                            ToolDependencies=mocks["ToolDependencies"]
+                        ),
+                        "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=mocks["HeadWobbler"]),
+                    },
+                ):
                     with patch("time.sleep"):
                         run(args, robot=mock_robot)
 
         mock_logger.warning.assert_any_call(
-            "Head tracking disabled: --no-camera flag is set. "
-            "Remove --no-camera to enable head tracking."
+            "Head tracking disabled: --no-camera flag is set. Remove --no-camera to enable head tracking."
         )
 
     def test_run_starts_all_services(self) -> None:
@@ -377,14 +415,26 @@ class TestRunWithMockedInternalImports:
         mock_stream.launch.side_effect = KeyboardInterrupt()
 
         with patch("reachy_mini_conversation_app.main.setup_logger", return_value=MagicMock()):
-            with patch("reachy_mini_conversation_app.main.handle_vision_stuff", return_value=(mock_camera_worker, None, mock_vision_manager)):
-                with patch.dict("sys.modules", {
-                    "reachy_mini_conversation_app.moves": MagicMock(MovementManager=MagicMock(return_value=mock_movement_manager)),
-                    "reachy_mini_conversation_app.console": MagicMock(LocalStream=MagicMock(return_value=mock_stream)),
-                    "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=MagicMock()),
-                    "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=MagicMock()),
-                    "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=MagicMock(return_value=mock_head_wobbler)),
-                }):
+            with patch(
+                "reachy_mini_conversation_app.main.handle_vision_stuff",
+                return_value=(mock_camera_worker, None, mock_vision_manager),
+            ):
+                with patch.dict(
+                    "sys.modules",
+                    {
+                        "reachy_mini_conversation_app.moves": MagicMock(
+                            MovementManager=MagicMock(return_value=mock_movement_manager)
+                        ),
+                        "reachy_mini_conversation_app.console": MagicMock(
+                            LocalStream=MagicMock(return_value=mock_stream)
+                        ),
+                        "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=MagicMock()),
+                        "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=MagicMock()),
+                        "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(
+                            HeadWobbler=MagicMock(return_value=mock_head_wobbler)
+                        ),
+                    },
+                ):
                     with patch("time.sleep"):
                         run(args, robot=mock_robot)
 
@@ -410,14 +460,26 @@ class TestRunWithMockedInternalImports:
         mock_stream.launch.side_effect = KeyboardInterrupt()
 
         with patch("reachy_mini_conversation_app.main.setup_logger", return_value=MagicMock()):
-            with patch("reachy_mini_conversation_app.main.handle_vision_stuff", return_value=(mock_camera_worker, None, mock_vision_manager)):
-                with patch.dict("sys.modules", {
-                    "reachy_mini_conversation_app.moves": MagicMock(MovementManager=MagicMock(return_value=mock_movement_manager)),
-                    "reachy_mini_conversation_app.console": MagicMock(LocalStream=MagicMock(return_value=mock_stream)),
-                    "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=MagicMock()),
-                    "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=MagicMock()),
-                    "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=MagicMock(return_value=mock_head_wobbler)),
-                }):
+            with patch(
+                "reachy_mini_conversation_app.main.handle_vision_stuff",
+                return_value=(mock_camera_worker, None, mock_vision_manager),
+            ):
+                with patch.dict(
+                    "sys.modules",
+                    {
+                        "reachy_mini_conversation_app.moves": MagicMock(
+                            MovementManager=MagicMock(return_value=mock_movement_manager)
+                        ),
+                        "reachy_mini_conversation_app.console": MagicMock(
+                            LocalStream=MagicMock(return_value=mock_stream)
+                        ),
+                        "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=MagicMock()),
+                        "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=MagicMock()),
+                        "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(
+                            HeadWobbler=MagicMock(return_value=mock_head_wobbler)
+                        ),
+                    },
+                ):
                     with patch("time.sleep"):
                         run(args, robot=mock_robot)
 
@@ -441,13 +503,20 @@ class TestRunWithMockedInternalImports:
 
         with patch("reachy_mini_conversation_app.main.setup_logger", return_value=MagicMock()):
             with patch("reachy_mini_conversation_app.main.handle_vision_stuff", return_value=(None, None, None)):
-                with patch.dict("sys.modules", {
-                    "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
-                    "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
-                    "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]),
-                    "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=mocks["ToolDependencies"]),
-                    "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=mocks["HeadWobbler"]),
-                }):
+                with patch.dict(
+                    "sys.modules",
+                    {
+                        "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
+                        "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
+                        "reachy_mini_conversation_app.openai_realtime": MagicMock(
+                            OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]
+                        ),
+                        "reachy_mini_conversation_app.tools.core_tools": MagicMock(
+                            ToolDependencies=mocks["ToolDependencies"]
+                        ),
+                        "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=mocks["HeadWobbler"]),
+                    },
+                ):
                     with patch("time.sleep"):
                         # Should not raise
                         run(args, robot=mock_robot)
@@ -475,13 +544,18 @@ class TestRunWithMockedInternalImports:
 
         with patch("reachy_mini_conversation_app.main.setup_logger", return_value=MagicMock()):
             with patch("reachy_mini_conversation_app.main.handle_vision_stuff", return_value=(None, None, None)):
-                with patch.dict("sys.modules", {
-                    "reachy_mini_conversation_app.moves": MagicMock(MovementManager=MagicMock()),
-                    "reachy_mini_conversation_app.console": MagicMock(LocalStream=mock_stream_class),
-                    "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=mock_handler_class),
-                    "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=MagicMock()),
-                    "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=MagicMock()),
-                }):
+                with patch.dict(
+                    "sys.modules",
+                    {
+                        "reachy_mini_conversation_app.moves": MagicMock(MovementManager=MagicMock()),
+                        "reachy_mini_conversation_app.console": MagicMock(LocalStream=mock_stream_class),
+                        "reachy_mini_conversation_app.openai_realtime": MagicMock(
+                            OpenaiRealtimeHandler=mock_handler_class
+                        ),
+                        "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=MagicMock()),
+                        "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=MagicMock()),
+                    },
+                ):
                     with patch("time.sleep"):
                         run(args, robot=mock_robot, settings_app=mock_settings_app, instance_path="/test")
 
@@ -506,17 +580,25 @@ class TestRunWithMockedInternalImports:
 
         with patch("reachy_mini_conversation_app.main.setup_logger", return_value=MagicMock()):
             with patch("reachy_mini_conversation_app.main.handle_vision_stuff", return_value=(None, None, None)):
-                with patch.dict("sys.modules", {
-                    "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
-                    "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
-                    "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]),
-                    "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=mocks["ToolDependencies"]),
-                    "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=mocks["HeadWobbler"]),
-                }):
+                with patch.dict(
+                    "sys.modules",
+                    {
+                        "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
+                        "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
+                        "reachy_mini_conversation_app.openai_realtime": MagicMock(
+                            OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]
+                        ),
+                        "reachy_mini_conversation_app.tools.core_tools": MagicMock(
+                            ToolDependencies=mocks["ToolDependencies"]
+                        ),
+                        "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=mocks["HeadWobbler"]),
+                    },
+                ):
                     with patch("time.sleep"):
                         run(args, robot=mock_robot, app_stop_event=stop_event)
 
         # Test completed without hanging
+
     def test_run_creates_gradio_ui_when_gradio_true(self) -> None:
         """Test run creates Gradio UI when gradio=True."""
         from reachy_mini_conversation_app.main import run
@@ -544,14 +626,25 @@ class TestRunWithMockedInternalImports:
         with patch("reachy_mini_conversation_app.main.setup_logger", return_value=MagicMock()):
             with patch("reachy_mini_conversation_app.main.handle_vision_stuff", return_value=(None, None, None)):
                 with patch("reachy_mini_conversation_app.main.FastAPI", return_value=mock_fastapi_app):
-                    with patch.dict("sys.modules", {
-                        "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
-                        "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
-                        "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]),
-                        "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=mocks["ToolDependencies"]),
-                        "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=mocks["HeadWobbler"]),
-                        "reachy_mini_conversation_app.gradio_personality": MagicMock(PersonalityUI=mock_personality_ui_class),
-                    }):
+                    with patch.dict(
+                        "sys.modules",
+                        {
+                            "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
+                            "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
+                            "reachy_mini_conversation_app.openai_realtime": MagicMock(
+                                OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]
+                            ),
+                            "reachy_mini_conversation_app.tools.core_tools": MagicMock(
+                                ToolDependencies=mocks["ToolDependencies"]
+                            ),
+                            "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(
+                                HeadWobbler=mocks["HeadWobbler"]
+                            ),
+                            "reachy_mini_conversation_app.gradio_personality": MagicMock(
+                                PersonalityUI=mock_personality_ui_class
+                            ),
+                        },
+                    ):
                         with patch("fastrtc.Stream", mock_stream_class):
                             with patch("time.sleep"):
                                 run(args, robot=mock_robot)
@@ -585,14 +678,23 @@ class TestRunWithMockedInternalImports:
 
         with patch("reachy_mini_conversation_app.main.setup_logger", return_value=MagicMock()):
             with patch("reachy_mini_conversation_app.main.handle_vision_stuff", return_value=(None, None, None)):
-                with patch.dict("sys.modules", {
-                    "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
-                    "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
-                    "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]),
-                    "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=mocks["ToolDependencies"]),
-                    "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=mocks["HeadWobbler"]),
-                    "reachy_mini_conversation_app.gradio_personality": MagicMock(PersonalityUI=mock_personality_ui_class),
-                }):
+                with patch.dict(
+                    "sys.modules",
+                    {
+                        "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
+                        "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
+                        "reachy_mini_conversation_app.openai_realtime": MagicMock(
+                            OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]
+                        ),
+                        "reachy_mini_conversation_app.tools.core_tools": MagicMock(
+                            ToolDependencies=mocks["ToolDependencies"]
+                        ),
+                        "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=mocks["HeadWobbler"]),
+                        "reachy_mini_conversation_app.gradio_personality": MagicMock(
+                            PersonalityUI=mock_personality_ui_class
+                        ),
+                    },
+                ):
                     with patch("fastrtc.Stream", mock_stream_class):
                         with patch("time.sleep"):
                             run(args, robot=mock_robot, settings_app=mock_existing_app)
@@ -626,14 +728,25 @@ class TestRunWithMockedInternalImports:
         with patch("reachy_mini_conversation_app.main.setup_logger", return_value=MagicMock()):
             with patch("reachy_mini_conversation_app.main.handle_vision_stuff", return_value=(None, None, None)):
                 with patch("reachy_mini_conversation_app.main.FastAPI", return_value=MagicMock()):
-                    with patch.dict("sys.modules", {
-                        "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
-                        "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
-                        "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]),
-                        "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=mocks["ToolDependencies"]),
-                        "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=mocks["HeadWobbler"]),
-                        "reachy_mini_conversation_app.gradio_personality": MagicMock(PersonalityUI=mock_personality_ui_class),
-                    }):
+                    with patch.dict(
+                        "sys.modules",
+                        {
+                            "reachy_mini_conversation_app.moves": MagicMock(MovementManager=mocks["MovementManager"]),
+                            "reachy_mini_conversation_app.console": MagicMock(LocalStream=mocks["LocalStream"]),
+                            "reachy_mini_conversation_app.openai_realtime": MagicMock(
+                                OpenaiRealtimeHandler=mocks["OpenaiRealtimeHandler"]
+                            ),
+                            "reachy_mini_conversation_app.tools.core_tools": MagicMock(
+                                ToolDependencies=mocks["ToolDependencies"]
+                            ),
+                            "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(
+                                HeadWobbler=mocks["HeadWobbler"]
+                            ),
+                            "reachy_mini_conversation_app.gradio_personality": MagicMock(
+                                PersonalityUI=mock_personality_ui_class
+                            ),
+                        },
+                    ):
                         with patch("fastrtc.Stream", mock_stream_class):
                             with patch("time.sleep"):
                                 run(args, robot=mock_robot, app_stop_event=stop_event)
@@ -652,6 +765,7 @@ class TestRunWithMockedInternalImports:
         stop_event = threading.Event()
 
         mock_stream = MagicMock()
+
         # Make launch block until stop_event is set, then raise KeyboardInterrupt
         def launch_side_effect() -> None:
             # Set the stop event to trigger the poll_stop_event thread
@@ -667,13 +781,16 @@ class TestRunWithMockedInternalImports:
 
         with patch("reachy_mini_conversation_app.main.setup_logger", return_value=mock_logger):
             with patch("reachy_mini_conversation_app.main.handle_vision_stuff", return_value=(None, None, None)):
-                with patch.dict("sys.modules", {
-                    "reachy_mini_conversation_app.moves": MagicMock(MovementManager=MagicMock()),
-                    "reachy_mini_conversation_app.console": MagicMock(LocalStream=mock_stream_class),
-                    "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=MagicMock()),
-                    "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=MagicMock()),
-                    "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=MagicMock()),
-                }):
+                with patch.dict(
+                    "sys.modules",
+                    {
+                        "reachy_mini_conversation_app.moves": MagicMock(MovementManager=MagicMock()),
+                        "reachy_mini_conversation_app.console": MagicMock(LocalStream=mock_stream_class),
+                        "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=MagicMock()),
+                        "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=MagicMock()),
+                        "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=MagicMock()),
+                    },
+                ):
                     run(args, robot=mock_robot, app_stop_event=stop_event)
 
         # Verify the stop event shutdown path was triggered
@@ -705,13 +822,16 @@ class TestRunWithMockedInternalImports:
 
         with patch("reachy_mini_conversation_app.main.setup_logger", return_value=mock_logger):
             with patch("reachy_mini_conversation_app.main.handle_vision_stuff", return_value=(None, None, None)):
-                with patch.dict("sys.modules", {
-                    "reachy_mini_conversation_app.moves": MagicMock(MovementManager=MagicMock()),
-                    "reachy_mini_conversation_app.console": MagicMock(LocalStream=mock_stream_class),
-                    "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=MagicMock()),
-                    "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=MagicMock()),
-                    "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=MagicMock()),
-                }):
+                with patch.dict(
+                    "sys.modules",
+                    {
+                        "reachy_mini_conversation_app.moves": MagicMock(MovementManager=MagicMock()),
+                        "reachy_mini_conversation_app.console": MagicMock(LocalStream=mock_stream_class),
+                        "reachy_mini_conversation_app.openai_realtime": MagicMock(OpenaiRealtimeHandler=MagicMock()),
+                        "reachy_mini_conversation_app.tools.core_tools": MagicMock(ToolDependencies=MagicMock()),
+                        "reachy_mini_conversation_app.audio.head_wobbler": MagicMock(HeadWobbler=MagicMock()),
+                    },
+                ):
                     run(args, robot=mock_robot, app_stop_event=stop_event)
 
         # Verify the error was logged
