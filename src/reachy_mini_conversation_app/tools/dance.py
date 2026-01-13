@@ -6,9 +6,12 @@ from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["Dance", "AVAILABLE_MOVES", "DANCE_AVAILABLE"]
+
 # Initialize dance library
 try:
     from reachy_mini_dances_library.collection.dance import AVAILABLE_MOVES
+
     from reachy_mini_conversation_app.dance_emotion_moves import DanceQueueMove
 
     DANCE_AVAILABLE = True

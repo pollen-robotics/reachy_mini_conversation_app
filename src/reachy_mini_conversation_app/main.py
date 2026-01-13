@@ -6,7 +6,7 @@ import time
 import asyncio
 import argparse
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 import gradio as gr
 from fastapi import FastAPI
@@ -14,6 +14,7 @@ from fastrtc import Stream
 from gradio.utils import get_space
 
 from reachy_mini import ReachyMini, ReachyMiniApp
+
 from reachy_mini_conversation_app.utils import (
     parse_args,
     setup_logger,
@@ -36,7 +37,7 @@ def main() -> None:
 
 def run(
     args: argparse.Namespace,
-    robot: ReachyMini = None,
+    robot: Optional[ReachyMini] = None,
     app_stop_event: Optional[threading.Event] = None,
     settings_app: Optional[FastAPI] = None,
     instance_path: Optional[str] = None,
@@ -53,10 +54,7 @@ def run(
     logger.info("Starting Reachy Mini Conversation App")
 
     if args.no_camera and args.head_tracker is not None:
-        logger.warning(
-            "Head tracking disabled: --no-camera flag is set. "
-            "Remove --no-camera to enable head tracking."
-        )
+        logger.warning("Head tracking disabled: --no-camera flag is set. Remove --no-camera to enable head tracking.")
 
     if robot is None:
         try:
@@ -68,25 +66,17 @@ def run(
             robot = ReachyMini(**robot_kwargs)
 
         except TimeoutError as e:
-            logger.error(
-                "Connection timeout: Failed to connect to Reachy Mini daemon. "
-                f"Details: {e}"
-            )
+            logger.error(f"Connection timeout: Failed to connect to Reachy Mini daemon. Details: {e}")
             log_connection_troubleshooting(logger, args.robot_name)
             sys.exit(1)
 
         except ConnectionError as e:
-            logger.error(
-                "Connection failed: Unable to establish connection to Reachy Mini. "
-                f"Details: {e}"
-            )
+            logger.error(f"Connection failed: Unable to establish connection to Reachy Mini. Details: {e}")
             log_connection_troubleshooting(logger, args.robot_name)
             sys.exit(1)
 
         except Exception as e:
-            logger.error(
-                f"Unexpected error during robot initialization: {type(e).__name__}: {e}"
-            )
+            logger.error(f"Unexpected error during robot initialization: {type(e).__name__}: {e}")
             logger.error("Please check your configuration and try again.")
             sys.exit(1)
 
@@ -161,7 +151,7 @@ def run(
         else:
             app = settings_app
 
-        personality_ui.wire_events(handler, stream_manager)
+        personality_ui.wire_events(handler, cast(gr.Blocks, stream_manager))
 
         app = gr.mount_gradio_app(app, stream.ui, path="/")
     else:
@@ -181,18 +171,17 @@ def run(
     if vision_manager:
         vision_manager.start()
 
-    def poll_stop_event() -> None:
-        """Poll the stop event to allow graceful shutdown."""
-        if app_stop_event is not None:
-            app_stop_event.wait()
-
-        logger.info("App stop event detected, shutting down...")
-        try:
-            stream_manager.close()
-        except Exception as e:
-            logger.error(f"Error while closing stream manager: {e}")
-
     if app_stop_event:
+
+        def poll_stop_event() -> None:
+            """Poll the stop event to allow graceful shutdown."""
+            app_stop_event.wait()
+            logger.info("App stop event detected, shutting down...")
+            try:
+                stream_manager.close()
+            except Exception as e:
+                logger.error(f"Error while closing stream manager: {e}")
+
         threading.Thread(target=poll_stop_event, daemon=True).start()
 
     try:
@@ -219,7 +208,7 @@ def run(
         logger.info("Shutdown complete.")
 
 
-class ReachyMiniConversationApp(ReachyMiniApp):  # type: ignore[misc]
+class ReachyMiniConversationApp(ReachyMiniApp):
     """Reachy Mini Apps entry point for the conversation app."""
 
     custom_app_url = "http://0.0.0.0:7860/"

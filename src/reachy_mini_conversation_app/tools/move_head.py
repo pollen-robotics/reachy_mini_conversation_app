@@ -1,7 +1,8 @@
 import logging
-from typing import Any, Dict, Tuple, Literal
+from typing import Any, Dict, Tuple, Literal, cast, get_args
 
 from reachy_mini.utils import create_head_pose
+
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 from reachy_mini_conversation_app.dance_emotion_moves import GotoQueueMove
 
@@ -9,6 +10,7 @@ from reachy_mini_conversation_app.dance_emotion_moves import GotoQueueMove
 logger = logging.getLogger(__name__)
 
 Direction = Literal["left", "right", "up", "down", "front"]
+VALID_DIRECTIONS = get_args(Direction)
 
 
 class MoveHead(Tool):
@@ -41,7 +43,9 @@ class MoveHead(Tool):
         direction_raw = kwargs.get("direction")
         if not isinstance(direction_raw, str):
             return {"error": "direction must be a string"}
-        direction: Direction = direction_raw  # type: ignore[assignment]
+        if direction_raw not in VALID_DIRECTIONS:
+            return {"error": f"direction must be one of {VALID_DIRECTIONS}"}
+        direction = cast(Direction, direction_raw)
         logger.info("Tool call: move_head direction=%s", direction)
 
         deltas = self.DELTAS.get(direction, self.DELTAS["front"])

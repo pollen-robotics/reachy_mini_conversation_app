@@ -8,6 +8,7 @@ avoid coupling and keep responsibilities clear for headless mode.
 """
 
 from __future__ import annotations
+
 from typing import List
 from pathlib import Path
 

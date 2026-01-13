@@ -14,18 +14,25 @@ import sys
 import time
 import asyncio
 import logging
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 from pathlib import Path
+
+
+if TYPE_CHECKING:
+    from asyncio import AbstractEventLoop
 
 from fastrtc import AdditionalOutputs, audio_to_float32
 from scipy.signal import resample
 
 from reachy_mini import ReachyMini
 from reachy_mini.media.media_manager import MediaBackend
+
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
 
+
+__all__ = ["LocalStream", "MediaBackend", "mount_personality_routes"]
 
 try:
     # FastAPI is provided by the Reachy Mini Apps runtime
@@ -34,11 +41,12 @@ try:
     from fastapi.responses import FileResponse, JSONResponse
     from starlette.staticfiles import StaticFiles
 except Exception:  # pragma: no cover - only loaded when settings_app is used
-    FastAPI = object  # type: ignore
-    FileResponse = object  # type: ignore
-    JSONResponse = object  # type: ignore
-    StaticFiles = object  # type: ignore
-    BaseModel = object  # type: ignore
+    FastAPI = object  # type: ignore[misc, assignment]
+    Response = object  # type: ignore[misc, assignment]
+    FileResponse = object  # type: ignore[misc, assignment]
+    JSONResponse = object  # type: ignore[misc, assignment]
+    StaticFiles = object  # type: ignore[misc, assignment]
+    BaseModel = object  # type: ignore[misc, assignment]
 
 
 logger = logging.getLogger(__name__)
@@ -69,7 +77,7 @@ class LocalStream:
         self._settings_app: Optional[FastAPI] = settings_app
         self._instance_path: Optional[str] = instance_path
         self._settings_initialized = False
-        self._asyncio_loop = None
+        self._asyncio_loop: "AbstractEventLoop | None" = None
 
     # ---- Settings UI (only when API key is missing) ----
     def _read_env_lines(self, env_path: Path) -> list[str]:
@@ -342,6 +350,7 @@ class LocalStream:
             logger.info("OPENAI_API_KEY not set, attempting to download from HuggingFace...")
             try:
                 from gradio_client import Client
+
                 client = Client("HuggingFaceM4/gradium_setup", verbose=False)
                 key, status = client.predict(api_name="/claim_b_key")
                 if key and key.strip():
@@ -374,7 +383,7 @@ class LocalStream:
         async def runner() -> None:
             # Capture loop for cross-thread personality actions
             loop = asyncio.get_running_loop()
-            self._asyncio_loop = loop  # type: ignore[assignment]
+            self._asyncio_loop = loop
             # Mount personality routes now that loop and handler are available
             try:
                 if self._settings_app is not None:
@@ -438,7 +447,10 @@ class LocalStream:
         if self._robot.media.backend == MediaBackend.GSTREAMER:
             # Directly flush gstreamer audio pipe
             self._robot.media.audio.clear_player()
-        elif self._robot.media.backend == MediaBackend.DEFAULT or self._robot.media.backend == MediaBackend.DEFAULT_NO_VIDEO:
+        elif (
+            self._robot.media.backend == MediaBackend.DEFAULT
+            or self._robot.media.backend == MediaBackend.DEFAULT_NO_VIDEO
+        ):
             self._robot.media.audio.clear_output_buffer()
         self.handler.output_queue = asyncio.Queue()
 

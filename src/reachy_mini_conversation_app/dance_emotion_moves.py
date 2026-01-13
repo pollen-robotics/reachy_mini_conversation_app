@@ -5,6 +5,7 @@ and executed sequentially by the MovementManager.
 """
 
 from __future__ import annotations
+
 import logging
 from typing import Tuple
 
@@ -19,7 +20,7 @@ from reachy_mini_dances_library.dance_move import DanceMove
 logger = logging.getLogger(__name__)
 
 
-class DanceQueueMove(Move):  # type: ignore
+class DanceQueueMove(Move):
     """Wrapper for dance moves to work with the movement queue system."""
 
     def __init__(self, move_name: str):
@@ -53,7 +54,7 @@ class DanceQueueMove(Move):  # type: ignore
             return (neutral_head_pose, np.array([0.0, 0.0], dtype=np.float64), 0.0)
 
 
-class EmotionQueueMove(Move):  # type: ignore
+class EmotionQueueMove(Move):
     """Wrapper for emotion moves to work with the movement queue system."""
 
     def __init__(self, emotion_name: str, recorded_moves: RecordedMoves):
@@ -87,7 +88,7 @@ class EmotionQueueMove(Move):  # type: ignore
             return (neutral_head_pose, np.array([0.0, 0.0], dtype=np.float64), 0.0)
 
 
-class GotoQueueMove(Move):  # type: ignore
+class GotoQueueMove(Move):
     """Wrapper for goto moves to work with the movement queue system."""
 
     def __init__(

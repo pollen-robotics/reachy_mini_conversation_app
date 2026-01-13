@@ -32,6 +32,7 @@ Safety
 """
 
 from __future__ import annotations
+
 import time
 import logging
 import threading
@@ -61,7 +62,7 @@ CONTROL_LOOP_FREQUENCY_HZ = 100.0  # Hz - Target frequency for the movement cont
 FullBodyPose = Tuple[NDArray[np.float32], Tuple[float, float], float]  # (head_pose_4x4, antennas, body_yaw)
 
 
-class BreathingMove(Move):  # type: ignore
+class BreathingMove(Move):
     """Breathing move with interpolation to neutral and then continuous breathing patterns."""
 
     def __init__(
@@ -105,7 +106,9 @@ class BreathingMove(Move):  # type: ignore
 
             # Interpolate head pose
             head_pose = linear_pose_interpolation(
-                self.interpolation_start_pose, self.neutral_head_pose, interpolation_t,
+                self.interpolation_start_pose,
+                self.neutral_head_pose,
+                interpolation_t,
             )
 
             # Interpolate antennas
@@ -632,7 +635,9 @@ class MovementManager:
 
         return antennas_cmd
 
-    def _issue_control_command(self, head: NDArray[np.float32], antennas: Tuple[float, float], body_yaw: float) -> None:
+    def _issue_control_command(
+        self, head: NDArray[np.float32], antennas: Tuple[float, float], body_yaw: float
+    ) -> None:
         """Send the fused pose to the robot with throttled error logging."""
         try:
             self.current_robot.set_target(head=head, antennas=antennas, body_yaw=body_yaw)
@@ -652,7 +657,10 @@ class MovementManager:
                 self._last_commanded_pose = clone_full_body_pose((head, antennas, body_yaw))
 
     def _update_frequency_stats(
-        self, loop_start: float, prev_loop_start: float, stats: LoopFrequencyStats,
+        self,
+        loop_start: float,
+        prev_loop_start: float,
+        stats: LoopFrequencyStats,
     ) -> LoopFrequencyStats:
         """Update frequency statistics based on the current loop start time."""
         period = loop_start - prev_loop_start

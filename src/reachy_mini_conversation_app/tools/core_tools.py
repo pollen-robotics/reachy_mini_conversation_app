@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import abc
 import sys
 import json
@@ -10,11 +11,28 @@ from pathlib import Path
 from dataclasses import dataclass
 
 from reachy_mini import ReachyMini
+
 # Import config to ensure .env is loaded before reading REACHY_MINI_CUSTOM_PROFILE
 from reachy_mini_conversation_app.config import config  # noqa: F401
 
 
 logger = logging.getLogger(__name__)
+
+# Export symbols for testing/mocking purposes
+__all__ = [
+    "Tool",
+    "ToolDependencies",
+    "ALL_TOOLS",
+    "ALL_TOOL_SPECS",
+    "get_concrete_subclasses",
+    "get_tool_specs",
+    "dispatch_tool_call",
+    "_safe_load_obj",
+    # Exported for test mocking
+    "config",
+    "Path",
+    "importlib",
+]
 
 
 PROFILES_DIRECTORY = "reachy_mini_conversation_app.profiles"
@@ -32,8 +50,7 @@ ALL_TOOL_SPECS: List[Dict[str, Any]] = []
 _TOOLS_INITIALIZED = False
 
 
-
-def get_concrete_subclasses(base: type[Tool]) -> List[type[Tool]]:
+def get_concrete_subclasses(base: type) -> List[type[Tool]]:
     """Recursively find all concrete (non-abstract) subclasses of a base class."""
     result: List[type[Tool]] = []
     for cls in base.__subclasses__():
@@ -181,7 +198,7 @@ def _initialize_tools() -> None:
 
     _load_profile_tools()
 
-    ALL_TOOLS = {cls.name: cls() for cls in get_concrete_subclasses(Tool)}  # type: ignore[type-abstract]
+    ALL_TOOLS = {cls.name: cls() for cls in get_concrete_subclasses(Tool)}
     ALL_TOOL_SPECS = [tool.spec() for tool in ALL_TOOLS.values()]
 
     for tool_name, tool in ALL_TOOLS.items():
@@ -199,7 +216,7 @@ def get_tool_specs(exclusion_list: list[str] = []) -> list[Dict[str, Any]]:
 
 
 # Dispatcher
-def _safe_load_obj(args_json: str) -> Dict[str, Any]:
+def _safe_load_obj(args_json: str | None) -> Dict[str, Any]:
     try:
         parsed_args = json.loads(args_json or "{}")
         return parsed_args if isinstance(parsed_args, dict) else {}

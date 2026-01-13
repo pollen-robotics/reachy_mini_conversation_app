@@ -70,8 +70,9 @@ class HeadWobbler:
             try:
                 chunk_generation, sr, chunk = queue_ref.get_nowait()  # (gen, sr, data)
             except queue.Empty:
-                # avoid while to never exit
-                time.sleep(MOVEMENT_LATENCY_S)
+                # Use interruptible wait instead of time.sleep
+                if self._stop_event.wait(timeout=MOVEMENT_LATENCY_S):
+                    break  # Stop event was set
                 continue
 
             try:
@@ -118,7 +119,9 @@ class HeadWobbler:
                             continue
 
                     if target > now:
-                        time.sleep(target - now)
+                        # Use interruptible wait instead of time.sleep
+                        if self._stop_event.wait(timeout=target - now):
+                            break  # Stop event was set
                         with self._state_lock:
                             if self._generation != current_generation:
                                 break

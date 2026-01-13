@@ -49,7 +49,9 @@ class Camera(Tool):
         # Use vision manager for processing if available
         if deps.vision_manager is not None:
             vision_result = await asyncio.to_thread(
-                deps.vision_manager.processor.process_image, frame, image_query,
+                deps.vision_manager.processor.process_image,
+                frame,
+                image_query,
             )
             if isinstance(vision_result, dict) and "error" in vision_result:
                 return vision_result
@@ -60,7 +62,7 @@ class Camera(Tool):
             )
 
         # Encode image directly to JPEG bytes without writing to file
-        success, buffer = cv2.imencode('.jpg', frame)
+        success, buffer = cv2.imencode(".jpg", frame)
         if not success:
             raise RuntimeError("Failed to encode frame as JPEG")
 
