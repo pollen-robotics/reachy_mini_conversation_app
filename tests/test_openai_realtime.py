@@ -503,7 +503,7 @@ class TestOpenaiRealtimeHandlerEmitIdle:
         async def mock_send_idle(duration: float) -> None:
             send_idle_called.append(duration)
 
-        handler.send_idle_signal = mock_send_idle
+        handler.send_idle_signal = mock_send_idle  # type: ignore[method-assign, assignment]
 
         # Put an item in the queue so emit returns something
         test_item = (24000, np.zeros(100, dtype=np.int16).reshape(1, -1))
@@ -529,7 +529,7 @@ class TestOpenaiRealtimeHandlerEmitIdle:
         async def failing_send_idle(duration: float) -> None:
             raise RuntimeError("Connection closed")
 
-        handler.send_idle_signal = failing_send_idle
+        handler.send_idle_signal = failing_send_idle  # type: ignore[method-assign, assignment]
 
         result = await handler.emit()
 
@@ -550,7 +550,7 @@ class TestOpenaiRealtimeHandlerEmitIdle:
         async def mock_send_idle(duration: float) -> None:
             pass
 
-        handler.send_idle_signal = mock_send_idle
+        handler.send_idle_signal = mock_send_idle  # type: ignore[method-assign, assignment]
 
         # Put an item in the queue
         test_item = (24000, np.zeros(100, dtype=np.int16).reshape(1, -1))
@@ -575,7 +575,7 @@ class TestOpenaiRealtimeHandlerEmitIdle:
         async def mock_send_idle(duration: float) -> None:
             send_idle_called.append(duration)
 
-        handler.send_idle_signal = mock_send_idle
+        handler.send_idle_signal = mock_send_idle  # type: ignore[method-assign, assignment]
 
         # Put an item in the queue
         test_item = (24000, np.zeros(100, dtype=np.int16).reshape(1, -1))
@@ -600,7 +600,7 @@ class TestOpenaiRealtimeHandlerEmitIdle:
         async def mock_send_idle(duration: float) -> None:
             send_idle_called.append(duration)
 
-        handler.send_idle_signal = mock_send_idle
+        handler.send_idle_signal = mock_send_idle  # type: ignore[method-assign, assignment]
 
         # Put an item in the queue
         test_item = (24000, np.zeros(100, dtype=np.int16).reshape(1, -1))
@@ -998,7 +998,7 @@ class TestOpenaiRealtimeHandlerStartUpGradioMode:
     async def test_start_up_gradio_mode_textbox_api_key(self, monkeypatch: Any) -> None:
         """Test start_up uses API key from textbox in gradio mode."""
         # Patch config to have no API key
-        monkeypatch.setattr(rt_mod.config, "OPENAI_API_KEY", "")
+        monkeypatch.setattr(rt_mod.config, "OPENAI_API_KEY", "")  # type: ignore[attr-defined]
 
         deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
         handler = rt_mod.OpenaiRealtimeHandler(deps, gradio_mode=True)
@@ -1048,7 +1048,7 @@ class TestOpenaiRealtimeHandlerStartUpGradioMode:
     @pytest.mark.asyncio
     async def test_start_up_gradio_mode_empty_textbox(self, monkeypatch: Any) -> None:
         """Test start_up falls back to config when textbox is empty."""
-        monkeypatch.setattr(rt_mod.config, "OPENAI_API_KEY", "sk-from-config")
+        monkeypatch.setattr(rt_mod.config, "OPENAI_API_KEY", "sk-from-config")  # type: ignore[attr-defined]
 
         deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
         handler = rt_mod.OpenaiRealtimeHandler(deps, gradio_mode=True)
@@ -1095,7 +1095,7 @@ class TestOpenaiRealtimeHandlerStartUpGradioMode:
     @pytest.mark.asyncio
     async def test_start_up_non_gradio_missing_key(self, monkeypatch: Any) -> None:
         """Test start_up uses placeholder when key missing in non-gradio mode."""
-        monkeypatch.setattr(rt_mod.config, "OPENAI_API_KEY", "")
+        monkeypatch.setattr(rt_mod.config, "OPENAI_API_KEY", "")  # type: ignore[attr-defined]
 
         deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
         handler = rt_mod.OpenaiRealtimeHandler(deps, gradio_mode=False)
@@ -3136,7 +3136,7 @@ class TestSessionRenewalTaskAlreadyDone:
         done_task = asyncio.create_task(completed_task())
         await done_task  # Let it complete
 
-        handler._session_renewal_task = done_task
+        handler._session_renewal_task = done_task  # type: ignore[attr-defined]
 
         class FakeConn:
             def __init__(self) -> None:
@@ -3428,7 +3428,7 @@ class TestSessionRenewalTaskDone:
 
         task = asyncio.create_task(already_done())
         await task  # Ensure it's done
-        handler._session_renewal_task = task
+        handler._session_renewal_task = task  # type: ignore[attr-defined]
 
         await handler.start_up()
 

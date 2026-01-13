@@ -1,7 +1,6 @@
 """Pytest fixtures specific to tool testing."""
 
 from typing import Any, Dict, Generator
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import numpy as np

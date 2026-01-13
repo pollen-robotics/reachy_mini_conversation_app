@@ -2,7 +2,7 @@
 
 import asyncio
 import concurrent.futures
-from typing import Any, Generator, Optional
+from typing import Any, Optional, Generator
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -792,7 +792,6 @@ class TestVoicesEndpoint:
 
         # Track coroutines so we can close them after the test
         created_coroutines: list[Any] = []
-        original_run = asyncio.run_coroutine_threadsafe
 
         def mock_run(coro: Any, loop: Any) -> Any:
             created_coroutines.append(coro)

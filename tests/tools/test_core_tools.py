@@ -103,7 +103,7 @@ class TestGetConcreteSubclasses:
             async def __call__(self, deps: Any, **kwargs: Any) -> dict[str, Any]:
                 return {}
 
-        subclasses = get_concrete_subclasses(Tool)
+        subclasses = get_concrete_subclasses(Tool)  # type: ignore[type-abstract]
         assert ConcreteTool in subclasses
 
     def test_get_concrete_subclasses_skips_abstract(self) -> None:
@@ -128,7 +128,7 @@ class TestGetConcreteSubclasses:
             async def custom_method(self) -> None:
                 pass
 
-        subclasses = get_concrete_subclasses(Tool)
+        subclasses = get_concrete_subclasses(Tool)  # type: ignore[type-abstract]
         assert AbstractTool not in subclasses
         assert ConcreteDerived in subclasses
 
@@ -154,7 +154,7 @@ class TestSafeLoadObj:
         """Test loading None returns empty dict."""
         from reachy_mini_conversation_app.tools.core_tools import _safe_load_obj
 
-        result = _safe_load_obj(None)
+        result = _safe_load_obj(None)  # type: ignore[arg-type]
         assert result == {}
 
     def test_safe_load_obj_invalid_json(self) -> None:
@@ -389,7 +389,7 @@ class TestLoadProfileTools:
         tools_txt = profile_dir / "tools.txt"
         tools_txt.write_text("".join(tools_txt_content))
 
-        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "comment_test")
+        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "comment_test")  # type: ignore[attr-defined]
 
         # Track which modules are attempted to load
         loaded_modules: list[str] = []
@@ -407,7 +407,7 @@ class TestLoadProfileTools:
             fake_file.parent.mkdir(parents=True, exist_ok=True)
             fake_file.touch()
 
-            with patch.object(core_tools.Path, "__call__", return_value=fake_file):
+            with patch.object(core_tools.Path, "__call__", return_value=fake_file):  # type: ignore[attr-defined]
                 # Directly call with patched path construction
                 profile_module_path = tmp_path / "profiles" / "comment_test"
                 tools_txt_path = profile_module_path / "tools.txt"
@@ -479,7 +479,7 @@ class TestLoadProfileToolsErrorHandling:
         fake_file.parent.mkdir(parents=True, exist_ok=True)
         fake_file.touch()
 
-        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "read_error_test")
+        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "read_error_test")  # type: ignore[attr-defined]
         monkeypatch.setattr(core_tools, "Path", lambda x: fake_file if x == core_tools.__file__ else Path(x))
 
         # Mock file operations to raise exception on read
@@ -537,7 +537,7 @@ move_head
         fake_file.parent.mkdir(parents=True, exist_ok=True)
         fake_file.touch()
 
-        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "comments_test")
+        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "comments_test")  # type: ignore[attr-defined]
         monkeypatch.setattr(core_tools, "Path", lambda x: fake_file if x == core_tools.__file__ else Path(x))
 
         # Reset tools state
@@ -585,7 +585,7 @@ class TestLoadProfileToolsImportExceptions:
         fake_file.touch()
 
         # Patch config before patching import_module
-        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "dep_missing")
+        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "dep_missing")  # type: ignore[attr-defined]
         monkeypatch.setattr(core_tools, "Path", lambda x: fake_file if x == core_tools.__file__ else Path(x))
 
         # Error message doesn't contain tool name -> dependency issue (line 148-150)
@@ -596,7 +596,7 @@ class TestLoadProfileToolsImportExceptions:
             raise ModuleNotFoundError("my_tool")
 
         with caplog.at_level(logging.ERROR):
-            monkeypatch.setattr(core_tools.importlib, "import_module", import_side_effect)
+            monkeypatch.setattr(core_tools.importlib, "import_module", import_side_effect)  # type: ignore[attr-defined]
             core_tools._load_profile_tools()
 
         assert "Missing dependency" in caplog.text or "numpy" in caplog.text
@@ -612,7 +612,7 @@ class TestLoadProfileToolsImportExceptions:
         fake_file.parent.mkdir(parents=True, exist_ok=True)
         fake_file.touch()
 
-        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "import_err")
+        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "import_err")  # type: ignore[attr-defined]
         monkeypatch.setattr(core_tools, "Path", lambda x: fake_file if x == core_tools.__file__ else Path(x))
 
         def import_side_effect(name: str) -> None:
@@ -621,7 +621,7 @@ class TestLoadProfileToolsImportExceptions:
             raise ModuleNotFoundError("broken_tool")
 
         with caplog.at_level(logging.ERROR):
-            monkeypatch.setattr(core_tools.importlib, "import_module", import_side_effect)
+            monkeypatch.setattr(core_tools.importlib, "import_module", import_side_effect)  # type: ignore[attr-defined]
             core_tools._load_profile_tools()
 
         assert "Import error" in caplog.text
@@ -637,7 +637,7 @@ class TestLoadProfileToolsImportExceptions:
         fake_file.parent.mkdir(parents=True, exist_ok=True)
         fake_file.touch()
 
-        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "gen_err")
+        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "gen_err")  # type: ignore[attr-defined]
         monkeypatch.setattr(core_tools, "Path", lambda x: fake_file if x == core_tools.__file__ else Path(x))
 
         def import_side_effect(name: str) -> None:
@@ -646,7 +646,7 @@ class TestLoadProfileToolsImportExceptions:
             raise ModuleNotFoundError("error_tool")
 
         with caplog.at_level(logging.ERROR):
-            monkeypatch.setattr(core_tools.importlib, "import_module", import_side_effect)
+            monkeypatch.setattr(core_tools.importlib, "import_module", import_side_effect)  # type: ignore[attr-defined]
             core_tools._load_profile_tools()
 
         assert "RuntimeError" in caplog.text
@@ -662,7 +662,7 @@ class TestLoadProfileToolsImportExceptions:
         fake_file.parent.mkdir(parents=True, exist_ok=True)
         fake_file.touch()
 
-        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "shared_import_err")
+        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "shared_import_err")  # type: ignore[attr-defined]
         monkeypatch.setattr(core_tools, "Path", lambda x: fake_file if x == core_tools.__file__ else Path(x))
 
         def import_side_effect(name: str) -> None:
@@ -673,7 +673,7 @@ class TestLoadProfileToolsImportExceptions:
             raise ImportError("cannot import from shared")
 
         with caplog.at_level(logging.ERROR):
-            monkeypatch.setattr(core_tools.importlib, "import_module", import_side_effect)
+            monkeypatch.setattr(core_tools.importlib, "import_module", import_side_effect)  # type: ignore[attr-defined]
             core_tools._load_profile_tools()
 
         assert "Import error" in caplog.text
@@ -690,7 +690,7 @@ class TestLoadProfileToolsImportExceptions:
         fake_file.parent.mkdir(parents=True, exist_ok=True)
         fake_file.touch()
 
-        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "shared_gen_err")
+        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "shared_gen_err")  # type: ignore[attr-defined]
         monkeypatch.setattr(core_tools, "Path", lambda x: fake_file if x == core_tools.__file__ else Path(x))
 
         def import_side_effect(name: str) -> None:
@@ -701,7 +701,7 @@ class TestLoadProfileToolsImportExceptions:
             raise RuntimeError("Unexpected shared error")
 
         with caplog.at_level(logging.ERROR):
-            monkeypatch.setattr(core_tools.importlib, "import_module", import_side_effect)
+            monkeypatch.setattr(core_tools.importlib, "import_module", import_side_effect)  # type: ignore[attr-defined]
             core_tools._load_profile_tools()
 
         assert "RuntimeError" in caplog.text
@@ -718,7 +718,7 @@ class TestLoadProfileToolsImportExceptions:
         fake_file.parent.mkdir(parents=True, exist_ok=True)
         fake_file.touch()
 
-        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "not_found_test")
+        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "not_found_test")  # type: ignore[attr-defined]
         monkeypatch.setattr(core_tools, "Path", lambda x: fake_file if x == core_tools.__file__ else Path(x))
 
         def import_side_effect(name: str) -> None:
@@ -726,7 +726,7 @@ class TestLoadProfileToolsImportExceptions:
             raise ModuleNotFoundError("nonexistent_tool")
 
         with caplog.at_level(logging.WARNING):
-            monkeypatch.setattr(core_tools.importlib, "import_module", import_side_effect)
+            monkeypatch.setattr(core_tools.importlib, "import_module", import_side_effect)  # type: ignore[attr-defined]
             core_tools._load_profile_tools()
 
         assert "not found in profile or shared tools" in caplog.text
@@ -742,7 +742,7 @@ class TestLoadProfileToolsImportExceptions:
         fake_file.parent.mkdir(parents=True, exist_ok=True)
         fake_file.touch()
 
-        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "double_fail")
+        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "double_fail")  # type: ignore[attr-defined]
         monkeypatch.setattr(core_tools, "Path", lambda x: fake_file if x == core_tools.__file__ else Path(x))
 
         def import_side_effect(name: str) -> None:
@@ -753,7 +753,7 @@ class TestLoadProfileToolsImportExceptions:
             raise ModuleNotFoundError("fail_tool")
 
         with caplog.at_level(logging.ERROR):
-            monkeypatch.setattr(core_tools.importlib, "import_module", import_side_effect)
+            monkeypatch.setattr(core_tools.importlib, "import_module", import_side_effect)  # type: ignore[attr-defined]
             core_tools._load_profile_tools()
 
         assert "also not found in shared tools" in caplog.text
@@ -769,7 +769,7 @@ class TestLoadProfileToolsImportExceptions:
         fake_file.parent.mkdir(parents=True, exist_ok=True)
         fake_file.touch()
 
-        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "success_test")
+        monkeypatch.setattr(core_tools.config, "REACHY_MINI_CUSTOM_PROFILE", "success_test")  # type: ignore[attr-defined]
         monkeypatch.setattr(core_tools, "Path", lambda x: fake_file if x == core_tools.__file__ else Path(x))
 
         def import_side_effect(name: str) -> MagicMock:
@@ -779,7 +779,7 @@ class TestLoadProfileToolsImportExceptions:
             raise ModuleNotFoundError("not needed")
 
         with caplog.at_level(logging.INFO):
-            monkeypatch.setattr(core_tools.importlib, "import_module", import_side_effect)
+            monkeypatch.setattr(core_tools.importlib, "import_module", import_side_effect)  # type: ignore[attr-defined]
             core_tools._load_profile_tools()
 
         assert "Loaded profile-local tool" in caplog.text

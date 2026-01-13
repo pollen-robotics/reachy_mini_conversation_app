@@ -12,8 +12,8 @@ import logging
 from typing import Any, Callable, Optional
 
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from fastapi.responses import JSONResponse
 
 from .config import config
 from .openai_realtime import OpenaiRealtimeHandler
@@ -26,6 +26,7 @@ from .headless_personality import (
     resolve_profile_dir,
     read_instructions_for,
 )
+
 
 logger = logging.getLogger(__name__)
 

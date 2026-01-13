@@ -2095,7 +2095,7 @@ class TestLaunchRunnerFunction:
         async def mock_runner_coroutine() -> None:
             runner_executed[0] = True
             # Simulate an exception when mounting personality routes
-            from reachy_mini_conversation_app.console import mount_personality_routes
+            from reachy_mini_conversation_app.console import mount_personality_routes  # type: ignore[attr-defined]
             with patch.object(stream, "_settings_app", mock_settings_app):
                 loop = asyncio.get_running_loop()
                 object.__setattr__(stream, "_asyncio_loop", loop)
@@ -2346,7 +2346,7 @@ class TestClearAudioQueueDefaultNoVideo:
 
     def test_clear_audio_queue_default_no_video_backend(self) -> None:
         """Test clear_audio_queue with DEFAULT_NO_VIDEO backend (branch 518->520)."""
-        from reachy_mini_conversation_app.console import LocalStream, MediaBackend
+        from reachy_mini_conversation_app.console import LocalStream, MediaBackend  # type: ignore[attr-defined]
 
         mock_handler = MagicMock()
         mock_handler.output_queue = asyncio.Queue()
