@@ -170,34 +170,7 @@ It probably means that the Reachy Mini's daemon isn't running. Install [Reachy M
 
 ## Session management
 
-The app implements automatic session management to handle OpenAI Realtime API limitations and connection issues.
-
-### OpenAI 60-minute session limit
-
-OpenAI Realtime sessions have a maximum duration of 60 minutes. The app handles this automatically:
-
-- **Session watchdog**: Monitors session duration and triggers proactive renewal 2 minutes before the 60-minute limit.
-- **Graceful renewal**: Restarts the session transparently with minimal disruption.
-- **Code 1001 handling**: When the server sends a "going away" close code, the session is automatically restarted without counting as a failure.
-
-### Connection health monitoring
-
-- **Heartbeat monitor**: Detects dead connections by tracking server events. If no events are received for 30 seconds, the session is automatically restarted.
-- **Keep-alive**: Sends periodic `session.update` calls every 5 minutes to maintain connection liveness during silent periods.
-- **Exponential backoff**: Failed reconnection attempts use exponential backoff (1s to 60s max) with jitter to prevent thundering herd.
-
-### Known limitations
-
-- **Context loss on renewal**: When a session is renewed (either proactively or due to the 60-minute limit), conversation context is lost. The assistant starts fresh.
-- **WebRTC ~2 minute timeout**: In Gradio mode, some users may experience disconnections after approximately 2 minutes. This is related to WebRTC/ICE connection handling in the fastrtc layer. Check network connectivity if you encounter this issue.
-
-### Session diagnostics
-
-Enable debug logging (`--debug`) to see detailed session information:
-- Session start/end times
-- Renewal triggers
-- Heartbeat status
-- WebRTC connection duration
+The app automatically handles OpenAI's 60-minute session limit with conversation history preserved across renewals.
 
 ## LLM tools exposed to the assistant
 
