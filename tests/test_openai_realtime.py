@@ -1051,3 +1051,321 @@ class TestWebRTCSessionTracking:
         # Verify no warning about WebRTC timeout
         warning_logs = [r for r in caplog.records if "WebRTC/ICE timeout" in r.msg]
         assert len(warning_logs) == 0
+
+
+# --- Conversation History Preservation Tests ---
+
+
+class TestConversationHistoryPreservation:
+    """Tests for conversation history preservation across session renewals."""
+
+    def test_conversation_history_initialized_empty(self) -> None:
+        """Verify _conversation_history is empty on init."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            assert handler._conversation_history == []
+            assert handler._history_restoration_in_progress is False
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def test_record_conversation_message_user(self) -> None:
+        """Verify user messages are recorded to history."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            handler._record_conversation_message("user", "Hello, how are you?")
+
+            assert len(handler._conversation_history) == 1
+            assert handler._conversation_history[0].role == "user"
+            assert handler._conversation_history[0].content == "Hello, how are you?"
+            assert handler._conversation_history[0].timestamp > 0
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def test_record_conversation_message_assistant(self) -> None:
+        """Verify assistant messages are recorded to history."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            handler._record_conversation_message("assistant", "I'm doing well, thanks!")
+
+            assert len(handler._conversation_history) == 1
+            assert handler._conversation_history[0].role == "assistant"
+            assert handler._conversation_history[0].content == "I'm doing well, thanks!"
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def test_record_conversation_message_empty_ignored(self) -> None:
+        """Verify empty messages are not recorded."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            handler._record_conversation_message("user", "")
+            handler._record_conversation_message("user", "   ")
+            handler._record_conversation_message("assistant", None)  # type: ignore[arg-type]
+
+            assert len(handler._conversation_history) == 0
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def test_record_conversation_message_trims_whitespace(self) -> None:
+        """Verify message content is trimmed."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            handler._record_conversation_message("user", "  Hello world  ")
+
+            assert handler._conversation_history[0].content == "Hello world"
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def test_record_conversation_message_preserves_order(self) -> None:
+        """Verify messages are recorded in order."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            handler._record_conversation_message("user", "Message 1")
+            handler._record_conversation_message("assistant", "Message 2")
+            handler._record_conversation_message("user", "Message 3")
+
+            assert len(handler._conversation_history) == 3
+            assert handler._conversation_history[0].content == "Message 1"
+            assert handler._conversation_history[1].content == "Message 2"
+            assert handler._conversation_history[2].content == "Message 3"
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def test_record_conversation_message_trims_when_max_exceeded(self) -> None:
+        """Verify history is trimmed when max is exceeded."""
+        import reachy_mini_conversation_app.openai_realtime as rt
+
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+
+            # Add more than MAX_CONVERSATION_HISTORY messages
+            for i in range(rt.MAX_CONVERSATION_HISTORY + 10):
+                handler._record_conversation_message("user", f"Message {i}")
+
+            # Should be trimmed to max
+            assert len(handler._conversation_history) == rt.MAX_CONVERSATION_HISTORY
+
+            # Oldest messages should be removed (keeping newest)
+            first_msg = handler._conversation_history[0]
+            assert first_msg.content == "Message 10"  # First 10 were trimmed
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def test_clear_conversation_history(self) -> None:
+        """Verify clear_conversation_history clears all messages."""
+        loop = asyncio.new_event_loop()
+        try:
+            handler = _build_handler(loop)
+            handler._record_conversation_message("user", "Message 1")
+            handler._record_conversation_message("assistant", "Message 2")
+
+            assert len(handler._conversation_history) == 2
+
+            handler.clear_conversation_history()
+
+            assert len(handler._conversation_history) == 0
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    @pytest.mark.asyncio
+    async def test_restore_conversation_history_no_connection(self) -> None:
+        """Verify restore returns 0 when no connection."""
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = OpenaiRealtimeHandler(deps)
+        handler.connection = None
+        handler._record_conversation_message("user", "Test message")
+
+        restored = await handler._restore_conversation_history()
+
+        assert restored == 0
+
+    @pytest.mark.asyncio
+    async def test_restore_conversation_history_empty(self) -> None:
+        """Verify restore returns 0 when history is empty."""
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = OpenaiRealtimeHandler(deps)
+
+        # Create mock connection
+        mock_connection = MagicMock()
+        handler.connection = mock_connection
+
+        restored = await handler._restore_conversation_history()
+
+        assert restored == 0
+
+    @pytest.mark.asyncio
+    async def test_restore_conversation_history_success(self) -> None:
+        """Verify restore creates conversation items for each message."""
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = OpenaiRealtimeHandler(deps)
+
+        # Track create calls
+        create_calls: list[dict[str, Any]] = []
+
+        async def mock_create(item: dict[str, Any]) -> None:
+            create_calls.append(item)
+
+        # Create mock connection
+        mock_item = MagicMock()
+        mock_item.create = mock_create
+        mock_conversation = MagicMock()
+        mock_conversation.item = mock_item
+        mock_connection = MagicMock()
+        mock_connection.conversation = mock_conversation
+        handler.connection = mock_connection
+
+        # Add messages to history
+        handler._record_conversation_message("user", "Hello")
+        handler._record_conversation_message("assistant", "Hi there!")
+        handler._record_conversation_message("user", "How are you?")
+
+        restored = await handler._restore_conversation_history()
+
+        assert restored == 3
+        assert len(create_calls) == 3
+
+        # Verify user message format
+        assert create_calls[0]["type"] == "message"
+        assert create_calls[0]["role"] == "user"
+        assert create_calls[0]["content"][0]["type"] == "input_text"
+        assert create_calls[0]["content"][0]["text"] == "Hello"
+
+        # Verify assistant message format
+        assert create_calls[1]["type"] == "message"
+        assert create_calls[1]["role"] == "assistant"
+        assert create_calls[1]["content"][0]["type"] == "text"
+        assert create_calls[1]["content"][0]["text"] == "Hi there!"
+
+    @pytest.mark.asyncio
+    async def test_restore_conversation_history_partial_failure(self) -> None:
+        """Verify restore continues despite individual message failures."""
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = OpenaiRealtimeHandler(deps)
+
+        call_count = {"n": 0}
+
+        async def mock_create_with_failure(item: dict[str, Any]) -> None:
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                raise Exception("Simulated failure")
+
+        # Create mock connection
+        mock_item = MagicMock()
+        mock_item.create = mock_create_with_failure
+        mock_conversation = MagicMock()
+        mock_conversation.item = mock_item
+        mock_connection = MagicMock()
+        mock_connection.conversation = mock_conversation
+        handler.connection = mock_connection
+
+        # Add messages to history
+        handler._record_conversation_message("user", "Message 1")
+        handler._record_conversation_message("user", "Message 2")  # This will fail
+        handler._record_conversation_message("user", "Message 3")
+
+        restored = await handler._restore_conversation_history()
+
+        # Should restore 2 (1 and 3), with 2 failing
+        assert restored == 2
+        assert handler._history_restoration_in_progress is False
+
+    @pytest.mark.asyncio
+    async def test_graceful_renewal_preserves_history(self) -> None:
+        """Verify graceful renewal restores conversation history."""
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = OpenaiRealtimeHandler(deps)
+
+        # Track restore calls
+        restore_called = {"count": 0, "restored": 0}
+
+        async def mock_restore() -> int:
+            restore_called["count"] += 1
+            restore_called["restored"] = len(handler._conversation_history)
+            return restore_called["restored"]
+
+        async def mock_restart() -> None:
+            # Simulate restart - create a mock connection
+            mock_item = MagicMock()
+
+            async def mock_create(item: dict[str, Any]) -> None:
+                pass
+
+            mock_item.create = mock_create
+            mock_conversation = MagicMock()
+            mock_conversation.item = mock_item
+            mock_connection = MagicMock()
+            mock_connection.conversation = mock_conversation
+            handler.connection = mock_connection
+
+        handler._restart_session = mock_restart  # type: ignore[method-assign]
+        handler._restore_conversation_history = mock_restore  # type: ignore[method-assign]
+
+        # Add messages to history
+        handler._record_conversation_message("user", "Hello")
+        handler._record_conversation_message("assistant", "Hi!")
+
+        await handler._graceful_session_renewal()
+
+        # Verify history was restored
+        assert restore_called["count"] == 1
+        assert restore_called["restored"] == 2
+
+    @pytest.mark.asyncio
+    async def test_graceful_renewal_handles_no_history(self) -> None:
+        """Verify graceful renewal works when no history exists."""
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = OpenaiRealtimeHandler(deps)
+
+        restart_called = {"count": 0}
+
+        async def mock_restart() -> None:
+            restart_called["count"] += 1
+            handler.connection = None  # No connection after restart
+
+        handler._restart_session = mock_restart  # type: ignore[method-assign]
+
+        # No history
+        assert len(handler._conversation_history) == 0
+
+        await handler._graceful_session_renewal()
+
+        # Should still call restart
+        assert restart_called["count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_history_preserved_across_renewal(self) -> None:
+        """Verify history list persists across session renewal."""
+        deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+        handler = OpenaiRealtimeHandler(deps)
+
+        # Add messages before renewal
+        handler._record_conversation_message("user", "Pre-renewal message")
+        handler._record_conversation_message("assistant", "Response before renewal")
+
+        original_history = handler._conversation_history.copy()
+
+        async def mock_restart() -> None:
+            handler.connection = None
+
+        handler._restart_session = mock_restart  # type: ignore[method-assign]
+
+        await handler._graceful_session_renewal()
+
+        # History should still be there
+        assert len(handler._conversation_history) == 2
+        assert handler._conversation_history[0].content == original_history[0].content
+        assert handler._conversation_history[1].content == original_history[1].content

@@ -6,6 +6,7 @@ import logging
 from typing import Any, Final, Tuple, Literal, Optional
 from pathlib import Path
 from datetime import datetime
+from dataclasses import dataclass
 
 import cv2
 import numpy as np
@@ -34,6 +35,18 @@ OPEN_AI_OUTPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
 MAX_RECONNECT_ATTEMPTS: Final[int] = 10
 BASE_RECONNECT_DELAY: Final[float] = 1.0  # seconds
 MAX_RECONNECT_DELAY: Final[float] = 60.0  # cap at 1 minute
+
+# Conversation history constants
+MAX_CONVERSATION_HISTORY: Final[int] = 50  # Maximum messages to preserve across renewals
+
+
+@dataclass
+class ConversationMessage:
+    """A message in the conversation history for preservation across session renewals."""
+
+    role: Literal["user", "assistant"]
+    content: str
+    timestamp: float
 
 
 class OpenaiRealtimeHandler(AsyncStreamHandler):
@@ -96,6 +109,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         # WebRTC/fastrtc connection state tracking (for diagnosing 2-minute timeout issues)
         self._webrtc_session_start_time: float | None = None
         self._shutdown_reason: str | None = None
+
+        # Conversation history for preservation across session renewals
+        self._conversation_history: list[ConversationMessage] = []
+        self._history_restoration_in_progress: bool = False
 
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
@@ -221,9 +238,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 if close_code == 1001:
                     # 1001 = "going away" - server-initiated close (e.g., 60min limit)
                     # This is expected behavior, reset attempt counter for fresh start
-                    logger.info(
-                        "Session ended by server (code 1001 - going away). Starting new session..."
-                    )
+                    logger.info("Session ended by server (code 1001 - going away). Starting new session...")
                     attempt = 0  # Reset counter for intentional server closures
                 else:
                     # Unexpected close - log with attempt count
@@ -318,22 +333,144 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 logger.warning("Session watchdog error: %s", e)
 
     async def _graceful_session_renewal(self) -> None:
-        """Gracefully renew the session before timeout.
+        """Gracefully renew the session before timeout, preserving conversation history.
 
-        Notifies via output queue and triggers a session restart.
+        This method:
+        1. Notifies the user about the renewal
+        2. Preserves the current conversation history
+        3. Restarts the session
+        4. Restores the conversation history in the new session
         """
         try:
+            history_count = len(self._conversation_history)
+            logger.info(
+                "Starting graceful session renewal with %d messages in history",
+                history_count,
+            )
+
             # Notify about renewal (system message, not spoken)
             await self.output_queue.put(
                 AdditionalOutputs({"role": "system", "content": "[Session renewal in progress...]"})
             )
 
-            # Restart the session
+            # Restart the session (history is preserved in self._conversation_history)
             await self._restart_session()
 
-            logger.info("Session renewed successfully.")
+            # Wait briefly for connection to be established
+            await asyncio.sleep(0.5)
+
+            # Restore conversation history in the new session
+            if self.connection is not None and self._conversation_history:
+                restored = await self._restore_conversation_history()
+                if restored > 0:
+                    await self.output_queue.put(
+                        AdditionalOutputs(
+                            {
+                                "role": "system",
+                                "content": f"[Session renewed. Restored {restored} messages from conversation history.]",
+                            }
+                        )
+                    )
+                    logger.info("Session renewed with %d messages restored.", restored)
+                else:
+                    logger.info("Session renewed but no messages were restored.")
+            else:
+                logger.info("Session renewed (no history to restore).")
+
         except Exception as e:
             logger.error("Graceful session renewal failed: %s", e)
+
+    def _record_conversation_message(self, role: Literal["user", "assistant"], content: str) -> None:
+        """Record a message to the conversation history for preservation across renewals.
+
+        Args:
+            role: The role of the message sender ("user" or "assistant")
+            content: The text content of the message
+
+        """
+        if not content or not content.strip():
+            return
+
+        message = ConversationMessage(
+            role=role,
+            content=content.strip(),
+            timestamp=asyncio.get_event_loop().time(),
+        )
+        self._conversation_history.append(message)
+
+        # Trim history if it exceeds the maximum
+        if len(self._conversation_history) > MAX_CONVERSATION_HISTORY:
+            # Remove oldest messages, keeping the most recent ones
+            excess = len(self._conversation_history) - MAX_CONVERSATION_HISTORY
+            self._conversation_history = self._conversation_history[excess:]
+            logger.debug("Trimmed conversation history, removed %d oldest messages", excess)
+
+    async def _restore_conversation_history(self) -> int:
+        """Restore conversation history to the current session.
+
+        Creates conversation items for each message in the history so the
+        model has context from the previous session.
+
+        Returns:
+            Number of messages successfully restored.
+
+        """
+        if self.connection is None:
+            logger.warning("Cannot restore history: no active connection")
+            return 0
+
+        if not self._conversation_history:
+            return 0
+
+        self._history_restoration_in_progress = True
+        restored_count = 0
+
+        try:
+            logger.info("Restoring %d messages to conversation history", len(self._conversation_history))
+
+            for msg in self._conversation_history:
+                try:
+                    if msg.role == "user":
+                        # User messages use input_text content type
+                        await self.connection.conversation.item.create(
+                            item={
+                                "type": "message",
+                                "role": "user",
+                                "content": [{"type": "input_text", "text": msg.content}],
+                            }
+                        )
+                    else:
+                        # Assistant messages use text content type
+                        await self.connection.conversation.item.create(
+                            item={
+                                "type": "message",
+                                "role": "assistant",
+                                "content": [{"type": "text", "text": msg.content}],
+                            }
+                        )
+                    restored_count += 1
+                except Exception as e:
+                    logger.warning("Failed to restore message: %s", e)
+                    # Continue with remaining messages
+
+            logger.info("Successfully restored %d/%d messages", restored_count, len(self._conversation_history))
+            return restored_count
+
+        except Exception as e:
+            logger.error("Error during history restoration: %s", e)
+            return restored_count
+        finally:
+            self._history_restoration_in_progress = False
+
+    def clear_conversation_history(self) -> None:
+        """Clear the conversation history.
+
+        This is useful when starting a fresh conversation or when the user
+        explicitly requests to clear context.
+        """
+        count = len(self._conversation_history)
+        self._conversation_history.clear()
+        logger.info("Cleared conversation history (%d messages)", count)
 
     async def _heartbeat_monitor(self) -> None:
         """Monitor for server activity and detect zombie connections.
@@ -544,11 +681,18 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         except asyncio.CancelledError:
                             pass
 
+                    # Record to conversation history for preservation across session renewals
+                    self._record_conversation_message("user", event.transcript)
+
                     await self.output_queue.put(AdditionalOutputs({"role": "user", "content": event.transcript}))
 
                 # Handle assistant transcription
                 if event.type in ("response.audio_transcript.done", "response.output_audio_transcript.done"):
                     logger.debug(f"Assistant transcript: {event.transcript}")
+
+                    # Record to conversation history for preservation across session renewals
+                    self._record_conversation_message("assistant", event.transcript)
+
                     await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": event.transcript}))
 
                 # Handle audio delta
@@ -745,8 +889,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         openai_duration = self.get_session_elapsed_time()
 
         logger.info(
-            "Handler shutdown initiated. "
-            "WebRTC session duration: %.1fs, OpenAI session duration: %s, gradio_mode: %s",
+            "Handler shutdown initiated. WebRTC session duration: %.1fs, OpenAI session duration: %s, gradio_mode: %s",
             webrtc_duration if webrtc_duration else 0,
             f"{openai_duration:.1f}s" if openai_duration else "N/A",
             self.gradio_mode,
