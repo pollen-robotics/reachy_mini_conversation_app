@@ -139,3 +139,4 @@ version_source = "tag"
 version_toml = ["pyproject.toml:project.version"]
 commit_parser = "conventional"
 upload_to_pypi = false
+allow_zero_version = true
