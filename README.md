@@ -168,6 +168,10 @@ If you get an error like this:
   ```
 It probably means that the Reachy Mini's daemon isn't running. Install [Reachy Mini's SDK](https://github.com/pollen-robotics/reachy_mini/) and start the daemon.
 
+## Session management
+
+The app automatically handles OpenAI's 60-minute session limit with conversation history preserved across renewals.
+
 ## LLM tools exposed to the assistant
 
 | Tool | Action | Dependencies |
