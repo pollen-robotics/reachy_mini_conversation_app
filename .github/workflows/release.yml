@@ -2,11 +2,7 @@ name: Release
 
 on:
   push:
-    branches:
-      - main
-
-permissions:
-  contents: write   # required for tags + GitHub releases
+    branches: [main]
 
 concurrency:
   group: release-${{ github.ref }}
@@ -17,10 +13,14 @@ jobs:
     name: Semantic Release
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -33,9 +33,12 @@ jobs:
       - name: Install with dev dependencies (locked)
         run: uv sync --frozen --group dev
 
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
       - name: Run semantic-release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          source .venv/bin/activate
-          semantic-release publish
+        run: uv run semantic-release publish
