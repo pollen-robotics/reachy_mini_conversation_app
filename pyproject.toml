@@ -65,6 +65,7 @@ dev = [
   "mypy==1.18.2",
   "pre-commit",
   "types-requests",
+  "python-semantic-release>=10.5.3",
 ]
 
 [project.scripts]
@@ -132,3 +133,11 @@ ignore_missing_imports = true
 strict = true
 show_error_codes = true
 warn_unused_ignores = true
+
+[tool.semantic_release]
+version_source = "tag"
+branch = "main"
+commit_parser = "angular"
+changelog_file = "CHANGELOG.md"
+upload_to_pypi = false
+build_command = false
