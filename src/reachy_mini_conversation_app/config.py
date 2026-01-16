@@ -34,6 +34,12 @@ class Config:
     REACHY_MINI_CUSTOM_PROFILE = os.getenv("REACHY_MINI_CUSTOM_PROFILE")
     logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")
 
+    # Speaker Identification (optional)
+    SPEAKER_ID_MODEL = os.getenv("SPEAKER_ID_MODEL", "speechbrain/spkrec-ecapa-voxceleb")
+    SPEAKER_ID_THRESHOLD = float(os.getenv("SPEAKER_ID_THRESHOLD", "0.25"))
+    SPEAKER_ID_EMBEDDINGS_PATH = os.getenv("SPEAKER_ID_EMBEDDINGS_PATH", "~/.reachy_mini/speaker_embeddings.npz")
+    SPEAKER_ID_DEVICE = os.getenv("SPEAKER_ID_DEVICE", "cpu")
+
 
 config = Config()
 

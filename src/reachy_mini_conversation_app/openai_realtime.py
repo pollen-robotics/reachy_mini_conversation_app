@@ -501,6 +501,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         # Cast if needed
         audio_frame = audio_to_int16(audio_frame)
 
+        # Feed audio to speaker identification worker if available
+        if self.deps.speaker_id_worker is not None:
+            self.deps.speaker_id_worker.feed_audio(audio_frame, self.input_sample_rate)
+
         # Send to OpenAI (guard against races during reconnect)
         try:
             audio_message = base64.b64encode(audio_frame.tobytes()).decode("utf-8")

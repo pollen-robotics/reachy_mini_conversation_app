@@ -107,12 +107,33 @@ def run(
 
     head_wobbler = HeadWobbler(set_speech_offsets=movement_manager.set_speech_offsets)
 
+    # Initialize speaker identification worker if requested
+    speaker_id_worker = None
+    if args.speaker_identification:
+        try:
+            from reachy_mini_conversation_app.config import config as app_config
+            from reachy_mini_conversation_app.speaker_identification import SpeakerIDWorker
+
+            speaker_id_worker = SpeakerIDWorker(
+                model_source=app_config.SPEAKER_ID_MODEL,
+                threshold=app_config.SPEAKER_ID_THRESHOLD,
+                embeddings_path=app_config.SPEAKER_ID_EMBEDDINGS_PATH,
+                device=app_config.SPEAKER_ID_DEVICE,
+            )
+            logger.info("Speaker identification enabled")
+        except ImportError as e:
+            logger.warning(
+                "Speaker identification not available: %s. Install with: uv sync --group speaker_id",
+                e,
+            )
+
     deps = ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
         camera_worker=camera_worker,
         vision_manager=vision_manager,
         head_wobbler=head_wobbler,
+        speaker_id_worker=speaker_id_worker,
     )
     current_file_path = os.path.dirname(os.path.abspath(__file__))
     logger.debug(f"Current file absolute path: {current_file_path}")
@@ -180,6 +201,8 @@ def run(
         camera_worker.start()
     if vision_manager:
         vision_manager.start()
+    if speaker_id_worker:
+        speaker_id_worker.start()
 
     def poll_stop_event() -> None:
         """Poll the stop event to allow graceful shutdown."""
@@ -206,6 +229,8 @@ def run(
             camera_worker.stop()
         if vision_manager:
             vision_manager.stop()
+        if speaker_id_worker:
+            speaker_id_worker.stop()
 
         # Ensure media is explicitly closed before disconnecting
         try:

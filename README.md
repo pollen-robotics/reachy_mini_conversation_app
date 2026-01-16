@@ -56,6 +56,7 @@ uv sync --extra local_vision         # For local PyTorch/Transformers vision
 uv sync --extra yolo_vision          # For YOLO-based vision
 uv sync --extra mediapipe_vision     # For MediaPipe-based vision
 uv sync --extra all_vision           # For all vision features
+uv sync --group speaker_id           # For speaker identification (voice recognition)
 ```
 
 You can combine extras or include dev dependencies:
@@ -98,6 +99,7 @@ Some wheels (e.g. PyTorch) are large and require compatible CUDA or CPU buildsâ€
 | `yolo_vision` | YOLOv8 tracking via `ultralytics` and `supervision`. | CPU friendly; supports the `--head-tracker yolo` option.
 | `mediapipe_vision` | Lightweight landmark tracking with MediaPipe. | Works on CPU; enables `--head-tracker mediapipe`.
 | `all_vision` | Convenience alias installing every vision extra. | Install when you want the flexibility to experiment with every provider.
+| `speaker_id` | Speaker identification using SpeechBrain ECAPA-TDNN. | Enables `--speaker-identification` option for voice recognition.
 | `dev` | Developer tooling (`pytest`, `ruff`). | Add on top of either base or `all_vision` environments.
 
 ## Configuration
@@ -112,6 +114,10 @@ Some wheels (e.g. PyTorch) are large and require compatible CUDA or CPU buildsâ€
 | `HF_HOME` | Cache directory for local Hugging Face downloads (only used with `--local-vision` flag, defaults to `./cache`).
 | `HF_TOKEN` | Optional token for Hugging Face models (only used with `--local-vision` flag, falls back to `huggingface-cli login`).
 | `LOCAL_VISION_MODEL` | Hugging Face model path for local vision processing (only used with `--local-vision` flag, defaults to `HuggingFaceTB/SmolVLM2-2.2B-Instruct`).
+| `SPEAKER_ID_MODEL` | HuggingFace model for speaker embeddings (only used with `--speaker-identification` flag, defaults to `speechbrain/spkrec-ecapa-voxceleb`).
+| `SPEAKER_ID_THRESHOLD` | Cosine similarity threshold for speaker matching (defaults to `0.25`).
+| `SPEAKER_ID_EMBEDDINGS_PATH` | Path to store speaker embeddings (defaults to `~/.reachy_mini/speaker_embeddings.npz`).
+| `SPEAKER_ID_DEVICE` | Device for speaker ID inference: `cpu` or `cuda` (defaults to `cpu`).
 
 ## Running the app
 
@@ -130,6 +136,7 @@ By default, the app runs in console mode for direct audio interaction. Use the `
 | `--head-tracker {yolo,mediapipe}` | `None` | Select a face-tracking backend when a camera is available. YOLO is implemented locally, MediaPipe comes from the `reachy_mini_toolbox` package. Requires the matching optional extra. |
 | `--no-camera` | `False` | Run without camera capture or face tracking. |
 | `--local-vision` | `False` | Use local vision model (SmolVLM2) for periodic image processing instead of gpt-realtime vision. Requires `local_vision` extra to be installed. |
+| `--speaker-identification` | `False` | Enable speaker identification to recognize who is speaking. Requires `speaker_id` dependency group to be installed. |
 | `--gradio` | `False` | Launch the Gradio web UI. Without this flag, runs in console mode. Required when running in simulation mode. |
 | `--debug` | `False` | Enable verbose logging for troubleshooting. |
 
@@ -159,6 +166,12 @@ By default, the app runs in console mode for direct audio interaction. Use the `
   reachy-mini-conversation-app --gradio
   ```
 
+- Run with speaker identification (requires `speaker_id` group):
+
+  ```bash
+  reachy-mini-conversation-app --speaker-identification
+  ```
+
 ### Troubleshooting
 
 - Timeout error:
@@ -180,6 +193,56 @@ It probably means that the Reachy Mini's daemon isn't running. Install [Reachy M
 | `play_emotion` | Play a recorded emotion clip via Hugging Face assets. | Needs `HF_TOKEN` for the recorded emotions dataset. |
 | `stop_emotion` | Clear queued emotions. | Core install only. |
 | `do_nothing` | Explicitly remain idle. | Core install only. |
+| `register_speaker` | Start registering a new speaker by name. | Requires `--speaker-identification` flag. |
+| `finish_speaker_registration` | Complete speaker registration after voice sample. | Requires `--speaker-identification` flag. |
+| `cancel_speaker_registration` | Cancel ongoing speaker registration. | Requires `--speaker-identification` flag. |
+| `identify_speaker` | Identify who is currently speaking by voice. | Requires `--speaker-identification` flag. |
+| `list_speakers` | List all registered speakers. | Requires `--speaker-identification` flag. |
+| `remove_speaker` | Remove a registered speaker. | Requires `--speaker-identification` flag. |
+
+## Speaker Identification
+
+The speaker identification feature allows Reachy Mini to recognize who is speaking based on their voice. It uses SpeechBrain's ECAPA-TDNN model to compute speaker embeddings and compare them against registered voices.
+
+### Installation
+
+```bash
+uv sync --group speaker_id
+```
+
+### Usage
+
+Enable speaker identification when starting the app:
+
+```bash
+reachy-mini-conversation-app --speaker-identification
+```
+
+### Voice commands
+
+Once enabled, you can interact with the speaker identification system through voice:
+
+- **Register a new speaker**: "Register me as Alice" or "Remember my voice, my name is Bob"
+- **Identify the speaker**: "Who am I?" or "Do you recognize me?"
+- **List registered speakers**: "Who do you know?" or "List all speakers"
+- **Remove a speaker**: "Forget Alice" or "Remove Bob from your memory"
+
+### How it works
+
+1. **Registration**: When you ask Reachy to register a new speaker, it starts collecting audio samples. Speak for a few seconds, then tell Reachy you're done. The system computes a voice embedding (192-dimensional vector) and stores it.
+
+2. **Identification**: During conversation, the system continuously processes incoming audio to identify the speaker. When asked, it compares the current voice against all registered embeddings using cosine similarity.
+
+3. **Threshold**: A speaker is considered "recognized" if the cosine similarity exceeds the threshold (default: 0.25). You can adjust this via the `SPEAKER_ID_THRESHOLD` environment variable.
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SPEAKER_ID_MODEL` | `speechbrain/spkrec-ecapa-voxceleb` | HuggingFace model for speaker embeddings |
+| `SPEAKER_ID_THRESHOLD` | `0.25` | Cosine similarity threshold for matching |
+| `SPEAKER_ID_EMBEDDINGS_PATH` | `~/.reachy_mini/speaker_embeddings.npz` | Path to store registered speakers |
+| `SPEAKER_ID_DEVICE` | `cpu` | Inference device (`cpu` or `cuda`) |
 
 ## Using custom profiles
 Create custom profiles with dedicated instructions and enabled tools! 
