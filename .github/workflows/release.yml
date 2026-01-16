@@ -30,11 +30,12 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Install dependencies (locked)
-        run: |
-          uv sync --group dev
+      - name: Install with dev dependencies (locked)
+        run: uv sync --frozen --group dev
 
       - name: Run semantic-release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: semantic-release publish
+        run: |
+          source .venv/bin/activate
+          semantic-release publish
