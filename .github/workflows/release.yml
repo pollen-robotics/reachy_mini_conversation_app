@@ -42,6 +42,8 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Compute next version (log)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: uv run semantic-release version --print
 
       - name: Run semantic-release
