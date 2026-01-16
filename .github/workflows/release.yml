@@ -31,7 +31,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Install with dev dependencies (locked)
-        run: uv sync --group dev
+        run: uv sync --frozen --group dev
 
       - name: Run semantic-release
         env:
