@@ -1,5 +1,6 @@
 import re
 import sys
+import asyncio
 import logging
 from pathlib import Path
 
@@ -59,6 +60,67 @@ def _expand_prompt_includes(content: str) -> str:
     return '\n'.join(expanded_lines)
 
 
+def _inject_memory_context(instructions: str) -> str:
+    """Inject memory instructions and context into the prompt.
+
+    Args:
+        instructions: Base instructions
+
+    Returns:
+        Instructions with memory context appended (if enabled)
+    """
+    try:
+        from reachy_mini_conversation_app.memory import get_memory_module
+
+        memory_module = get_memory_module()
+
+        if not memory_module.is_enabled():
+            logger.debug("Memory system disabled, skipping injection")
+            return instructions
+
+        # Load memory instructions
+        memory_instructions = memory_module.get_memory_instructions()
+
+        # Get memory context (async operation, run in event loop)
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If event loop is running, we can't use asyncio.run()
+                # Schedule as a task and wait for it
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    memory_context = loop.run_in_executor(
+                        pool, lambda: asyncio.run(memory_module.get_memory_context())
+                    )
+                    memory_context = asyncio.get_event_loop().run_until_complete(memory_context)
+            else:
+                # No event loop running, safe to use asyncio.run()
+                memory_context = asyncio.run(memory_module.get_memory_context())
+        except RuntimeError:
+            # Fallback: create new event loop
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                memory_context = new_loop.run_until_complete(memory_module.get_memory_context())
+            finally:
+                new_loop.close()
+
+        # Append memory instructions and context
+        parts = [instructions]
+
+        if memory_instructions:
+            parts.append("\n\n" + memory_instructions)
+
+        if memory_context:
+            parts.append("\n\n" + memory_context)
+
+        return "".join(parts)
+
+    except Exception as e:
+        logger.warning("Failed to inject memory context: %s", e)
+        return instructions
+
+
 def get_session_instructions() -> str:
     """Get session instructions, loading from REACHY_MINI_CUSTOM_PROFILE if set."""
     profile = config.REACHY_MINI_CUSTOM_PROFILE
@@ -75,6 +137,10 @@ def get_session_instructions() -> str:
             if instructions:
                 # Expand [<name>] placeholders with content from prompts library
                 expanded_instructions = _expand_prompt_includes(instructions)
+
+                # Inject memory instructions and context if enabled
+                expanded_instructions = _inject_memory_context(expanded_instructions)
+
                 return expanded_instructions
             logger.error(f"Profile '{profile}' has empty {INSTRUCTIONS_FILENAME}")
             sys.exit(1)

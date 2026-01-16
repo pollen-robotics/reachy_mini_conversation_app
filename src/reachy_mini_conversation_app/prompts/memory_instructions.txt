@@ -1,0 +1,7 @@
+## MEMORY SYSTEM
+You have persistent memory across conversations.
+- User preferences and facts are in <Memory> below (if present)
+- Use search_memory for detailed recall of specific information
+- Use update_memory to save important new information (user preferences, facts, robot context)
+- Use list_memory_blocks to see all stored memory blocks
+- Remember to update memory when you learn something important about the user or conversation context

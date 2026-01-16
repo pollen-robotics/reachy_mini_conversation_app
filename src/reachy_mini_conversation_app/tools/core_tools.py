@@ -2,12 +2,13 @@ from __future__ import annotations
 import abc
 import sys
 import json
+import asyncio
 import inspect
 import logging
 import importlib
 from typing import Any, Dict, List
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from reachy_mini import ReachyMini
 # Import config to ensure .env is loaded before reading REACHY_MINI_CUSTOM_PROFILE
@@ -55,6 +56,8 @@ class ToolDependencies:
     vision_manager: Any | None = None
     head_wobbler: Any | None = None  # HeadWobbler for audio-reactive motion
     motion_duration_s: float = 1.0
+    # Queue for background tasks to report completion (for async tool execution)
+    background_task_queue: asyncio.Queue | None = None
 
 
 # Tool base class

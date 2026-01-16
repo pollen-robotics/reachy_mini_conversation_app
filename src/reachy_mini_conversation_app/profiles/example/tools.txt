@@ -11,3 +11,20 @@ stop_emotion
 
 # AN EXAMPLE OF A CUSTOM TOOL DEFINED LOCALLY
 sweep_look
+
+# Web search using SerpAPI
+web_search
+
+# Read websites using Jina Reader
+read_website
+
+# Home Assistant smart home control
+smart_home
+
+# Web-agent browser automation
+web_agent
+
+# Memory system
+search_memory
+update_memory
+list_memory_blocks

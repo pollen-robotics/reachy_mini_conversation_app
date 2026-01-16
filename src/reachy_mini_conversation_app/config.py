@@ -34,6 +34,12 @@ class Config:
     REACHY_MINI_CUSTOM_PROFILE = os.getenv("REACHY_MINI_CUSTOM_PROFILE")
     logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")
 
+    # Memory system configuration
+    MEMORY_ENABLED = os.getenv("MEMORY_ENABLED", "true").lower() == "true"
+    MEMORY_DB_PATH = os.path.expanduser(os.getenv("MEMORY_DB_PATH", "~/.reachy_mini/memory.db"))
+    MEMORY_AUTO_EXTRACT = os.getenv("MEMORY_AUTO_EXTRACT", "true").lower() == "true"
+    logger.debug(f"Memory Enabled: {MEMORY_ENABLED}, DB Path: {MEMORY_DB_PATH}, Auto Extract: {MEMORY_AUTO_EXTRACT}")
+
 
 config = Config()
 
