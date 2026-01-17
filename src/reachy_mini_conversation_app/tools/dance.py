@@ -23,6 +23,7 @@ def _build_dance_description() -> str:
 
     Returns:
         str: Formatted description of available dance moves.
+
     """
     if not AVAILABLE_MOVES: #if the AVAILABLE_MOVES is empty
         return "No moves currently available."
@@ -63,7 +64,7 @@ class Dance(Tool):
         """Play a named or random dance move once (or repeat). Non-blocking."""
         if not DANCE_AVAILABLE:
             return {"error": "Dance system not available"}
-        
+
         if not AVAILABLE_MOVES: #if AVAILABLE_MOVES is empty
             return {"error": "No moves currently available"}
 
