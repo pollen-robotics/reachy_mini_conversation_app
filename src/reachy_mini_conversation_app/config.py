@@ -34,6 +34,16 @@ class Config:
     REACHY_MINI_CUSTOM_PROFILE = os.getenv("REACHY_MINI_CUSTOM_PROFILE")
     logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")
 
+    # Long-term memory configuration
+    MEMORY_FILE_PATH: str = os.getenv(
+        "MEMORY_FILE_PATH", os.path.expanduser("~/.reachy_mini/memory.txt")
+    )
+    MEMORY_MAX_TOKENS: int = int(os.getenv("MEMORY_MAX_TOKENS", "2000"))
+    MEMORY_SYNC_INTERVAL: int = int(os.getenv("MEMORY_SYNC_INTERVAL", "300"))  # 5 min
+    logger.debug(
+        f"Memory: {MEMORY_FILE_PATH}, max_tokens={MEMORY_MAX_TOKENS}, sync_interval={MEMORY_SYNC_INTERVAL}s"
+    )
+
 
 config = Config()
 
