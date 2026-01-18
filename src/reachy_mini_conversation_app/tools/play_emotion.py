@@ -27,6 +27,9 @@ def get_available_emotions_and_descriptions() -> str:
 
     try:
         emotion_names = RECORDED_MOVES.list_moves()
+        if not emotion_names:
+            return "No emotions currently available"
+
         output = "Available emotions:\n"
         for name in emotion_names:
             description = RECORDED_MOVES.get(name).description
@@ -69,6 +72,9 @@ class PlayEmotion(Tool):
         # Check if emotion exists
         try:
             emotion_names = RECORDED_MOVES.list_moves()
+            if not emotion_names:
+                return {"error": "No emotions currently available"}
+
             if emotion_name not in emotion_names:
                 return {"error": f"Unknown emotion '{emotion_name}'. Available: {emotion_names}"}
 
