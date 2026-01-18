@@ -18,26 +18,19 @@ except ImportError as e:
     DANCE_AVAILABLE = False
 
 
-def _build_dance_description() -> str:
-    """Generate dance move descriptions dynamically from AVAILABLE_MOVES.
+def get_available_dances_and_descriptions() -> str:
+    """Get formatted list of available dances with descriptions."""
+    if not DANCE_AVAILABLE:
+        return "Moves not available."
 
-    Returns:
-        str: Formatted description of available dance moves.
+    if not AVAILABLE_MOVES: #if AVAILABLE_MOVES is empty
+        return "Moves not available."
 
-    """
-    if not AVAILABLE_MOVES: #if the AVAILABLE_MOVES is empty
-        return "No moves currently available."
-
-    moves_list = []
+    output = ""
     for move_name, (func, params, metadata) in AVAILABLE_MOVES.items():
         description = metadata.get("description", "No description available.")
-        moves_list.append(f"{move_name}: {description}")
-
-    formatted_moves = "\n                                    ".join(moves_list)
-    return f"""Name of the move; use 'random' or omit for random.
-                                Here is a list of the available moves:
-                                    {formatted_moves}
-            """
+        output += f"{move_name}: {description}\n"
+    return output
 
 
 class Dance(Tool):
@@ -50,7 +43,10 @@ class Dance(Tool):
         "properties": {
             "move": {
                 "type": "string",
-                "description": _build_dance_description(),
+                "description": f"""Name of the move; use 'random' or omit for random.
+                                    Here is a list of the available moves:
+                                        {get_available_dances_and_descriptions()}
+                                """,
             },
             "repeat": {
                 "type": "integer",
