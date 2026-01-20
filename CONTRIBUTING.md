@@ -163,7 +163,7 @@ Internal code refactoring doesn't require a breaking change marker. For example:
 
 The squashed commit message drives automated releases - no manual versioning needed!
 
-**About uv.lock validation:** Our CI automatically checks that `uv.lock` is in sync with `pyproject.toml`. If you modify dependencies in `pyproject.toml`, run `uv sync` locally to update the lockfile and commit both files together. This ensures reproducible builds for all contributors.
+**About uv.lock validation:** our CI checks that `uv.lock` is in sync with `pyproject.toml` by validating the lockfile without modifying it. When you change dependencies in `pyproject.toml`, update the lockfile locally by running `uv lock`, then commit both `pyproject.toml` and `uv.lock` together. This avoids unintended updates and ensures reproducible builds across contributors.
 
 <details>
 <summary><b>🧪 Quality checks reference</b></summary>
