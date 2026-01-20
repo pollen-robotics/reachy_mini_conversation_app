@@ -6,49 +6,19 @@ We welcome all contributions: bug fixes, new features, documentation, testing, a
 
 ## Quick Start
 
-```bash
-# 1. Fork and clone
-git clone https://github.com/pollen-robotics/reachy_mini_conversation_app
-cd reachy_mini_conversation_app
-
-# 2. Set up environment
-# macOS (Homebrew)
-uv venv --python /opt/homebrew/bin/python3.12 .venv
-
-# Linux / Windows (Python in PATH)
-uv venv --python python3.12 .venv
-
-uv sync --all-extras --group dev
-
-# 3. Configure
-cp .env.example .env
-# edit .env with your API keys (⚠️ never commit this file!)
-
-# 4. Make your changes, then run checks
-uv run ruff check . --fix
-uv run ruff format .
-uv run mypy --pretty --show-error-codes .
-uv run pytest tests/ -v
-```
-
-### Understanding dependency flags
-
-Our project uses two types of dependencies in `pyproject.toml`:
-
-**Optional dependencies**
-- Install with `--extra <name>` (e.g., `uv sync --extra local_vision`)
-- Examples: `local_vision`, `yolo_vision`, `all_vision`, `reachy_mini_wireless`
-
-**Dependency groups**:
-- Install with `--group <name>` (e.g., `uv sync --group dev`)
-- Examples: `dev` (contains pytest, ruff, mypy, etc.)
-
-**Combined usage:**
-```bash
-uv sync --all-extras --group dev  # install ALL optional deps + dev tools
-uv sync --extra local_vision --group dev  # just local_vision + dev tools
-uv sync --frozen --all-extras --group dev  # exact versions from uv.lock
-```
+1. Fork and clone the repo:
+   ```bash
+   git clone https://github.com/pollen-robotics/reachy_mini_conversation_app
+   cd reachy_mini_conversation_app
+   ```
+2. Follow the [README installation guide](README.md#installation) to set up dependencies and `.env`.
+3. Run the contributor checks after your changes:
+   ```bash
+   uv run ruff check . --fix
+   uv run ruff format .
+   uv run mypy --pretty --show-error-codes .
+   uv run pytest tests/ -v
+   ```
 
 ## Before Opening a PR
 
@@ -196,45 +166,7 @@ The squashed commit message drives automated releases - no manual versioning nee
 **About uv.lock validation:** Our CI automatically checks that `uv.lock` is in sync with `pyproject.toml`. If you modify dependencies in `pyproject.toml`, run `uv sync` locally to update the lockfile and commit both files together. This ensures reproducible builds for all contributors.
 
 <details>
-<summary>📦 Full installation instructions</summary>
-
-### Prerequisites
-- Python 3.10+ (3.12 recommended)
-- Optional: GStreamer (for wireless), PyTorch (for local vision)
-
-### Using uv (recommended)
-```bash
-# macOS (Homebrew)
-uv venv --python /opt/homebrew/bin/python3.12 .venv
-
-# Linux/Windows  
-uv venv --python python3.12 .venv
-
-source .venv/bin/activate
-uv sync --all-extras --group dev
-
-# For locked/reproducible installs
-uv sync --frozen --all-extras --group dev
-```
-
-### Using pip
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .[dev,all_vision]
-```
-
-### Configuration
-```bash
-cp .env.example .env
-# edit .env with your OpenAI API key and other settings
-# See README.md Configuration section for all variables
-```
-
-</details>
-
-<details>
-<summary>🧪 Quality checks reference</summary>
+<summary><b>🧪 Quality checks reference</b></summary>
 
 ### Linting
 ```bash
