@@ -53,7 +53,7 @@ uv sync --frozen --all-extras --group dev  # exact versions from uv.lock
 ## Before Opening a PR
 
 - All tests pass locally (`uv run pytest tests/ -v`)
-- Code is formatted (`uv run ruff format .` and `uv run mypy .`)
+- Code is formatted (`uv run ruff format .`) and type-checked (`uv run mypy .`)
 - Commits follow [conventional format](#commit-format-required) (this is critical!)
 - Added tests for bug fixes or new features
 - Updated docs if needed
@@ -62,8 +62,19 @@ uv sync --frozen --all-extras --group dev  # exact versions from uv.lock
 
 ## Commit Format (Required)
 
-**This project auto-releases based on commit messages.** Use conventional commits:
+**This project auto-releases based on commit messages.** Use conventional commits with issue references:
 
+### Workflow
+
+1. **Open an issue first** describing the bug fix, feature, or improvement.
+2. **Create a branch** using the issue number and label assigned to the issue:
+```bash
+   fix/485-handle-camera-timeout
+   feat/123-add-head-tracking
+   docs/67-update-installation-guide
+```
+
+### Commit Messages
 ```bash
 # Bug fix -> patch release (0.1.0 -> 0.1.1)
 git commit -m "fix: handle camera timeout"
@@ -136,7 +147,7 @@ Try to keep commits focused. If you must combine changes, semantic-release will 
 **Breaking changes:** Changes that affect how users interact with the application:
 - Removing or renaming CLI flags (e.g., dropping a `--debug` flag)
 - Changing configuration file formats (e.g., renaming `.env` variables or profile schema fields)
-- Breaking custom tool compatibility (e.g., renaming a tool in `src/reachy_mini_conversation_app/src/tools/`)
+- Breaking custom tool compatibility (e.g., renaming a tool in `src/reachy_mini_conversation_app/tools`)
 - Changing profile file structures (e.g., moving `profiles/default/` or renaming `instructions.txt` there)
 - Altering public API entrypoints (e.g., renaming `reachy_mini_conversation_app.main` or CLI entry points)
 
