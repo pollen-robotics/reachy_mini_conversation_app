@@ -1,0 +1,33 @@
+name: Sync to Hugging Face Space
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: hf-sync-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Checkout huggingface-sync-action fork
+        uses: actions/checkout@v4
+        with:
+          repository: alozowski/huggingface-sync-action
+          path: .github/actions/huggingface-sync-action
+
+      - name: Sync with Hugging Face Space
+        uses: ./.github/actions/huggingface-sync-action
+        with:
+          github_repo_id: pollen-robotics/reachy_mini_conversation_app
+          huggingface_repo_id: pollen-robotics/reachy_mini_conversation_app
+          hf_token: ${{ secrets.HF_TOKEN }}
+          repo_type: space
+          space_sdk: gradio
