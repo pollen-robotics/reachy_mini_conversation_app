@@ -22,13 +22,27 @@ We welcome all contributions: bug fixes, new features, documentation, testing, a
 
 ## Development Workflow
 
+### Branching Model
+
+- The **main** branch is the **release branch**.
+- All releases are created from `main` using Git tags.
+- Development should happen on feature or fix branches and be merged into `main` via pull requests.
+
+### Hugging Face Space Mirror
+
+This project is mirrored to a **Hugging Face Space**.
+
+- Every push to the `main` branch is automatically synchronized to [pollen-robotics/reachy_mini_conversation_app](https://huggingface.co/spaces/pollen-robotics/reachy_mini_conversation_app)
+- This sync is handled by a GitHub Action and requires no manual steps.
+- Contributors do not need to interact with the Hugging Face repository directly.
+
 ### 1. Create an Issue
 
 Open an issue first describing the bug fix, feature, or improvement you plan to work on.
 
 ### 2. Create a Branch
 
-Create a branch using the issue number and label assigned to the issue:
+Create a branch using the issue number and a short description:
 
 ```bash
 fix/485-handle-camera-timeout
@@ -44,94 +58,17 @@ Common types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`
 
 Follow the [quality checklist](#before-opening-a-pr) below to ensure your changes meet our standards.
 
-### 4. Write Conventional Commits
+### 4. Commit Messages
 
-**This project auto-releases based on commit messages.** Use conventional commits:
+Please write **clear, descriptive commit messages** that explain what and why:
 
 ```bash
-# Bug fix -> patch release (0.1.0 -> 0.1.1)
-git commit -m "fix: handle camera timeout"
-
-# New feature -> minor release (0.1.0 -> 0.2.0)  
-git commit -m "feat: add head tracking tool"
-
-# Documentation, refactor, tests -> no release
-git commit -m "docs: update installation guide"
-git commit -m "refactor: simplify motion loop"
-git commit -m "test: add vision processor tests"
+git commit -m "Handle camera timeout in conversation loop"
+git commit -m "Add head tracking tool"
+git commit -m "Improve installation documentation"
 ```
 
-**Format:** `<type>: <description>` (lowercase, no period at end)
-
-**Common types:**
-- `feat:` - new feature (minor bump)
-- `fix:` - bug fix (patch bump)  
-- `docs:`, `test:`, `refactor:`, `style:`, `chore:` - no version bump
-
-For a complete list of commit types and the full specification, see the [Conventional Commits specification](https://www.conventionalcommits.org/).
-
-⚡️ **Breaking changes** (use with caution!):
-```bash
-# Method 1: Add ! after type
-git commit -m "feat!: redesign motion API"
-
-# Method 2: Add footer
-git commit -m "feat: change camera tool
-
-BREAKING CHANGE: camera tool now requires question parameter"
-```
-
-💡 **Not sure?** Just ask in your PR - maintainers can help with commit messages during merge.
-
-<details>
-<summary><b>📖 More commit examples and guidelines</b></summary>
-
-### Good Commits
-```bash
-git commit -m "fix: handle missing camera frames"
-git commit -m "feat(vision): add YOLO head tracker"
-git commit -m "perf: reduce tool dispatch latency"
-```
-
-### Bad Commits
-```bash
-git commit -m "update stuff"  # Too vague
-git commit -m "Fixed bug"     # Wrong format
-git commit -m "feat: Add feature"  # Wrong capitalization
-```
-
-### Scopes (Optional)
-Add context with scopes: `vision`, `motion`, `conversation`, `tools`, `config`
-
-### Preview Your Release
-```bash
-uv sync --group dev # to make sure you have python-semantic-release installed
-uv run semantic-release version --print
-```
-
-### Multiple Changes
-Try to keep commits focused. If you must combine changes, semantic-release will still work but changelogs will be less granular.
-
-</details>
-
-<details>
-<summary><b>🔒 What counts as a breaking change?</b></summary>
-
-**Breaking changes:** Changes that affect how users interact with the application:
-- Removing or renaming CLI flags, such as dropping `--debug`;
-- Changing configuration file formats, including renamed `.env` variables or profile schema fields;
-- Breaking custom tool compatibility by renaming tools in `src/reachy_mini_conversation_app/tools`;
-- Changing profile file structures, like moving `profiles/default/` or renaming `instructions.txt`;
-- Altering public API entrypoints, such as renaming `reachy_mini_conversation_app.main` or CLI entry points.
-
-Internal code refactoring doesn't require a breaking change marker. For example:
-- `refactor: move camera processing into camera_worker.py`
-- `refactor: split headless UI helpers into headless_personality_ui.py`
-- `refactor: reorganize prompts in src/reachy_mini_conversation_app/prompts/`
-
-**When unsure:** Use `feat:` or `fix:` without the breaking marker. Ask in your PR if needed. We can make breaking changes later, but can't undo them!
-
-</details>
+Using conventional prefixes (`feat:`, `fix:`, etc.) is **allowed but optional**.
 
 ### 5. Open a Pull Request
 
@@ -141,15 +78,27 @@ Open a PR and fill out the template. Our CI will automatically check:
 - Test suite with pytest
 - `uv.lock` validation
 
-Maintainers may request changes during review. Once approved, your PR will be squashed into one commit following conventional format - this squashed commit message drives automated releases!
+Maintainers may request changes during review.
 
-**About uv.lock validation:** our CI checks that `uv.lock` is in sync with `pyproject.toml` by validating the lockfile without modifying it. When you change dependencies in `pyproject.toml`, update the lockfile locally by running `uv lock`, then commit both `pyproject.toml` and `uv.lock` together. This avoids unintended updates and ensures reproducible builds across contributors.
+## Release Process (Maintainers)
+
+Releases are **explicit and tag-based**.
+
+1. Update the version in `pyproject.toml`
+2. Commit the version bump
+3. Create and push a tag:
+   ```bash
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+4. A GitHub Action will automatically create the GitHub Release with generated release notes.
+
+Commit messages do **not** affect versioning or releases.
 
 ## Before Opening a PR
 
 - All tests pass locally (`uv run pytest tests/ -v`)
 - Code is formatted (`uv run ruff format .`) and type-checked (`uv run mypy .`)
-- Commits follow [conventional format](#4-write-conventional-commits) (this is critical!)
 - Added tests for bug fixes or new features
 - Updated docs if needed
 - No secrets or `.env` files committed
