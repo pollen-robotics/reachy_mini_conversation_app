@@ -26,7 +26,7 @@ dependencies = [
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
-    "reachy-mini @ git+https://github.com/pollen-robotics/reachy_mini.git@develop",
+    "reachy-mini >= 1.2.11",
     "eclipse-zenoh~=1.7.0",
     "gradio_client>=1.13.3",
 ]
