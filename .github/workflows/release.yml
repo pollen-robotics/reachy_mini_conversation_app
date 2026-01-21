@@ -34,8 +34,9 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Install with dev dependencies (locked)
-        run: uv sync --frozen --group dev
+      - name: Verify semantic-release availability
+        run: |
+          uv run --with python-semantic-release semantic-release --version
 
       - name: Configure git
         run: |
@@ -51,9 +52,11 @@ jobs:
       - name: Compute next version (log)
         env:
           GH_TOKEN: ${{ github.token }}
-        run: uv run semantic-release -vv version --print
+        run: |
+          uv run --with python-semantic-release semantic-release -vv version --print
 
       - name: Run semantic-release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: uv run semantic-release -vv version
+        run: |
+          uv run --with python-semantic-release semantic-release -vv version
