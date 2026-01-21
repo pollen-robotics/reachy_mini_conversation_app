@@ -17,8 +17,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Checkout huggingface-sync-action fork
+        uses: actions/checkout@v4
+        with:
+          repository: alozowski/huggingface-sync-action
+          path: .github/actions/huggingface-sync-action
+
       - name: Sync with Hugging Face Space
-        uses: nateraw/huggingface-sync-action@v0.0.5
+        uses: ./.github/actions/huggingface-sync-action
         with:
           github_repo_id: pollen-robotics/reachy_mini_conversation_app
           huggingface_repo_id: alozowski/reachy_mini_conversation_app_test
