@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reachy_mini_conversation_app"
-version = "0.2.1"
+version = "0.2.2"
 authors = [{ name = "Pollen Robotics", email = "contact@pollen-robotics.com" }]
 description = ""
 readme = "README.md"
@@ -133,10 +133,3 @@ ignore_missing_imports = true
 strict = true
 show_error_codes = true
 warn_unused_ignores = true
-
-[tool.semantic_release]
-version_source = "tag"
-version_toml = ["pyproject.toml:project.version"]
-commit_parser = "conventional"
-upload_to_pypi = false
-allow_zero_version = true
