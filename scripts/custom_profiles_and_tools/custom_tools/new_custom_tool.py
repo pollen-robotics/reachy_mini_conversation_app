@@ -17,7 +17,7 @@ from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 logger = logging.getLogger(__name__)
 
 
-class NewCustomTool(Tool):
+class NewCustomTool(Tool):  # type: ignore[misc]
     """Placeholder custom tool - demonstrates external tool loading."""
 
     name = "new_custom_tool"
