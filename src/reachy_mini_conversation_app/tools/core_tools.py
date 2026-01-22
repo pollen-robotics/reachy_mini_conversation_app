@@ -21,43 +21,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_PROFILES_DIRECTORY = "reachy_mini_conversation_app.profiles"
 
 
-def _load_module_from_file(module_name: str, file_path: Path) -> None:
-    """Load a Python module from a file path."""
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    if not (spec and spec.loader):
-        raise ModuleNotFoundError(f"Cannot create spec for {file_path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-
-
-def _try_load_tool(
-    tool_name: str,
-    module_path: str,
-    fallback_directory: Path | None,
-    file_subpath: str,
-) -> bool:
-    """Try to load a tool: first via importlib, then from file if fallback is configured."""
-    try:
-        importlib.import_module(module_path)
-        return True
-    except ModuleNotFoundError:
-        if fallback_directory is None:
-            raise
-        tool_file = fallback_directory / file_subpath
-        _load_module_from_file(tool_name, tool_file)
-        return True
-
-
-def _format_error(error: Exception) -> str:
-    """Format an exception for logging."""
-    if isinstance(error, (ModuleNotFoundError, FileNotFoundError)):
-        return f"Missing dependency: {error}"
-    if isinstance(error, ImportError):
-        return f"Import error: {error}"
-    return f"{type(error).__name__}: {error}"
-
-
 if not logger.handlers:
     handler = logging.StreamHandler()
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s:%(lineno)d | %(message)s")
@@ -123,6 +86,43 @@ class Tool(abc.ABC):
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Async tool execution entrypoint."""
         raise NotImplementedError
+
+
+def _load_module_from_file(module_name: str, file_path: Path) -> None:
+    """Load a Python module from a file path."""
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if not (spec and spec.loader):
+        raise ModuleNotFoundError(f"Cannot create spec for {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+
+
+def _try_load_tool(
+    tool_name: str,
+    module_path: str,
+    fallback_directory: Path | None,
+    file_subpath: str,
+) -> bool:
+    """Try to load a tool: first via importlib, then from file if fallback is configured."""
+    try:
+        importlib.import_module(module_path)
+        return True
+    except ModuleNotFoundError:
+        if fallback_directory is None:
+            raise
+        tool_file = fallback_directory / file_subpath
+        _load_module_from_file(tool_name, tool_file)
+        return True
+
+
+def _format_error(error: Exception) -> str:
+    """Format an exception for logging."""
+    if isinstance(error, (ModuleNotFoundError, FileNotFoundError)):
+        return f"Missing dependency: {error}"
+    if isinstance(error, ImportError):
+        return f"Import error: {error}"
+    return f"{type(error).__name__}: {error}"
 
 
 # Registry & specs (dynamic)
