@@ -1,9 +1,0 @@
-# Tools from the reachy_mini_conversation_app library
-dance
-stop_dance
-play_emotion
-stop_emotion
-move_head
-
-# Custom tool defined in this script folder
-new_custom_tool

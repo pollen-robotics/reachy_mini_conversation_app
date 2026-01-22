@@ -1,11 +1,10 @@
-"""
-Custom tool example - can be loaded from outside the reachy_mini_conversation_app library.
+"""Custom tool example - can be loaded from outside the reachy_mini_conversation_app library.
 
 To use this tool, set these environment variables:
     export REACHY_MINI_CUSTOM_PROFILE=custom_profile
     export PROFILES_DIRECTORY=/path/to/custom_profiles_and_tools
     export TOOLS_DIRECTORY=/path/to/custom_profiles_and_tools/custom_tool
-    
+
 Or add them to your .env file.
 """
 
@@ -35,7 +34,7 @@ class NewCustomTool(Tool):
     }
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
-        """Placeholder tool execution."""
+        """Execute the placeholder tool."""
         message = kwargs.get("message", "Hello from custom tool!")
         logger.info(f"Tool call: custom_greeting message={message}")
 

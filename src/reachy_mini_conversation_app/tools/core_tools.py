@@ -5,10 +5,11 @@ import json
 import inspect
 import logging
 import importlib
+import importlib.util
 from typing import Any, Dict, List
 from pathlib import Path
 from dataclasses import dataclass
-import importlib.util
+
 from reachy_mini import ReachyMini
 # Import config to ensure .env is loaded before reading REACHY_MINI_CUSTOM_PROFILE
 from reachy_mini_conversation_app.config import config  # noqa: F401
