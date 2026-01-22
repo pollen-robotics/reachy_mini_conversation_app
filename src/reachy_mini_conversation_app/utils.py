@@ -31,6 +31,12 @@ def parse_args() -> Tuple[argparse.Namespace, list]:  # type: ignore
         default=None,
         help="[Optional] Robot name/prefix for Zenoh topics (must match daemon's --robot-name). Only needed for development with multiple robots.",
     )
+    parser.add_argument(
+        "--preview-vision",
+        default=False,
+        action="store_true",
+        help="Use OpenCV's imshow to preview Reachy Mini's camera view",
+    )
     return parser.parse_known_args()
 
 
@@ -52,12 +58,13 @@ def handle_vision_stuff(args: argparse.Namespace, current_robot: ReachyMini) -> 
 
                 head_tracker = HeadTracker()
             elif args.head_tracker == "mediapipe":
-                from reachy_mini_toolbox.vision import HeadTracker  # type: ignore[no-redef]
+                # type: ignore[no-redef]
+                from reachy_mini_toolbox.vision import HeadTracker
 
                 head_tracker = HeadTracker()
 
         # Initialize camera worker
-        camera_worker = CameraWorker(current_robot, head_tracker)
+        camera_worker = CameraWorker(current_robot, head_tracker, enable_preview=args.preview_vision)
 
         # Initialize vision manager only if local vision is requested
         if args.local_vision:
@@ -73,6 +80,8 @@ def handle_vision_stuff(args: argparse.Namespace, current_robot: ReachyMini) -> 
             logging.getLogger(__name__).info(
                 "Using gpt-realtime for vision (default). Use --local-vision for local processing.",
             )
+        if args.preview_vision:
+            logging.getLogger(__name__).info("OpenCV camera preview enabled (--preview-vision)")
 
     return camera_worker, head_tracker, vision_manager
 
