@@ -8,7 +8,7 @@ import importlib
 from typing import Any, Dict, List
 from pathlib import Path
 from dataclasses import dataclass
-
+import importlib.util
 from reachy_mini import ReachyMini
 # Import config to ensure .env is loaded before reading REACHY_MINI_CUSTOM_PROFILE
 from reachy_mini_conversation_app.config import config  # noqa: F401
@@ -17,7 +17,45 @@ from reachy_mini_conversation_app.config import config  # noqa: F401
 logger = logging.getLogger(__name__)
 
 
-PROFILES_DIRECTORY = "reachy_mini_conversation_app.profiles"
+DEFAULT_PROFILES_DIRECTORY = "reachy_mini_conversation_app.profiles"
+
+
+def _load_module_from_file(module_name: str, file_path: Path) -> None:
+    """Load a Python module from a file path."""
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if not (spec and spec.loader):
+        raise ModuleNotFoundError(f"Cannot create spec for {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+
+
+def _try_load_tool(
+    tool_name: str,
+    module_path: str,
+    fallback_directory: Path | None,
+    file_subpath: str,
+) -> bool:
+    """Try to load a tool: first via importlib, then from file if fallback is configured."""
+    try:
+        importlib.import_module(module_path)
+        return True
+    except ModuleNotFoundError:
+        if fallback_directory is None:
+            raise
+        tool_file = fallback_directory / file_subpath
+        _load_module_from_file(tool_name, tool_file)
+        return True
+
+
+def _format_error(error: Exception) -> str:
+    """Format an exception for logging."""
+    if isinstance(error, (ModuleNotFoundError, FileNotFoundError)):
+        return f"Missing dependency: {error}"
+    if isinstance(error, ImportError):
+        return f"Import error: {error}"
+    return f"{type(error).__name__}: {error}"
+
 
 if not logger.handlers:
     handler = logging.StreamHandler()
@@ -95,7 +133,7 @@ def _load_profile_tools() -> None:
 
     # Build path to tools.txt
     # Get the profile directory path
-    profile_module_path = Path(__file__).parent.parent / "profiles" / profile
+    profile_module_path = config.PROFILES_DIRECTORY / profile
     tools_txt_path = profile_module_path / "tools.txt"
 
     if not tools_txt_path.exists():
@@ -125,50 +163,48 @@ def _load_profile_tools() -> None:
     for tool_name in tool_names:
         loaded = False
         profile_error = None
+        profile_import_path = f"{DEFAULT_PROFILES_DIRECTORY}.{profile}.{tool_name}"
 
-        # Try profile-local tool first
+        # Try profile tool first
         try:
-            profile_tool_module = f"{PROFILES_DIRECTORY}.{profile}.{tool_name}"
-            importlib.import_module(profile_tool_module)
-            logger.info(f"✓ Loaded profile-local tool: {tool_name}")
+            _try_load_tool(
+                tool_name,
+                module_path=profile_import_path,
+                fallback_directory=config.PROFILES_DIRECTORY,
+                file_subpath=f"{profile}/{tool_name}.py",
+            )
+            logger.info(f"✓ Loaded profile tool: {tool_name}")
             loaded = True
-        except ModuleNotFoundError as e:
-            # Check if it's the tool module itself that's missing (expected) or a dependency
-            if tool_name in str(e):
-                pass  # Tool not in profile directory, try shared tools
-            else:
-                # Missing import dependency within the tool file
-                profile_error = f"Missing dependency: {e}"
-                logger.error(f"❌ Failed to load profile-local tool '{tool_name}': {profile_error}")
-                logger.error(f"  Module path: {profile_tool_module}")
-        except ImportError as e:
-            profile_error = f"Import error: {e}"
-            logger.error(f"❌ Failed to load profile-local tool '{tool_name}': {profile_error}")
-            logger.error(f"  Module path: {profile_tool_module}")
+        except (ModuleNotFoundError, FileNotFoundError) as e:
+            if tool_name not in str(e):
+                profile_error = _format_error(e)
+                logger.error(f"❌ Failed to load profile tool '{tool_name}': {profile_error}")
+                logger.error(f"  Module path: {profile_import_path}")
         except Exception as e:
-            profile_error = f"{type(e).__name__}: {e}"
-            logger.error(f"❌ Failed to load profile-local tool '{tool_name}': {profile_error}")
-            logger.error(f"  Module path: {profile_tool_module}")
+            profile_error = _format_error(e)
+            logger.error(f"❌ Failed to load profile tool '{tool_name}': {profile_error}")
+            logger.error(f"  Module path: {profile_import_path}")
 
-        # Try shared tools library if not found in profile
+        # Try tools directory if not found in profile
         if not loaded:
+            shared_module_path = f"reachy_mini_conversation_app.tools.{tool_name}"
             try:
-                shared_tool_module = f"reachy_mini_conversation_app.tools.{tool_name}"
-                importlib.import_module(shared_tool_module)
+                _try_load_tool(
+                    tool_name,
+                    module_path=shared_module_path,
+                    fallback_directory=config.TOOLS_DIRECTORY,
+                    file_subpath=f"{tool_name}.py",
+                )
                 logger.info(f"✓ Loaded shared tool: {tool_name}")
-                loaded = True
-            except ModuleNotFoundError:
+            except (ModuleNotFoundError, FileNotFoundError):
                 if profile_error:
-                    # Already logged error from profile attempt
                     logger.error(f"❌ Tool '{tool_name}' also not found in shared tools")
                 else:
                     logger.warning(f"⚠️ Tool '{tool_name}' not found in profile or shared tools")
-            except ImportError as e:
-                logger.error(f"❌ Failed to load shared tool '{tool_name}': Import error: {e}")
-                logger.error(f"  Module path: {shared_tool_module}")
             except Exception as e:
-                logger.error(f"❌ Failed to load shared tool '{tool_name}': {type(e).__name__}: {e}")
-                logger.error(f"  Module path: {shared_tool_module}")
+                logger.error(f"❌ Failed to load shared tool '{tool_name}': {_format_error(e)}")
+                logger.error(f"  Module path: {shared_module_path}")
+
 
 
 def _initialize_tools() -> None:

@@ -2,6 +2,7 @@ import os
 import logging
 
 from dotenv import find_dotenv, load_dotenv
+from pathlib import Path
 
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,8 @@ class Config:
     logger.debug(f"Model: {MODEL_NAME}, HF_HOME: {HF_HOME}, Vision Model: {LOCAL_VISION_MODEL}")
 
     REACHY_MINI_CUSTOM_PROFILE = os.getenv("REACHY_MINI_CUSTOM_PROFILE")
+    PROFILES_DIRECTORY = Path(os.getenv("PROFILES_DIRECTORY", "") or Path(__file__).parent / "profiles")
+    TOOLS_DIRECTORY = Path(os.getenv("TOOLS_DIRECTORY", ""))
     logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")
 
 
