@@ -54,7 +54,7 @@ uv sync
 > [!NOTE]
 > To reproduce the exact dependency set from this repo's `uv.lock`, run `uv sync --frozen`. This ensures `uv` installs directly from the lockfile without re-resolving or updating any versions.
 
-To include optional dependencies (features published with the package):
+To include optional dependencies:
 ```bash
 uv sync --extra reachy_mini_wireless # For wireless Reachy Mini with GStreamer support
 uv sync --extra local_vision         # For local PyTorch/Transformers vision
