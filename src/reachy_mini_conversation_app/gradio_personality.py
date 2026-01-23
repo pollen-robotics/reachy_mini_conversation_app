@@ -85,10 +85,16 @@ class PersonalityUI:
     # ---------- Public API ----------
     def create_components(self) -> None:
         """Instantiate Gradio components for the personality UI."""
-        is_locked = LOCKED_PROFILE is not None
-        current_value = LOCKED_PROFILE if is_locked else (config.REACHY_MINI_CUSTOM_PROFILE or self.DEFAULT_OPTION)
-        dropdown_label = "Select personality (locked)" if is_locked else "Select personality"
-        dropdown_choices = [current_value] if is_locked else [self.DEFAULT_OPTION, *(self._list_personalities())]
+        if LOCKED_PROFILE is not None:
+            is_locked = True
+            current_value: str = LOCKED_PROFILE
+            dropdown_label = "Select personality (locked)"
+            dropdown_choices: list[str] = [LOCKED_PROFILE]
+        else:
+            is_locked = False
+            current_value = config.REACHY_MINI_CUSTOM_PROFILE or self.DEFAULT_OPTION
+            dropdown_label = "Select personality"
+            dropdown_choices = [self.DEFAULT_OPTION, *(self._list_personalities())]
 
         self.personalities_dropdown = gr.Dropdown(
             label=dropdown_label,
