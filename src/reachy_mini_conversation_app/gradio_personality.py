@@ -10,7 +10,7 @@ from pathlib import Path
 
 import gradio as gr
 
-from .config import config
+from .config import LOCKED_PROFILE, config
 
 
 class PersonalityUI:
@@ -85,23 +85,27 @@ class PersonalityUI:
     # ---------- Public API ----------
     def create_components(self) -> None:
         """Instantiate Gradio components for the personality UI."""
-        current_value = config.REACHY_MINI_CUSTOM_PROFILE or self.DEFAULT_OPTION
+        is_locked = LOCKED_PROFILE is not None
+        current_value = LOCKED_PROFILE if is_locked else (config.REACHY_MINI_CUSTOM_PROFILE or self.DEFAULT_OPTION)
+        dropdown_label = "Select personality (locked)" if is_locked else "Select personality"
+        dropdown_choices = [current_value] if is_locked else [self.DEFAULT_OPTION, *(self._list_personalities())]
 
         self.personalities_dropdown = gr.Dropdown(
-            label="Select personality",
-            choices=[self.DEFAULT_OPTION, *(self._list_personalities())],
+            label=dropdown_label,
+            choices=dropdown_choices,
             value=current_value,
+            interactive=not is_locked,
         )
-        self.apply_btn = gr.Button("Apply personality")
+        self.apply_btn = gr.Button("Apply personality", interactive=not is_locked)
         self.status_md = gr.Markdown(visible=True)
         self.preview_md = gr.Markdown(value=self._read_instructions_for(current_value))
-        self.person_name_tb = gr.Textbox(label="Personality name")
-        self.person_instr_ta = gr.TextArea(label="Personality instructions", lines=10)
-        self.tools_txt_ta = gr.TextArea(label="tools.txt", lines=10)
-        self.voice_dropdown = gr.Dropdown(label="Voice", choices=["cedar"], value="cedar")
-        self.new_personality_btn = gr.Button("New personality")
-        self.available_tools_cg = gr.CheckboxGroup(label="Available tools (helper)", choices=[], value=[])
-        self.save_btn = gr.Button("Save personality (instructions + tools)")
+        self.person_name_tb = gr.Textbox(label="Personality name", interactive=not is_locked)
+        self.person_instr_ta = gr.TextArea(label="Personality instructions", lines=10, interactive=not is_locked)
+        self.tools_txt_ta = gr.TextArea(label="tools.txt", lines=10, interactive=not is_locked)
+        self.voice_dropdown = gr.Dropdown(label="Voice", choices=["cedar"], value="cedar", interactive=not is_locked)
+        self.new_personality_btn = gr.Button("New personality", interactive=not is_locked)
+        self.available_tools_cg = gr.CheckboxGroup(label="Available tools (helper)", choices=[], value=[], interactive=not is_locked)
+        self.save_btn = gr.Button("Save personality (instructions + tools)", interactive=not is_locked)
 
     def additional_inputs_ordered(self) -> list[Any]:
         """Return the additional inputs in the expected order for Stream."""

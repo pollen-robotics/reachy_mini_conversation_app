@@ -22,7 +22,7 @@ from scipy.signal import resample
 
 from reachy_mini import ReachyMini
 from reachy_mini.media.media_manager import MediaBackend
-from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.config import LOCKED_PROFILE, config
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
 
@@ -162,6 +162,8 @@ class LocalStream:
 
     def _persist_personality(self, profile: Optional[str]) -> None:
         """Persist the startup personality to the instance .env and config."""
+        if LOCKED_PROFILE is not None:
+            return
         selection = (profile or "").strip() or None
         try:
             from reachy_mini_conversation_app.config import set_custom_profile
@@ -328,12 +330,13 @@ class LocalStream:
                             config.OPENAI_API_KEY = new_key
                         except Exception:
                             pass
-                    new_profile = os.getenv("REACHY_MINI_CUSTOM_PROFILE")
-                    if new_profile is not None:
-                        try:
-                            set_custom_profile(new_profile.strip() or None)
-                        except Exception:
-                            pass
+                    if LOCKED_PROFILE is None:
+                        new_profile = os.getenv("REACHY_MINI_CUSTOM_PROFILE")
+                        if new_profile is not None:
+                            try:
+                                set_custom_profile(new_profile.strip() or None)
+                            except Exception:
+                                pass
             except Exception:
                 pass
 

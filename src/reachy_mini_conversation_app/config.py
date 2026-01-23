@@ -4,6 +4,10 @@ import logging
 from dotenv import find_dotenv, load_dotenv
 
 
+# Locked profile: set to a profile name (e.g., "astronomer") to lock the app
+# to that profile and disable all profile switching. Leave as None for normal behavior.
+LOCKED_PROFILE: str | None = None
+
 logger = logging.getLogger(__name__)
 
 # Locate .env file (search upward from current working directory)
@@ -31,7 +35,7 @@ class Config:
 
     logger.debug(f"Model: {MODEL_NAME}, HF_HOME: {HF_HOME}, Vision Model: {LOCAL_VISION_MODEL}")
 
-    REACHY_MINI_CUSTOM_PROFILE = os.getenv("REACHY_MINI_CUSTOM_PROFILE")
+    REACHY_MINI_CUSTOM_PROFILE = LOCKED_PROFILE or os.getenv("REACHY_MINI_CUSTOM_PROFILE")
     logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")
 
 
@@ -44,6 +48,8 @@ def set_custom_profile(profile: str | None) -> None:
     This ensures modules that read `config` and code that inspects the
     environment see a consistent value.
     """
+    if LOCKED_PROFILE is not None:
+        return
     try:
         config.REACHY_MINI_CUSTOM_PROFILE = profile
     except Exception:
