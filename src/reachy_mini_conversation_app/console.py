@@ -439,7 +439,15 @@ class LocalStream:
             # Directly flush gstreamer audio pipe
             self._robot.media.audio.clear_player()
         elif self._robot.media.backend == MediaBackend.DEFAULT or self._robot.media.backend == MediaBackend.DEFAULT_NO_VIDEO:
-            self._robot.media.audio.clear_output_buffer()
+            # Try to clear output buffer if method exists
+            if hasattr(self._robot.media.audio, 'clear_output_buffer'):
+                self._robot.media.audio.clear_output_buffer()
+            elif hasattr(self._robot.media.audio, '_output_buffer'):
+                # Fallback: clear the private buffer directly
+                try:
+                    self._robot.media.audio._output_buffer.clear()
+                except Exception:
+                    pass
         self.handler.output_queue = asyncio.Queue()
 
     async def record_loop(self) -> None:
