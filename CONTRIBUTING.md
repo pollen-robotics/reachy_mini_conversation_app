@@ -61,7 +61,7 @@ Follow the [quality checklist](#before-opening-a-pr) below to ensure your change
 **PR Scope:**
 - **one PR = one feature/fix** - keep pull requests focused on a single issue or feature;
 - **minimal code changes** - only include what's necessary to solve the problem;
-- **self-documenting code** - pleaase, write clear, readable code, and add comments only when the logic isn't obvious.
+- **self-documenting code** - please, write clear, readable code, and add comments only when the logic isn't obvious.
 
 ### 4. Commit Messages
 
