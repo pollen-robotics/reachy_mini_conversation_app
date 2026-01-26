@@ -336,9 +336,9 @@ class LocalStream:
                             try:
                                 set_custom_profile(new_profile.strip() or None)
                             except Exception:
-                                pass
+                                pass  # Best-effort profile update
             except Exception:
-                pass
+                pass  # Instance .env loading is optional; continue with defaults
 
         # If key is still missing, try to download one from HuggingFace
         if not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()):
