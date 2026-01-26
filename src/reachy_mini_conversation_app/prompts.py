@@ -9,7 +9,6 @@ from reachy_mini_conversation_app.config import config
 logger = logging.getLogger(__name__)
 
 
-PROFILES_DIRECTORY = Path(__file__).parent / "profiles"
 PROMPTS_LIBRARY_DIRECTORY = Path(__file__).parent / "prompts"
 INSTRUCTIONS_FILENAME = "instructions.txt"
 VOICE_FILENAME = "voice.txt"
@@ -67,7 +66,7 @@ def get_session_instructions() -> str:
         instructions_file = PROMPTS_LIBRARY_DIRECTORY / "default_prompt.txt"
     else:
         logger.info(f"Loading prompt from profile '{profile}'")
-        instructions_file = PROFILES_DIRECTORY / profile / INSTRUCTIONS_FILENAME
+        instructions_file = config.PROFILES_DIRECTORY / profile / INSTRUCTIONS_FILENAME
 
     try:
         if instructions_file.exists():
@@ -95,7 +94,7 @@ def get_session_voice(default: str = "cedar") -> str:
     if not profile:
         return default
     try:
-        voice_file = PROFILES_DIRECTORY / profile / VOICE_FILENAME
+        voice_file = config.PROFILES_DIRECTORY / profile / VOICE_FILENAME
         if voice_file.exists():
             voice = voice_file.read_text(encoding="utf-8").strip()
             return voice or default
