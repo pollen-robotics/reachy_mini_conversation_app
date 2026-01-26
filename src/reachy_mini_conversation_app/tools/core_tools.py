@@ -5,13 +5,17 @@ import json
 import inspect
 import logging
 import importlib
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List
 from pathlib import Path
 from dataclasses import dataclass
 
 from reachy_mini import ReachyMini
 # Import config to ensure .env is loaded before reading REACHY_MINI_CUSTOM_PROFILE
 from reachy_mini_conversation_app.config import config  # noqa: F401
+
+
+if TYPE_CHECKING:
+    from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 
 
 logger = logging.getLogger(__name__)
@@ -55,6 +59,7 @@ class ToolDependencies:
     vision_manager: Any | None = None
     head_wobbler: Any | None = None  # HeadWobbler for audio-reactive motion
     motion_duration_s: float = 1.0
+    openai_realtime_handler: OpenaiRealtimeHandler | None = None
 
 
 # Tool base class

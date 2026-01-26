@@ -47,6 +47,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.input_sample_rate: Literal[24000] = self.input_sample_rate
 
         self.deps = deps
+        # Inject the handler as a dependency for tool calling, enabling interaction with the robot during long-running and interactive Tool.__call__ executions.
+        self.deps.openai_realtime_handler = self
 
         # Override type annotations for OpenAI strict typing (only for values used in API)
         self.output_sample_rate = OPEN_AI_OUTPUT_SAMPLE_RATE
