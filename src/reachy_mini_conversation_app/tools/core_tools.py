@@ -19,13 +19,6 @@ logger = logging.getLogger(__name__)
 
 PROFILES_DIRECTORY = "reachy_mini_conversation_app.profiles"
 
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s:%(lineno)d | %(message)s")
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-
 
 ALL_TOOLS: Dict[str, "Tool"] = {}
 ALL_TOOL_SPECS: List[Dict[str, Any]] = []
@@ -54,6 +47,7 @@ class ToolDependencies:
     camera_worker: Any | None = None  # CameraWorker for frame buffering
     vision_manager: Any | None = None
     head_wobbler: Any | None = None  # HeadWobbler for audio-reactive motion
+    speaker_id_worker: Any | None = None  # SpeakerIDWorker for speaker identification
     motion_duration_s: float = 1.0
 
 

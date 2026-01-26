@@ -67,6 +67,9 @@ dev = [
   "types-requests",
   "python-semantic-release>=10.5.3",
 ]
+speaker_id = [
+  "speechbrain @ git+https://github.com/speechbrain/speechbrain.git@develop",
+]
 
 [project.scripts]
 reachy-mini-conversation-app = "reachy_mini_conversation_app.main:main"
