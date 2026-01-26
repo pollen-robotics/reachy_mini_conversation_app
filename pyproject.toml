@@ -23,6 +23,9 @@ dependencies = [
     #OpenAI
     "openai>=2.1",
 
+    #PersonaPlex/Moshi
+    "websockets>=12.0",
+
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",

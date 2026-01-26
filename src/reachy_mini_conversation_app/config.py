@@ -20,16 +20,24 @@ else:
 class Config:
     """Configuration class for the conversation app."""
 
-    # Required
+    # Handler selection
+    HANDLER_TYPE = os.getenv("HANDLER_TYPE", "openai")  # "openai" or "personaplex"
+
+    # OpenAI configuration
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # The key is downloaded in console.py if needed
+    MODEL_NAME = os.getenv("MODEL_NAME", "gpt-realtime")
+
+    # PersonaPlex configuration
+    PERSONAPLEX_SERVER_URL = os.getenv("PERSONAPLEX_SERVER_URL", "ws://localhost:8998")
+    PERSONAPLEX_DEVICE = os.getenv("PERSONAPLEX_DEVICE", "mps")  # "mps" for Mac, "cuda" for GPU, "cpu" for CPU
 
     # Optional
-    MODEL_NAME = os.getenv("MODEL_NAME", "gpt-realtime")
     HF_HOME = os.getenv("HF_HOME", "./cache")
     LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "HuggingFaceTB/SmolVLM2-2.2B-Instruct")
     HF_TOKEN = os.getenv("HF_TOKEN")  # Optional, falls back to hf auth login if not set
 
-    logger.debug(f"Model: {MODEL_NAME}, HF_HOME: {HF_HOME}, Vision Model: {LOCAL_VISION_MODEL}")
+    logger.debug(f"Handler: {HANDLER_TYPE}, Model: {MODEL_NAME}, HF_HOME: {HF_HOME}, Vision Model: {LOCAL_VISION_MODEL}")
+    logger.debug(f"PersonaPlex Server: {PERSONAPLEX_SERVER_URL}, Device: {PERSONAPLEX_DEVICE}")
 
     REACHY_MINI_CUSTOM_PROFILE = os.getenv("REACHY_MINI_CUSTOM_PROFILE")
     logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")
