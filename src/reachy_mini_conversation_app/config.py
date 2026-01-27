@@ -1,5 +1,7 @@
 import os
+import sys
 import logging
+from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
 
@@ -9,6 +11,18 @@ from dotenv import find_dotenv, load_dotenv
 LOCKED_PROFILE: str | None = None
 
 logger = logging.getLogger(__name__)
+
+# Validate LOCKED_PROFILE at startup
+if LOCKED_PROFILE is not None:
+    _profiles_dir = Path(__file__).parent / "profiles"
+    _profile_path = _profiles_dir / LOCKED_PROFILE
+    _instructions_file = _profile_path / "instructions.txt"
+    if not _profile_path.is_dir():
+        print(f"Error: LOCKED_PROFILE '{LOCKED_PROFILE}' does not exist in {_profiles_dir}", file=sys.stderr)
+        sys.exit(1)
+    if not _instructions_file.is_file():
+        print(f"Error: LOCKED_PROFILE '{LOCKED_PROFILE}' has no instructions.txt", file=sys.stderr)
+        sys.exit(1)
 
 # Locate .env file (search upward from current working directory)
 dotenv_path = find_dotenv(usecwd=True)
