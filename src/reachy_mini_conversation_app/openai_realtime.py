@@ -17,6 +17,7 @@ from scipy.signal import resample
 from websockets.exceptions import ConnectionClosedError
 
 from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.memory import synthesize_conversation
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
@@ -72,6 +73,11 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         # Internal lifecycle flags
         self._shutdown_requested: bool = False
         self._connected_event: asyncio.Event = asyncio.Event()
+
+        # Long-term memory: conversation buffer and sync timer
+        self._conversation_buffer: list[str] = []
+        self._memory_sync_task: asyncio.Task[None] | None = None
+        self._last_memory_sync: float = 0.0
 
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
@@ -275,6 +281,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
             logger.info("Realtime session updated successfully")
 
+            # Start memory sync timer for automatic conversation persistence
+            await self._start_memory_sync_timer()
+
             # Manage event received from the openai server
             self.connection = conn
             try:
@@ -343,11 +352,16 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         except asyncio.CancelledError:
                             pass
 
+                    # Add to conversation buffer for memory synthesis
+                    self._add_to_conversation_buffer("User", event.transcript)
+
                     await self.output_queue.put(AdditionalOutputs({"role": "user", "content": event.transcript}))
 
                 # Handle assistant transcription
                 if event.type in ("response.audio_transcript.done", "response.output_audio_transcript.done"):
                     logger.debug(f"Assistant transcript: {event.transcript}")
+                    # Add to conversation buffer for memory synthesis
+                    self._add_to_conversation_buffer("Assistant", event.transcript)
                     await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": event.transcript}))
 
                 # Handle audio delta
@@ -530,6 +544,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
     async def shutdown(self) -> None:
         """Shutdown the handler."""
         self._shutdown_requested = True
+
+        # Stop memory sync timer and perform final sync
+        await self._stop_memory_sync_timer()
+
         # Cancel any pending debounce task
         if self.partial_transcript_task and not self.partial_transcript_task.done():
             self.partial_transcript_task.cancel()
@@ -717,3 +735,69 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         except Exception as e:
             # Never crash the app for QoL persistence; just log.
             logger.warning("Could not persist OPENAI_API_KEY to .env: %s", e)
+
+    def _add_to_conversation_buffer(self, role: str, content: str) -> None:
+        """Add a message to the conversation buffer for memory synthesis.
+
+        Args:
+            role: The role of the speaker (user or assistant).
+            content: The message content.
+
+        """
+        if content.strip():
+            self._conversation_buffer.append(f"{role}: {content}")
+            logger.debug(f"Added to conversation buffer: {role}: {content[:50]}...")
+
+    async def _start_memory_sync_timer(self) -> None:
+        """Start the periodic memory sync timer."""
+        if self._memory_sync_task is not None and not self._memory_sync_task.done():
+            return  # Already running
+
+        self._memory_sync_task = asyncio.create_task(
+            self._periodic_memory_sync(), name="memory-sync-timer"
+        )
+        logger.info("Started memory sync timer (interval=%ds)", config.MEMORY_SYNC_INTERVAL)
+
+    async def _periodic_memory_sync(self) -> None:
+        """Periodically sync conversation buffer to long-term memory."""
+        while not self._shutdown_requested:
+            try:
+                await asyncio.sleep(config.MEMORY_SYNC_INTERVAL)
+                if self._shutdown_requested:
+                    break
+                await self._sync_memory()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning("Error in periodic memory sync: %s", e)
+
+    async def _sync_memory(self) -> None:
+        """Sync current conversation buffer to long-term memory."""
+        if not self._conversation_buffer:
+            logger.debug("No conversation to sync to memory")
+            return
+
+        transcript = "\n".join(self._conversation_buffer)
+        logger.info(f"Syncing {len(self._conversation_buffer)} messages to memory...")
+
+        try:
+            # Run synthesis in executor to avoid blocking event loop
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, synthesize_conversation, transcript)
+            self._last_memory_sync = asyncio.get_event_loop().time()
+            logger.info("Memory sync completed successfully")
+        except Exception as e:
+            logger.error(f"Failed to sync memory: {e}")
+
+    async def _stop_memory_sync_timer(self) -> None:
+        """Stop the memory sync timer and perform final sync."""
+        if self._memory_sync_task is not None and not self._memory_sync_task.done():
+            self._memory_sync_task.cancel()
+            try:
+                await self._memory_sync_task
+            except asyncio.CancelledError:
+                pass
+
+        # Final sync on shutdown
+        await self._sync_memory()
+        self._conversation_buffer.clear()

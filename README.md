@@ -120,6 +120,31 @@ Some wheels (e.g. PyTorch) are large and require compatible CUDA or CPU builds�
 | `HF_TOKEN` | Optional token for Hugging Face models (only used with `--local-vision` flag, falls back to `huggingface-cli login`).
 | `LOCAL_VISION_MODEL` | Hugging Face model path for local vision processing (only used with `--local-vision` flag, defaults to `HuggingFaceTB/SmolVLM2-2.2B-Instruct`).
 
+### Long-Term Memory
+
+The app supports persistent memory across sessions. Reachy can remember information about the user from previous conversations.
+
+| Variable | Description |
+|----------|-------------|
+| `MEMORY_FILE_PATH` | Path to the memory file (defaults to `~/.reachy_mini/memory.txt`). |
+| `MEMORY_MAX_TOKENS` | Maximum tokens for memory summary (defaults to `2000`). |
+| `MEMORY_SYNC_INTERVAL` | Interval in seconds between memory syncs (defaults to `300` = 5 minutes). |
+
+**How it works:**
+1. During conversation, the app accumulates a transcript of the dialogue.
+2. Periodically (every `MEMORY_SYNC_INTERVAL` seconds) and at session close, the transcript is synthesized into a narrative summary using `gpt-4o-mini`.
+3. The summary is merged with existing memories and saved to `MEMORY_FILE_PATH`.
+4. On startup, memories are loaded and injected into the system prompt.
+
+**Memory format:**
+Memories are stored as a narrative summary (not a list of facts), making them natural for the LLM to process. Example:
+
+```
+L'utilisateur s'appelle Alice et travaille comme développeuse Python.
+Elle est passionnée par la robotique et développe actuellement un projet
+appelé "RobotArm". Elle préfère communiquer en français.
+```
+
 ## Running the app
 
 Activate your virtual environment, ensure the Reachy Mini robot (or simulator) is reachable, then launch:
