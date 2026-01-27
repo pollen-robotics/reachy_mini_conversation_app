@@ -227,6 +227,15 @@ When running with `--gradio`, open the "Personality" accordion:
 
 Note: The "Personality" panel updates the conversation instructions. Tool sets are loaded at startup from `tools.txt` and are not hot‑reloaded.
 
+### Locked profile mode
+
+To create a locked variant of the app that cannot switch profiles, edit `src/reachy_mini_conversation_app/config.py` and set the `LOCKED_PROFILE` constant to the desired profile name:
+```python
+LOCKED_PROFILE: str | None = "mars_rover"  # Lock to this profile
+```
+When `LOCKED_PROFILE` is set, the app always uses that profile, ignoring `REACHY_MINI_CUSTOM_PROFILE` env var & the Gradio UI shows "(locked)" and disables all profile editing controls.
+This is useful for creating dedicated clones of the app with a fixed personality. Clone scripts can simply edit this constant to lock the variant.
+
 
 ## Development workflow
 - Install the dev group extras: `uv sync --group dev` or `pip install -e .[dev]`.
