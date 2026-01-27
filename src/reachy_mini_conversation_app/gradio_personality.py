@@ -134,6 +134,11 @@ class PersonalityUI:
         """Attach event handlers to components within a Blocks context."""
 
         async def _apply_personality(selected: str) -> tuple[str, str]:
+            if LOCKED_PROFILE is not None and selected != LOCKED_PROFILE:
+                return (
+                    f"Profile is locked to '{LOCKED_PROFILE}'. Cannot change personality.",
+                    self._read_instructions_for(LOCKED_PROFILE),
+                )
             profile = None if selected == self.DEFAULT_OPTION else selected
             status = await handler.apply_personality(profile)
             preview = self._read_instructions_for(selected)
