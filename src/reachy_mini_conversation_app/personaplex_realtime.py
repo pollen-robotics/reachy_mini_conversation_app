@@ -310,7 +310,7 @@ class PersonaPlexHandler(AsyncStreamHandler):
         elif event_type == "error":
             error_msg = event.get("message", "Unknown error")
             logger.error(f"Moshi error: {error_msg}")
-            await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": f"[error] {error_msg}"))
+            await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": f"[error] {error_msg}"}))
 
     async def _handle_tool_call(self, event: dict[str, Any]) -> None:
         """Handle tool call from Moshi server."""
