@@ -7,8 +7,11 @@ import logging
 import websockets
 from typing import Any, Final, Tuple, Literal, Optional
 from datetime import datetime
+from urllib.parse import quote
 
+import io
 import cv2
+import opuslib
 import numpy as np
 import gradio as gr
 from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item, audio_to_int16
@@ -61,20 +64,49 @@ class PersonaPlexHandler(AsyncStreamHandler):
         # Debouncing for partial transcripts
         self.partial_transcript_task: asyncio.Task[None] | None = None
         self.partial_transcript_sequence: int = 0
-        self.partial_debounce_delay = 0.5  # seconds
+        self.partial_debounce_delay = 0.0  # seconds
 
         # Internal lifecycle flags
         self._shutdown_requested: bool = False
         self._connected_event: asyncio.Event = asyncio.Event()
+        self._handshake_received: asyncio.Event = asyncio.Event()
 
         # PersonaPlex specific
         self.server_url = config.PERSONAPLEX_SERVER_URL
         self.current_persona: str | None = None
         self.current_voice_prompt: str | None = None
 
+        # Opus encoder/decoder for audio (24kHz mono, 80ms frame size)
+        # Mimi uses 12.5Hz frame rate = 80ms frames = 1920 samples at 24kHz
+        self.opus_frame_size = 1920  # 80ms frames at 24kHz (matches Mimi's 12.5Hz frame rate)
+
+        # Use opuslib for raw Opus encoding and decoding
+        self.opus_encoder = opuslib.Encoder(24000, 1, opuslib.APPLICATION_AUDIO)
+        try:
+            self.opus_encoder.bitrate = 128000  # 128 kbps
+        except Exception:
+            pass  # Use default if setting fails
+
+        # Use opuslib for decoding raw Opus packets from server
+        self.opus_decoder = opuslib.Decoder(24000, 1)
+
+        # Buffer for accumulating audio before encoding
+        self.audio_buffer: list[np.ndarray] = []
+        self.buffer_samples = 0
+        self.target_buffer_samples = 1920  # Encode in 80ms chunks
+
+        # Latency tracking (similar to web client)
+        self.total_audio_sent = 0.0  # Total seconds of audio sent to server
+        self.total_audio_received = 0.0  # Total seconds of audio received from server
+        self.last_latency_log_time = 0.0
+
     def copy(self) -> "PersonaPlexHandler":
         """Create a copy of the handler."""
         return PersonaPlexHandler(self.deps, self.gradio_mode, self.instance_path)
+
+    def _ms_to_samples(self, ms: float) -> int:
+        """Convert milliseconds to samples at 24kHz."""
+        return int(ms * 24000 / 1000)
 
     async def apply_personality(self, profile: str | None) -> str:
         """Apply a new personality (profile) at runtime.
@@ -169,6 +201,7 @@ class PersonaPlexHandler(AsyncStreamHandler):
 
             try:
                 self._connected_event.clear()
+                self._handshake_received.clear()
             except Exception:
                 pass
 
@@ -184,13 +217,15 @@ class PersonaPlexHandler(AsyncStreamHandler):
     async def _run_moshi_session(self) -> None:
         """Establish and manage a single Moshi session."""
         try:
-            async with websockets.connect(self.server_url) as ws:
+            # Add required query parameters: voice_prompt and text_prompt
+            # voice_prompt: select voice (NATF2 - natural female voice)
+            # text_prompt: persona/system instructions (must be URL-encoded)
+            persona = self.current_persona or "You are Reachy Mini, a friendly, compact robot assistant with a calm voice and a subtle sense of humor. Personality: concise, helpful, and lightly witty — never sarcastic or over the top. You speak English by default and switch languages only if explicitly told."
+            ws_url = f"{self.server_url}?voice_prompt=NATF2.pt&text_prompt={quote(persona)}"
+            async with websockets.connect(ws_url) as ws:
                 self.websocket = ws
                 self._connected_event.set()
-                logger.info("Connected to Moshi server")
-
-                # Send initial configuration if needed
-                await self._send_config()
+                logger.info("Connected to Moshi server with persona and voice")
 
                 # Start receiving task
                 receive_task = asyncio.create_task(self._receive_loop())
@@ -205,45 +240,112 @@ class PersonaPlexHandler(AsyncStreamHandler):
             logger.error(f"Moshi session error: {e}")
             raise
 
-    async def _send_config(self) -> None:
-        """Send initial configuration to Moshi server."""
-        config_msg = {
-            "type": "config",
-            "persona": self.current_persona or "You are a helpful robot assistant.",
-            "sample_rate": self.input_sample_rate,
-        }
-        await self.websocket.send(json.dumps(config_msg))
-        logger.info("Sent configuration to Moshi server")
-
     async def _receive_loop(self) -> None:
         """Receive and process messages from Moshi server."""
         async for message in self.websocket:
             try:
                 if isinstance(message, bytes):
-                    # Binary message - audio data
-                    await self._handle_audio_data(message)
+                    # Binary message - check type byte
+                    if len(message) == 0:
+                        continue
+
+                    msg_type = message[0]
+                    payload = message[1:]
+
+                    if msg_type == 0x00:
+                        # Handshake - signal that we can now send audio
+                        logger.info("Received handshake from Moshi server - ready to send audio")
+                        self._handshake_received.set()
+                    elif msg_type == 0x01:
+                        # Audio data (Opus-encoded)
+                        await self._handle_audio_data(payload)
+                    elif msg_type == 0x02:
+                        # Text tokens (UTF-8)
+                        await self._handle_text_tokens(payload)
+                    else:
+                        logger.warning(f"Unknown message type: {msg_type}")
                 else:
-                    # Text message - JSON event
+                    # Text message - JSON event (if server sends any)
                     event = json.loads(message)
                     await self._handle_event(event)
             except Exception as e:
                 logger.error(f"Error processing message: {e}")
 
-    async def _handle_audio_data(self, audio_bytes: bytes) -> None:
-        """Handle incoming audio data from Moshi."""
+    async def _handle_audio_data(self, opus_bytes: bytes) -> None:
+        """Handle incoming raw Opus-encoded audio data from Moshi."""
         self.last_activity_time = asyncio.get_event_loop().time()
 
-        # Convert bytes to int16 audio
-        audio_array = np.frombuffer(audio_bytes, dtype=np.int16).reshape(1, -1)
+        # Decode raw Opus packets using opuslib (matching the modified server)
+        try:
+            logger.debug(f"Received Opus packet: {len(opus_bytes)} bytes")
+
+            # The server sends concatenated raw Opus packets
+            # We need to decode all of them
+            # Opus packets can vary in size, but we'll try to decode the entire buffer
+
+            # Decode the raw Opus packet
+            # Use a large frame size to handle variable packet lengths
+            pcm_int16_bytes = self.opus_decoder.decode(opus_bytes, 5760, decode_fec=False)
+
+            # Convert bytes to int16 array
+            audio_int16 = np.frombuffer(pcm_int16_bytes, dtype=np.int16)
+
+            # Check if we got data
+            if len(audio_int16) == 0:
+                logger.debug("No PCM data decoded from Opus packet")
+                return
+
+            # Ensure shape is (1, samples) for mono
+            audio_array = audio_int16.reshape(1, -1)
+
+            logger.debug(f"Decoded to {audio_array.shape[1]} samples")
+
+        except Exception as e:
+            logger.error(f"Failed to decode Opus audio: {e}, packet size: {len(opus_bytes)} bytes")
+            # Return silence to prevent ZeroDivisionError in playback
+            audio_array = np.zeros((1, 1920), dtype=np.int16)
+
+        # Track received audio for latency measurement
+        audio_duration = audio_array.shape[1] / 24000.0  # seconds
+        self.total_audio_received += audio_duration
+
+        # Calculate and log latency periodically
+        current_time = asyncio.get_event_loop().time()
+        if current_time - self.last_latency_log_time > 2.0:  # Log every 2 seconds
+            queue_size = self.output_queue.qsize()
+
+            # Calculate buffered audio time (how much audio is waiting to play)
+            # Each packet in queue represents ~80ms of audio
+            buffered_seconds = queue_size * 0.08  # approximate
+
+            logger.info(
+                f"Audio Buffer: {buffered_seconds:.3f}s ({queue_size} packets) | "
+                f"Total: sent={self.total_audio_sent:.1f}s, received={self.total_audio_received:.1f}s"
+            )
+            self.last_latency_log_time = current_time
 
         # Feed to head wobbler if available
         if self.deps.head_wobbler is not None:
             # Convert to base64 for head wobbler (mimicking OpenAI format)
-            b64_audio = base64.b64encode(audio_bytes).decode("utf-8")
+            pcm_bytes = audio_array.tobytes()
+            b64_audio = base64.b64encode(pcm_bytes).decode("utf-8")
             self.deps.head_wobbler.feed(b64_audio)
 
         # Queue for output
         await self.output_queue.put((self.output_sample_rate, audio_array))
+
+    async def _handle_text_tokens(self, text_bytes: bytes) -> None:
+        """Handle incoming text tokens from Moshi."""
+        try:
+            text = text_bytes.decode("utf-8")
+            logger.debug(f"Received text tokens: {text}")
+
+            # Display as transcript
+            await self.output_queue.put(
+                AdditionalOutputs({"role": "assistant", "content": text}),
+            )
+        except Exception as e:
+            logger.error(f"Failed to decode text tokens: {e}")
 
     async def _handle_event(self, event: dict[str, Any]) -> None:
         """Handle JSON events from Moshi server."""
@@ -330,13 +432,10 @@ class PersonaPlexHandler(AsyncStreamHandler):
             logger.error(f"Tool '{tool_name}' failed: {e}")
             tool_result = {"error": str(e)}
 
-        # Send tool result back to Moshi
-        result_msg = {
-            "type": "tool_result",
-            "call_id": call_id,
-            "result": json.dumps(tool_result),
-        }
-        await self.websocket.send(json.dumps(result_msg))
+        # Note: Moshi doesn't have a JSON protocol for tool results
+        # Tool results are handled internally by the model
+        # If Moshi supports tool calling, it would be via binary protocol
+        logger.debug(f"Tool {tool_name} executed, result: {tool_result}")
 
         # Display tool result in UI
         await self.output_queue.put(
@@ -356,13 +455,9 @@ class PersonaPlexHandler(AsyncStreamHandler):
                 logger.warning(f"Unexpected type for b64_im: {type(b64_im)}")
                 b64_im = str(b64_im)
 
-            # Send image to Moshi
-            image_msg = {
-                "type": "image",
-                "data": f"data:image/jpeg;base64,{b64_im}",
-            }
-            await self.websocket.send(json.dumps(image_msg))
-            logger.info("Added camera image to conversation")
+            # Note: Moshi doesn't have a JSON protocol for images
+            # Vision would need to be handled differently (e.g., via local VLM)
+            logger.info("Camera tool executed (image not sent to Moshi - vision not yet supported)")
 
             # Display image in Gradio
             if self.deps.camera_worker is not None:
@@ -391,6 +486,12 @@ class PersonaPlexHandler(AsyncStreamHandler):
         if not self.websocket:
             return
 
+        # Drop audio frames until handshake is received
+        # This prevents accumulating latency during connection setup
+        if not self._handshake_received.is_set():
+            logger.debug("Handshake not yet received, dropping audio frame to prevent latency buildup")
+            return
+
         input_sample_rate, audio_frame = frame
 
         # Reshape if needed
@@ -407,11 +508,44 @@ class PersonaPlexHandler(AsyncStreamHandler):
         # Cast to int16
         audio_frame = audio_to_int16(audio_frame)
 
-        # Send to Moshi as binary data
+        # Encode to Opus using opuslib (raw Opus packets)
         try:
-            await self.websocket.send(audio_frame.tobytes())
+            # Add to buffer
+            self.audio_buffer.append(audio_frame)
+            self.buffer_samples += len(audio_frame)
+
+            # Process complete frames (1920 samples = 80ms at 24kHz)
+            while self.buffer_samples >= self.target_buffer_samples:
+                # Concatenate buffer
+                full_buffer = np.concatenate(self.audio_buffer)
+
+                # Extract one frame
+                frame = full_buffer[:self.target_buffer_samples]
+                remaining = full_buffer[self.target_buffer_samples:]
+
+                # Encode to raw Opus
+                opus_bytes = self.opus_encoder.encode(frame.tobytes(), self.opus_frame_size)
+
+                logger.debug(f"Encoded raw Opus: {len(opus_bytes)} bytes from {len(frame)} samples")
+
+                # Format: first byte = 1 (audio message type), then raw Opus payload
+                message = bytes([1]) + opus_bytes
+                await self.websocket.send(message)
+
+                # Track audio sent for latency measurement
+                audio_duration = len(frame) / 24000.0  # seconds
+                self.total_audio_sent += audio_duration
+
+                # Update buffer
+                if len(remaining) > 0:
+                    self.audio_buffer = [remaining]
+                    self.buffer_samples = len(remaining)
+                else:
+                    self.audio_buffer = []
+                    self.buffer_samples = 0
+
         except Exception as e:
-            logger.debug(f"Dropping audio frame: connection not ready ({e})")
+            logger.error(f"Failed to encode/send audio: {e}")
             return
 
     async def emit(self) -> Tuple[int, NDArray[np.int16]] | AdditionalOutputs | None:
@@ -427,6 +561,8 @@ class PersonaPlexHandler(AsyncStreamHandler):
 
             self.last_activity_time = asyncio.get_event_loop().time()
 
+        # Simple approach: just play audio as it arrives
+        # The audio device will handle buffering naturally
         return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
 
     async def shutdown(self) -> None:
@@ -476,8 +612,6 @@ class PersonaPlexHandler(AsyncStreamHandler):
             logger.debug("No connection, cannot send idle signal")
             return
 
-        idle_msg = {
-            "type": "idle_signal",
-            "message": timestamp_msg,
-        }
-        await self.websocket.send(json.dumps(idle_msg))
+        # Note: Moshi doesn't have a JSON protocol for idle signals
+        # The model should handle idle behavior based on lack of user speech
+        logger.debug(f"Idle condition detected: {timestamp_msg}")

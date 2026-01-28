@@ -25,6 +25,7 @@ dependencies = [
 
     #PersonaPlex/Moshi
     "websockets>=12.0",
+    "opuslib>=3.0.0",
 
     #Reachy mini
     "reachy_mini_dances_library",
