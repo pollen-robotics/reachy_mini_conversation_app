@@ -23,7 +23,7 @@ def get_available_dances_and_descriptions() -> str:
     if not DANCE_AVAILABLE:
         return "Moves not available."
 
-    if not AVAILABLE_MOVES: #if AVAILABLE_MOVES is empty
+    if not AVAILABLE_MOVES:  # if AVAILABLE_MOVES is empty
         return "Moves not available."
 
     output = ""
@@ -61,7 +61,7 @@ class Dance(Tool):
         if not DANCE_AVAILABLE:
             return {"error": "Dance system not available"}
 
-        if not AVAILABLE_MOVES: #if AVAILABLE_MOVES is empty
+        if not AVAILABLE_MOVES:  # if AVAILABLE_MOVES is empty
             return {"error": "No moves currently available"}
 
         move_name = kwargs.get("move")
