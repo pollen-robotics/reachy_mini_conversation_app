@@ -36,6 +36,9 @@ reachy_mini_wireless = [
   "PyGObject>=3.42.2,<=3.46.0", 
   "gst-signalling>=1.1.2",
 ]
+sarvam = [
+  "sarvam-ai>=0.1.0",
+]
 local_vision = [
   "torch>=2.1",
   "transformers==5.0.0rc2",

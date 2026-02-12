@@ -40,6 +40,10 @@ class Config:
 
     # Required
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # The key is downloaded in console.py if needed
+    SARVAM_API_KEY = os.getenv("SARVAM_API_KEY")  # Sarvam AI API key for realtime conversations
+
+    # Provider selection: "openai" or "sarvam"
+    REALTIME_PROVIDER = os.getenv("REALTIME_PROVIDER", "openai").lower()
 
     # Optional
     MODEL_NAME = os.getenv("MODEL_NAME", "gpt-realtime")
@@ -48,6 +52,7 @@ class Config:
     HF_TOKEN = os.getenv("HF_TOKEN")  # Optional, falls back to hf auth login if not set
 
     logger.debug(f"Model: {MODEL_NAME}, HF_HOME: {HF_HOME}, Vision Model: {LOCAL_VISION_MODEL}")
+    logger.debug(f"Realtime Provider: {REALTIME_PROVIDER}")
 
     REACHY_MINI_CUSTOM_PROFILE = LOCKED_PROFILE or os.getenv("REACHY_MINI_CUSTOM_PROFILE")
     logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")

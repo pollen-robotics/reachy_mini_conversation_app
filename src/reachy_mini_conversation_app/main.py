@@ -46,11 +46,14 @@ def run(
     from reachy_mini_conversation_app.moves import MovementManager
     from reachy_mini_conversation_app.console import LocalStream
     from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
+    from reachy_mini_conversation_app.sarvam_realtime import SarvamRealtimeHandler
+    from reachy_mini_conversation_app.config import config
     from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
     from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
 
     logger = setup_logger(args.debug)
     logger.info("Starting Reachy Mini Conversation App")
+    logger.info("Using realtime provider: %s", config.REALTIME_PROVIDER)
 
     if args.no_camera and args.head_tracker is not None:
         logger.warning(
@@ -126,7 +129,13 @@ def run(
     )
     logger.debug(f"Chatbot avatar images: {chatbot.avatar_images}")
 
-    handler = OpenaiRealtimeHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)
+    # Select handler based on configured provider
+    if config.REALTIME_PROVIDER == "sarvam":
+        logger.info("Initializing Sarvam AI realtime handler")
+        handler = SarvamRealtimeHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)
+    else:
+        logger.info("Initializing OpenAI realtime handler")
+        handler = OpenaiRealtimeHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)
 
     stream_manager: gr.Blocks | LocalStream | None = None
 

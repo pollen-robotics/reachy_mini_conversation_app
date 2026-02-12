@@ -24,6 +24,7 @@ from reachy_mini import ReachyMini
 from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.config import LOCKED_PROFILE, config
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
+from reachy_mini_conversation_app.realtime_handler_base import RealtimeHandlerBase
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
 
 
@@ -49,13 +50,13 @@ class LocalStream:
 
     def __init__(
         self,
-        handler: OpenaiRealtimeHandler,
+        handler: RealtimeHandlerBase,
         robot: ReachyMini,
         *,
         settings_app: Optional[FastAPI] = None,
         instance_path: Optional[str] = None,
     ):
-        """Initialize the stream with an OpenAI realtime handler and pipelines.
+        """Initialize the stream with a realtime handler and pipelines.
 
         - ``settings_app``: the Reachy Mini Apps FastAPI to attach settings endpoints.
         - ``instance_path``: directory where per-instance ``.env`` should be stored.

@@ -23,6 +23,7 @@ from reachy_mini_conversation_app.tools.core_tools import (
     get_tool_specs,
     dispatch_tool_call,
 )
+from reachy_mini_conversation_app.realtime_handler_base import RealtimeHandlerBase
 
 
 logger = logging.getLogger(__name__)
@@ -31,38 +32,33 @@ OPEN_AI_INPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
 OPEN_AI_OUTPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
 
 
-class OpenaiRealtimeHandler(AsyncStreamHandler):
+class OpenaiRealtimeHandler(RealtimeHandlerBase):
     """An OpenAI realtime handler for fastrtc Stream."""
 
     def __init__(self, deps: ToolDependencies, gradio_mode: bool = False, instance_path: Optional[str] = None):
         """Initialize the handler."""
         super().__init__(
+            deps=deps,
             expected_layout="mono",
             output_sample_rate=OPEN_AI_OUTPUT_SAMPLE_RATE,
             input_sample_rate=OPEN_AI_INPUT_SAMPLE_RATE,
+            gradio_mode=gradio_mode,
+            instance_path=instance_path,
         )
 
         # Override typing of the sample rates to match OpenAI's requirements
         self.output_sample_rate: Literal[24000] = self.output_sample_rate
         self.input_sample_rate: Literal[24000] = self.input_sample_rate
 
-        self.deps = deps
-
         # Override type annotations for OpenAI strict typing (only for values used in API)
         self.output_sample_rate = OPEN_AI_OUTPUT_SAMPLE_RATE
         self.input_sample_rate = OPEN_AI_INPUT_SAMPLE_RATE
 
         self.connection: Any = None
-        self.output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]" = asyncio.Queue()
 
         self.last_activity_time = asyncio.get_event_loop().time()
         self.start_time = asyncio.get_event_loop().time()
         self.is_idle_tool_call = False
-        self.gradio_mode = gradio_mode
-        self.instance_path = instance_path
-        # Track how the API key was provided (env vs textbox) and its value
-        self._key_source: Literal["env", "textbox"] = "env"
-        self._provided_api_key: str | None = None
 
         # Debouncing for partial transcripts
         self.partial_transcript_task: asyncio.Task[None] | None = None
@@ -72,6 +68,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         # Internal lifecycle flags
         self._shutdown_requested: bool = False
         self._connected_event: asyncio.Event = asyncio.Event()
+
+        # Track how the API key was provided (env vs textbox) and its value
+        self._key_source: Literal["env", "textbox"] = "env"
+        self._provided_api_key: str | None = None
 
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
