@@ -30,6 +30,13 @@ logger = logging.getLogger(__name__)
 OPEN_AI_INPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
 OPEN_AI_OUTPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
 
+# Cost tracking from usage data (pricing as of Feb 2026 https://openai.com/api/pricing/)
+AUDIO_INPUT_COST_PER_1M = 32.0
+AUDIO_OUTPUT_COST_PER_1M = 64.0
+TEXT_INPUT_COST_PER_1M = 4.0
+TEXT_OUTPUT_COST_PER_1M = 16.0
+IMAGE_INPUT_COST_PER_1M = 5.0
+
 
 class OpenaiRealtimeHandler(AsyncStreamHandler):
     """An OpenAI realtime handler for fastrtc Stream."""
@@ -313,12 +320,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     # Doesn't mean the audio is done playing
                     logger.debug("Response done")
 
-                    # Cost tracking from usage data (pricing as of Feb 2026 https://openai.com/fr-FR/api/pricing/)
-                    AUDIO_INPUT_COST_PER_1M = 32.0
-                    AUDIO_OUTPUT_COST_PER_1M = 64.0
-                    TEXT_INPUT_COST_PER_1M = 4.0
-                    TEXT_OUTPUT_COST_PER_1M = 16.0
-                    IMAGE_INPUT_COST_PER_1M = 5.0
+
 
                     response = getattr(event, "response", None)
                     usage = getattr(response, "usage", None) if response else None
