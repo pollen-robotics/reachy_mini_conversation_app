@@ -1,23 +1,26 @@
 from __future__ import annotations
+import re
 import abc
 import sys
 import json
 import inspect
 import logging
 import importlib
+import importlib.util
 from typing import Any, Dict, List
 from pathlib import Path
 from dataclasses import dataclass
 
 from reachy_mini import ReachyMini
-# Import config to ensure .env is loaded before reading REACHY_MINI_CUSTOM_PROFILE
-from reachy_mini_conversation_app.config import config  # noqa: F401
+from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY as DEFAULT_PROFILES_PATH  # noqa: F401
+from reachy_mini_conversation_app.config import config
 
 
 logger = logging.getLogger(__name__)
 
 
-PROFILES_DIRECTORY = "reachy_mini_conversation_app.profiles"
+DEFAULT_PROFILES_MODULE = "reachy_mini_conversation_app.profiles"
+
 
 if not logger.handlers:
     handler = logging.StreamHandler()
@@ -86,6 +89,47 @@ class Tool(abc.ABC):
         raise NotImplementedError
 
 
+def _load_module_from_file(module_name: str, file_path: Path) -> None:
+    """Load a Python module from a file path."""
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if not (spec and spec.loader):
+        raise ModuleNotFoundError(f"Cannot create spec for {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+
+
+def _try_load_tool(
+    tool_name: str,
+    module_path: str,
+    fallback_directory: Path | None,
+    file_subpath: str,
+) -> str:
+    """Try to load a tool: first via importlib, then from file if fallback is configured."""
+    try:
+        importlib.import_module(module_path)
+        return "module"
+    except ModuleNotFoundError:
+        if fallback_directory is None:
+            raise
+        tool_file = fallback_directory / file_subpath
+        if not tool_file.exists():
+            raise FileNotFoundError(f"tool file not found at {tool_file}")
+        _load_module_from_file(tool_name, tool_file)
+        return "file"
+
+
+def _format_error(error: Exception) -> str:
+    """Format an exception for logging."""
+    if isinstance(error, FileNotFoundError):
+        return f"Tool file not found: {error}"
+    if isinstance(error, ModuleNotFoundError):
+        return f"Missing dependency: {error}"
+    if isinstance(error, ImportError):
+        return f"Import error: {error}"
+    return f"{type(error).__name__}: {error}"
+
+
 # Registry & specs (dynamic)
 def _load_profile_tools() -> None:
     """Load tools based on profile's tools.txt file."""
@@ -95,12 +139,29 @@ def _load_profile_tools() -> None:
 
     # Build path to tools.txt
     # Get the profile directory path
-    profile_module_path = Path(__file__).parent.parent / "profiles" / profile
+    profile_module_path = config.PROFILES_DIRECTORY / profile
     tools_txt_path = profile_module_path / "tools.txt"
+    default_tools_txt_path = Path(__file__).parent.parent / "profiles" / "default" / "tools.txt"
+
+    if config.PROFILES_DIRECTORY != DEFAULT_PROFILES_PATH:
+        logger.info(
+            "Loading external profile '%s' from %s",
+            profile,
+            profile_module_path,
+        )
 
     if not tools_txt_path.exists():
-        logger.error(f"✗ tools.txt not found at {tools_txt_path}")
-        sys.exit(1)
+        if profile != "default" and default_tools_txt_path.exists():
+            logger.warning(
+                "tools.txt not found for profile '%s' at %s. Falling back to default profile tools at %s",
+                profile,
+                tools_txt_path,
+                default_tools_txt_path,
+            )
+            tools_txt_path = default_tools_txt_path
+        else:
+            logger.error(f"✗ tools.txt not found at {tools_txt_path}")
+            sys.exit(1)
 
     # Read and parse tools.txt
     try:
@@ -121,54 +182,77 @@ def _load_profile_tools() -> None:
 
     logger.info(f"Found {len(tool_names)} tools to load: {tool_names}")
 
-    # Import each tool
+    if config.AUTOLOAD_EXTERNAL_TOOLS and config.TOOLS_DIRECTORY and config.TOOLS_DIRECTORY.is_dir():
+        discovered_external_tools: List[str] = []
+        for tool_file in sorted(config.TOOLS_DIRECTORY.glob("*.py")):
+            if tool_file.name.startswith("_"):
+                continue
+            candidate_name = tool_file.stem
+            if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", candidate_name):
+                logger.warning("Skipping external tool with invalid name: %s", tool_file.name)
+                continue
+            discovered_external_tools.append(candidate_name)
+
+        extra_tools = [name for name in discovered_external_tools if name not in tool_names]
+        if extra_tools:
+            tool_names.extend(extra_tools)
+            logger.info(
+                "AUTOLOAD_EXTERNAL_TOOLS enabled: added %d external tool(s): %s",
+                len(extra_tools),
+                extra_tools,
+            )
+
     for tool_name in tool_names:
         loaded = False
         profile_error = None
+        profile_import_path = f"{DEFAULT_PROFILES_MODULE}.{profile}.{tool_name}"
 
-        # Try profile-local tool first
+        # Try profile tool first
         try:
-            profile_tool_module = f"{PROFILES_DIRECTORY}.{profile}.{tool_name}"
-            importlib.import_module(profile_tool_module)
-            logger.info(f"✓ Loaded profile-local tool: {tool_name}")
-            loaded = True
-        except ModuleNotFoundError as e:
-            # Check if it's the tool module itself that's missing (expected) or a dependency
-            if tool_name in str(e):
-                pass  # Tool not in profile directory, try shared tools
+            source = _try_load_tool(
+                tool_name,
+                module_path=profile_import_path,
+                fallback_directory=config.PROFILES_DIRECTORY,
+                file_subpath=f"{profile}/{tool_name}.py",
+            )
+            if source == "file":
+                logger.info("✓ Loaded external profile tool: %s", tool_name)
             else:
-                # Missing import dependency within the tool file
-                profile_error = f"Missing dependency: {e}"
-                logger.error(f"❌ Failed to load profile-local tool '{tool_name}': {profile_error}")
-                logger.error(f"  Module path: {profile_tool_module}")
-        except ImportError as e:
-            profile_error = f"Import error: {e}"
-            logger.error(f"❌ Failed to load profile-local tool '{tool_name}': {profile_error}")
-            logger.error(f"  Module path: {profile_tool_module}")
+                logger.info("✓ Loaded core profile tool: %s", tool_name)
+            loaded = True
+        except (ModuleNotFoundError, FileNotFoundError) as e:
+            if tool_name not in str(e):
+                profile_error = _format_error(e)
+                logger.error(f"❌ Failed to load profile tool '{tool_name}': {profile_error}")
+                logger.error(f"  Module path: {profile_import_path}")
         except Exception as e:
-            profile_error = f"{type(e).__name__}: {e}"
-            logger.error(f"❌ Failed to load profile-local tool '{tool_name}': {profile_error}")
-            logger.error(f"  Module path: {profile_tool_module}")
+            profile_error = _format_error(e)
+            logger.error(f"❌ Failed to load profile tool '{tool_name}': {profile_error}")
+            logger.error(f"  Module path: {profile_import_path}")
 
-        # Try shared tools library if not found in profile
+        # Try tools directory if not found in profile
         if not loaded:
+            shared_module_path = f"reachy_mini_conversation_app.tools.{tool_name}"
             try:
-                shared_tool_module = f"reachy_mini_conversation_app.tools.{tool_name}"
-                importlib.import_module(shared_tool_module)
-                logger.info(f"✓ Loaded shared tool: {tool_name}")
-                loaded = True
-            except ModuleNotFoundError:
+                source = _try_load_tool(
+                    tool_name,
+                    module_path=shared_module_path,
+                    fallback_directory=config.TOOLS_DIRECTORY,
+                    file_subpath=f"{tool_name}.py",
+                )
+                if source == "file":
+                    logger.info("✓ Loaded external tool: %s", tool_name)
+                else:
+                    logger.info("✓ Loaded core tool: %s", tool_name)
+            except (ModuleNotFoundError, FileNotFoundError):
                 if profile_error:
-                    # Already logged error from profile attempt
                     logger.error(f"❌ Tool '{tool_name}' also not found in shared tools")
                 else:
                     logger.warning(f"⚠️ Tool '{tool_name}' not found in profile or shared tools")
-            except ImportError as e:
-                logger.error(f"❌ Failed to load shared tool '{tool_name}': Import error: {e}")
-                logger.error(f"  Module path: {shared_tool_module}")
             except Exception as e:
-                logger.error(f"❌ Failed to load shared tool '{tool_name}': {type(e).__name__}: {e}")
-                logger.error(f"  Module path: {shared_tool_module}")
+                logger.error(f"❌ Failed to load shared tool '{tool_name}': {_format_error(e)}")
+                logger.error(f"  Module path: {shared_module_path}")
+
 
 
 def _initialize_tools() -> None:

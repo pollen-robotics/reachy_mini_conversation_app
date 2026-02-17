@@ -1,0 +1,11 @@
+# This file is an explicit allow-list.
+# Every tool name listed below must be either:
+# - a built-in tool from src/reachy_mini_conversation_app/tools/
+# - or an external tool file in TOOLS_DIRECTORY (e.g. external_tools/starter_custom_tool.py)
+
+dance
+stop_dance
+play_emotion
+stop_emotion
+move_head
+starter_custom_tool

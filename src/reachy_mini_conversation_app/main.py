@@ -93,13 +93,13 @@ def run(
             logger.error("Please check your configuration and try again.")
             sys.exit(1)
 
-    # Check if running in simulation mode without --gradio
-    if robot.client.get_status()["simulation_enabled"] and not args.gradio:
-        logger.error(
-            "Simulation mode requires Gradio interface. Please use --gradio flag when running in simulation mode."
-        )
-        robot.client.disconnect()
-        sys.exit(1)
+    # Auto-enable Gradio in simulation mode (both MuJoCo for deamon and mockup-sim for desktop app)
+    status = robot.client.get_status()
+    is_simulation = status.get("simulation_enabled", False) or status.get("mockup_sim_enabled", False)
+
+    if is_simulation and not args.gradio:
+        logger.info("Simulation mode detected. Automatically enabling gradio flag.")
+        args.gradio = True
 
     camera_worker, _, vision_manager = handle_vision_stuff(args, robot)
 

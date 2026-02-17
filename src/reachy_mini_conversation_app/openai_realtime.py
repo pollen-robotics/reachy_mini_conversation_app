@@ -31,6 +31,28 @@ logger = logging.getLogger(__name__)
 OPEN_AI_INPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
 OPEN_AI_OUTPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
 
+# Cost tracking from usage data (pricing as of Feb 2026 https://openai.com/api/pricing/)
+AUDIO_INPUT_COST_PER_1M = 32.0
+AUDIO_OUTPUT_COST_PER_1M = 64.0
+TEXT_INPUT_COST_PER_1M = 4.0
+TEXT_OUTPUT_COST_PER_1M = 16.0
+IMAGE_INPUT_COST_PER_1M = 5.0
+
+
+def _compute_response_cost(usage: Any) -> float:
+    """Compute dollar cost from a response usage object."""
+    inp = getattr(usage, "input_token_details", None)
+    out = getattr(usage, "output_token_details", None)
+    cost = 0.0
+    if inp:
+        cost += (getattr(inp, "audio_tokens", 0) or 0) * AUDIO_INPUT_COST_PER_1M / 1e6
+        cost += (getattr(inp, "text_tokens", 0) or 0) * TEXT_INPUT_COST_PER_1M / 1e6
+        cost += (getattr(inp, "image_tokens", 0) or 0) * IMAGE_INPUT_COST_PER_1M / 1e6
+    if out:
+        cost += (getattr(out, "audio_tokens", 0) or 0) * AUDIO_OUTPUT_COST_PER_1M / 1e6
+        cost += (getattr(out, "text_tokens", 0) or 0) * TEXT_OUTPUT_COST_PER_1M / 1e6
+    return cost
+
 
 class OpenaiRealtimeHandler(RealtimeHandlerBase):
     """An OpenAI realtime handler for fastrtc Stream."""
@@ -72,6 +94,9 @@ class OpenaiRealtimeHandler(RealtimeHandlerBase):
         # Track how the API key was provided (env vs textbox) and its value
         self._key_source: Literal["env", "textbox"] = "env"
         self._provided_api_key: str | None = None
+
+        # Cost tracking
+        self.cumulative_cost: float = 0.0
 
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
@@ -309,6 +334,17 @@ class OpenaiRealtimeHandler(RealtimeHandlerBase):
                 if event.type == "response.done":
                     # Doesn't mean the audio is done playing
                     logger.debug("Response done")
+
+
+
+                    response = getattr(event, "response", None)
+                    usage = getattr(response, "usage", None) if response else None
+                    if usage:
+                        cost = _compute_response_cost(usage)
+                        self.cumulative_cost += cost
+                        logger.debug("Cost: $%.4f | Cumulative: $%.4f", cost, self.cumulative_cost)
+                    else:
+                        logger.warning("No usage data available for cost tracking")
 
                 # Handle partial transcription (user speaking in real-time)
                 if event.type == "conversation.item.input_audio_transcription.partial":

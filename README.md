@@ -213,10 +213,10 @@ play_emotion
 # My custom tool defined locally
 sweep_look
 ```
-Tools are resolved first from Python files in the profile folder (custom tools), then from the shared library `src/reachy_mini_conversation_app/tools/` (e.g., `dance`, `head_tracking`). 
+Tools are resolved first from Python files in the profile folder (custom tools), then from the core library `src/reachy_mini_conversation_app/tools/` (e.g., `dance`, `head_tracking`). 
 
 ### Custom tools
-On top of built-in tools found in the shared library, you can implement custom tools specific to your profile by adding Python files in the profile folder. 
+On top of built-in tools found in the core library, you can implement custom tools specific to your profile by adding Python files in the profile folder. 
 Custom tools must subclass `reachy_mini_conversation_app.tools.core_tools.Tool` (see `profiles/example/sweep_look.py`).
 
 ### Edit personalities from the UI
@@ -235,6 +235,50 @@ LOCKED_PROFILE: str | None = "mars_rover"  # Lock to this profile
 ```
 When `LOCKED_PROFILE` is set, the app always uses that profile, ignoring `REACHY_MINI_CUSTOM_PROFILE` env var & the Gradio UI shows "(locked)" and disables all profile editing controls.
 This is useful for creating dedicated clones of the app with a fixed personality. Clone scripts can simply edit this constant to lock the variant.
+
+
+## External profiles and tools (single source of truth)
+
+You can extend the app with profiles/tools stored outside `src/reachy_mini_conversation_app/`.
+
+- Core profiles are under `src/reachy_mini_conversation_app/profiles/`.
+- Core tools are under `src/reachy_mini_conversation_app/tools/`.
+
+Recommended layout:
+
+```text
+external_content/
+├── external_profiles/
+│   └── my_profile/
+│       ├── instructions.txt
+│       ├── tools.txt        # optional (see fallback behavior below)
+│       └── voice.txt        # optional
+└── external_tools/
+    └── my_custom_tool.py
+```
+
+### Environment variables
+
+Set these values in your `.env` (copy from `.env.example`):
+
+```env
+REACHY_MINI_CUSTOM_PROFILE=my_profile
+REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY=./external_content/external_profiles
+REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY=./external_content/external_tools
+# Optional convenience mode:
+# AUTOLOAD_EXTERNAL_TOOLS=1
+```
+
+### Loading behavior
+
+- **Default/strict mode**: `tools.txt` defines enabled tools explicitly.
+- Every name in `tools.txt` must resolve to either a built-in tool (`src/reachy_mini_conversation_app/tools/`) or an external tool module in `REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY`.
+- **Convenience mode** (`AUTOLOAD_EXTERNAL_TOOLS=1`): all valid `*.py` tool files in `REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY` are auto-added.
+- **External profile fallback**: if selected external profile has no `tools.txt`, the app falls back to built-in `profiles/default/tools.txt`.
+
+This supports both:
+1. Downloaded external tools used with built-in/default profile.
+2. Downloaded external profiles used with built-in default tools.
 
 
 ## Development workflow
