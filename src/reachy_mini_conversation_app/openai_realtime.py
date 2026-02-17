@@ -38,6 +38,21 @@ TEXT_OUTPUT_COST_PER_1M = 16.0
 IMAGE_INPUT_COST_PER_1M = 5.0
 
 
+def _compute_response_cost(usage: Any) -> float:
+    """Compute dollar cost from a response usage object."""
+    inp = getattr(usage, "input_token_details", None)
+    out = getattr(usage, "output_token_details", None)
+    cost = 0.0
+    if inp:
+        cost += (getattr(inp, "audio_tokens", 0) or 0) * AUDIO_INPUT_COST_PER_1M / 1e6
+        cost += (getattr(inp, "text_tokens", 0) or 0) * TEXT_INPUT_COST_PER_1M / 1e6
+        cost += (getattr(inp, "image_tokens", 0) or 0) * IMAGE_INPUT_COST_PER_1M / 1e6
+    if out:
+        cost += (getattr(out, "audio_tokens", 0) or 0) * AUDIO_OUTPUT_COST_PER_1M / 1e6
+        cost += (getattr(out, "text_tokens", 0) or 0) * TEXT_OUTPUT_COST_PER_1M / 1e6
+    return cost
+
+
 class OpenaiRealtimeHandler(AsyncStreamHandler):
     """An OpenAI realtime handler for fastrtc Stream."""
 
@@ -325,18 +340,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     response = getattr(event, "response", None)
                     usage = getattr(response, "usage", None) if response else None
                     if usage:
-                        inp = getattr(usage, "input_token_details", None)
-                        out = getattr(usage, "output_token_details", None)
-                        cost = 0.0
-                        if inp:
-                            cost += getattr(inp, "audio_tokens", 0) * AUDIO_INPUT_COST_PER_1M / 1e6
-                            cost += getattr(inp, "text_tokens", 0) * TEXT_INPUT_COST_PER_1M / 1e6
-                            cost += getattr(inp, "image_tokens", 0) * IMAGE_INPUT_COST_PER_1M / 1e6
-                        if out:
-                            cost += getattr(out, "audio_tokens", 0) * AUDIO_OUTPUT_COST_PER_1M / 1e6
-                            cost += getattr(out, "text_tokens", 0) * TEXT_OUTPUT_COST_PER_1M / 1e6
+                        cost = _compute_response_cost(usage)
                         self.cumulative_cost += cost
-                        logger.info("Cost: $%.4f | Cumulative: $%.4f", cost, self.cumulative_cost)
+                        logger.debug("Cost: $%.4f | Cumulative: $%.4f", cost, self.cumulative_cost)
                     else:
                         logger.warning("No usage data available for cost tracking")
 
