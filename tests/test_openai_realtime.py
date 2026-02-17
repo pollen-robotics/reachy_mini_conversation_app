@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import reachy_mini_conversation_app.openai_realtime as rt_mod
-from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
+from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler, _compute_response_cost
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 
 
@@ -115,3 +115,59 @@ async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -
     # Optional: confirm we logged the unexpected close once
     warnings = [r for r in caplog.records if r.levelname == "WARNING" and "closed unexpectedly" in r.msg]
     assert len(warnings) == 1
+
+
+# ---- Cost calculation tests ----
+
+
+def _make_usage(
+    audio_in: int | None = 0,
+    text_in: int | None = 0,
+    image_in: int | None = 0,
+    audio_out: int | None = 0,
+    text_out: int | None = 0,
+    has_input: bool = True,
+    has_output: bool = True,
+) -> MagicMock:
+    """Build a fake usage object matching the OpenAI response.usage shape."""
+    usage = MagicMock()
+    if has_input:
+        inp = MagicMock()
+        inp.audio_tokens = audio_in
+        inp.text_tokens = text_in
+        inp.image_tokens = image_in
+        usage.input_token_details = inp
+    else:
+        usage.input_token_details = None
+    if has_output:
+        out = MagicMock()
+        out.audio_tokens = audio_out
+        out.text_tokens = text_out
+        usage.output_token_details = out
+    else:
+        usage.output_token_details = None
+    return usage
+
+
+@pytest.mark.parametrize(
+    "usage_kwargs, expect_positive",
+    [
+        # All token types present → positive cost
+        ({"audio_in": 1000, "text_in": 2000, "image_in": 500, "audio_out": 800, "text_out": 300}, True),
+        # All None tokens → must not crash
+        ({"audio_in": None, "text_in": None, "image_in": None, "audio_out": None, "text_out": None}, False),
+        # Mix of None and valid ints
+        ({"audio_in": None, "text_in": 500, "image_in": None, "audio_out": 1000, "text_out": None}, True),
+        # Missing input/output details entirely
+        ({"has_input": False, "has_output": False}, False),
+    ],
+    ids=["normal", "all_none", "mixed", "missing_details"],
+)
+def test_compute_response_cost(usage_kwargs: dict[str, Any], expect_positive: bool) -> None:
+    """Verify _compute_response_cost handles various token combinations without crashing."""
+    usage = _make_usage(**usage_kwargs)
+    cost = _compute_response_cost(usage)
+    if expect_positive:
+        assert cost > 0
+    else:
+        assert cost == 0.0
