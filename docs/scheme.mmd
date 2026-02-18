@@ -16,18 +16,22 @@ flowchart TB
     Motion@{ label: "<span style='font-size:16px;font-weight:bold;'>Motion Control</span><br><span style='font-size:13px;color:#f57f17;'>Audio Sync + Tracking</span>" }
     
     OpenAI -- tool calls --> 
-    Handlers@{ label: "<span style='font-size:16px;font-weight:bold;'>Tool Handlers</span><br><span style='font-size:12px;color:#f9a825;'>move_head, camera, head_tracking,<br/>dance, play_emotion, do_nothing</span>" }
+    Handlers@{ label: "<span style='font-size:16px;font-weight:bold;'>Tool Layer</span><br><span style='font-size:12px;color:#f9a825;'>Built-in tools + profile-local tools<br/>+ external tools (optional)</span>" }
+
+    Profiles@{ label: "<span style='font-size:16px;font-weight:bold;'>Selected Profile</span><br><span style='font-size:12px;color:#6a1b9a;'>built-in or external<br/>instructions.txt + tools.txt</span>" }
+
+    Profiles -- defines enabled tools --> Handlers
 
     Handlers -- movement 
     requests --> Motion
 
-    Handlers -- camera frames, face tracking --> 
-    Camera@{ label: "<span style='font-size:16px;font-weight:bold;'>Camera Worker</span><br><span style='font-size:13px;color:#f57f17;'>Frame Buffer + Face Tracking</span>" }
+    Handlers -- camera frames, head tracking --> 
+    Camera@{ label: "<span style='font-size:16px;font-weight:bold;'>Camera Worker</span><br><span style='font-size:13px;color:#f57f17;'>Frame Buffer + Head Tracking</span>" }
     
     Handlers -. image for 
     analysis .-> OpenAI
 
-    Camera -- face tracking --> Motion
+    Camera -- head tracking --> Motion
 
     Camera -. frames .-> 
     Vision@{ label: "<span style='font-size:16px;font-weight:bold;'>Vision Processor</span><br><span style='font-size:13px;color:#7b1fa2;'>Local VLM (optional)</span>" }
@@ -46,6 +50,7 @@ flowchart TB
      UI:::uiStyle
      OpenAI:::aiStyle
      Motion:::coreStyle
+     Profiles:::toolStyle
      Handlers:::toolStyle
      Camera:::coreStyle
      Vision:::aiStyle
