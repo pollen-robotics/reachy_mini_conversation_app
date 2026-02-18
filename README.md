@@ -178,7 +178,7 @@ reachy-mini-conversation-app --gradio
 |------|--------|--------------|
 | `move_head` | Queue a head pose change (left/right/up/down/front). | Core install only. |
 | `camera` | Capture the latest camera frame and send it to gpt-realtime for vision analysis. | Requires camera worker. Uses gpt-realtime vision by default. |
-| `head_tracking` | Enable or disable head-tracking offsets (not facial recognition - only detects and tracks face position). | Camera worker with configured head tracker (`--head-tracker`). |
+| `head_tracking` | Enable or disable head-tracking offsets (not identity recognition - only detects and tracks head position). | Camera worker with configured head tracker (`--head-tracker`). |
 | `dance` | Queue a dance from `reachy_mini_dances_library`. | Core install only. |
 | `stop_dance` | Clear queued dances. | Core install only. |
 | `play_emotion` | Play a recorded emotion clip via Hugging Face datasets. | Core install only. Uses the default open emotions dataset: [`pollen-robotics/reachy-mini-emotions-library`](https://huggingface.co/datasets/pollen-robotics/reachy-mini-emotions-library). |
