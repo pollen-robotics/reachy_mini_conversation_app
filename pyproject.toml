@@ -37,7 +37,7 @@ reachy_mini_wireless = [
   "gst-signalling>=1.1.2",
 ]
 sarvam = [
-  "sarvam-ai>=0.1.0",
+  "sarvamai>=0.1.25",
 ]
 local_vision = [
   "torch>=2.1",
