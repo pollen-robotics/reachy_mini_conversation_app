@@ -31,8 +31,8 @@ Conversational app for the Reachy Mini robot combining OpenAI's realtime APIs, v
 ## Overview
 - Real-time audio conversation loop powered by the OpenAI realtime API and `fastrtc` for low-latency streaming.
 - Vision processing uses gpt-realtime by default (when camera tool is used), with optional local vision processing using SmolVLM2 model running on-device (CPU/GPU/MPS) via `--local-vision` flag.
-- Layered motion system queuing primary moves (dances, emotions, goto poses, breathing) while blending speech-reactive wobble and head-tracking.
-- Async tool dispatch integrating robot motion, camera capture, and optional head-tracking capabilities through a Gradio web UI with live transcripts.
+- Layered motion system queues primary moves (dances, emotions, goto poses, breathing) while blending speech-reactive wobble and head-tracking.
+- Async tool dispatch integrates robot motion, camera capture, and optional head-tracking capabilities through a Gradio web UI with live transcripts.
 
 ## Architecture
 
@@ -112,7 +112,7 @@ Some wheels (like PyTorch) are large and require compatible CUDA or CPU buildsâ€
 |-------|---------|-------|
 | `reachy_mini_wireless` | Wireless Reachy Mini with GStreamer support | Required for wireless versions of Reachy Mini, includes GStreamer dependencies. |
 | `local_vision` | Run the local VLM (SmolVLM2) through PyTorch/Transformers | GPU recommended. Ensure compatible PyTorch builds for your platform. |
-| `yolo_vision` | YOLOv11n face tracking via `ultralytics` and `supervision` | Runs on CPU (default). GPU improves performance. Supports the `--head-tracker yolo` option. |
+| `yolo_vision` | YOLOv11n head tracking via `ultralytics` and `supervision` | Runs on CPU (default). GPU improves performance. Supports the `--head-tracker yolo` option. |
 | `mediapipe_vision` | Lightweight landmark tracking with MediaPipe | Works on CPU. Enables `--head-tracker mediapipe`. |
 | `all_vision` | Convenience alias installing every vision extra | Install when you want the flexibility to experiment with every provider. |
 | `dev` | Developer tooling (`pytest`, `ruff`, `mypy`) | Development-only dependencies. Use `--group dev` with uv or `[dev]` with pip. |
@@ -150,7 +150,7 @@ The app runs in console mode by default. Add `--gradio` to launch a web UI at ht
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--head-tracker {yolo,mediapipe}` | `None` | Select a head-tracking backend when a camera is available. YOLO is implemented locally, MediaPipe comes from the `reachy_mini_toolbox` package. Requires the matching optional extra. |
-| `--no-camera` | `False` | Run without camera capture or face tracking. |
+| `--no-camera` | `False` | Run without camera capture or head tracking. |
 | `--local-vision` | `False` | Use local vision model (SmolVLM2) for periodic image processing instead of gpt-realtime vision. Requires `local_vision` extra to be installed. |
 | `--gradio` | `False` | Launch the Gradio web UI. Without this flag, runs in console mode. Required when running in simulation mode. |
 | `--robot-name` | `None` | Optional. Connect to a specific robot by name when running multiple daemons on the same subnet. See [Multiple robots on the same subnet](#advanced-features). |
