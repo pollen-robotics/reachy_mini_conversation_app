@@ -1,6 +1,18 @@
 name: Type check
 
-on: [push, pull_request]
+on:
+  push:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - ".github/workflows/**"
+      - "pyproject.toml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - ".github/workflows/**"
+      - "pyproject.toml"
 
 permissions:
   contents: read
@@ -14,16 +26,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-
-      - uses: astral-sh/setup-uv@v5
 
       - name: Install deps (locked) incl. vision extras
         run: uv sync --frozen --group dev --extra all_vision
 
       - name: Run mypy
-        run: .venv/bin/mypy --pretty --show-error-codes .
+        run: uv run mypy
