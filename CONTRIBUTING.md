@@ -6,6 +6,9 @@ We welcome all contributions: bug fixes, new features, documentation, testing, a
 
 ## Quick Start
 
+> [!IMPORTANT]
+> This project targets Linux, macOS, and Windows. Please avoid platform-specific code (hardcoded paths, shell-specific commands, OS-only APIs) unless absolutely necessary and clearly documented.
+
 1. Fork and clone the repo:
    ```bash
    git clone https://github.com/pollen-robotics/reachy_mini_conversation_app
@@ -127,6 +130,7 @@ Releases are explicit and tag-based.
 - Updated docs if needed
 - No secrets or `.env` files committed
 - `uv.lock` is up to date if you changed dependencies
+- No platform-specific code without fallbacks (works on Linux, macOS, and Windows)
 
 <details>
 <summary><b>🧪 Quality checks reference</b></summary>
