@@ -24,7 +24,7 @@ class Config:
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # The key is downloaded in console.py if needed
 
     # Optional
-    MODEL_NAME = os.getenv("MODEL_NAME", "gpt-realtime")
+    MODEL_NAME = os.getenv("MODEL_NAME", "gpt-realtime-1.5")
     HF_HOME = os.getenv("HF_HOME", "./cache")
     LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "HuggingFaceTB/SmolVLM2-2.2B-Instruct")
     HF_TOKEN = os.getenv("HF_TOKEN")  # Optional, falls back to hf auth login if not set

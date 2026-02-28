@@ -15,6 +15,10 @@ tags:
 
 Conversational app for the Reachy Mini robot combining OpenAI's realtime APIs, vision pipelines, and choreographed motion libraries.
 
+## Upstream attribution
+This project is based on the official Pollen Robotics `reachy_mini_conversation_app`.
+The changes in this branch focus on an experimental direct Luma check-in workflow (`luma_checkin` tool, profile/prompt updates, and config/docs updates) for event reception use cases.
+
 ![Reachy Mini Dance](docs/assets/reachy_mini_dance.gif)
 
 ## Architecture
@@ -27,7 +31,7 @@ The app follows a layered architecture connecting the user, AI services, and rob
 
 ## Overview
 - Real-time audio conversation loop powered by the OpenAI realtime API and `fastrtc` for low-latency streaming.
-- Vision processing uses gpt-realtime by default (when camera tool is used), with optional local vision processing using SmolVLM2 model running on-device (CPU/GPU/MPS) via `--local-vision` flag.
+- Vision processing uses gpt-realtime-1.5 by default (when camera tool is used), with optional local vision processing using SmolVLM2 model running on-device (CPU/GPU/MPS) via `--local-vision` flag.
 - Layered motion system queues primary moves (dances, emotions, goto poses, breathing) while blending speech-reactive wobble and face-tracking.
 - Async tool dispatch integrates robot motion, camera capture, and optional face-tracking capabilities through a Gradio web UI with live transcripts.
 
@@ -108,10 +112,17 @@ Some wheels (e.g. PyTorch) are large and require compatible CUDA or CPU buildsâ€
 | Variable | Description |
 |----------|-------------|
 | `OPENAI_API_KEY` | Required. Grants access to the OpenAI realtime endpoint.
-| `MODEL_NAME` | Override the realtime model (defaults to `gpt-realtime`). Used for both conversation and vision (unless `--local-vision` flag is used).
+| `MODEL_NAME` | Override the realtime model (defaults to `gpt-realtime-1.5`). Used for both conversation and vision (unless `--local-vision` flag is used).
 | `HF_HOME` | Cache directory for local Hugging Face downloads (only used with `--local-vision` flag, defaults to `./cache`).
 | `HF_TOKEN` | Optional token for Hugging Face models (only used with `--local-vision` flag, falls back to `huggingface-cli login`).
 | `LOCAL_VISION_MODEL` | Hugging Face model path for local vision processing (only used with `--local-vision` flag, defaults to `HuggingFaceTB/SmolVLM2-2.2B-Instruct`).
+| `LUMA_DIRECT_CHECKIN_ENABLED` | Enable direct Luma check-in tool (`true` by default). |
+| `LUMA_API_KEY` | Luma public API key for guest resolution APIs. |
+| `LUMA_SESSION_COOKIE` | Raw authenticated Luma web cookie string (used for admin check-in/verification). |
+| `LUMA_SESSION_COOKIE_FILE` | Optional path to cookie file (used when `LUMA_SESSION_COOKIE` is empty). |
+| `LUMA_ACTIVE_EVENT_API_ID` | Default event API ID (`evt-...`) used when request does not include one. |
+| `LUMA_EVENTS_REGISTRY_PATH` | Fallback registry JSON path to read `active_event_api_id`. |
+| `LUMA_DIRECT_TIMEOUT_SECONDS` | Timeout for direct Luma API calls (default `5.0`). |
 
 ## Running the app
 
@@ -121,7 +132,7 @@ Activate your virtual environment, ensure the Reachy Mini robot (or simulator) i
 reachy-mini-conversation-app
 ```
 
-By default, the app runs in console mode for direct audio interaction. Use the `--gradio` flag to launch a web UI served locally at http://127.0.0.1:7860/ (required when running in simulation mode). With a camera attached, vision is handled by the gpt-realtime model when the camera tool is used. For local vision processing, use the `--local-vision` flag to process frames periodically using the SmolVLM2 model. Additionally, you can enable face tracking via YOLO or MediaPipe pipelines depending on the extras you installed.
+By default, the app runs in console mode for direct audio interaction. Use the `--gradio` flag to launch a web UI served locally at http://127.0.0.1:7860/ (required when running in simulation mode). With a camera attached, vision is handled by the gpt-realtime-1.5 model when the camera tool is used. For local vision processing, use the `--local-vision` flag to process frames periodically using the SmolVLM2 model. Additionally, you can enable face tracking via YOLO or MediaPipe pipelines depending on the extras you installed.
 
 ### CLI options
 
@@ -129,7 +140,7 @@ By default, the app runs in console mode for direct audio interaction. Use the `
 |--------|---------|-------------|
 | `--head-tracker {yolo,mediapipe}` | `None` | Select a face-tracking backend when a camera is available. YOLO is implemented locally, MediaPipe comes from the `reachy_mini_toolbox` package. Requires the matching optional extra. |
 | `--no-camera` | `False` | Run without camera capture or face tracking. |
-| `--local-vision` | `False` | Use local vision model (SmolVLM2) for periodic image processing instead of gpt-realtime vision. Requires `local_vision` extra to be installed. |
+| `--local-vision` | `False` | Use local vision model (SmolVLM2) for periodic image processing instead of gpt-realtime-1.5 vision. Requires `local_vision` extra to be installed. |
 | `--gradio` | `False` | Launch the Gradio web UI. Without this flag, runs in console mode. Required when running in simulation mode. |
 | `--debug` | `False` | Enable verbose logging for troubleshooting. |
 | `--wireless-version` | `False` | Use GStreamer backend for wireless version of the robot. Requires `reachy_mini_wireless` extra to be installed.
@@ -174,13 +185,14 @@ It probably means that the Reachy Mini's daemon isn't running. Install [Reachy M
 | Tool | Action | Dependencies |
 |------|--------|--------------|
 | `move_head` | Queue a head pose change (left/right/up/down/front). | Core install only. |
-| `camera` | Capture the latest camera frame and send it to gpt-realtime for vision analysis. | Requires camera worker; uses gpt-realtime vision by default. |
+| `camera` | Capture the latest camera frame and send it to gpt-realtime-1.5 for vision analysis. | Requires camera worker; uses gpt-realtime-1.5 vision by default. |
 | `head_tracking` | Enable or disable face-tracking offsets (not facial recognition - only detects and tracks face position). | Camera worker with configured head tracker. |
 | `dance` | Queue a dance from `reachy_mini_dances_library`. | Core install only. |
 | `stop_dance` | Clear queued dances. | Core install only. |
 | `play_emotion` | Play a recorded emotion clip via Hugging Face assets. | Needs `HF_TOKEN` for the recorded emotions dataset. |
 | `stop_emotion` | Clear queued emotions. | Core install only. |
 | `do_nothing` | Explicitly remain idle. | Core install only. |
+| `luma_checkin` | Resolve and check in a Luma attendee directly via API and verify `last_checked_in_at`. | Requires `LUMA_API_KEY` + authenticated Luma session cookie. |
 
 ## Using custom profiles
 Create custom profiles with dedicated instructions and enabled tools! 
@@ -208,6 +220,7 @@ play_emotion
 sweep_look
 ```
 Tools are resolved first from Python files in the profile folder (custom tools), then from the shared library `src/reachy_mini_conversation_app/tools/` (e.g., `dance`, `head_tracking`). 
+For Luma check-in, ensure `luma_checkin` is enabled in the active profile's `tools.txt`.
 
 ### Custom tools
 On top of built-in tools found in the shared library, you can implement custom tools specific to your profile by adding Python files in the profile folder. 

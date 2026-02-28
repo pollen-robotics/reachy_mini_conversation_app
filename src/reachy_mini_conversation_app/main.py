@@ -70,8 +70,9 @@ def run(
             logger.info("Using GStreamer backend for on-device wireless version")
             robot = ReachyMini(media_backend="gstreamer")
         else:
-            logger.info("Using default backend for lite version")
-            robot = ReachyMini(media_backend="default")
+            backend = "default_no_video" if args.no_camera else "default"
+            logger.info(f"Using {backend} backend for lite version")
+            robot = ReachyMini(media_backend=backend)
 
     # Check if running in simulation mode without --gradio
     if robot.client.get_status()["simulation_enabled"] and not args.gradio:

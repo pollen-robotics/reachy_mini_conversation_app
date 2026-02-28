@@ -3,6 +3,7 @@ stop_dance
 play_emotion
 stop_emotion
 camera
+luma_checkin
 do_nothing
 head_tracking
 move_head
