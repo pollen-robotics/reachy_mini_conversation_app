@@ -26,6 +26,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Install system dependencies
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: libportaudio2 libcairo2-dev libgirepository1.0-dev
+          version: 1.0
       - uses: actions/checkout@v6
 
       - name: Install uv
@@ -33,8 +38,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install deps (locked) incl. vision extras
-        run: uv sync --frozen --group dev --extra all_vision
+      - name: Install the project
+        run: uv sync --frozen --all-extras --group dev
 
-      - name: Run mypy
+      - name: Lint with mypy
         run: uv run mypy
