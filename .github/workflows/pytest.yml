@@ -82,7 +82,12 @@ jobs:
 
       - name: Install (locked)
         run: |
-          uv sync --frozen --group dev --extra all_vision
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            # Keep macOS CI stable: run full test suite without the GStreamer runtime bundle.
+            uv sync --frozen --group dev --extra all_vision --no-install-package gstreamer-bundle
+          else
+            uv sync --frozen --group dev --extra all_vision
+          fi
 
       # Prefetch HF dataset to avoid download during test collection
       - name: Prefetch HF dataset
