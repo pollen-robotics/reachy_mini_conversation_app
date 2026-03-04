@@ -1,7 +1,21 @@
-name: Tests
+name: Pytest
 on:
-  push:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - ".github/workflows/**"
+      - "pyproject.toml"
+      - "uv.lock"
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - ".github/workflows/**"
+      - "pyproject.toml"
+      - "uv.lock"
 
 permissions:
   contents: read
@@ -13,12 +27,13 @@ concurrency:
 
 jobs:
   tests:
-    name: pytest (py${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: pytest (${{ matrix.os }} py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
+        os: ["ubuntu-latest", "macos-latest"]
         python-version: ["3.12"]
 
     env:
@@ -34,6 +49,18 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - uses: astral-sh/setup-uv@v5
+
+      - name: Install Linux system deps for PyGObject/PyCairo
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libcairo2-dev \
+            libffi-dev \
+            libgirepository1.0-dev \
+            libglib2.0-dev \
+            pkg-config \
+            python3-dev
 
       - name: Set HF_HOME
         shell: bash
