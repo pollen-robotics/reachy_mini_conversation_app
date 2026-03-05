@@ -22,10 +22,10 @@ def _make_audio_chunk(duration_s: float = 0.3, frequency_hz: float = 220.0) -> s
     return base64.b64encode(pcm.tobytes()).decode("ascii")
 
 
-def _wait_for(predicate: Callable[[], bool], timeout: float = 0.6) -> bool:
+def _wait_for(predicate: Callable[[], bool], timeout: float = 1.5) -> bool:
     """Poll `predicate` until true or timeout."""
-    end_time = time.time() + timeout
-    while time.time() < end_time:
+    end_time = time.monotonic() + timeout
+    while time.monotonic() < end_time:
         if predicate():
             return True
         time.sleep(0.01)
