@@ -4287,7 +4287,7 @@ wheels = [
 
 [[package]]
 name = "reachy-mini-conversation-app"
-version = "0.2.2"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiortc" },
