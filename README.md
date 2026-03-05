@@ -68,7 +68,6 @@ uv sync
 
 **Install optional features:**
 ```bash
-uv sync --extra reachy_mini_wireless # Wireless Reachy Mini with GStreamer support
 uv sync --extra local_vision         # Local PyTorch/Transformers vision
 uv sync --extra yolo_vision          # YOLO-based head-tracking
 uv sync --extra mediapipe_vision     # MediaPipe-based head-tracking
@@ -93,7 +92,6 @@ pip install -e .
 
 **Install optional features:**
 ```bash
-pip install -e .[reachy_mini_wireless]  # Wireless Reachy Mini
 pip install -e .[local_vision]          # Local vision stack
 pip install -e .[yolo_vision]           # YOLO-based vision
 pip install -e .[mediapipe_vision]      # MediaPipe-based vision
@@ -109,7 +107,6 @@ Some wheels (like PyTorch) are large and require compatible CUDA or CPU buildsâ€
 
 | Extra | Purpose | Notes |
 |-------|---------|-------|
-| `reachy_mini_wireless` | Wireless Reachy Mini with GStreamer support | Required for wireless versions of Reachy Mini, includes GStreamer dependencies. |
 | `local_vision` | Run the local VLM (SmolVLM2) through PyTorch/Transformers | GPU recommended. Ensure compatible PyTorch builds for your platform. |
 | `yolo_vision` | YOLOv11n head tracking via `ultralytics` and `supervision` | Runs on CPU (default). GPU improves performance. Supports the `--head-tracker yolo` option. |
 | `mediapipe_vision` | Lightweight landmark tracking with MediaPipe | Works on CPU. Enables `--head-tracker mediapipe`. |
