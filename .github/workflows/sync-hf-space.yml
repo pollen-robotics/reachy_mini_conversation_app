@@ -1,8 +1,8 @@
 name: Sync to Hugging Face Space
 
 on:
-  push:
-    branches: [main]
+  release:
+    types: [published]
 
 concurrency:
   group: hf-sync-${{ github.ref }}
