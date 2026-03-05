@@ -27,7 +27,6 @@ dependencies = [
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
     "reachy-mini>=1.5.0",
-    "eclipse-zenoh~=1.7.0",
     "gradio_client>=1.13.3",
     "gstreamer-bundle==1.28.1; sys_platform != 'linux'",
     # OS-specific: use PyGObject for Linux
