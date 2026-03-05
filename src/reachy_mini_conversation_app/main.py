@@ -90,9 +90,16 @@ def run(
             logger.error("Please check your configuration and try again.")
             sys.exit(1)
 
-    # Auto-enable Gradio in simulation mode (both MuJoCo for deamon and mockup-sim for desktop app)
+    # Auto-enable Gradio in simulation mode (both MuJoCo for daemon and mockup-sim for desktop app)
     status = robot.client.get_status()
-    is_simulation = status.get("simulation_enabled", False) or status.get("mockup_sim_enabled", False)
+    if isinstance(status, dict):
+        simulation_enabled = status.get("simulation_enabled", False)
+        mockup_sim_enabled = status.get("mockup_sim_enabled", False)
+    else:
+        simulation_enabled = getattr(status, "simulation_enabled", False)
+        mockup_sim_enabled = getattr(status, "mockup_sim_enabled", False)
+
+    is_simulation = simulation_enabled or mockup_sim_enabled
 
     if is_simulation and not args.gradio:
         logger.info("Simulation mode detected. Automatically enabling gradio flag.")
