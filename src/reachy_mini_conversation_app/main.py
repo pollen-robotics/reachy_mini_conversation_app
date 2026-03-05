@@ -19,6 +19,7 @@ from reachy_mini_conversation_app.utils import (
     setup_logger,
     handle_vision_stuff,
     log_connection_troubleshooting,
+    apply_runtime_compatibility_fixes,
 )
 
 
@@ -51,6 +52,7 @@ def run(
 
     logger = setup_logger(args.debug)
     logger.info("Starting Reachy Mini Conversation App")
+    apply_runtime_compatibility_fixes()
 
     if args.no_camera and args.head_tracker is not None:
         logger.warning(

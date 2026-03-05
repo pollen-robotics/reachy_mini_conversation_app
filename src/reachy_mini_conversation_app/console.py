@@ -17,6 +17,7 @@ import logging
 from typing import List, Optional
 from pathlib import Path
 
+import numpy as np
 from fastrtc import AdditionalOutputs, audio_to_float32
 from scipy.signal import resample
 
@@ -441,7 +442,10 @@ class LocalStream:
         if self._robot.media.backend == MediaBackend.GSTREAMER:
             # Directly flush gstreamer audio pipe
             self._robot.media.audio.clear_player()
-        elif self._robot.media.backend == MediaBackend.DEFAULT or self._robot.media.backend == MediaBackend.DEFAULT_NO_VIDEO:
+        elif (
+            self._robot.media.backend == MediaBackend.DEFAULT
+            or self._robot.media.backend == MediaBackend.DEFAULT_NO_VIDEO
+        ):
             self._robot.media.audio.clear_output_buffer()
         self.handler.output_queue = asyncio.Queue()
 
@@ -493,6 +497,16 @@ class LocalStream:
                         audio_frame,
                         int(len(audio_frame) * output_sample_rate / input_sample_rate),
                     )
+
+                # Match backend output channel count (WebRTC expects stereo in SDK 1.5.0).
+                output_channels = self._robot.media.get_output_channels()
+                if output_channels > 1:
+                    if audio_frame.ndim == 1:
+                        audio_frame = np.repeat(audio_frame[:, np.newaxis], output_channels, axis=1)
+                    elif audio_frame.ndim == 2 and audio_frame.shape[1] == 1:
+                        audio_frame = np.repeat(audio_frame, output_channels, axis=1)
+                    elif audio_frame.ndim == 2 and audio_frame.shape[1] > output_channels:
+                        audio_frame = audio_frame[:, :output_channels]
 
                 self._robot.media.push_audio_sample(audio_frame)
 
