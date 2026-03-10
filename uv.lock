@@ -12,6 +12,13 @@ resolution-markers = [
     "python_full_version < '3.11' and sys_platform != 'win32'",
 ]
 
+[manifest]
+
+[[manifest.dependency-metadata]]
+name = "gstreamer-libs"
+version = "1.28.1"
+requires-dist = ["gstreamer-msvc-runtime ; sys_platform == 'win32'", "setuptools"]
+
 [[package]]
 name = "absl-py"
 version = "2.4.0"
@@ -1486,7 +1493,7 @@ name = "gstreamer-libs"
 version = "1.28.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "gstreamer-msvc-runtime" },
+    { name = "gstreamer-msvc-runtime", marker = "sys_platform == 'win32'" },
     { name = "setuptools" },
 ]
 wheels = [
@@ -4245,7 +4252,7 @@ wheels = [
 
 [[package]]
 name = "reachy-mini"
-version = "1.5.0"
+version = "1.5.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -4280,9 +4287,9 @@ dependencies = [
     { name = "websockets" },
     { name = "zeroconf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/86/a1/eb56144a622313277aaaf42bd66d4744da0d4af411a9bf7e2fb0b640ee37/reachy_mini-1.5.0.tar.gz", hash = "sha256:99e041da8aba0140811088e4d0b47729cd809e8daad184673fc4f2f10dc83796", size = 24695556, upload-time = "2026-03-05T09:38:18.811Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/53/7a/c89f091de2136b482409fd471f7592519f192db0f76c540d0bb8f5e54bd6/reachy_mini-1.5.1.tar.gz", hash = "sha256:43c86279ef75329b3ce76f6cf69502e5153d3e3a03f59c0ae9eebf1fb4e4e464", size = 24695779, upload-time = "2026-03-09T11:39:44.026Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1f/da/7f655eeafbf60429d0641c6b6947db838061ecd8014fbf966e131f102a4a/reachy_mini-1.5.0-py3-none-any.whl", hash = "sha256:10ebbdc85c0af30a9585ee4d1861e8b4e9e416fad7067e1da86e5cdaa346f7d4", size = 24795895, upload-time = "2026-03-05T09:38:15.914Z" },
+    { url = "https://files.pythonhosted.org/packages/c0/f1/036133dbb182a403aaf5ee2229d1927f29e01b9bb66f2bdc3b6e58cf356a/reachy_mini-1.5.1-py3-none-any.whl", hash = "sha256:e8a7bb4bb8b2d519eeaace3f1235ef0e7dc5ec6b9f6ee7cbd9c5a708bdd2cd87", size = 24795997, upload-time = "2026-03-09T11:39:40.87Z" },
 ]
 
 [[package]]
@@ -4352,7 +4359,7 @@ requires-dist = [
     { name = "openai", specifier = ">=2.1" },
     { name = "opencv-python", specifier = ">=4.12.0.88" },
     { name = "python-dotenv" },
-    { name = "reachy-mini", specifier = ">=1.5.0" },
+    { name = "reachy-mini", specifier = ">=1.5.1" },
     { name = "reachy-mini-dances-library" },
     { name = "reachy-mini-toolbox" },
     { name = "supervision", marker = "extra == 'all-vision'" },
