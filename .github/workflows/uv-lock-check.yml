@@ -10,5 +10,7 @@ jobs:
   uv-lock-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: hbelmiro/uv-lock-check@v0.2.0
+        with:
+          command: "uv lock --check"
