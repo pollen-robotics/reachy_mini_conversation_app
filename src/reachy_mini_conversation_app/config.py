@@ -11,6 +11,22 @@ from dotenv import find_dotenv, load_dotenv
 LOCKED_PROFILE: str | None = None
 DEFAULT_PROFILES_DIRECTORY = Path(__file__).parent / "profiles"
 
+# Full list of voices supported by the OpenAI Realtime / TTS API.
+# Source: https://developers.openai.com/api/docs/guides/text-to-speech/#voice-options
+# "marin" and "cedar" are recommended for gpt-realtime.
+AVAILABLE_VOICES: list[str] = [
+    "alloy",
+    "ash",
+    "ballad",
+    "cedar",
+    "coral",
+    "echo",
+    "marin",
+    "sage",
+    "shimmer",
+    "verse",
+]
+
 logger = logging.getLogger(__name__)
 
 

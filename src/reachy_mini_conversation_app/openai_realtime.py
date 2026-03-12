@@ -17,7 +17,7 @@ from numpy.typing import NDArray
 from scipy.signal import resample
 from websockets.exceptions import ConnectionClosedError
 
-from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.config import AVAILABLE_VOICES, config
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
@@ -785,16 +785,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         for any keys that might contain voice names. Falls back to a curated
         list known to work with realtime if discovery fails.
         """
-        # Conservative fallback list with default first
-        fallback = [
-            "cedar",
-            "alloy",
-            "aria",
-            "ballad",
-            "verse",
-            "sage",
-            "coral",
-        ]
+        fallback = list(AVAILABLE_VOICES)
         try:
             # Best effort discovery; safe-guarded for unexpected shapes
             model = await self.client.models.retrieve(config.MODEL_NAME)

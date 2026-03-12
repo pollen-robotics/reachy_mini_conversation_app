@@ -163,7 +163,9 @@ async function applyPersonality(name, { persist = false } = {}) {
   return await resp.json();
 }
 
-const VOICE_FALLBACK = ["cedar", "alloy", "aria", "ballad", "verse", "sage", "coral"];
+// Full list from https://developers.openai.com/api/docs/guides/text-to-speech/#voice-options
+// "marin" and "cedar" are recommended for gpt-realtime.
+const VOICE_FALLBACK = ["alloy", "ash", "ballad", "cedar", "coral", "echo", "marin", "sage", "shimmer", "verse"];
 
 async function getVoices() {
   try {
