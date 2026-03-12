@@ -281,6 +281,8 @@ class MovementManager:
         self._last_set_target_err = 0.0
         self._set_target_err_interval = 1.0  # seconds between error logs
         self._set_target_err_suppressed = 0
+        self._cached_secondary_offsets: tuple = ()  # force miss on first call
+        self._cached_secondary_pose: FullBodyPose | None = None
 
         # Cross-thread signalling
         self._command_queue: "Queue[Tuple[str, Any]]" = Queue()
@@ -564,26 +566,32 @@ class MovementManager:
     def _get_secondary_pose(self) -> FullBodyPose:
         """Get the secondary full body pose from speech and face tracking offsets."""
         # Combine speech sway offsets + face tracking offsets for secondary pose
-        secondary_offsets = [
+        current_offsets = (
             self.state.speech_offsets[0] + self.state.face_tracking_offsets[0],
             self.state.speech_offsets[1] + self.state.face_tracking_offsets[1],
             self.state.speech_offsets[2] + self.state.face_tracking_offsets[2],
             self.state.speech_offsets[3] + self.state.face_tracking_offsets[3],
             self.state.speech_offsets[4] + self.state.face_tracking_offsets[4],
             self.state.speech_offsets[5] + self.state.face_tracking_offsets[5],
-        ]
+        )
+
+        # Skip expensive create_head_pose if offsets unchanged since last tick
+        if current_offsets == self._cached_secondary_offsets:
+            return self._cached_secondary_pose
 
         secondary_head_pose = create_head_pose(
-            x=secondary_offsets[0],
-            y=secondary_offsets[1],
-            z=secondary_offsets[2],
-            roll=secondary_offsets[3],
-            pitch=secondary_offsets[4],
-            yaw=secondary_offsets[5],
+            x=current_offsets[0],
+            y=current_offsets[1],
+            z=current_offsets[2],
+            roll=current_offsets[3],
+            pitch=current_offsets[4],
+            yaw=current_offsets[5],
             degrees=False,
             mm=False,
         )
-        return (secondary_head_pose, (0.0, 0.0), 0.0)
+        self._cached_secondary_offsets = current_offsets
+        self._cached_secondary_pose = (secondary_head_pose, (0.0, 0.0), 0.0)
+        return self._cached_secondary_pose
 
     def _compose_full_body_pose(self, current_time: float) -> FullBodyPose:
         """Compose primary and secondary poses into a single command pose."""
