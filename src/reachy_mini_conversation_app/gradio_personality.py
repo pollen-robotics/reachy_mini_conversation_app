@@ -164,7 +164,8 @@ class PersonalityUI:
                     current = "cedar"
                 return gr.update(choices=voices, value=current)
             except Exception:
-                return gr.update(choices=["cedar"], value="cedar")
+                fallback = ["cedar", "alloy", "aria", "ballad", "verse", "sage", "coral"]
+                return gr.update(choices=fallback, value="cedar")
 
         def _available_tools_for(selected: str) -> tuple[list[str], list[str]]:
             shared: list[str] = []

@@ -163,6 +163,8 @@ async function applyPersonality(name, { persist = false } = {}) {
   return await resp.json();
 }
 
+const VOICE_FALLBACK = ["cedar", "alloy", "aria", "ballad", "verse", "sage", "coral"];
+
 async function getVoices() {
   try {
     const url = new URL("/voices", window.location.origin);
@@ -171,7 +173,7 @@ async function getVoices() {
     if (!resp.ok) throw new Error("voices_failed");
     return await resp.json();
   } catch (e) {
-    return ["cedar"];
+    return VOICE_FALLBACK;
   }
 }
 
