@@ -147,7 +147,7 @@ def combine_full_body(primary_pose: FullBodyPose, secondary_pose: FullBodyPose) 
     # Combine head poses using compose_world_offset; the secondary pose must be an
     # offset expressed in the world frame (T_off_world) applied to the absolute
     # primary transform (T_abs).
-    combined_head = compose_world_offset(primary_head, secondary_head, reorthonormalize=True)
+    combined_head = compose_world_offset(primary_head, secondary_head, reorthonormalize=False)
 
     # Sum antennas and body_yaw
     combined_antennas = (
