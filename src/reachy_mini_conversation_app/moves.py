@@ -84,7 +84,7 @@ class BreathingMove(Move):  # type: ignore
 
         # Neutral positions for breathing base
         self.neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
-        self.neutral_antennas = np.array([0.0, 0.0])
+        self.neutral_antennas = np.array([-0.1745, 0.1745])  # ~10° offset to reduce shaking
 
         # Breathing parameters
         self.breathing_z_amplitude = 0.005  # 5mm gentle breathing
@@ -538,7 +538,7 @@ class MovementManager:
             if head is None:
                 head = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
             if antennas is None:
-                antennas = np.array([0.0, 0.0])
+                antennas = np.array([-0.1745, 0.1745])  # ~10° offset
             if body_yaw is None:
                 body_yaw = 0.0
 
@@ -746,7 +746,7 @@ class MovementManager:
         # Reset to neutral position using goto_target (same approach as wake_up)
         try:
             neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
-            neutral_antennas = [0.0, 0.0]
+            neutral_antennas = [-0.1745, 0.1745]  # ~10° offset to reduce shaking
             neutral_body_yaw = 0.0
 
             # Use goto_target directly on the robot
