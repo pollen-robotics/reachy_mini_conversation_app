@@ -281,8 +281,8 @@ class MovementManager:
         self._last_set_target_err = 0.0
         self._set_target_err_interval = 1.0  # seconds between error logs
         self._set_target_err_suppressed = 0
-        self._cached_secondary_offsets: tuple = ()  # force miss on first call
-        self._cached_secondary_pose: FullBodyPose | None = None
+        self._cached_secondary_offsets: tuple[float, ...] = ()  # force miss on first call
+        self._cached_secondary_pose: FullBodyPose = (np.eye(4, dtype=np.float32), (0.0, 0.0), 0.0)
 
         # Cross-thread signalling
         self._command_queue: "Queue[Tuple[str, Any]]" = Queue()
@@ -643,7 +643,7 @@ class MovementManager:
     def _issue_control_command(self, head: NDArray[np.float32], antennas: Tuple[float, float], body_yaw: float) -> None:
         """Send the fused pose to the robot with throttled error logging."""
         try:
-            self.current_robot.set_target(head=head, antennas=antennas, body_yaw=body_yaw)
+            self.current_robot.set_target_full(head=head, antennas=antennas, body_yaw=body_yaw)
         except Exception as e:
             now = self._now()
             if now - self._last_set_target_err >= self._set_target_err_interval:
