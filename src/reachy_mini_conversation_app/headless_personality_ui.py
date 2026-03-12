@@ -13,7 +13,7 @@ from typing import Any, Callable, Optional
 
 from fastapi import FastAPI
 
-from .config import AVAILABLE_VOICES, LOCKED_PROFILE, config
+from .config import LOCKED_PROFILE, AVAILABLE_VOICES, config
 from .openai_realtime import OpenaiRealtimeHandler
 from .headless_personality import (
     DEFAULT_OPTION,

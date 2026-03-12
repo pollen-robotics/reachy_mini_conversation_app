@@ -10,7 +10,7 @@ from pathlib import Path
 
 import gradio as gr
 
-from .config import AVAILABLE_VOICES, LOCKED_PROFILE, config
+from .config import LOCKED_PROFILE, AVAILABLE_VOICES, config
 
 
 class PersonalityUI:
