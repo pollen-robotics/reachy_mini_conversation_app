@@ -108,7 +108,8 @@ class PersonalityUI:
         self.person_name_tb = gr.Textbox(label="Personality name", interactive=not is_locked)
         self.person_instr_ta = gr.TextArea(label="Personality instructions", lines=10, interactive=not is_locked)
         self.tools_txt_ta = gr.TextArea(label="tools.txt", lines=10, interactive=not is_locked)
-        self.voice_dropdown = gr.Dropdown(label="Voice", choices=["cedar"], value="cedar", interactive=not is_locked)
+        _initial_voices = ["cedar", "alloy", "aria", "ballad", "verse", "sage", "coral"]
+        self.voice_dropdown = gr.Dropdown(label="Voice", choices=_initial_voices, value="cedar", interactive=not is_locked)
         self.new_personality_btn = gr.Button("New personality", interactive=not is_locked)
         self.available_tools_cg = gr.CheckboxGroup(label="Available tools (helper)", choices=[], value=[], interactive=not is_locked)
         self.save_btn = gr.Button("Save personality (instructions + tools)", interactive=not is_locked)
