@@ -1,7 +1,9 @@
 from __future__ import annotations
+import sys
 import logging
 import argparse
 import warnings
+import subprocess
 from typing import TYPE_CHECKING, Optional
 
 from reachy_mini import ReachyMini
@@ -62,6 +64,21 @@ def initialize_camera_and_vision(
         camera_worker = CameraWorker(current_robot, head_tracker)
 
         if args.local_vision:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "from reachy_mini_conversation_app.vision.processors import VisionProcessor",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode < 0:
+                raise RuntimeError(
+                    "Local vision import crashed on this machine. "
+                    "Run without --local-vision or install compatible dependencies.",
+                )
             try:
                 from reachy_mini_conversation_app.vision.processors import initialize_vision_processor
 
