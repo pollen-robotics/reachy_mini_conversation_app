@@ -15,7 +15,7 @@ from reachy_mini_conversation_app.config import config
 
 logger = logging.getLogger(__name__)
 
-LOCAL_VISION_GROUNDING_PROMPT = (
+DEFAULT_LOCAL_VISION_PROMPT = (
     "Respond to the request using only details that are clearly visible in the image. "
     "Do not guess, infer hidden details, or invent missing information. "
     "If the answer is not clearly visible, say exactly: I can't tell from this image. "
@@ -88,7 +88,7 @@ class VisionProcessor:
     def process_image(
         self,
         frame: NDArray[np.uint8],
-        prompt: str = "Briefly describe what you see in one sentence.",
+        prompt: str = DEFAULT_LOCAL_VISION_PROMPT,
     ) -> str:
         """Process a BGR camera frame and return a text description."""
         if not self._initialized or self.processor is None or self.model is None:
@@ -97,14 +97,14 @@ class VisionProcessor:
         processor = self.processor
         model = self.model
         rgb_image = Image.fromarray(np.ascontiguousarray(frame[..., ::-1]))
-        grounded_prompt = f"{LOCAL_VISION_GROUNDING_PROMPT}\nRequest: {prompt.strip()}"
+        request = prompt.strip() or DEFAULT_LOCAL_VISION_PROMPT
 
         messages = [
             {
                 "role": "user",
                 "content": [
                     {"type": "image", "image": rgb_image},
-                    {"type": "text", "text": grounded_prompt},
+                    {"type": "text", "text": request},
                 ],
             },
         ]
