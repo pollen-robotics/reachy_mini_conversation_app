@@ -66,6 +66,8 @@ def initialize_camera_and_vision(
                 from reachy_mini_conversation_app.vision.processors import initialize_vision_processor
 
                 vision_processor = initialize_vision_processor()
+                if vision_processor is None:
+                    raise RuntimeError("Failed to initialize local vision processor. See logs for details.")
             except ImportError as e:
                 raise ImportError(
                     "To use --local-vision, please install the extra dependencies: pip install '.[local_vision]'",

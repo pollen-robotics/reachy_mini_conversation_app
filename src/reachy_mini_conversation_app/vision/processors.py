@@ -69,9 +69,6 @@ class VisionProcessor:
                 "torch_dtype": torch.bfloat16 if self.device == "cuda" else torch.float32,
             }
 
-            if self.device == "cuda":
-                model_kwargs["attn_implementation"] = "flash_attention_2"
-
             model: torch.nn.Module = AutoModelForImageTextToText.from_pretrained(
                 self.vision_config.model_path,
                 **model_kwargs,
@@ -112,22 +109,22 @@ class VisionProcessor:
             },
         ]
 
-        inputs = processor.apply_chat_template(
-            messages,  # type: ignore[arg-type]
-            add_generation_prompt=True,
-            tokenize=True,
-            return_dict=True,
-            return_tensors="pt",
-        )
-        inputs = inputs.to(self.device)  # type: ignore[attr-defined]
-        prompt_len = None
-        input_ids = inputs.get("input_ids")
-        input_shape = getattr(input_ids, "shape", None)
-        if input_shape:
-            prompt_len = int(input_shape[-1])
-
         for attempt in range(self.vision_config.max_retries):
             try:
+                inputs = processor.apply_chat_template(
+                    messages,  # type: ignore[arg-type]
+                    add_generation_prompt=True,
+                    tokenize=True,
+                    return_dict=True,
+                    return_tensors="pt",
+                )
+                inputs = inputs.to(self.device)  # type: ignore[attr-defined]
+                prompt_len = None
+                input_ids = inputs.get("input_ids")
+                input_shape = getattr(input_ids, "shape", None)
+                if input_shape:
+                    prompt_len = int(input_shape[-1])
+
                 with torch.inference_mode():
                     generated_ids = model.generate(  # type: ignore[operator]
                         **inputs,

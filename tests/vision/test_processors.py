@@ -59,6 +59,9 @@ def mock_transformers() -> Any:
         # Mock processor — apply_chat_template returns a BatchFeature-like object with .to()
         mock_batch = MagicMock()
         mock_batch.to.return_value = mock_batch
+        mock_input_ids = MagicMock()
+        mock_input_ids.shape = (1, 3)
+        mock_batch.get.side_effect = lambda key, default=None: mock_input_ids if key == "input_ids" else default
 
         mock_processor = MagicMock()
         mock_processor.apply_chat_template.return_value = mock_batch
@@ -142,6 +145,20 @@ def test_vision_processor_initialization(mock_torch: Any, mock_transformers: Any
     )
 
 
+def test_vision_processor_initialization_cuda(mock_torch: Any, mock_transformers: Any) -> None:
+    """Test CUDA initialization uses bfloat16 without extra attention wiring."""
+    mock_torch.cuda.is_available.return_value = True
+
+    processor = VisionProcessor(VisionConfig(model_path="test/model", device_preference="cuda"))
+    result = processor.initialize()
+
+    assert result is True
+    mock_transformers["model"].from_pretrained.assert_called_once_with(
+        "test/model",
+        torch_dtype="bfloat16",
+    )
+
+
 def test_vision_processor_initialization_failure(mock_torch: Any) -> None:
     """Test VisionProcessor handles initialization failure gracefully."""
     with patch("reachy_mini_conversation_app.vision.processors.AutoProcessor") as mock_proc:
@@ -202,6 +219,24 @@ def test_vision_processor_process_image_with_retry(mock_torch: Any, mock_transfo
 
     assert isinstance(result, str)
     assert call_count[0] == 3
+
+
+def test_vision_processor_process_image_retries_input_transfer_failure(
+    mock_torch: Any,
+    mock_transformers: Any,
+) -> None:
+    """Test process_image retries when input transfer fails before generation."""
+    processor = VisionProcessor(VisionConfig(max_retries=2, retry_delay=0.01))
+    processor.initialize()
+
+    batch_mock = mock_transformers["processor"].from_pretrained.return_value.apply_chat_template.return_value
+    batch_mock.to.side_effect = [Exception("Temporary transfer failure"), batch_mock]
+
+    test_image = np.zeros((480, 640, 3), dtype=np.uint8)
+    result = processor.process_image(test_image)
+
+    assert result == "This is a test description."
+    assert batch_mock.to.call_count == 2
 
 
 def test_initialize_vision_processor_success(mock_torch: Any, mock_transformers: Any) -> None:

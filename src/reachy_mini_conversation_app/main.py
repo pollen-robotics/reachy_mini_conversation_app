@@ -105,7 +105,11 @@ def run(
         logger.info("Simulation mode detected. Automatically enabling gradio flag.")
         args.gradio = True
 
-    camera_worker, vision_processor = initialize_camera_and_vision(args, robot)
+    try:
+        camera_worker, vision_processor = initialize_camera_and_vision(args, robot)
+    except (ImportError, RuntimeError) as e:
+        logger.error("Failed to initialize camera/vision: %s", e)
+        sys.exit(1)
 
     movement_manager = MovementManager(
         current_robot=robot,
