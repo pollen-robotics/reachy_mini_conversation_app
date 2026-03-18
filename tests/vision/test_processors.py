@@ -141,7 +141,7 @@ def test_vision_processor_initialization(mock_torch: Any, mock_transformers: Any
     mock_transformers["processor"].from_pretrained.assert_called_once_with("test/model")
     mock_transformers["model"].from_pretrained.assert_called_once_with(
         "test/model",
-        torch_dtype="float32",
+        dtype="float32",
     )
 
 
@@ -155,7 +155,7 @@ def test_vision_processor_initialization_cuda(mock_torch: Any, mock_transformers
     assert result is True
     mock_transformers["model"].from_pretrained.assert_called_once_with(
         "test/model",
-        torch_dtype="bfloat16",
+        dtype="bfloat16",
     )
 
 

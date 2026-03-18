@@ -66,7 +66,7 @@ class VisionProcessor:
             processor: ProcessorMixin = AutoProcessor.from_pretrained(self.vision_config.model_path)  # type: ignore[no-untyped-call]
 
             model_kwargs: dict[str, object] = {
-                "torch_dtype": torch.bfloat16 if self.device == "cuda" else torch.float32,
+                "dtype": torch.bfloat16 if self.device == "cuda" else torch.float32,
             }
 
             model: torch.nn.Module = AutoModelForImageTextToText.from_pretrained(
