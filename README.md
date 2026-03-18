@@ -172,6 +172,9 @@ reachy-mini-conversation-app --no-camera
 reachy-mini-conversation-app --gradio
 ```
 
+> [!WARNING]
+> `--local-vision` is not supported when running the conversation app directly on Reachy Mini Wireless / the Raspberry Pi. For local vision, keep the daemon running on the robot and start the conversation app from your laptop or workstation instead.
+
 ## LLM tools exposed to the assistant
 
 | Tool | Action | Dependencies |
