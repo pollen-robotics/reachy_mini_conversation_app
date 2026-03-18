@@ -104,7 +104,8 @@ async def test_tool_completion_does_not_reset_head_wobbler(monkeypatch: Any) -> 
         head_wobbler=head_wobbler,
     )
     handler = OpenaiRealtimeHandler(deps)
-    handler.client = FakeClient()
+    fake_client: Any = FakeClient()
+    handler.client = fake_client
 
     session_task = asyncio.create_task(handler._run_realtime_session())
 
@@ -119,7 +120,7 @@ async def test_tool_completion_does_not_reset_head_wobbler(monkeypatch: Any) -> 
         is_idle_tool_call=False,
     )
 
-    fake_conn = handler.client.realtime.conn
+    fake_conn = fake_client.realtime.conn
     await asyncio.wait_for(fake_conn.conversation.item.created.wait(), timeout=2.0)
     await fake_conn.close()
     await asyncio.wait_for(session_task, timeout=2.0)
@@ -208,8 +209,10 @@ async def test_non_idle_tool_call_does_not_queue_progress_response(monkeypatch: 
 
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
     handler = OpenaiRealtimeHandler(deps)
-    handler.client = FakeClient()
-    handler._safe_response_create = AsyncMock()  # type: ignore[method-assign]
+    fake_client: Any = FakeClient()
+    handler.client = fake_client
+    safe_response_create = AsyncMock()
+    object.__setattr__(handler, "_safe_response_create", safe_response_create)
     start_up = MagicMock()
     shutdown = AsyncMock()
     start_tool = AsyncMock(return_value=MagicMock(tool_id="camera-call_camera_1-0"))
@@ -220,7 +223,7 @@ async def test_non_idle_tool_call_does_not_queue_progress_response(monkeypatch: 
     await handler._run_realtime_session()
 
     start_tool.assert_awaited_once()
-    handler._safe_response_create.assert_not_awaited()
+    safe_response_create.assert_not_awaited()
 
 
 def test_format_timestamp_uses_wall_clock() -> None:
