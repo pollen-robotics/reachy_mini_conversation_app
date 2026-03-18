@@ -33,8 +33,9 @@ dependencies = [
 
 [project.optional-dependencies]
 local_vision = [
+  "accelerate>=1.13.0",
   "torch>=2.1",
-  "transformers==5.0.0rc2",
+  "transformers==5.3.0",
   "num2words",
 ]
 yolo_vision = [
@@ -45,8 +46,9 @@ mediapipe_vision = [
   "mediapipe==0.10.14",
 ]
 all_vision = [
+  "accelerate>=1.13.0",
   "torch>=2.1",
-  "transformers==5.0.0rc2",
+  "transformers==5.3.0",
   "num2words",
   "ultralytics",
   "supervision",
