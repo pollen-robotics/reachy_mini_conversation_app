@@ -11,15 +11,6 @@ from pathlib import Path
 import gradio as gr
 
 from .config import LOCKED_PROFILE, AVAILABLE_VOICES, config
-from .profile_paths import (
-    VOICE_FILENAME,
-    TOOLS_FILENAMES,
-    INSTRUCTIONS_FILENAMES,
-    find_profile_file,
-    resolve_profile_dir,
-    resolve_profile_file,
-    to_public_profile_name,
-)
 
 
 class PersonalityUI:
@@ -54,29 +45,19 @@ class PersonalityUI:
                 for p in sorted(self._profiles_root.iterdir()):
                     if p.name == "user_personalities":
                         continue
-                    if p.is_dir() and find_profile_file(p, INSTRUCTIONS_FILENAMES):
-                        names.append(
-                            to_public_profile_name(
-                                p.name,
-                                profiles_root=self._profiles_root,
-                                builtin_root=self._profiles_root,
-                            )
-                        )
+                    if p.is_dir() and (p / "instructions.txt").exists():
+                        names.append(p.name)
                 user_dir = self._profiles_root / "user_personalities"
                 if user_dir.exists():
                     for p in sorted(user_dir.iterdir()):
-                        if p.is_dir() and find_profile_file(p, INSTRUCTIONS_FILENAMES):
+                        if p.is_dir() and (p / "instructions.txt").exists():
                             names.append(f"user_personalities/{p.name}")
         except Exception:
             pass
         return names
 
     def _resolve_profile_dir(self, selection: str) -> Path:
-        return resolve_profile_dir(
-            selection,
-            profiles_root=self._profiles_root,
-            builtin_root=self._profiles_root,
-        )
+        return self._profiles_root / selection
 
     def _read_instructions_for(self, name: str) -> str:
         try:
@@ -85,12 +66,7 @@ class PersonalityUI:
                 if default_file.exists():
                     return default_file.read_text(encoding="utf-8").strip()
                 return ""
-            target = resolve_profile_file(
-                name,
-                profiles_root=self._profiles_root,
-                builtin_root=self._profiles_root,
-                filenames=INSTRUCTIONS_FILENAMES,
-            )
+            target = self._resolve_profile_dir(name) / "instructions.txt"
             if target.exists():
                 return target.read_text(encoding="utf-8").strip()
             return ""
@@ -172,7 +148,7 @@ class PersonalityUI:
             try:
                 if name == self.DEFAULT_OPTION:
                     return "cedar"
-                vf = self._resolve_profile_dir(name) / VOICE_FILENAME
+                vf = self._resolve_profile_dir(name) / "voice.txt"
                 if vf.exists():
                     v = vf.read_text(encoding="utf-8").strip()
                     return v or "cedar"
@@ -221,8 +197,8 @@ class PersonalityUI:
             instr = self._read_instructions_for(selected)
             tools_txt = ""
             if selected != self.DEFAULT_OPTION:
-                tp = find_profile_file(self._resolve_profile_dir(selected), TOOLS_FILENAMES)
-                if tp is not None:
+                tp = self._resolve_profile_dir(selected) / "tools.txt"
+                if tp.exists():
                     tools_txt = tp.read_text(encoding="utf-8")
             shared, local = _available_tools_for(selected)
             all_tools = sorted(set(shared + local))
@@ -270,8 +246,8 @@ class PersonalityUI:
                 target_dir = self._profiles_root / "user_personalities" / name_s
                 target_dir.mkdir(parents=True, exist_ok=True)
                 (target_dir / "instructions.txt").write_text(instructions.strip() + "\n", encoding="utf-8")
-                (target_dir / TOOLS_FILENAMES[0]).write_text(tools_text.strip() + "\n", encoding="utf-8")
-                (target_dir / VOICE_FILENAME).write_text((voice or "cedar").strip() + "\n", encoding="utf-8")
+                (target_dir / "tools.txt").write_text(tools_text.strip() + "\n", encoding="utf-8")
+                (target_dir / "voice.txt").write_text((voice or "cedar").strip() + "\n", encoding="utf-8")
 
                 choices = self._list_personalities()
                 value = f"user_personalities/{name_s}"

@@ -5,12 +5,6 @@ from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
 
-from reachy_mini_conversation_app.profile_paths import (
-    INSTRUCTIONS_FILENAMES,
-    resolve_profile_file,
-    collect_profile_names,
-)
-
 
 # Locked profile: set to a profile name (e.g., "astronomer") to lock the app
 # to that profile and disable all profile switching. Leave as None for normal behavior.
@@ -56,6 +50,13 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return default
 
 
+def _collect_profile_names(profiles_root: Path) -> set[str]:
+    """Return profile folder names from a profiles root directory."""
+    if not profiles_root.exists() or not profiles_root.is_dir():
+        return set()
+    return {p.name for p in profiles_root.iterdir() if p.is_dir()}
+
+
 def _collect_tool_module_names(tools_root: Path) -> set[str]:
     """Return tool module names from a tools directory."""
     if not tools_root.exists() or not tools_root.is_dir():
@@ -91,26 +92,13 @@ def _raise_on_name_collisions(
 # Validate LOCKED_PROFILE at startup
 if LOCKED_PROFILE is not None:
     _profiles_dir = DEFAULT_PROFILES_DIRECTORY
-    _profile_path = resolve_profile_file(
-        LOCKED_PROFILE,
-        profiles_root=_profiles_dir,
-        builtin_root=DEFAULT_PROFILES_DIRECTORY,
-        filenames=INSTRUCTIONS_FILENAMES,
-    ).parent
-    _instructions_file = resolve_profile_file(
-        LOCKED_PROFILE,
-        profiles_root=_profiles_dir,
-        builtin_root=DEFAULT_PROFILES_DIRECTORY,
-        filenames=INSTRUCTIONS_FILENAMES,
-    )
+    _profile_path = _profiles_dir / LOCKED_PROFILE
+    _instructions_file = _profile_path / "instructions.txt"
     if not _profile_path.is_dir():
         print(f"Error: LOCKED_PROFILE '{LOCKED_PROFILE}' does not exist in {_profiles_dir}", file=sys.stderr)
         sys.exit(1)
     if not _instructions_file.is_file():
-        print(
-            f"Error: LOCKED_PROFILE '{LOCKED_PROFILE}' has no {', '.join(INSTRUCTIONS_FILENAMES)}",
-            file=sys.stderr,
-        )
+        print(f"Error: LOCKED_PROFILE '{LOCKED_PROFILE}' has no instructions.txt", file=sys.stderr)
         sys.exit(1)
 
 _skip_dotenv = _env_flag("REACHY_MINI_SKIP_DOTENV", default=False)
@@ -159,12 +147,7 @@ class Config:
         if self.REACHY_MINI_CUSTOM_PROFILE and self.PROFILES_DIRECTORY != DEFAULT_PROFILES_DIRECTORY:
             selected_profile_path = self.PROFILES_DIRECTORY / self.REACHY_MINI_CUSTOM_PROFILE
             if not selected_profile_path.is_dir():
-                available_profiles = sorted(
-                    collect_profile_names(
-                        self.PROFILES_DIRECTORY,
-                        builtin_root=DEFAULT_PROFILES_DIRECTORY,
-                    )
-                )
+                available_profiles = sorted(_collect_profile_names(self.PROFILES_DIRECTORY))
                 raise RuntimeError(
                     "Config.__init__(): Selected profile "
                     f"'{self.REACHY_MINI_CUSTOM_PROFILE}' was not found in external profiles root "
@@ -175,14 +158,8 @@ class Config:
                 )
 
         if self.PROFILES_DIRECTORY != DEFAULT_PROFILES_DIRECTORY:
-            external_profiles = collect_profile_names(
-                self.PROFILES_DIRECTORY,
-                builtin_root=DEFAULT_PROFILES_DIRECTORY,
-            )
-            internal_profiles = collect_profile_names(
-                DEFAULT_PROFILES_DIRECTORY,
-                builtin_root=DEFAULT_PROFILES_DIRECTORY,
-            )
+            external_profiles = _collect_profile_names(self.PROFILES_DIRECTORY)
+            internal_profiles = _collect_profile_names(DEFAULT_PROFILES_DIRECTORY)
             _raise_on_name_collisions(
                 label="profile",
                 external_root=self.PROFILES_DIRECTORY,

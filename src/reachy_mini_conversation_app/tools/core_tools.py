@@ -17,7 +17,6 @@ from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY as DE
 
 # Import config to ensure .env is loaded before reading REACHY_MINI_CUSTOM_PROFILE
 from reachy_mini_conversation_app.config import config  # noqa: F401
-from reachy_mini_conversation_app.profile_paths import TOOLS_FILENAMES, resolve_profile_dir, resolve_profile_file
 from reachy_mini_conversation_app.tools.tool_constants import SystemTool
 
 
@@ -147,24 +146,9 @@ def _load_profile_tools() -> None:
     logger.info(f"Loading tools for profile: {profile}")
 
     # Build path to tools.txt
-    profile_module_path = resolve_profile_dir(
-        profile,
-        profiles_root=config.PROFILES_DIRECTORY,
-        builtin_root=DEFAULT_PROFILES_PATH,
-    )
-    tools_txt_path = resolve_profile_file(
-        profile,
-        profiles_root=config.PROFILES_DIRECTORY,
-        builtin_root=DEFAULT_PROFILES_PATH,
-        filenames=TOOLS_FILENAMES,
-    )
-    default_tools_txt_path = resolve_profile_file(
-        "default",
-        profiles_root=DEFAULT_PROFILES_PATH,
-        builtin_root=DEFAULT_PROFILES_PATH,
-        filenames=TOOLS_FILENAMES,
-    )
-    storage_profile = profile_module_path.name
+    profile_module_path = config.PROFILES_DIRECTORY / profile
+    tools_txt_path = profile_module_path / "tools.txt"
+    default_tools_txt_path = Path(__file__).parent.parent / "profiles" / "default" / "tools.txt"
 
     if config.PROFILES_DIRECTORY != DEFAULT_PROFILES_PATH:
         logger.info(
@@ -231,7 +215,7 @@ def _load_profile_tools() -> None:
     for tool_name in tool_names:
         loaded = False
         profile_error = None
-        profile_import_path = f"{DEFAULT_PROFILES_MODULE}.{storage_profile}.{tool_name}"
+        profile_import_path = f"{DEFAULT_PROFILES_MODULE}.{profile}.{tool_name}"
 
         # Try profile tool first
         try:
@@ -239,7 +223,7 @@ def _load_profile_tools() -> None:
                 tool_name,
                 module_path=profile_import_path,
                 fallback_directory=config.PROFILES_DIRECTORY,
-                file_subpath=f"{storage_profile}/{tool_name}.py",
+                file_subpath=f"{profile}/{tool_name}.py",
             )
             if source == "file":
                 logger.info("✓ Loaded external profile tool: %s", tool_name)

@@ -23,10 +23,10 @@ def test_config_raises_on_external_profile_name_collision(
 def test_config_raises_on_external_profile_name_collision_with_builtin_alias(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Config should treat legacy built-in profile names as reserved."""
+    """Config should treat compact built-in profile names as reserved."""
     external_profiles = tmp_path / "external_profiles"
     external_profiles.mkdir(parents=True)
-    (external_profiles / "short_mad_scientist_assistant").mkdir()
+    (external_profiles / "mad_scientist_assistant").mkdir()
 
     monkeypatch.setattr(config_mod.Config, "PROFILES_DIRECTORY", external_profiles)
     monkeypatch.setattr(config_mod.Config, "TOOLS_DIRECTORY", None)
