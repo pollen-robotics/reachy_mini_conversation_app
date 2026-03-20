@@ -6,15 +6,15 @@ from pathlib import Path
 
 
 BUILTIN_PROFILE_DIRECTORY_ALIASES: dict[str, str] = {
-    "short_bored_teenager": "s_bored_teen",
-    "short_captain_circuit": "s_capt_circuit",
-    "short_chess_coach": "s_chess_coach",
-    "short_hype_bot": "s_hype_bot",
-    "short_mad_scientist_assistant": "s_mad_sci_asst",
-    "short_nature_documentarian": "s_nat_doc",
-    "short_noir_detective": "s_noir_det",
-    "short_time_traveler": "s_time_travel",
-    "short_victorian_butler": "s_vict_butler",
+    "short_bored_teenager": "bored_teenager",
+    "short_captain_circuit": "captain_circuit",
+    "short_chess_coach": "chess_coach",
+    "short_hype_bot": "hype_bot",
+    "short_mad_scientist_assistant": "mad_scientist_assistant",
+    "short_nature_documentarian": "nature_documentarian",
+    "short_noir_detective": "noir_detective",
+    "short_time_traveler": "time_traveler",
+    "short_victorian_butler": "victorian_butler",
 }
 BUILTIN_PROFILE_PUBLIC_NAMES = {value: key for key, value in BUILTIN_PROFILE_DIRECTORY_ALIASES.items()}
 
