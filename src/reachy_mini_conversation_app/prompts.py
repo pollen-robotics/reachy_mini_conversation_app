@@ -4,14 +4,13 @@ import logging
 from pathlib import Path
 
 from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY, config
+from reachy_mini_conversation_app.profile_paths import VOICE_FILENAME, INSTRUCTIONS_FILENAMES, resolve_profile_file
 
 
 logger = logging.getLogger(__name__)
 
 
 PROMPTS_LIBRARY_DIRECTORY = Path(__file__).parent / "prompts"
-INSTRUCTIONS_FILENAME = "instructions.txt"
-VOICE_FILENAME = "voice.txt"
 
 
 def _expand_prompt_includes(content: str) -> str:
@@ -73,7 +72,12 @@ def get_session_instructions() -> str:
             )
         else:
             logger.info(f"Loading prompt from profile '{profile}'")
-        instructions_file = config.PROFILES_DIRECTORY / profile / INSTRUCTIONS_FILENAME
+        instructions_file = resolve_profile_file(
+            profile,
+            profiles_root=config.PROFILES_DIRECTORY,
+            builtin_root=DEFAULT_PROFILES_DIRECTORY,
+            filenames=INSTRUCTIONS_FILENAMES,
+        )
 
     try:
         if instructions_file.exists():
@@ -82,9 +86,9 @@ def get_session_instructions() -> str:
                 # Expand [<name>] placeholders with content from prompts library
                 expanded_instructions = _expand_prompt_includes(instructions)
                 return expanded_instructions
-            logger.error(f"Profile '{profile}' has empty {INSTRUCTIONS_FILENAME}")
+            logger.error(f"Profile '{profile}' has empty {instructions_file.name}")
             sys.exit(1)
-        logger.error(f"Profile {profile} has no {INSTRUCTIONS_FILENAME}")
+        logger.error(f"Profile {profile} has no {', '.join(INSTRUCTIONS_FILENAMES)}")
         sys.exit(1)
     except Exception as e:
         logger.error(f"Failed to load instructions from profile '{profile}': {e}")
@@ -101,7 +105,12 @@ def get_session_voice(default: str = "cedar") -> str:
     if not profile:
         return default
     try:
-        voice_file = config.PROFILES_DIRECTORY / profile / VOICE_FILENAME
+        voice_file = resolve_profile_file(
+            profile,
+            profiles_root=config.PROFILES_DIRECTORY,
+            builtin_root=DEFAULT_PROFILES_DIRECTORY,
+            filenames=(VOICE_FILENAME,),
+        )
         if voice_file.exists():
             voice = voice_file.read_text(encoding="utf-8").strip()
             return voice or default

@@ -195,11 +195,11 @@ Create custom profiles with dedicated instructions and enabled tools.
 
 Set `REACHY_MINI_CUSTOM_PROFILE=<name>` to load `src/reachy_mini_conversation_app/profiles/<name>/` (see `.env.example`). If unset, the `default` profile is used.
 
-Each profile should include `instructions.txt` (prompt text). `tools.txt` (list of allowed tools) is recommended. If missing for a non-default profile, the app falls back to `profiles/default/tools.txt`. Profiles can optionally contain custom tool implementations.
+Each profile should include `instructions.txt` (prompt text). `inst.txt` is also accepted for compatibility with the compact built-in layout used on Windows-sensitive installs. `tools.txt` (list of allowed tools) is recommended. If missing for a non-default profile, the app falls back to `profiles/default/tools.txt`. Profiles can optionally contain custom tool implementations.
 
 **Custom instructions:**
 
-Write plain-text prompts in `instructions.txt`. To reuse shared prompt pieces, add lines like:
+Write plain-text prompts in `instructions.txt` (or `inst.txt`). To reuse shared prompt pieces, add lines like:
 ```
 [passion_for_lobster_jokes]
 [identities/witty_identity]
@@ -231,6 +231,7 @@ When running with `--gradio`, open the "Personality" accordion:
 - Create a new personality by entering a name and instructions text. It stores files under `profiles/<name>/` and copies `tools.txt` from the `default` profile.
 
 Note: The "Personality" panel updates the conversation instructions. Tool sets are loaded at startup from `tools.txt` and are not hot‑reloaded.
+Built-in profiles may use abbreviated on-disk folder names internally to keep Windows install paths short, but their public profile names remain unchanged.
 
 </details>
 

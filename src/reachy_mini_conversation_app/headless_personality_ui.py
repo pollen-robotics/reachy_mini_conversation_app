@@ -14,6 +14,7 @@ from typing import Any, Callable, Optional
 from fastapi import FastAPI
 
 from .config import LOCKED_PROFILE, AVAILABLE_VOICES, config
+from .profile_paths import VOICE_FILENAME, TOOLS_FILENAMES, find_profile_file
 from .openai_realtime import OpenaiRealtimeHandler
 from .headless_personality import (
     DEFAULT_OPTION,
@@ -91,10 +92,10 @@ def mount_personality_routes(
         voice = "cedar"
         if name != DEFAULT_OPTION:
             pdir = resolve_profile_dir(name)
-            tp = pdir / "tools.txt"
-            if tp.exists():
+            tp = find_profile_file(pdir, TOOLS_FILENAMES)
+            if tp is not None:
                 tools_txt = tp.read_text(encoding="utf-8")
-            vf = pdir / "voice.txt"
+            vf = pdir / VOICE_FILENAME
             if vf.exists():
                 v = vf.read_text(encoding="utf-8").strip()
                 voice = v or "cedar"

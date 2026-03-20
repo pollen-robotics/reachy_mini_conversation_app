@@ -1,0 +1,63 @@
+from pathlib import Path
+
+import pytest
+
+import reachy_mini_conversation_app.prompts as prompts_mod
+from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY, config
+from reachy_mini_conversation_app.headless_personality import (
+    list_personalities,
+    resolve_profile_dir,
+    read_instructions_for,
+)
+
+
+def test_builtin_profiles_keep_legacy_public_names() -> None:
+    """Built-in abbreviated folders should still surface legacy profile names."""
+    names = list_personalities()
+
+    assert "short_mad_scientist_assistant" in names
+    assert "s_mad_sci_asst" not in names
+
+
+def test_legacy_profile_name_resolves_to_short_storage_dir() -> None:
+    """Legacy profile names should resolve to the compact built-in directory."""
+    profile_dir = resolve_profile_dir("short_mad_scientist_assistant")
+
+    assert profile_dir.name == "s_mad_sci_asst"
+    assert (profile_dir / "inst.txt").is_file()
+
+
+def test_prompts_load_from_compact_builtin_instructions_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prompt loading should read compact built-in instructions files transparently."""
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "short_mad_scientist_assistant")
+    monkeypatch.setattr(config, "PROFILES_DIRECTORY", DEFAULT_PROFILES_DIRECTORY)
+
+    expected = (DEFAULT_PROFILES_DIRECTORY / "s_mad_sci_asst" / "inst.txt").read_text(encoding="utf-8").strip()
+
+    assert prompts_mod.get_session_instructions() == expected
+    assert read_instructions_for("short_mad_scientist_assistant") == expected
+
+
+def test_aliased_builtin_profile_paths_stay_compact() -> None:
+    """Abbreviated built-in profile files should stay within the path budget."""
+    project_root = Path(__file__).resolve().parents[1]
+    aliased_profiles = [
+        DEFAULT_PROFILES_DIRECTORY / "s_bored_teen",
+        DEFAULT_PROFILES_DIRECTORY / "s_capt_circuit",
+        DEFAULT_PROFILES_DIRECTORY / "s_chess_coach",
+        DEFAULT_PROFILES_DIRECTORY / "s_hype_bot",
+        DEFAULT_PROFILES_DIRECTORY / "s_mad_sci_asst",
+        DEFAULT_PROFILES_DIRECTORY / "s_nat_doc",
+        DEFAULT_PROFILES_DIRECTORY / "s_noir_det",
+        DEFAULT_PROFILES_DIRECTORY / "s_time_travel",
+        DEFAULT_PROFILES_DIRECTORY / "s_vict_butler",
+    ]
+
+    longest = max(
+        len(str(path.relative_to(project_root)))
+        for profile_dir in aliased_profiles
+        for path in profile_dir.rglob("*")
+        if path.is_file()
+    )
+
+    assert longest <= 66

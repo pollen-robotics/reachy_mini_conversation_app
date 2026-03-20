@@ -11,6 +11,18 @@ from __future__ import annotations
 from typing import List
 from pathlib import Path
 
+from .profile_paths import (
+    VOICE_FILENAME,
+    TOOLS_FILENAMES,
+    INSTRUCTIONS_FILENAMES,
+    find_profile_file,
+    resolve_profile_file,
+    to_public_profile_name,
+)
+from .profile_paths import (
+    resolve_profile_dir as resolve_profile_dir_path,
+)
+
 
 DEFAULT_OPTION = "(built-in default)"
 
@@ -45,12 +57,18 @@ def list_personalities() -> List[str]:
             for p in sorted(root.iterdir()):
                 if p.name == "user_personalities":
                     continue
-                if p.is_dir() and (p / "instructions.txt").exists():
-                    names.append(p.name)
+                if p.is_dir() and find_profile_file(p, INSTRUCTIONS_FILENAMES):
+                    names.append(
+                        to_public_profile_name(
+                            p.name,
+                            profiles_root=root,
+                            builtin_root=root,
+                        )
+                    )
         udir = root / "user_personalities"
         if udir.exists():
             for p in sorted(udir.iterdir()):
-                if p.is_dir() and (p / "instructions.txt").exists():
+                if p.is_dir() and find_profile_file(p, INSTRUCTIONS_FILENAMES):
                     names.append(f"user_personalities/{p.name}")
     except Exception:
         pass
@@ -59,16 +77,22 @@ def list_personalities() -> List[str]:
 
 def resolve_profile_dir(selection: str) -> Path:
     """Resolve the directory path for the given profile selection."""
-    return _profiles_root() / selection
+    root = _profiles_root()
+    return resolve_profile_dir_path(selection, profiles_root=root, builtin_root=root)
 
 
 def read_instructions_for(name: str) -> str:
-    """Read the instructions.txt content for the given profile name."""
+    """Read the instructions content for the given profile name."""
     try:
         if name == DEFAULT_OPTION:
             df = _prompts_dir() / "default_prompt.txt"
             return df.read_text(encoding="utf-8").strip() if df.exists() else ""
-        target = resolve_profile_dir(name) / "instructions.txt"
+        target = resolve_profile_file(
+            name,
+            profiles_root=_profiles_root(),
+            builtin_root=_profiles_root(),
+            filenames=INSTRUCTIONS_FILENAMES,
+        )
         return target.read_text(encoding="utf-8").strip() if target.exists() else ""
     except Exception as e:
         return f"Could not load instructions: {e}"
@@ -98,5 +122,5 @@ def _write_profile(name_s: str, instructions: str, tools_text: str, voice: str =
     target_dir = _profiles_root() / "user_personalities" / name_s
     target_dir.mkdir(parents=True, exist_ok=True)
     (target_dir / "instructions.txt").write_text(instructions.strip() + "\n", encoding="utf-8")
-    (target_dir / "tools.txt").write_text((tools_text or "").strip() + "\n", encoding="utf-8")
-    (target_dir / "voice.txt").write_text((voice or "cedar").strip() + "\n", encoding="utf-8")
+    (target_dir / TOOLS_FILENAMES[0]).write_text((tools_text or "").strip() + "\n", encoding="utf-8")
+    (target_dir / VOICE_FILENAME).write_text((voice or "cedar").strip() + "\n", encoding="utf-8")
