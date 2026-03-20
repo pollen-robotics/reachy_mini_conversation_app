@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from reachy_mini_conversation_app.vision.processors import (
+    LOCAL_VISION_RESPONSE_INSTRUCTIONS,
     VisionConfig,
     VisionProcessor,
     initialize_vision_processor,
@@ -177,8 +178,21 @@ def test_vision_processor_process_image_not_initialized(mock_torch: Any) -> None
     processor = VisionProcessor()
     test_image = np.zeros((480, 640, 3), dtype=np.uint8)
 
-    result = processor.process_image(test_image)
+    result = processor.process_image(test_image, "Describe this image.")
     assert result == "Vision model not initialized"
+
+
+def test_vision_processor_process_image_rejects_blank_prompt(
+    mock_torch: Any,
+    mock_transformers: Any,
+) -> None:
+    """Test process_image requires a non-empty prompt."""
+    processor = VisionProcessor()
+    processor.initialize()
+
+    test_image = np.zeros((480, 640, 3), dtype=np.uint8)
+    with pytest.raises(ValueError, match="prompt must be a non-empty string"):
+        processor.process_image(test_image, "   ")
 
 
 def test_vision_processor_process_image_success(mock_torch: Any, mock_transformers: Any) -> None:
@@ -191,6 +205,25 @@ def test_vision_processor_process_image_success(mock_torch: Any, mock_transforme
 
     assert isinstance(result, str)
     assert result == "This is a test description."
+
+
+def test_vision_processor_process_image_appends_local_vision_instructions(
+    mock_torch: Any,
+    mock_transformers: Any,
+) -> None:
+    """Test process_image preserves the question and appends response instructions."""
+    processor = VisionProcessor()
+    processor.initialize()
+
+    test_image = np.zeros((480, 640, 3), dtype=np.uint8)
+    processor.process_image(test_image, "What is on the table?")
+
+    processor_mock = mock_transformers["processor"].from_pretrained.return_value
+    messages = processor_mock.apply_chat_template.call_args.args[0]
+    assert messages[0]["content"][1]["text"] == (
+        "What is on the table?\n\n"
+        f"{LOCAL_VISION_RESPONSE_INSTRUCTIONS}"
+    )
 
 
 def test_vision_processor_process_image_with_retry(mock_torch: Any, mock_transformers: Any) -> None:
@@ -215,7 +248,7 @@ def test_vision_processor_process_image_with_retry(mock_torch: Any, mock_transfo
     model_mock.generate = failing_generate
 
     test_image = np.zeros((480, 640, 3), dtype=np.uint8)
-    result = processor.process_image(test_image)
+    result = processor.process_image(test_image, "Describe this image.")
 
     assert isinstance(result, str)
     assert call_count[0] == 3
@@ -233,7 +266,7 @@ def test_vision_processor_process_image_retries_input_transfer_failure(
     batch_mock.to.side_effect = [Exception("Temporary transfer failure"), batch_mock]
 
     test_image = np.zeros((480, 640, 3), dtype=np.uint8)
-    result = processor.process_image(test_image)
+    result = processor.process_image(test_image, "Describe this image.")
 
     assert result == "This is a test description."
     assert batch_mock.to.call_count == 2
@@ -296,7 +329,7 @@ def test_vision_processor_cuda_oom_recovery(mock_torch: Any, mock_transformers: 
     mock_transformers["model"].from_pretrained.return_value.generate.side_effect = mock_torch.cuda.OutOfMemoryError("OOM")
 
     test_image = np.zeros((480, 640, 3), dtype=np.uint8)
-    result = processor.process_image(test_image)
+    result = processor.process_image(test_image, "Describe this image.")
 
     assert "GPU out of memory" in result
     mock_torch.cuda.empty_cache.assert_called()
@@ -309,7 +342,7 @@ def test_vision_processor_cache_cleanup_mps(mock_torch: Any, mock_transformers: 
     processor.device = "mps"  # Force MPS for this test
 
     test_image = np.zeros((480, 640, 3), dtype=np.uint8)
-    processor.process_image(test_image)
+    processor.process_image(test_image, "Describe this image.")
 
     # empty_cache should NOT be called on the happy path
     mock_torch.mps.empty_cache.assert_not_called()

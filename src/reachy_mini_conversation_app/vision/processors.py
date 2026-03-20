@@ -15,7 +15,7 @@ from reachy_mini_conversation_app.config import config
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_LOCAL_VISION_PROMPT = (
+LOCAL_VISION_RESPONSE_INSTRUCTIONS = (
     "Respond to the request using only details that are clearly visible in the image. "
     "Do not guess, infer hidden details, or invent missing information. "
     "If the answer is not clearly visible, say exactly: I can't tell from this image. "
@@ -88,16 +88,22 @@ class VisionProcessor:
     def process_image(
         self,
         frame: NDArray[np.uint8],
-        prompt: str = DEFAULT_LOCAL_VISION_PROMPT,
+        prompt: str,
     ) -> str:
         """Process a BGR camera frame and return a text description."""
+        prompt_text = prompt.strip()
+        if not prompt_text:
+            raise ValueError("prompt must be a non-empty string")
+
         if not self._initialized or self.processor is None or self.model is None:
             return "Vision model not initialized"
 
         processor = self.processor
         model = self.model
         rgb_image = Image.fromarray(np.ascontiguousarray(frame[..., ::-1]))
-        request = prompt.strip() or DEFAULT_LOCAL_VISION_PROMPT
+        request_parts = [LOCAL_VISION_RESPONSE_INSTRUCTIONS]
+        request_parts.insert(0, prompt_text)
+        request = "\n\n".join(request_parts)
 
         messages = [
             {
