@@ -14,6 +14,10 @@ if TYPE_CHECKING:
     from reachy_mini_conversation_app.vision.processors import VisionProcessor
 
 
+class CameraVisionInitializationError(Exception):
+    """Raised when camera or vision setup fails in an expected way."""
+
+
 def parse_args() -> tuple[argparse.Namespace, list]:  # type: ignore
     """Parse command line arguments."""
     parser = argparse.ArgumentParser("Reachy Mini Conversation App")
@@ -75,20 +79,19 @@ def initialize_camera_and_vision(
                 check=False,
             )
             if result.returncode < 0:
-                raise RuntimeError(
+                raise CameraVisionInitializationError(
                     "Local vision import crashed on this machine. "
                     "Run without --local-vision or install compatible dependencies.",
                 )
             try:
                 from reachy_mini_conversation_app.vision.processors import initialize_vision_processor
 
-                vision_processor = initialize_vision_processor()
-                if vision_processor is None:
-                    raise RuntimeError("Failed to initialize local vision processor. See logs for details.")
             except ImportError as e:
-                raise ImportError(
+                raise CameraVisionInitializationError(
                     "To use --local-vision, please install the extra dependencies: pip install '.[local_vision]'",
                 ) from e
+
+            vision_processor = initialize_vision_processor()
         else:
             logging.getLogger(__name__).info(
                 "Using gpt-realtime for vision (default). Use --local-vision for local processing.",

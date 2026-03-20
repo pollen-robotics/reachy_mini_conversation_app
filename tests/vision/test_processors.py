@@ -135,9 +135,8 @@ def test_vision_processor_initialization(mock_torch: Any, mock_transformers: Any
     processor = VisionProcessor(config)
 
     assert not processor._initialized
-    result = processor.initialize()
+    processor.initialize()
 
-    assert result is True
     assert processor._initialized
     mock_transformers["processor"].from_pretrained.assert_called_once_with("test/model")
     mock_transformers["model"].from_pretrained.assert_called_once_with(
@@ -151,9 +150,8 @@ def test_vision_processor_initialization_cuda(mock_torch: Any, mock_transformers
     mock_torch.cuda.is_available.return_value = True
 
     processor = VisionProcessor(VisionConfig(model_path="test/model", device_preference="cuda"))
-    result = processor.initialize()
+    processor.initialize()
 
-    assert result is True
     mock_transformers["model"].from_pretrained.assert_called_once_with(
         "test/model",
         dtype="bfloat16",
@@ -161,15 +159,14 @@ def test_vision_processor_initialization_cuda(mock_torch: Any, mock_transformers
 
 
 def test_vision_processor_initialization_failure(mock_torch: Any) -> None:
-    """Test VisionProcessor handles initialization failure gracefully."""
+    """Test VisionProcessor surfaces initialization failures."""
     with patch("reachy_mini_conversation_app.vision.processors.AutoProcessor") as mock_proc:
         mock_proc.from_pretrained.side_effect = Exception("Model not found")
 
         config = VisionConfig(model_path="invalid/model")
         processor = VisionProcessor(config)
-        result = processor.initialize()
-
-        assert result is False
+        with pytest.raises(Exception, match="Model not found"):
+            processor.initialize()
         assert not processor._initialized
 
 
@@ -283,13 +280,12 @@ def test_initialize_vision_processor_success(mock_torch: Any, mock_transformers:
 
         result = initialize_vision_processor()
 
-        assert result is not None
         assert isinstance(result, VisionProcessor)
         assert result._initialized
         mock_download.assert_called_once()
 
 def test_initialize_vision_processor_download_failure(mock_torch: Any) -> None:
-    """Test initialize_vision_processor handles download failure."""
+    """Test initialize_vision_processor surfaces download failures."""
     with patch("reachy_mini_conversation_app.vision.processors.snapshot_download") as mock_download, \
          patch("reachy_mini_conversation_app.vision.processors.os.makedirs"), \
          patch("reachy_mini_conversation_app.vision.processors.config") as mock_config:
@@ -298,12 +294,11 @@ def test_initialize_vision_processor_download_failure(mock_torch: Any) -> None:
         mock_config.HF_HOME = "/tmp/hf_cache"
         mock_download.side_effect = Exception("Network error")
 
-        result = initialize_vision_processor()
-
-        assert result is None
+        with pytest.raises(Exception, match="Network error"):
+            initialize_vision_processor()
 
 def test_initialize_vision_processor_processor_failure(mock_torch: Any) -> None:
-    """Test initialize_vision_processor handles processor initialization failure."""
+    """Test initialize_vision_processor surfaces processor initialization failures."""
     with patch("reachy_mini_conversation_app.vision.processors.snapshot_download"), \
          patch("reachy_mini_conversation_app.vision.processors.os.makedirs"), \
          patch("reachy_mini_conversation_app.vision.processors.config") as mock_config, \
@@ -313,9 +308,8 @@ def test_initialize_vision_processor_processor_failure(mock_torch: Any) -> None:
         mock_config.HF_HOME = "/tmp/hf_cache"
         mock_proc.from_pretrained.side_effect = Exception("Model load error")
 
-        result = initialize_vision_processor()
-
-        assert result is None
+        with pytest.raises(Exception, match="Model load error"):
+            initialize_vision_processor()
 
 
 def test_vision_processor_cuda_oom_recovery(mock_torch: Any, mock_transformers: Any) -> None:

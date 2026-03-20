@@ -59,31 +59,25 @@ class VisionProcessor:
             return "mps"
         return "cuda" if torch.cuda.is_available() else "cpu"
 
-    def initialize(self) -> bool:
+    def initialize(self) -> None:
         """Load model and processor onto the selected device."""
-        try:
-            logger.info("Loading SmolVLM2 model on %s (HF_HOME=%s)", self.device, config.HF_HOME)
-            processor: ProcessorMixin = AutoProcessor.from_pretrained(self.vision_config.model_path)  # type: ignore[no-untyped-call]
+        logger.info("Loading SmolVLM2 model on %s (HF_HOME=%s)", self.device, config.HF_HOME)
+        processor: ProcessorMixin = AutoProcessor.from_pretrained(self.vision_config.model_path)  # type: ignore[no-untyped-call]
 
-            model_kwargs: dict[str, object] = {
-                "dtype": torch.bfloat16 if self.device == "cuda" else torch.float32,
-            }
+        model_kwargs: dict[str, object] = {
+            "dtype": torch.bfloat16 if self.device == "cuda" else torch.float32,
+        }
 
-            model: torch.nn.Module = AutoModelForImageTextToText.from_pretrained(
-                self.vision_config.model_path,
-                **model_kwargs,
-            )
-            model = model.to(self.device)
+        model: torch.nn.Module = AutoModelForImageTextToText.from_pretrained(
+            self.vision_config.model_path,
+            **model_kwargs,
+        )
+        model = model.to(self.device)
 
-            model.eval()
-            self.processor = processor
-            self.model = model
-            self._initialized = True
-            return True
-
-        except Exception as e:
-            logger.error("Failed to initialize vision model: %s", e)
-            return False
+        model.eval()
+        self.processor = processor
+        self.model = model
+        self._initialized = True
 
     def process_image(
         self,
@@ -177,8 +171,8 @@ class VisionProcessor:
         return f"Vision processing error after {self.vision_config.max_retries} attempts"
 
 
-def initialize_vision_processor() -> VisionProcessor | None:
-    """Download the vision model and return an initialized VisionProcessor, or None on failure."""
+def initialize_vision_processor() -> VisionProcessor:
+    """Download the vision model and return an initialized VisionProcessor."""
     try:
         model_id = config.LOCAL_VISION_MODEL
         cache_dir = os.path.expanduser(config.HF_HOME)
@@ -191,8 +185,7 @@ def initialize_vision_processor() -> VisionProcessor | None:
         snapshot_download(repo_id=model_id, repo_type="model", cache_dir=cache_dir)
 
         vision_processor = VisionProcessor()
-        if not vision_processor.initialize():
-            raise RuntimeError("Vision processor initialization failed")
+        vision_processor.initialize()
 
         logger.info(
             "Vision processing enabled: %s on %s",
@@ -201,7 +194,6 @@ def initialize_vision_processor() -> VisionProcessor | None:
         )
 
         return vision_processor
-
-    except Exception as e:
-        logger.error("Failed to initialize vision processor: %s", e)
-        return None
+    except Exception:
+        logger.exception("Failed to initialize vision processor")
+        raise

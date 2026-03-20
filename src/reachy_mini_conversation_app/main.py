@@ -15,6 +15,7 @@ from gradio.utils import get_space
 
 from reachy_mini import ReachyMini, ReachyMiniApp
 from reachy_mini_conversation_app.utils import (
+    CameraVisionInitializationError,
     parse_args,
     setup_logger,
     initialize_camera_and_vision,
@@ -107,7 +108,7 @@ def run(
 
     try:
         camera_worker, vision_processor = initialize_camera_and_vision(args, robot)
-    except (ImportError, RuntimeError) as e:
+    except CameraVisionInitializationError as e:
         logger.error("Failed to initialize camera/vision: %s", e)
         sys.exit(1)
 
