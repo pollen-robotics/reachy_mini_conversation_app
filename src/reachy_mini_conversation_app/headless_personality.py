@@ -63,7 +63,7 @@ def resolve_profile_dir(selection: str) -> Path:
 
 
 def read_instructions_for(name: str) -> str:
-    """Read the instructions content for the given profile name."""
+    """Read the instructions.txt content for the given profile name."""
     try:
         if name == DEFAULT_OPTION:
             df = _prompts_dir() / "default_prompt.txt"

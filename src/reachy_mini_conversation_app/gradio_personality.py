@@ -178,7 +178,7 @@ class PersonalityUI:
             local: list[str] = []
             try:
                 if selected != self.DEFAULT_OPTION:
-                    for py in self._resolve_profile_dir(selected).glob("*.py"):
+                    for py in (self._profiles_root / selected).glob("*.py"):
                         local.append(py.stem)
             except Exception:
                 pass

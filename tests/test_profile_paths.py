@@ -63,3 +63,23 @@ def test_builtin_profile_paths_stay_compact() -> None:
     )
 
     assert longest <= 83
+
+
+def test_project_file_paths_stay_within_windows_budget() -> None:
+    """Project file paths should stay below the agreed in-repo budget."""
+    project_root = Path(__file__).resolve().parents[1]
+    ignored_parts = {".git", ".venv", "__pycache__", "build", "dist"}
+
+    project_files = [
+        path
+        for path in project_root.rglob("*")
+        if path.is_file() and not any(part in ignored_parts for part in path.relative_to(project_root).parts)
+    ]
+
+    longest_path = max(project_files, key=lambda path: len(str(path.relative_to(project_root))))
+    longest_length = len(str(longest_path.relative_to(project_root)))
+
+    assert longest_length <= 140, (
+        "Project path budget exceeded: "
+        f"{longest_path.relative_to(project_root)} is {longest_length} characters long"
+    )

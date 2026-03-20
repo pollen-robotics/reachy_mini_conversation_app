@@ -146,6 +146,7 @@ def _load_profile_tools() -> None:
     logger.info(f"Loading tools for profile: {profile}")
 
     # Build path to tools.txt
+    # Get the profile directory path
     profile_module_path = config.PROFILES_DIRECTORY / profile
     tools_txt_path = profile_module_path / "tools.txt"
     default_tools_txt_path = Path(__file__).parent.parent / "profiles" / "default" / "tools.txt"
