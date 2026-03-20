@@ -50,9 +50,9 @@ def initialize_camera_and_vision(
     current_robot: ReachyMini,
 ) -> tuple[CameraWorker | None, VisionProcessor | None]:
     """Initialize camera capture, optional head tracking, and optional local vision."""
-    camera_worker: CameraWorker | None = None
+    camera_worker: Optional[CameraWorker] = None
     head_tracker = None
-    vision_processor: VisionProcessor | None = None
+    vision_processor: Optional[VisionProcessor] = None
 
     if not args.no_camera:
         if args.head_tracker is not None:
