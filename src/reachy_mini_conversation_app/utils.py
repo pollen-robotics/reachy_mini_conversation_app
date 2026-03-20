@@ -25,7 +25,7 @@ def parse_args() -> tuple[argparse.Namespace, list]:  # type: ignore
         "--head-tracker",
         choices=["yolo", "mediapipe"],
         default=None,
-        help="Choose the head-tracking backend: yolo uses a local face detector, mediapipe uses reachy_mini_toolbox",
+        help="Head-tracking backend: yolo uses a local face detector, mediapipe uses reachy_mini_toolbox. Disabled by default.",
     )
     parser.add_argument("--no-camera", default=False, action="store_true", help="Disable camera usage")
     parser.add_argument(
