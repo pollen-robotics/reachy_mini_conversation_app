@@ -13,6 +13,11 @@ LOCKED_PROFILE: str | None = None
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _is_source_checkout_root(root: Path) -> bool:
+    """Return whether the given root looks like this project's source checkout."""
+    return (root / "pyproject.toml").is_file() and (root / "src" / "reachy_mini_conversation_app").is_dir()
+
+
 def _packaged_profiles_directory() -> Path | None:
     """Return the installed wheel's packaged profiles directory when available."""
     try:
@@ -24,11 +29,11 @@ def _packaged_profiles_directory() -> Path | None:
 def _resolve_default_profiles_directory() -> Path:
     """Resolve built-in profiles from source checkout or installed package data."""
     source_profiles = PROJECT_ROOT / "profiles"
-    if source_profiles.exists():
+    if _is_source_checkout_root(PROJECT_ROOT) and source_profiles.is_dir():
         return source_profiles
 
     packaged_profiles = _packaged_profiles_directory()
-    if packaged_profiles is not None and packaged_profiles.exists():
+    if packaged_profiles is not None and packaged_profiles.is_dir():
         return packaged_profiles
 
     return source_profiles

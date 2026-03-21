@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+import reachy_mini_conversation_app.config as config_mod
 import reachy_mini_conversation_app.prompts as prompts_mod
 from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY, config
 from reachy_mini_conversation_app.headless_personality import (
@@ -29,6 +30,21 @@ def test_prompts_load_from_compact_builtin_profile(monkeypatch: pytest.MonkeyPat
 
     assert prompts_mod.get_session_instructions() == expected
     assert read_instructions_for("mad_scientist_assistant") == expected
+
+
+def test_packaged_profiles_win_outside_source_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Installed builds should use packaged profiles, not an unrelated sibling folder."""
+    unrelated_profiles = tmp_path / "profiles"
+    unrelated_profiles.mkdir()
+    packaged_profiles = tmp_path / "package_data" / "profiles"
+    packaged_profiles.mkdir(parents=True)
+
+    monkeypatch.setattr(config_mod, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(config_mod, "_packaged_profiles_directory", lambda: packaged_profiles)
+
+    assert config_mod._resolve_default_profiles_directory() == packaged_profiles
 
 
 def test_project_file_paths_stay_within_windows_budget() -> None:
