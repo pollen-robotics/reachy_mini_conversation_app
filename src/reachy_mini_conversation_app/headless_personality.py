@@ -16,7 +16,7 @@ DEFAULT_OPTION = "(built-in default)"
 
 
 def _profiles_root() -> Path:
-    return Path(__file__).parent / "profiles"
+    return Path(__file__).resolve().parents[2] / "profiles"
 
 
 def _prompts_dir() -> Path:

@@ -193,7 +193,7 @@ Built-in motion content is published as open Hugging Face datasets:
 
 Create custom profiles with dedicated instructions and enabled tools.
 
-Set `REACHY_MINI_CUSTOM_PROFILE=<name>` to load `src/reachy_mini_conversation_app/profiles/<name>/` (see `.env.example`). If unset, the `default` profile is used.
+Set `REACHY_MINI_CUSTOM_PROFILE=<name>` to load `profiles/<name>/` (see `.env.example`). If unset, the `default` profile is used.
 
 Each profile should include `instructions.txt` (prompt text). `tools.txt` (list of allowed tools) is recommended. If missing for a non-default profile, the app falls back to `profiles/default/tools.txt`. Profiles can optionally contain custom tool implementations.
 
@@ -204,7 +204,7 @@ Write plain-text prompts in `instructions.txt`. To reuse shared prompt pieces, a
 [passion_for_lobster_jokes]
 [identities/witty_identity]
 ```
-Each placeholder pulls the matching file under `src/reachy_mini_conversation_app/prompts/` (nested paths allowed). See `src/reachy_mini_conversation_app/profiles/example/` for a reference layout.
+Each placeholder pulls the matching file under `src/reachy_mini_conversation_app/prompts/` (nested paths allowed). See `profiles/example/` for a reference layout.
 
 **Enabling tools:**
 
@@ -226,7 +226,7 @@ Custom tools must subclass `reachy_mini_conversation_app.tools.core_tools.Tool` 
 **Edit personalities from the UI:**
 
 When running with `--gradio`, open the "Personality" accordion:
-- Select among available profiles (folders under `src/reachy_mini_conversation_app/profiles/`) or the built‑in default.
+- Select among available profiles (folders under `profiles/`) or the built‑in default.
 - Click "Apply" to update the current session instructions live.
 - Create a new personality by entering a name and instructions text. It stores files under `profiles/<name>/` and copies `tools.txt` from the `default` profile.
 
@@ -249,9 +249,9 @@ This is useful for creating dedicated clones of the app with a fixed personality
 <details>
 <summary><b>External profiles and tools</b></summary>
 
-You can extend the app with profiles/tools stored outside `src/reachy_mini_conversation_app/`.
+You can extend the app with profiles/tools stored outside the repository defaults.
 
-- Core profiles are under `src/reachy_mini_conversation_app/profiles/`.
+- Core profiles are under `profiles/`.
 - Core tools are under `src/reachy_mini_conversation_app/tools/`.
 
 **Recommended layout:**

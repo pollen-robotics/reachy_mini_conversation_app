@@ -45,7 +45,7 @@ def test_project_file_paths_stay_within_windows_budget() -> None:
     longest_path = max(project_files, key=lambda path: len(str(path.relative_to(project_root))))
     longest_length = len(str(longest_path.relative_to(project_root)))
 
-    assert longest_length <= 140, (
+    assert longest_length <= 104, (
         "Project path budget exceeded: "
         f"{longest_path.relative_to(project_root)} is {longest_length} characters long"
     )

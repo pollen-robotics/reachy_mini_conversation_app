@@ -91,7 +91,6 @@ reachy_mini_conversation_app = [
   ".env.example",
   "demos/**/*.txt",
   "prompts_library/*.txt",
-  "profiles/**/*.txt",
   "prompts/**/*.txt",
 ]
 

@@ -9,7 +9,8 @@ from dotenv import find_dotenv, load_dotenv
 # Locked profile: set to a profile name (e.g., "astronomer") to lock the app
 # to that profile and disable all profile switching. Leave as None for normal behavior.
 LOCKED_PROFILE: str | None = None
-DEFAULT_PROFILES_DIRECTORY = Path(__file__).parent / "profiles"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_PROFILES_DIRECTORY = PROJECT_ROOT / "profiles"
 
 # Full list of voices supported by the OpenAI Realtime / TTS API.
 # Source: https://developers.openai.com/api/docs/guides/text-to-speech/#voice-options
@@ -132,9 +133,7 @@ class Config:
     logger.debug(f"Model: {MODEL_NAME}, HF_HOME: {HF_HOME}, Vision Model: {LOCAL_VISION_MODEL}")
 
     _profiles_directory_env = os.getenv("REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY")
-    PROFILES_DIRECTORY = (
-        Path(_profiles_directory_env) if _profiles_directory_env else Path(__file__).parent / "profiles"
-    )
+    PROFILES_DIRECTORY = Path(_profiles_directory_env) if _profiles_directory_env else DEFAULT_PROFILES_DIRECTORY
     _tools_directory_env = os.getenv("REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY")
     TOOLS_DIRECTORY = Path(_tools_directory_env) if _tools_directory_env else None
     AUTOLOAD_EXTERNAL_TOOLS = _env_flag("AUTOLOAD_EXTERNAL_TOOLS", default=False)

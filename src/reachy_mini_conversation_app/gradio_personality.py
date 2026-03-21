@@ -20,7 +20,7 @@ class PersonalityUI:
         """Initialize the PersonalityUI instance."""
         # Constants and paths
         self.DEFAULT_OPTION = "(built-in default)"
-        self._profiles_root = Path(__file__).parent / "profiles"
+        self._profiles_root = Path(__file__).resolve().parents[2] / "profiles"
         self._tools_dir = Path(__file__).parent / "tools"
         self._prompts_dir = Path(__file__).parent / "prompts"
 
