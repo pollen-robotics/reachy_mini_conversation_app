@@ -93,6 +93,10 @@ reachy_mini_conversation_app = [
   "prompts_library/*.txt",
   "prompts/**/*.txt",
 ]
+rmca_data = [
+  "profiles/**/*.txt",
+  "profiles/**/*.py",
+]
 
 [tool.ruff]
 line-length = 119

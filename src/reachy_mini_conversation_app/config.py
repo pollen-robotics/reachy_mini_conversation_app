@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 from pathlib import Path
+from importlib.resources import files
 
 from dotenv import find_dotenv, load_dotenv
 
@@ -10,7 +11,30 @@ from dotenv import find_dotenv, load_dotenv
 # to that profile and disable all profile switching. Leave as None for normal behavior.
 LOCKED_PROFILE: str | None = None
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_PROFILES_DIRECTORY = PROJECT_ROOT / "profiles"
+
+
+def _packaged_profiles_directory() -> Path | None:
+    """Return the installed wheel's packaged profiles directory when available."""
+    try:
+        return Path(str(files("rmca_data").joinpath("profiles")))
+    except Exception:
+        return None
+
+
+def _resolve_default_profiles_directory() -> Path:
+    """Resolve built-in profiles from source checkout or installed package data."""
+    source_profiles = PROJECT_ROOT / "profiles"
+    if source_profiles.exists():
+        return source_profiles
+
+    packaged_profiles = _packaged_profiles_directory()
+    if packaged_profiles is not None and packaged_profiles.exists():
+        return packaged_profiles
+
+    return source_profiles
+
+
+DEFAULT_PROFILES_DIRECTORY = _resolve_default_profiles_directory()
 
 # Full list of voices supported by the OpenAI Realtime / TTS API.
 # Source: https://developers.openai.com/api/docs/guides/text-to-speech/#voice-options
