@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reachy_mini_conversation_app"
-version = "0.3.1"
+version = "0.4.0"
 authors = [{ name = "Pollen Robotics", email = "contact@pollen-robotics.com" }]
 description = ""
 readme = "README.md"
@@ -93,7 +93,7 @@ reachy_mini_conversation_app = [
   "prompts_library/*.txt",
   "prompts/**/*.txt",
 ]
-rmca_data = [
+reachy_mini_data = [
   "profiles/**/*.txt",
   "profiles/**/*.py",
 ]

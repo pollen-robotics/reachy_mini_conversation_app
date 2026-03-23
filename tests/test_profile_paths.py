@@ -1,4 +1,3 @@
-import sys
 import shutil
 import zipfile
 import subprocess
@@ -19,7 +18,7 @@ WINDOWS_PATH_BUDGET = 104
 
 
 def _git_tracked_files(project_root: Path) -> list[Path]:
-    """Return git-tracked files for the repository rooted at project_root."""
+    """Return git-tracked files that still exist in the working tree."""
     try:
         result = subprocess.run(
             ["git", "ls-files"],
@@ -31,7 +30,8 @@ def _git_tracked_files(project_root: Path) -> list[Path]:
     except (OSError, subprocess.CalledProcessError) as exc:
         pytest.skip(f"git-tracked file listing unavailable: {exc}")
 
-    return [project_root / relative_path for relative_path in result.stdout.splitlines() if relative_path]
+    tracked_files = [project_root / relative_path for relative_path in result.stdout.splitlines() if relative_path]
+    return [path for path in tracked_files if path.is_file()]
 
 
 def test_profile_name_resolves_directly_to_storage_dir() -> None:
@@ -97,7 +97,7 @@ def test_wheel_file_paths_stay_within_windows_budget(tmp_path: Path) -> None:
 
     try:
         subprocess.run(
-            [sys.executable, "setup.py", "bdist_wheel", "--dist-dir", str(dist_dir)],
+            ["uv", "build", "--wheel", "--out-dir", str(dist_dir)],
             cwd=source_checkout,
             check=True,
             capture_output=True,
