@@ -1,8 +1,8 @@
-from pathlib import Path, PurePosixPath
-import shutil
-import subprocess
 import sys
+import shutil
 import zipfile
+import subprocess
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -13,6 +13,7 @@ from reachy_mini_conversation_app.headless_personality import (
     resolve_profile_dir,
     read_instructions_for,
 )
+
 
 WINDOWS_PATH_BUDGET = 104
 
