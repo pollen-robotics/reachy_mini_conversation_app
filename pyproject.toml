@@ -93,7 +93,7 @@ reachy_mini_conversation_app = [
   "prompts_library/*.txt",
   "prompts/**/*.txt",
 ]
-reachy_mini_data = [
+reachy_talk_data = [
   "profiles/**/*.txt",
   "profiles/**/*.py",
 ]

@@ -21,7 +21,7 @@ def _is_source_checkout_root(root: Path) -> bool:
 def _packaged_profiles_directory() -> Path | None:
     """Return the installed wheel's packaged profiles directory when available."""
     try:
-        return Path(str(files("reachy_mini_data").joinpath("profiles")))
+        return Path(str(files("reachy_talk_data").joinpath("profiles")))
     except Exception:
         return None
 
