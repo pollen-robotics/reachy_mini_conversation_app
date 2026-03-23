@@ -3,7 +3,7 @@ import asyncio
 import logging
 from typing import Any
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -18,6 +18,212 @@ def _build_handler(loop: asyncio.AbstractEventLoop) -> OpenaiRealtimeHandler:
     asyncio.set_event_loop(loop)
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
     return OpenaiRealtimeHandler(deps)
+
+
+@pytest.mark.asyncio
+async def test_tool_completion_does_not_reset_head_wobbler(monkeypatch: Any) -> None:
+    """Tool completion should not interrupt ongoing speech wobble."""
+    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
+    monkeypatch.setattr(rt_mod, "get_session_voice", lambda: "alloy")
+    monkeypatch.setattr(rt_mod, "get_tool_specs", lambda: [])
+
+    async def _fake_dispatch(
+        tool_name: str, args_json: str, deps: Any, **_kw: Any
+    ) -> dict[str, Any]:
+        return {"image_description": "A person in front of a door.", "tool": tool_name}
+
+    monkeypatch.setattr(btm_mod, "dispatch_tool_call", _fake_dispatch)
+
+    class FakeSession:
+        async def update(self, **_kw: Any) -> None:
+            pass
+
+    class FakeInputAudioBuffer:
+        async def append(self, **_kw: Any) -> None:
+            pass
+
+    class FakeItem:
+        def __init__(self) -> None:
+            self.created = asyncio.Event()
+
+        async def create(self, **_kw: Any) -> None:
+            self.created.set()
+
+    class FakeConversation:
+        def __init__(self) -> None:
+            self.item = FakeItem()
+
+    class FakeResponse:
+        async def create(self, **_kw: Any) -> None:
+            pass
+
+        async def cancel(self, **_kw: Any) -> None:
+            pass
+
+    class FakeConn:
+        def __init__(self) -> None:
+            self._events: asyncio.Queue[Any] = asyncio.Queue()
+            self.session = FakeSession()
+            self.input_audio_buffer = FakeInputAudioBuffer()
+            self.conversation = FakeConversation()
+            self.response = FakeResponse()
+
+        async def __aenter__(self) -> "FakeConn":
+            return self
+
+        async def __aexit__(self, *_args: Any) -> bool:
+            return False
+
+        async def close(self) -> None:
+            await self._events.put(None)
+
+        def __aiter__(self) -> "FakeConn":
+            return self
+
+        async def __anext__(self) -> Any:
+            event = await self._events.get()
+            if event is None:
+                raise StopAsyncIteration
+            return event
+
+    class FakeRealtime:
+        def __init__(self) -> None:
+            self.conn = FakeConn()
+
+        def connect(self, **_kw: Any) -> FakeConn:
+            return self.conn
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.realtime = FakeRealtime()
+
+    head_wobbler = MagicMock()
+    deps = ToolDependencies(
+        reachy_mini=MagicMock(),
+        movement_manager=MagicMock(),
+        head_wobbler=head_wobbler,
+    )
+    handler = OpenaiRealtimeHandler(deps)
+    fake_client: Any = FakeClient()
+    handler.client = fake_client
+
+    session_task = asyncio.create_task(handler._run_realtime_session())
+
+    await asyncio.sleep(0)
+    await handler.tool_manager.start_tool(
+        call_id="call_1",
+        tool_call_routine=ToolCallRoutine(
+            tool_name="camera",
+            args_json_str='{"question":"What do I see?"}',
+            deps=deps,
+        ),
+        is_idle_tool_call=False,
+    )
+
+    fake_conn = fake_client.realtime.conn
+    await asyncio.wait_for(fake_conn.conversation.item.created.wait(), timeout=2.0)
+    await fake_conn.close()
+    await asyncio.wait_for(session_task, timeout=2.0)
+
+    head_wobbler.reset.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_non_idle_tool_call_does_not_queue_progress_response(monkeypatch: Any) -> None:
+    """Tool-call startup should not enqueue a second speech response."""
+    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
+    monkeypatch.setattr(rt_mod, "get_session_voice", lambda: "alloy")
+    monkeypatch.setattr(rt_mod, "get_tool_specs", lambda: [])
+
+    class FakeEvent:
+        def __init__(self, etype: str, **kwargs: Any) -> None:
+            self.type = etype
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+    class FakeSession:
+        async def update(self, **_kw: Any) -> None:
+            pass
+
+    class FakeInputAudioBuffer:
+        async def append(self, **_kw: Any) -> None:
+            pass
+
+    class FakeItem:
+        async def create(self, **_kw: Any) -> None:
+            pass
+
+    class FakeConversation:
+        item = FakeItem()
+
+    class FakeResponse:
+        async def create(self, **_kw: Any) -> None:
+            pass
+
+        async def cancel(self, **_kw: Any) -> None:
+            pass
+
+    class FakeConn:
+        session = FakeSession()
+        input_audio_buffer = FakeInputAudioBuffer()
+        conversation = FakeConversation()
+        response = FakeResponse()
+
+        def __init__(self) -> None:
+            self._events = iter(
+                [
+                    FakeEvent(
+                        "response.function_call_arguments.done",
+                        name="camera",
+                        arguments='{"question":"What do I see?"}',
+                        call_id="call_camera_1",
+                    )
+                ]
+            )
+
+        async def __aenter__(self) -> "FakeConn":
+            return self
+
+        async def __aexit__(self, *_args: Any) -> bool:
+            return False
+
+        async def close(self) -> None:
+            pass
+
+        def __aiter__(self) -> "FakeConn":
+            return self
+
+        async def __anext__(self) -> FakeEvent:
+            try:
+                return next(self._events)
+            except StopIteration:
+                raise StopAsyncIteration
+
+    class FakeRealtime:
+        def connect(self, **_kw: Any) -> FakeConn:
+            return FakeConn()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.realtime = FakeRealtime()
+
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = OpenaiRealtimeHandler(deps)
+    fake_client: Any = FakeClient()
+    handler.client = fake_client
+    safe_response_create = AsyncMock()
+    object.__setattr__(handler, "_safe_response_create", safe_response_create)
+    start_up = MagicMock()
+    shutdown = AsyncMock()
+    start_tool = AsyncMock(return_value=MagicMock(tool_id="camera-call_camera_1-0"))
+    object.__setattr__(handler.tool_manager, "start_up", start_up)
+    object.__setattr__(handler.tool_manager, "shutdown", shutdown)
+    object.__setattr__(handler.tool_manager, "start_tool", start_tool)
+
+    await handler._run_realtime_session()
+
+    start_tool.assert_awaited_once()
+    safe_response_create.assert_not_awaited()
 
 
 def test_format_timestamp_uses_wall_clock() -> None:

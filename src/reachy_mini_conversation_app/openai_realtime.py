@@ -420,10 +420,6 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     ),
                 )
 
-            # Re-synchronize the head wobble after a tool call that may have taken some time
-            if self.deps.head_wobbler is not None:
-                self.deps.head_wobbler.reset()
-
         except ConnectionClosedError:
             logger.warning("Connection closed while sending tool result")
             self.connection = None
@@ -620,12 +616,6 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
                         if self.is_idle_tool_call:
                             self.is_idle_tool_call = False
-                        else:
-                            await self._safe_response_create(
-                                response=RealtimeResponseCreateParamsParam(
-                                    instructions="Notify what the tool has been running giving meaningful information about the task",
-                                ),
-                            )
 
                         logger.info("Started background tool: %s (id=%s, call_id=%s)", tool_name, bg_tool.tool_id, call_id)
 
