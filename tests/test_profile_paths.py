@@ -14,7 +14,8 @@ from reachy_mini_conversation_app.headless_personality import (
 )
 
 
-WINDOWS_PATH_BUDGET = 104
+WINDOWS_PATH_BUDGET = 130
+WINDOWS_WHEEL_PATH_BUDGET = 71
 
 
 def _git_tracked_files(project_root: Path) -> list[Path]:
@@ -75,13 +76,17 @@ def test_project_file_paths_stay_within_windows_budget() -> None:
     project_root = Path(__file__).resolve().parents[1]
     project_files = _git_tracked_files(project_root)
 
-    longest_path = max(project_files, key=lambda path: len(str(path.relative_to(project_root))))
-    longest_length = len(str(longest_path.relative_to(project_root)))
+    violations = []
+    for path in project_files:
+        relative = str(Path(project_root.name) / path.relative_to(project_root))
+        length = len(relative)
+        if length > WINDOWS_PATH_BUDGET:
+            violations.append(
+                f"Windows path budget exceeded ({WINDOWS_PATH_BUDGET}): "
+                f"{relative} is {length} characters long"
+            )
 
-    assert longest_length <= WINDOWS_PATH_BUDGET, (
-        "Project path budget exceeded: "
-        f"{longest_path.relative_to(project_root)} is {longest_length} characters long"
-    )
+    assert not violations, "\n".join(violations)
 
 
 def test_wheel_file_paths_stay_within_windows_budget(tmp_path: Path) -> None:
@@ -113,10 +118,13 @@ def test_wheel_file_paths_stay_within_windows_budget(tmp_path: Path) -> None:
     with zipfile.ZipFile(wheel_files[0]) as archive:
         archived_paths = [PurePosixPath(info.filename) for info in archive.infolist() if not info.is_dir()]
 
-    longest_path = max(archived_paths, key=lambda path: len(path.as_posix()))
-    longest_length = len(longest_path.as_posix())
+    violations = []
+    for path in archived_paths:
+        length = len(path.as_posix())
+        if length > WINDOWS_WHEEL_PATH_BUDGET:
+            violations.append(
+                f"Windows wheel path budget exceeded ({WINDOWS_WHEEL_PATH_BUDGET}): "
+                f"{path.as_posix()} is {length} characters long"
+            )
 
-    assert longest_length <= WINDOWS_PATH_BUDGET, (
-        "Wheel path budget exceeded: "
-        f"{longest_path.as_posix()} is {longest_length} characters long"
-    )
+    assert not violations, "\n".join(violations)
