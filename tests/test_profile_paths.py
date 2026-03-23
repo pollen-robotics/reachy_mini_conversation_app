@@ -1,4 +1,8 @@
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import shutil
+import subprocess
+import sys
+import zipfile
 
 import pytest
 
@@ -9,6 +13,24 @@ from reachy_mini_conversation_app.headless_personality import (
     resolve_profile_dir,
     read_instructions_for,
 )
+
+WINDOWS_PATH_BUDGET = 104
+
+
+def _git_tracked_files(project_root: Path) -> list[Path]:
+    """Return git-tracked files for the repository rooted at project_root."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-files"],
+            cwd=project_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        pytest.skip(f"git-tracked file listing unavailable: {exc}")
+
+    return [project_root / relative_path for relative_path in result.stdout.splitlines() if relative_path]
 
 
 def test_profile_name_resolves_directly_to_storage_dir() -> None:
@@ -48,20 +70,52 @@ def test_packaged_profiles_win_outside_source_checkout(
 
 
 def test_project_file_paths_stay_within_windows_budget() -> None:
-    """Project file paths should stay below the agreed in-repo budget."""
+    """Git-tracked project file paths should stay below the agreed Windows budget."""
     project_root = Path(__file__).resolve().parents[1]
-    ignored_parts = {".git", ".venv", "__pycache__", "build", "dist"}
-
-    project_files = [
-        path
-        for path in project_root.rglob("*")
-        if path.is_file() and not any(part in ignored_parts for part in path.relative_to(project_root).parts)
-    ]
+    project_files = _git_tracked_files(project_root)
 
     longest_path = max(project_files, key=lambda path: len(str(path.relative_to(project_root))))
     longest_length = len(str(longest_path.relative_to(project_root)))
 
-    assert longest_length <= 104, (
+    assert longest_length <= WINDOWS_PATH_BUDGET, (
         "Project path budget exceeded: "
         f"{longest_path.relative_to(project_root)} is {longest_length} characters long"
+    )
+
+
+def test_wheel_file_paths_stay_within_windows_budget(tmp_path: Path) -> None:
+    """Built wheel paths should stay below the agreed Windows budget."""
+    project_root = Path(__file__).resolve().parents[1]
+    source_checkout = tmp_path / "checkout"
+    dist_dir = tmp_path / "dist"
+
+    for source_file in _git_tracked_files(project_root):
+        target_file = source_checkout / source_file.relative_to(project_root)
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_file, target_file)
+
+    try:
+        subprocess.run(
+            [sys.executable, "setup.py", "bdist_wheel", "--dist-dir", str(dist_dir)],
+            cwd=source_checkout,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        details = exc.stderr if isinstance(exc, subprocess.CalledProcessError) and exc.stderr else str(exc)
+        pytest.fail(f"Wheel build failed while checking Windows path budget: {details}")
+
+    wheel_files = list(dist_dir.glob("*.whl"))
+    assert len(wheel_files) == 1, f"Expected exactly one built wheel in {dist_dir}, found: {wheel_files}"
+
+    with zipfile.ZipFile(wheel_files[0]) as archive:
+        archived_paths = [PurePosixPath(info.filename) for info in archive.infolist() if not info.is_dir()]
+
+    longest_path = max(archived_paths, key=lambda path: len(path.as_posix()))
+    longest_length = len(longest_path.as_posix())
+
+    assert longest_length <= WINDOWS_PATH_BUDGET, (
+        "Wheel path budget exceeded: "
+        f"{longest_path.as_posix()} is {longest_length} characters long"
     )
