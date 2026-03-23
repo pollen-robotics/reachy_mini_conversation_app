@@ -14,9 +14,31 @@ from reachy_mini_conversation_app.headless_personality import (
 )
 
 
+# Path characters budget computation
+# ─────────────────
+# Windows MAX_PATH limit: 259 usable characters (failures start at 260)
+#
+# Project files (WINDOWS_PATH_BUDGET = 130):
+#   C:\Users\<username(20)>
+#     \.cache\huggingface\hub
+#     \spaces--pollen-robotics--reachy_mini_conversation_app
+#     \snapshots\<commit_hash(40)>\
+#   = 158 characters  =>  101 remaining to 259.
+#   The project root folder is not cloned in the snapshot, so we add it
+#   back to the budget: 101 + len("reachy_mini_conversation_app\") (29) = 130.
+#
+# Wheel files (WINDOWS_WHEEL_PATH_BUDGET = 71):
+#   C:\Users\<username(20)>
+#     \.cache\huggingface\hub
+#     \spaces--pollen-robotics--reachy_mini_conversation_app
+#     \snapshots\<commit_hash(40)>
+#     \build\bdist.win-amd64\wheel\
+#   = 186 characters  =>  73 remaining to 259.
+#   In practice the copy fails at 257 because of an intermediate \.\
+#   folder, bringing the real budget down to 71.
+
 WINDOWS_PATH_BUDGET = 130
 WINDOWS_WHEEL_PATH_BUDGET = 71
-
 
 def _git_tracked_files(project_root: Path) -> list[Path]:
     """Return git-tracked files that still exist in the working tree."""
