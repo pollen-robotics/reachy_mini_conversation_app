@@ -19,7 +19,7 @@ We welcome all contributions: bug fixes, new features, documentation, testing, a
    ```bash
    uv run ruff check . --fix
    uv run ruff format .
-   uv run mypy --pretty --show-error-codes .
+   uv run mypy --pretty --show-error-codes
    uv run pytest tests/ -v
    ```
 
@@ -125,7 +125,7 @@ Releases are explicit and tag-based.
 ## Before Opening a PR
 
 - All tests pass locally (`uv run pytest tests/ -v`)
-- Code is formatted (`uv run ruff format .`) and type-checked (`uv run mypy .`)
+- Code is formatted (`uv run ruff format .`) and type-checked (`uv run mypy`)
 - Added tests for bug fixes or new features
 - Updated docs if needed
 - No secrets or `.env` files committed
@@ -143,7 +143,7 @@ uv run ruff format .            # Format code
 
 ### Type Checking
 ```bash
-uv run mypy --pretty --show-error-codes .
+uv run mypy --pretty --show-error-codes
 ```
 
 ### Testing
@@ -154,7 +154,7 @@ uv run pytest tests/ -v --cov  # With coverage
 
 ### All at Once
 ```bash
-uv run mypy --pretty --show-error-codes . && uv run ruff check . --fix && uv run pytest tests/ -v
+uv run mypy --pretty --show-error-codes && uv run ruff check . --fix && uv run pytest tests/ -v
 ```
 
 </details>
