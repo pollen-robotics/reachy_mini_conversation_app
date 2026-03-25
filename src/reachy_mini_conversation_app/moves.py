@@ -643,7 +643,7 @@ class MovementManager:
     def _issue_control_command(self, head: NDArray[np.float32], antennas: Tuple[float, float], body_yaw: float) -> None:
         """Send the fused pose to the robot with throttled error logging."""
         try:
-            self.current_robot.set_target_full(head=head, antennas=antennas, body_yaw=body_yaw)
+            self.current_robot.set_target(head=head, antennas=antennas, body_yaw=body_yaw)
         except Exception as e:
             now = self._now()
             if now - self._last_set_target_err >= self._set_target_err_interval:
