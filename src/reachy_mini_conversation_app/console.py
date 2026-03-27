@@ -21,6 +21,7 @@ from fastrtc import AdditionalOutputs, audio_to_float32
 from scipy.signal import resample
 
 from reachy_mini import ReachyMini
+from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.config import LOCKED_PROFILE, config
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
@@ -438,12 +439,21 @@ class LocalStream:
     def clear_audio_queue(self) -> None:
         """Flush the player's appsrc to drop any queued audio immediately."""
         logger.info("User intervention: flushing player queue")
+        backend = getattr(self._robot.media, "backend", None)
         audio = getattr(self._robot.media, "audio", None)
         if audio is not None:
-            if hasattr(audio, "clear_player") and callable(audio.clear_player):
+            if backend == MediaBackend.LOCAL and hasattr(audio, "clear_player") and callable(audio.clear_player):
                 audio.clear_player()
+            elif (
+                backend == MediaBackend.WEBRTC
+                and hasattr(audio, "clear_output_buffer")
+                and callable(audio.clear_output_buffer)
+            ):
+                audio.clear_output_buffer()
             elif hasattr(audio, "clear_output_buffer") and callable(audio.clear_output_buffer):
                 audio.clear_output_buffer()
+            elif hasattr(audio, "clear_player") and callable(audio.clear_player):
+                audio.clear_player()
         self.handler.output_queue = asyncio.Queue()
 
     async def record_loop(self) -> None:
