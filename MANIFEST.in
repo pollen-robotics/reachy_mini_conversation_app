@@ -1,0 +1,1 @@
+recursive-include profiles *.txt *.py

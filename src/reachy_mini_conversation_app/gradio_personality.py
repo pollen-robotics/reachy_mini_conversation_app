@@ -10,7 +10,7 @@ from pathlib import Path
 
 import gradio as gr
 
-from .config import LOCKED_PROFILE, AVAILABLE_VOICES, config
+from .config import LOCKED_PROFILE, AVAILABLE_VOICES, DEFAULT_PROFILES_DIRECTORY, config
 
 
 class PersonalityUI:
@@ -20,7 +20,7 @@ class PersonalityUI:
         """Initialize the PersonalityUI instance."""
         # Constants and paths
         self.DEFAULT_OPTION = "(built-in default)"
-        self._profiles_root = Path(__file__).parent / "profiles"
+        self._profiles_root = DEFAULT_PROFILES_DIRECTORY
         self._tools_dir = Path(__file__).parent / "tools"
         self._prompts_dir = Path(__file__).parent / "prompts"
 

@@ -590,7 +590,9 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
         )
 
     # Yield so spawned tool tasks, the listener, and the sender can drain.
-    await asyncio.sleep(5)
+    # This stress test queues hundreds of serialized response.create calls, so
+    # slower CI runners need a wider drain window before teardown.
+    await asyncio.sleep(10)
 
     # ---- Tear down ----
 

@@ -63,7 +63,7 @@ class ToolDependencies:
     movement_manager: Any  # MovementManager from moves.py
     # Optional deps
     camera_worker: Any | None = None  # CameraWorker for frame buffering
-    vision_manager: Any | None = None
+    vision_processor: Any | None = None
     head_wobbler: Any | None = None  # HeadWobbler for audio-reactive motion
     motion_duration_s: float = 1.0
 
@@ -149,7 +149,7 @@ def _load_profile_tools() -> None:
     # Get the profile directory path
     profile_module_path = config.PROFILES_DIRECTORY / profile
     tools_txt_path = profile_module_path / "tools.txt"
-    default_tools_txt_path = Path(__file__).parent.parent / "profiles" / "default" / "tools.txt"
+    default_tools_txt_path = DEFAULT_PROFILES_PATH / "default" / "tools.txt"
 
     if config.PROFILES_DIRECTORY != DEFAULT_PROFILES_PATH:
         logger.info(

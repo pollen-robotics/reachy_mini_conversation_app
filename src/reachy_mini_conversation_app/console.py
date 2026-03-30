@@ -345,6 +345,7 @@ class LocalStream:
             logger.info("OPENAI_API_KEY not set, attempting to download from HuggingFace...")
             try:
                 from gradio_client import Client
+
                 client = Client("HuggingFaceM4/gradium_setup", verbose=False)
                 key, status = client.predict(api_name="/claim_b_key")
                 if key and key.strip():
@@ -438,11 +439,21 @@ class LocalStream:
     def clear_audio_queue(self) -> None:
         """Flush the player's appsrc to drop any queued audio immediately."""
         logger.info("User intervention: flushing player queue")
-        if self._robot.media.backend == MediaBackend.GSTREAMER:
-            # Directly flush gstreamer audio pipe
-            self._robot.media.audio.clear_player()
-        elif self._robot.media.backend == MediaBackend.DEFAULT or self._robot.media.backend == MediaBackend.DEFAULT_NO_VIDEO:
-            self._robot.media.audio.clear_output_buffer()
+        backend = getattr(self._robot.media, "backend", None)
+        audio = getattr(self._robot.media, "audio", None)
+        if audio is not None:
+            if backend == MediaBackend.LOCAL and hasattr(audio, "clear_player") and callable(audio.clear_player):
+                audio.clear_player()
+            elif (
+                backend == MediaBackend.WEBRTC
+                and hasattr(audio, "clear_output_buffer")
+                and callable(audio.clear_output_buffer)
+            ):
+                audio.clear_output_buffer()
+            elif hasattr(audio, "clear_output_buffer") and callable(audio.clear_output_buffer):
+                audio.clear_output_buffer()
+            elif hasattr(audio, "clear_player") and callable(audio.clear_player):
+                audio.clear_player()
         self.handler.output_queue = asyncio.Queue()
 
     async def record_loop(self) -> None:

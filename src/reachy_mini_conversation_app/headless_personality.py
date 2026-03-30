@@ -11,12 +11,14 @@ from __future__ import annotations
 from typing import List
 from pathlib import Path
 
+from .config import DEFAULT_PROFILES_DIRECTORY
+
 
 DEFAULT_OPTION = "(built-in default)"
 
 
 def _profiles_root() -> Path:
-    return Path(__file__).parent / "profiles"
+    return DEFAULT_PROFILES_DIRECTORY
 
 
 def _prompts_dir() -> Path:

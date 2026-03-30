@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 from pathlib import Path
+from importlib.resources import files
 
 from dotenv import find_dotenv, load_dotenv
 
@@ -9,7 +10,36 @@ from dotenv import find_dotenv, load_dotenv
 # Locked profile: set to a profile name (e.g., "astronomer") to lock the app
 # to that profile and disable all profile switching. Leave as None for normal behavior.
 LOCKED_PROFILE: str | None = None
-DEFAULT_PROFILES_DIRECTORY = Path(__file__).parent / "profiles"
+PROJECT_ROOT = Path(__file__).parents[2].resolve()
+
+
+def _is_source_checkout_root(root: Path) -> bool:
+    """Return whether the given root looks like this project's source checkout."""
+    return (root / "pyproject.toml").is_file() and (root / "src" / "reachy_mini_conversation_app").is_dir()
+
+
+def _packaged_profiles_directory() -> Path | None:
+    """Return the installed wheel's packaged profiles directory when available."""
+    try:
+        return Path(str(files("reachy_talk_data").joinpath("profiles")))
+    except Exception:
+        return None
+
+
+def _resolve_default_profiles_directory() -> Path:
+    """Resolve built-in profiles from source checkout or installed package data."""
+    source_profiles = PROJECT_ROOT / "profiles"
+    if _is_source_checkout_root(PROJECT_ROOT) and source_profiles.is_dir():
+        return source_profiles
+
+    packaged_profiles = _packaged_profiles_directory()
+    if packaged_profiles is not None and packaged_profiles.is_dir():
+        return packaged_profiles
+
+    return source_profiles
+
+
+DEFAULT_PROFILES_DIRECTORY = _resolve_default_profiles_directory()
 
 # Full list of voices supported by the OpenAI Realtime / TTS API.
 # Source: https://developers.openai.com/api/docs/guides/text-to-speech/#voice-options
@@ -132,9 +162,7 @@ class Config:
     logger.debug(f"Model: {MODEL_NAME}, HF_HOME: {HF_HOME}, Vision Model: {LOCAL_VISION_MODEL}")
 
     _profiles_directory_env = os.getenv("REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY")
-    PROFILES_DIRECTORY = (
-        Path(_profiles_directory_env) if _profiles_directory_env else Path(__file__).parent / "profiles"
-    )
+    PROFILES_DIRECTORY = Path(_profiles_directory_env) if _profiles_directory_env else DEFAULT_PROFILES_DIRECTORY
     _tools_directory_env = os.getenv("REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY")
     TOOLS_DIRECTORY = Path(_tools_directory_env) if _tools_directory_env else None
     AUTOLOAD_EXTERNAL_TOOLS = _env_flag("AUTOLOAD_EXTERNAL_TOOLS", default=False)

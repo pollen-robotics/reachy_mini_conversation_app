@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reachy_mini_conversation_app"
-version = "0.3.0"
+version = "0.4.2"
 authors = [{ name = "Pollen Robotics", email = "contact@pollen-robotics.com" }]
 description = ""
 readme = "README.md"
@@ -24,19 +24,21 @@ dependencies = [
     "python-dotenv",
 
     #OpenAI
-    "openai==2.28.0",
+    "openai>=2.30.0",
 
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
-    "reachy-mini>=1.5.1",
+    "reachy-mini>=1.6.0",
     "eclipse-zenoh~=1.7.0",
+    "gradio_client>=1.13.3",
 ]
 
 [project.optional-dependencies]
 local_vision = [
+  "accelerate>=1.13.0",
   "torch>=2.1",
-  "transformers==5.0.0rc2",
+  "transformers==5.3.0",
   "num2words",
 ]
 yolo_vision = [
@@ -47,8 +49,9 @@ mediapipe_vision = [
   "mediapipe==0.10.14",
 ]
 all_vision = [
+  "accelerate>=1.13.0",
   "torch>=2.1",
-  "transformers==5.0.0rc2",
+  "transformers==5.3.0",
   "num2words",
   "ultralytics",
   "supervision",
@@ -95,8 +98,11 @@ reachy_mini_conversation_app = [
   ".env.example",
   "demos/**/*.txt",
   "prompts_library/*.txt",
-  "profiles/**/*.txt",
   "prompts/**/*.txt",
+]
+reachy_talk_data = [
+  "profiles/**/*.txt",
+  "profiles/**/*.py",
 ]
 
 [tool.ruff]
