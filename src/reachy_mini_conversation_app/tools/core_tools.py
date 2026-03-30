@@ -110,6 +110,7 @@ def _load_module_from_file(module_name: str, file_path: Path) -> None:
     try:
         spec.loader.exec_module(module)
     except Exception:
+        # Avoid leaving a partially initialised module registered on failure
         sys.modules.pop(module_name, None)
         raise
 
