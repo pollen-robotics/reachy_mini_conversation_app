@@ -55,10 +55,6 @@ jobs:
           space_sdk: ${{ env.HF_SPACE_SDK }}
           private: true
 
-      - name: Set up uv
-        if: steps.sync.outcome == 'success'
-        uses: astral-sh/setup-uv@v8
-
       - name: Ensure preview space stays private
         if: steps.sync.outcome == 'success'
         env:
