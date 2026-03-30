@@ -55,6 +55,10 @@ jobs:
           space_sdk: ${{ env.HF_SPACE_SDK }}
           private: true
 
+      - name: Set up uv
+        if: steps.sync.outcome == 'success'
+        uses: astral-sh/setup-uv@v8
+
       - name: Ensure preview space stays private
         if: steps.sync.outcome == 'success'
         env:
@@ -169,6 +173,9 @@ jobs:
         id: preview
         run: |
           echo "space_id=${HF_SPACE_NAMESPACE}/${HF_SPACE_BASE_NAME}_PR${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
 
       - name: Delete preview space
         env:
