@@ -39,6 +39,7 @@ def test_external_profile_can_use_builtin_tools(tmp_path: Path, monkeypatch: pyt
     core_tools_mod = _reload_core_tools()
 
     assert "dance" in core_tools_mod.ALL_TOOLS
+    assert "dance" not in sys.modules
 
 
 def test_external_tools_can_be_loaded_without_external_profile(

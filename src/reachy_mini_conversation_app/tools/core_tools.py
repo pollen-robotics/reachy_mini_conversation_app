@@ -40,6 +40,10 @@ ALL_TOOL_SPECS: List[Dict[str, Any]] = []
 _TOOLS_INITIALIZED = False
 
 
+class MissingToolFileError(FileNotFoundError):
+    """Raised when a requested tool file is absent on disk."""
+
+
 def get_concrete_subclasses(base: type[Tool]) -> List[type[Tool]]:
     """Recursively find all concrete (non-abstract) subclasses of a base class."""
     result: List[type[Tool]] = []
@@ -95,12 +99,19 @@ class Tool(abc.ABC):
 
 def _load_module_from_file(module_name: str, file_path: Path) -> None:
     """Load a Python module from a file path."""
+    if not file_path.is_file():
+        raise MissingToolFileError(f"tool file not found at {file_path}")
+
     spec = importlib.util.spec_from_file_location(module_name, file_path)
     if not (spec and spec.loader):
         raise ModuleNotFoundError(f"Cannot create spec for {file_path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(module_name, None)
+        raise
 
 
 def _try_load_tool(
@@ -117,8 +128,6 @@ def _try_load_tool(
         if fallback_directory is None:
             raise
         tool_file = fallback_directory / file_subpath
-        if not tool_file.exists():
-            raise FileNotFoundError(f"tool file not found at {tool_file}")
         _load_module_from_file(tool_name, tool_file)
         return "file"
 
@@ -148,11 +157,11 @@ def _load_profile_tools() -> None:
     default_tools_txt_path = DEFAULT_PROFILES_PATH / "default" / "tools.txt"
 
     if config.PROFILES_DIRECTORY != DEFAULT_PROFILES_PATH:
-            logger.info(
-                "Loading external profile '%s' from %s",
-                profile,
-                profile_dir,
-            )
+        logger.info(
+            "Loading external profile '%s' from %s",
+            profile,
+            profile_dir,
+        )
 
     if not tools_txt_path.exists():
         if profile != "default" and default_tools_txt_path.exists():
@@ -216,15 +225,15 @@ def _load_profile_tools() -> None:
 
         # Profile-local tools live alongside the selected profile on disk
         try:
-            if profile_tool_file.exists():
-                _load_module_from_file(tool_name, profile_tool_file)
-                profile_scope = "external" if config.PROFILES_DIRECTORY != DEFAULT_PROFILES_PATH else "built-in"
-                logger.info("✓ Loaded %s profile tool: %s", profile_scope, tool_name)
-                loaded = True
+            _load_module_from_file(tool_name, profile_tool_file)
+            profile_scope = "external" if config.PROFILES_DIRECTORY != DEFAULT_PROFILES_PATH else "built-in"
+            logger.info("✓ Loaded %s profile tool: %s", profile_scope, tool_name)
+            loaded = True
+        except MissingToolFileError:
+            logger.debug("No profile-local tool file for '%s' at %s", tool_name, profile_tool_file)
         except FileNotFoundError as e:
-            if tool_name not in str(e):
-                profile_error = _format_error(e)
-                logger.error(f"❌ Failed to load profile tool '{tool_name}': {profile_error}")
+            profile_error = _format_error(e)
+            logger.error(f"❌ Failed to load profile tool '{tool_name}': {profile_error}")
         except Exception as e:
             profile_error = _format_error(e)
             logger.error(f"❌ Failed to load profile tool '{tool_name}': {profile_error}")
