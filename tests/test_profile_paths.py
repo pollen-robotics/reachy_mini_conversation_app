@@ -95,7 +95,7 @@ def test_packaged_profiles_win_outside_source_checkout(
 
 def test_project_file_paths_stay_within_windows_budget() -> None:
     """Git-tracked project file paths should stay below the agreed Windows budget."""
-    project_root = Path(__file__).resolve().parents[1]
+    project_root = Path(__file__).parents[1].resolve()
     project_files = _git_tracked_files(project_root)
 
     violations = []
@@ -113,7 +113,7 @@ def test_project_file_paths_stay_within_windows_budget() -> None:
 
 def test_wheel_file_paths_stay_within_windows_budget(tmp_path: Path) -> None:
     """Built wheel paths should stay below the agreed Windows budget."""
-    project_root = Path(__file__).resolve().parents[1]
+    project_root = Path(__file__).parents[1].resolve()
     source_checkout = tmp_path / "checkout"
     dist_dir = tmp_path / "dist"
 

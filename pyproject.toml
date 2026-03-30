@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reachy_mini_conversation_app"
-version = "0.4.1"
+version = "0.4.2"
 authors = [{ name = "Pollen Robotics", email = "contact@pollen-robotics.com" }]
 description = ""
 readme = "README.md"
@@ -21,13 +21,12 @@ dependencies = [
     "python-dotenv",
 
     #OpenAI
-    "openai==2.28.0",
+    "openai>=2.30.0",
 
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
-    "reachy-mini>=1.5.1",
-    "eclipse-zenoh~=1.7.0",
+    "reachy-mini>=1.6.0",
     "gradio_client>=1.13.3",
 ]
 

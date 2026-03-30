@@ -40,7 +40,7 @@ def parse_args() -> tuple[argparse.Namespace, list]:  # type: ignore
         "--robot-name",
         type=str,
         default=None,
-        help="[Optional] Robot name/prefix for Zenoh topics (must match daemon's --robot-name). Only needed for development with multiple robots.",
+        help="[Optional] Robot name to target. Must match the daemon's --robot-name when connecting to a specific robot, mainly useful for development with multiple robots.",
     )
     return parser.parse_known_args()
 
@@ -133,14 +133,9 @@ def log_connection_troubleshooting(logger: logging.Logger, robot_name: Optional[
     logger.error("  1. Verify reachy-mini-daemon is running")
 
     if robot_name is not None:
-        logger.error(
-            f"  2. Daemon must be started with: --robot-name '{robot_name}'"
-        )
+        logger.error(f"  2. Daemon must be started with: --robot-name '{robot_name}'")
     else:
-        logger.error(
-            "  2. If daemon uses --robot-name, add the same flag here: "
-            "--robot-name <name>"
-        )
+        logger.error("  2. If daemon uses --robot-name, add the same flag here: --robot-name <name>")
 
     logger.error("  3. For wireless: check network connectivity")
     logger.error("  4. Review daemon logs")
