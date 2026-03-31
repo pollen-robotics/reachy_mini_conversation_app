@@ -27,9 +27,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_PROFILES_MODULE = "reachy_mini_conversation_app.profiles"
-
-
 if not logger.handlers:
     handler = logging.StreamHandler()
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s:%(lineno)d | %(message)s")
@@ -42,6 +39,9 @@ ALL_TOOLS: Dict[str, "Tool"] = {}
 ALL_TOOL_SPECS: List[Dict[str, Any]] = []
 _TOOLS_INITIALIZED = False
 
+
+class MissingToolFileError(FileNotFoundError):
+    """Raised when a requested tool file is absent on disk."""
 
 
 def get_concrete_subclasses(base: type[Tool]) -> List[type[Tool]]:
@@ -99,12 +99,20 @@ class Tool(abc.ABC):
 
 def _load_module_from_file(module_name: str, file_path: Path) -> None:
     """Load a Python module from a file path."""
+    if not file_path.is_file():
+        raise MissingToolFileError(f"tool file not found at {file_path}")
+
     spec = importlib.util.spec_from_file_location(module_name, file_path)
     if not (spec and spec.loader):
         raise ModuleNotFoundError(f"Cannot create spec for {file_path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        # Avoid leaving a partially initialised module registered on failure
+        sys.modules.pop(module_name, None)
+        raise
 
 
 def _try_load_tool(
@@ -121,8 +129,6 @@ def _try_load_tool(
         if fallback_directory is None:
             raise
         tool_file = fallback_directory / file_subpath
-        if not tool_file.exists():
-            raise FileNotFoundError(f"tool file not found at {tool_file}")
         _load_module_from_file(tool_name, tool_file)
         return "file"
 
@@ -147,15 +153,15 @@ def _load_profile_tools() -> None:
 
     # Build path to tools.txt
     # Get the profile directory path
-    profile_module_path = config.PROFILES_DIRECTORY / profile
-    tools_txt_path = profile_module_path / "tools.txt"
+    profile_dir = config.PROFILES_DIRECTORY / profile
+    tools_txt_path = profile_dir / "tools.txt"
     default_tools_txt_path = DEFAULT_PROFILES_PATH / "default" / "tools.txt"
 
     if config.PROFILES_DIRECTORY != DEFAULT_PROFILES_PATH:
         logger.info(
             "Loading external profile '%s' from %s",
             profile,
-            profile_module_path,
+            profile_dir,
         )
 
     if not tools_txt_path.exists():
@@ -216,30 +222,22 @@ def _load_profile_tools() -> None:
     for tool_name in tool_names:
         loaded = False
         profile_error = None
-        profile_import_path = f"{DEFAULT_PROFILES_MODULE}.{profile}.{tool_name}"
+        profile_tool_file = config.PROFILES_DIRECTORY / profile / f"{tool_name}.py"
 
-        # Try profile tool first
+        # Profile-local tools live alongside the selected profile on disk
         try:
-            source = _try_load_tool(
-                tool_name,
-                module_path=profile_import_path,
-                fallback_directory=config.PROFILES_DIRECTORY,
-                file_subpath=f"{profile}/{tool_name}.py",
-            )
-            if source == "file":
-                logger.info("✓ Loaded external profile tool: %s", tool_name)
-            else:
-                logger.info("✓ Loaded core profile tool: %s", tool_name)
+            _load_module_from_file(tool_name, profile_tool_file)
+            profile_scope = "external" if config.PROFILES_DIRECTORY != DEFAULT_PROFILES_PATH else "built-in"
+            logger.info("✓ Loaded %s profile tool: %s", profile_scope, tool_name)
             loaded = True
-        except (ModuleNotFoundError, FileNotFoundError) as e:
-            if tool_name not in str(e):
-                profile_error = _format_error(e)
-                logger.error(f"❌ Failed to load profile tool '{tool_name}': {profile_error}")
-                logger.error(f"  Module path: {profile_import_path}")
+        except MissingToolFileError:
+            logger.debug("No profile-local tool file for '%s' at %s", tool_name, profile_tool_file)
+        except FileNotFoundError as e:
+            profile_error = _format_error(e)
+            logger.error(f"❌ Failed to load profile tool '{tool_name}': {profile_error}")
         except Exception as e:
             profile_error = _format_error(e)
             logger.error(f"❌ Failed to load profile tool '{tool_name}': {profile_error}")
-            logger.error(f"  Module path: {profile_import_path}")
 
         # Try tools directory if not found in profile
         if not loaded:
@@ -263,7 +261,6 @@ def _load_profile_tools() -> None:
             except Exception as e:
                 logger.error(f"❌ Failed to load shared tool '{tool_name}': {_format_error(e)}")
                 logger.error(f"  Module path: {shared_module_path}")
-
 
 
 def _initialize_tools() -> None:
@@ -323,7 +320,9 @@ async def dispatch_tool_call(tool_name: str, args_json: str, deps: ToolDependenc
     return await _dispatch_tool_call(tool_name, _safe_load_obj(args_json), deps)
 
 
-async def dispatch_tool_call_with_manager(tool_name: str, args_json: str, deps: ToolDependencies, tool_manager: "BackgroundToolManager") -> Dict[str, Any]:
+async def dispatch_tool_call_with_manager(
+    tool_name: str, args_json: str, deps: ToolDependencies, tool_manager: "BackgroundToolManager"
+) -> Dict[str, Any]:
     """Dispatch a tool call, injecting a BackgroundToolManager into the args."""
     args = _safe_load_obj(args_json)
     args["tool_manager"] = tool_manager
