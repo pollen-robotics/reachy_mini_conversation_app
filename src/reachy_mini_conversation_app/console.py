@@ -22,9 +22,17 @@ from scipy.signal import resample
 
 from reachy_mini import ReachyMini
 from reachy_mini.media.media_manager import MediaBackend
-from reachy_mini_conversation_app.config import LOCKED_PROFILE, config
+from reachy_mini_conversation_app.config import LOCKED_PROFILE, config, is_gemini_model
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
+
+try:
+    from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
+except ImportError:
+    GeminiLiveHandler = None  # type: ignore[misc,assignment]
+
+# Union type for either handler
+RealtimeHandler = OpenaiRealtimeHandler  # default; overridden at runtime when Gemini
 
 
 try:
@@ -49,7 +57,7 @@ class LocalStream:
 
     def __init__(
         self,
-        handler: OpenaiRealtimeHandler,
+        handler: "OpenaiRealtimeHandler | GeminiLiveHandler",  # type: ignore[type-arg]
         robot: ReachyMini,
         *,
         settings_app: Optional[FastAPI] = None,
@@ -340,8 +348,8 @@ class LocalStream:
             except Exception:
                 pass  # Instance .env loading is optional; continue with defaults
 
-        # If key is still missing, try to download one from HuggingFace
-        if not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()):
+        # If key is still missing, try to download one from HuggingFace (OpenAI only)
+        if not is_gemini_model() and not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()):
             logger.info("OPENAI_API_KEY not set, attempting to download from HuggingFace...")
             try:
                 from gradio_client import Client
@@ -360,11 +368,22 @@ class LocalStream:
         self._init_settings_ui_if_needed()
 
         # If key is still missing -> wait until provided via the settings UI
-        if not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()):
-            logger.warning("OPENAI_API_KEY not found. Open the app settings page to enter it.")
+        _need_key = (
+            (is_gemini_model() and not (config.GEMINI_API_KEY and str(config.GEMINI_API_KEY).strip()))
+            or (not is_gemini_model() and not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()))
+        )
+        if _need_key:
+            key_name = "GEMINI_API_KEY" if is_gemini_model() else "OPENAI_API_KEY"
+            logger.warning("%s not found. Open the app settings page to enter it.", key_name)
             # Poll until the key becomes available (set via the settings UI)
             try:
-                while not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()):
+                while True:
+                    if is_gemini_model():
+                        if config.GEMINI_API_KEY and str(config.GEMINI_API_KEY).strip():
+                            break
+                    else:
+                        if config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip():
+                            break
                     time.sleep(0.2)
             except KeyboardInterrupt:
                 logger.info("Interrupted while waiting for API key.")
@@ -486,6 +505,10 @@ class LocalStream:
                 input_sample_rate, audio_data = handler_output
                 output_sample_rate = self._robot.media.get_output_audio_samplerate()
 
+                # Skip empty audio frames
+                if audio_data.size == 0:
+                    continue
+
                 # Reshape if needed
                 if audio_data.ndim == 2:
                     # Scipy channels last convention
@@ -500,9 +523,12 @@ class LocalStream:
 
                 # Resample if needed
                 if input_sample_rate != output_sample_rate:
+                    num_samples = int(len(audio_frame) * output_sample_rate / input_sample_rate)
+                    if num_samples == 0:
+                        continue
                     audio_frame = resample(
                         audio_frame,
-                        int(len(audio_frame) * output_sample_rate / input_sample_rate),
+                        num_samples,
                     )
 
                 self._robot.media.push_audio_sample(audio_frame)

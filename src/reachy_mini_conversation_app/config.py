@@ -57,6 +57,18 @@ AVAILABLE_VOICES: list[str] = [
     "verse",
 ]
 
+# Voices supported by the Gemini Live API
+GEMINI_AVAILABLE_VOICES: list[str] = [
+    "Aoede",
+    "Charon",
+    "Fenrir",
+    "Kore",
+    "Leda",
+    "Orus",
+    "Puck",
+    "Zephyr",
+]
+
 logger = logging.getLogger(__name__)
 
 
@@ -150,8 +162,9 @@ else:
 class Config:
     """Configuration class for the conversation app."""
 
-    # Required
+    # Required (one of these depending on MODEL_NAME)
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # The key is downloaded in console.py if needed
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
     # Optional
     MODEL_NAME = os.getenv("MODEL_NAME", "gpt-realtime")
@@ -236,6 +249,11 @@ class Config:
 
 
 config = Config()
+
+
+def is_gemini_model() -> bool:
+    """Return True if the configured MODEL_NAME is a Gemini Live model."""
+    return config.MODEL_NAME.lower().startswith("gemini")
 
 
 def set_custom_profile(profile: str | None) -> None:
