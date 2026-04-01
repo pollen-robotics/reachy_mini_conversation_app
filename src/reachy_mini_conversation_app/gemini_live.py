@@ -423,6 +423,37 @@ class GeminiLiveHandler(AsyncStreamHandler):
         except Exception as e:
             logger.warning("Error sending tool result to Gemini: %s", e)
 
+    async def _video_sender_loop(self) -> None:
+        """Send camera frames to Gemini Live at ~1 FPS for continuous visual context.
+
+        Only runs when a camera_worker is available. Frames are JPEG-encoded
+        and sent via send_realtime_input(video=...).
+        """
+        logger.info("Video sender loop started (1 FPS)")
+        while not self._stop_event.is_set():
+            try:
+                if self.session and self.deps.camera_worker is not None:
+                    frame = self.deps.camera_worker.get_latest_frame()
+                    if frame is not None:
+                        success, buffer = cv2.imencode(
+                            ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70]
+                        )
+                        if success:
+                            jpeg_bytes = buffer.tobytes()
+                            await self.session.send_realtime_input(
+                                video=types.Blob(
+                                    data=jpeg_bytes, mime_type="image/jpeg"
+                                )
+                            )
+            except Exception as e:
+                if self._stop_event.is_set():
+                    break
+                logger.debug("Video sender error (will retry): %s", e)
+
+            await asyncio.sleep(1.0)  # 1 FPS
+
+        logger.info("Video sender loop stopped")
+
     async def _run_live_session(self) -> None:
         """Establish and manage a single Gemini Live session."""
         live_config = self._build_live_config()
@@ -439,9 +470,16 @@ class GeminiLiveHandler(AsyncStreamHandler):
 
             logger.info("Gemini Live session connected successfully")
 
+            video_task: asyncio.Task[None] | None = None
             try:
                 # Start the background tool manager
                 self.tool_manager.start_up(tool_callbacks=[self._handle_tool_result])
+
+                # Start video sender if camera is available
+                if self.deps.camera_worker is not None:
+                    video_task = asyncio.create_task(
+                        self._video_sender_loop(), name="gemini-video-sender"
+                    )
 
                 # session.receive() yields responses for the current turn then completes.
                 # We loop so the session stays alive across multiple conversation turns.
@@ -525,6 +563,12 @@ class GeminiLiveHandler(AsyncStreamHandler):
                         await asyncio.sleep(0.1)
 
             finally:
+                if video_task is not None:
+                    video_task.cancel()
+                    try:
+                        await video_task
+                    except asyncio.CancelledError:
+                        pass
                 await self.tool_manager.shutdown()
 
     async def receive(self, frame: Tuple[int, NDArray[np.int16]]) -> None:
