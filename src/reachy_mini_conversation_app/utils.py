@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Optional
 
 from reachy_mini import ReachyMini
 from reachy_mini_conversation_app.camera_worker import CameraWorker
+from reachy_mini_conversation_app.vision.head_tracking import HeadTracker
 
 
 if TYPE_CHECKING:
@@ -54,21 +55,21 @@ def initialize_camera_and_vision(
 ) -> tuple[CameraWorker | None, VisionProcessor | None]:
     """Initialize camera capture, optional head tracking, and optional local vision."""
     camera_worker: Optional[CameraWorker] = None
-    head_tracker = None
+    head_tracker: HeadTracker | None = None
     vision_processor: Optional[VisionProcessor] = None
 
     if not args.no_camera:
         if args.head_tracker is not None:
             try:
                 if args.head_tracker == "yolo":
-                    from reachy_mini_conversation_app.vision.head_tracking.yolo_head_tracker_process import (
+                    from reachy_mini_conversation_app.vision.head_tracking.yolo_process import (
                         YoloHeadTrackerProcess,
                     )
 
                     head_tracker = YoloHeadTrackerProcess()
                     logging.getLogger(__name__).info("Using yolo head tracker subprocess")
                 else:
-                    from reachy_mini_conversation_app.vision.head_tracking.mediapipe_head_tracker import (
+                    from reachy_mini_conversation_app.vision.head_tracking.mediapipe import (
                         MediapipeHeadTracker,
                     )
 

@@ -3,7 +3,7 @@
 import time
 import logging
 import threading
-from typing import Any, List, Tuple
+from typing import List, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -11,6 +11,7 @@ from scipy.spatial.transform import Rotation as R
 
 from reachy_mini import ReachyMini
 from reachy_mini.utils.interpolation import linear_pose_interpolation
+from reachy_mini_conversation_app.vision.head_tracking import HeadTracker
 
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 class CameraWorker:
     """Thread-safe camera worker with frame buffering and optional head tracking."""
 
-    def __init__(self, reachy_mini: ReachyMini, head_tracker: Any = None) -> None:
+    def __init__(self, reachy_mini: ReachyMini, head_tracker: HeadTracker | None = None) -> None:
         """Initialize."""
         self.reachy_mini = reachy_mini
         self.head_tracker = head_tracker

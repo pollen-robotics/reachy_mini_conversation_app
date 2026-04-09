@@ -11,11 +11,13 @@ import struct
 import logging
 import threading
 import subprocess
-from typing import IO, Any, Protocol, TypeAlias, TypeGuard
+from typing import IO, TypeGuard
 from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
+
+from reachy_mini_conversation_app.vision.head_tracking import HeadTracker, HeadTrackerResult
 
 
 logger = logging.getLogger(__name__)
@@ -25,21 +27,12 @@ _REQUEST_TIMEOUT = 0.5
 _SHUTDOWN_TIMEOUT = 2.0
 _HEADER_STRUCT = struct.Struct("!I")
 
-TrackerResult: TypeAlias = tuple[NDArray[np.float32] | None, float | np.floating[Any] | None]
 
-
-class TrackerBackend(Protocol):
-    """Backend contract for head-tracking workers."""
-
-    def get_head_position(self, img: NDArray[np.uint8]) -> TrackerResult:
-        """Return the detected head position for a frame."""
-
-
-def _build_tracker_backend() -> TrackerBackend:
+def _build_tracker_backend() -> HeadTracker:
     """Instantiate a concrete head-tracker backend."""
-    from reachy_mini_conversation_app.vision.head_tracking.yolo_head_tracker import YoloHeadTracker
+    from reachy_mini_conversation_app.vision.head_tracking.yolo import YoloHeadTracker
 
-    yolo_tracker: TrackerBackend = YoloHeadTracker()
+    yolo_tracker: HeadTracker = YoloHeadTracker()
     return yolo_tracker
 
 
@@ -120,7 +113,7 @@ def _worker_main() -> int:
             _send_message(protocol_out, ("error", request_id, repr(exc)))
 
 
-def _is_tracker_result(payload: object) -> TypeGuard[TrackerResult]:
+def _is_tracker_result(payload: object) -> TypeGuard[HeadTrackerResult]:
     """Return whether the payload matches a tracker result."""
     if not isinstance(payload, tuple) or len(payload) != 2:
         return False
@@ -145,7 +138,7 @@ class YoloHeadTrackerProcess:
         self._next_request_id = 0
         self._tracker_name = "yolo"
 
-        module_path = "reachy_mini_conversation_app.vision.head_tracking.yolo_head_tracker_process"
+        module_path = "reachy_mini_conversation_app.vision.head_tracking.yolo_process"
         env = os.environ.copy()
         project_src = Path(__file__).resolve().parents[2]
         existing_pythonpath = env.get("PYTHONPATH")
@@ -211,6 +204,7 @@ class YoloHeadTrackerProcess:
             if remaining <= 0:
                 raise RuntimeError(f"{self._tracker_name} head tracker timed out after {timeout:.2f}s")
 
+            wait_started = time.monotonic()
             message = self._wait_for_message(remaining)
             if not (
                 isinstance(message, tuple)
@@ -222,6 +216,7 @@ class YoloHeadTrackerProcess:
 
             status, message_request_id, payload = message
             if message_request_id < request_id:
+                deadline += time.monotonic() - wait_started
                 logger.debug(
                     "Discarding stale reply from %s head tracker: expected request %s, got %s",
                     self._tracker_name,
@@ -316,7 +311,7 @@ def main() -> int:
     """CLI entrypoint for the head-tracker worker process."""
     if len(sys.argv) != 1:
         print(
-            "usage: python -m reachy_mini_conversation_app.vision.head_tracking.yolo_head_tracker_process",
+            "usage: python -m reachy_mini_conversation_app.vision.head_tracking.yolo_process",
             file=sys.stderr,
         )
         return 2

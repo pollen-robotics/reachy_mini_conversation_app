@@ -4,6 +4,8 @@ import logging
 import numpy as np
 from numpy.typing import NDArray
 
+from reachy_mini_conversation_app.vision.head_tracking import HeadTrackerResult
+
 
 try:
     from supervision import Detections
@@ -71,7 +73,7 @@ class YoloHeadTracker:
 
         return np.array([norm_x, norm_y], dtype=np.float32)
 
-    def get_head_position(self, img: NDArray[np.uint8]) -> tuple[NDArray[np.float32] | None, float | None]:
+    def get_head_position(self, img: NDArray[np.uint8]) -> HeadTrackerResult:
         """Get head position from face detection."""
         h, w = img.shape[:2]
 
