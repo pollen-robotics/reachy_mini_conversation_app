@@ -15,15 +15,14 @@ def _reload_core_tools() -> ModuleType:
             sys.modules.pop(module_name, None)
     # External file-loaded modules are registered by bare tool name.
     sys.modules.pop("ext_ping", None)
+    sys.modules.pop("sweep_look", None)
 
     sys.modules.pop("reachy_mini_conversation_app.tools.core_tools", None)
     core_tools_mod = importlib.import_module("reachy_mini_conversation_app.tools.core_tools")
     return core_tools_mod
 
 
-def test_external_profile_can_use_builtin_tools(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_external_profile_can_use_builtin_tools(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """External profile tools.txt can reference built-in src tools."""
     profile_name = "ext_profile_test"
     external_profiles_root = tmp_path / "external_profiles"
@@ -40,6 +39,7 @@ def test_external_profile_can_use_builtin_tools(
     core_tools_mod = _reload_core_tools()
 
     assert "dance" in core_tools_mod.ALL_TOOLS
+    assert "dance" not in sys.modules
 
 
 def test_external_tools_can_be_loaded_without_external_profile(
@@ -56,12 +56,12 @@ def test_external_tools_can_be_loaded_without_external_profile(
                 "from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies",
                 "",
                 "class ExtPingTool(Tool):",
-                "    name = \"ext_ping\"",
-                "    description = \"External ping tool\"",
-                "    parameters_schema = {\"type\": \"object\", \"properties\": {}, \"required\": []}",
+                '    name = "ext_ping"',
+                '    description = "External ping tool"',
+                '    parameters_schema = {"type": "object", "properties": {}, "required": []}',
                 "",
                 "    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:",
-                "        return {\"status\": \"ok\"}",
+                '        return {"status": "ok"}',
                 "",
             ]
         ),
@@ -76,3 +76,17 @@ def test_external_tools_can_be_loaded_without_external_profile(
     core_tools_mod = _reload_core_tools()
 
     assert "ext_ping" in core_tools_mod.ALL_TOOLS
+
+
+def test_builtin_profile_can_load_profile_local_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Built-in profile-local tools should load from the packaged profiles root."""
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "example")
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", config_mod.DEFAULT_PROFILES_DIRECTORY)
+    monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
+    monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
+
+    core_tools_mod = _reload_core_tools()
+
+    assert "sweep_look" in core_tools_mod.ALL_TOOLS
