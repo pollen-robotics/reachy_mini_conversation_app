@@ -45,9 +45,8 @@ def run(
     """Run the Reachy Mini conversation app."""
     # Putting these dependencies here makes the dashboard faster to load when the conversation app is installed
     from reachy_mini_conversation_app.moves import MovementManager
-    from reachy_mini_conversation_app.config import config
-    from reachy_mini_conversation_app.console import LocalStream
     from reachy_mini_conversation_app.config import config, is_gemini_model
+    from reachy_mini_conversation_app.console import LocalStream
     from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
     from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
 
@@ -139,6 +138,7 @@ def run(
     )
     logger.debug(f"Chatbot avatar images: {chatbot.avatar_images}")
 
+    handler: Any  # GeminiLiveHandler | OpenaiRealtimeHandler — resolved below
     if is_gemini_model():
         from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
         logger.info("Using Gemini Live handler for model: %s", config.MODEL_NAME)

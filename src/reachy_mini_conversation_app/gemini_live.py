@@ -13,15 +13,15 @@ import uuid
 import random
 import asyncio
 import logging
-from typing import Any, Dict, Final, List, Tuple, Literal, Optional
+from typing import Any, Dict, List, Final, Tuple, Literal, Optional
 from datetime import datetime
 
 import cv2
 import numpy as np
 import gradio as gr
 from google import genai
-from google.genai import types
 from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item, audio_to_int16
+from google.genai import types
 from numpy.typing import NDArray
 from scipy.signal import resample
 
@@ -178,7 +178,6 @@ class GeminiLiveHandler(AsyncStreamHandler):
         session.update equivalent.
         """
         try:
-            from reachy_mini_conversation_app.config import config as _config
             from reachy_mini_conversation_app.config import set_custom_profile
 
             set_custom_profile(profile)
@@ -503,7 +502,7 @@ class GeminiLiveHandler(AsyncStreamHandler):
                                         self.deps.head_wobbler.reset()
 
                                 # Handle audio output from model
-                                if content.model_turn:
+                                if content.model_turn and content.model_turn.parts:
                                     for part in content.model_turn.parts:
                                         if part.inline_data and part.inline_data.data:
                                             audio_bytes = part.inline_data.data

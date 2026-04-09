@@ -26,6 +26,7 @@ from reachy_mini_conversation_app.config import LOCKED_PROFILE, config, is_gemin
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
 
+
 try:
     from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
 except ImportError:
@@ -57,7 +58,7 @@ class LocalStream:
 
     def __init__(
         self,
-        handler: "OpenaiRealtimeHandler | GeminiLiveHandler",  # type: ignore[type-arg]
+        handler: "OpenaiRealtimeHandler | GeminiLiveHandler",
         robot: ReachyMini,
         *,
         settings_app: Optional[FastAPI] = None,

@@ -13,7 +13,7 @@ from typing import Any, Callable, Optional
 
 from fastapi import FastAPI
 
-from .config import DEFAULT_VOICE, LOCKED_PROFILE, AVAILABLE_VOICES, GEMINI_AVAILABLE_VOICES, config, is_gemini_model
+from .config import DEFAULT_VOICE, LOCKED_PROFILE, AVAILABLE_VOICES, config
 from .headless_personality import (
     DEFAULT_OPTION,
     _sanitize_name,
@@ -23,6 +23,7 @@ from .headless_personality import (
     resolve_profile_dir,
     read_instructions_for,
 )
+
 
 # Accept either handler type
 try:
@@ -262,7 +263,7 @@ def mount_personality_routes(
         async def _do_apply() -> str:
             sel = None if sel_name == DEFAULT_OPTION else sel_name
             status = await handler.apply_personality(sel)
-            return status
+            return status  # type: ignore[no-any-return]
 
         try:
             logger.info("Headless apply: requested name=%r", sel_name)
@@ -287,7 +288,7 @@ def mount_personality_routes(
 
         async def _get_v() -> list[str]:
             try:
-                return await handler.get_available_voices()
+                return await handler.get_available_voices()  # type: ignore[no-any-return]
             except Exception:
                 return list(AVAILABLE_VOICES)
 

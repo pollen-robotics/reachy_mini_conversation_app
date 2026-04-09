@@ -181,6 +181,7 @@ class Config:
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
     # Optional
+    MODEL_NAME = os.getenv("MODEL_NAME", "gpt-realtime")
     OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", "gpt-realtime")
     BACKEND_PROVIDER = os.getenv("BACKEND_PROVIDER", "speech-to-speech").strip().lower()
     S2S_REALTIME_SESSION_URL = os.getenv("S2S_REALTIME_SESSION_URL")
