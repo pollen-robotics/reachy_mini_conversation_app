@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Optional
 
 from reachy_mini import ReachyMini
 from reachy_mini_conversation_app.camera_worker import CameraWorker
-from reachy_mini_conversation_app.vision.head_tracker import HeadTracker
 
 
 if TYPE_CHECKING:
@@ -26,7 +25,10 @@ def parse_args() -> tuple[argparse.Namespace, list]:  # type: ignore
         "--head-tracker",
         choices=["yolo", "mediapipe"],
         default=None,
-        help="Head-tracking backend: yolo uses a local face detector, mediapipe uses reachy_mini_toolbox. Disabled by default.",
+        help=(
+            "Optional head-tracking backend: yolo uses a local face detector in a subprocess, "
+            "mediapipe uses reachy_mini_toolbox in process. Disabled by default."
+        ),
     )
     parser.add_argument("--no-camera", default=False, action="store_true", help="Disable camera usage")
     parser.add_argument(
@@ -58,15 +60,20 @@ def initialize_camera_and_vision(
     if not args.no_camera:
         if args.head_tracker is not None:
             try:
-                head_tracker = HeadTracker(args.head_tracker)
+                if args.head_tracker == "yolo":
+                    from reachy_mini_conversation_app.vision.head_tracker import HeadTracker
+
+                    head_tracker = HeadTracker()
+                    logging.getLogger(__name__).info("Using yolo head tracker subprocess")
+                else:
+                    from reachy_mini_toolbox import vision
+
+                    head_tracker = vision.HeadTracker()
+                    logging.getLogger(__name__).info("Using mediapipe head tracker in process")
             except Exception as e:
                 raise CameraVisionInitializationError(
                     f"Failed to initialize {args.head_tracker} head tracker: {e}",
                 ) from e
-            logging.getLogger(__name__).info(
-                "Using %s head tracker subprocess",
-                args.head_tracker,
-            )
 
         camera_worker = CameraWorker(current_robot, head_tracker)
 

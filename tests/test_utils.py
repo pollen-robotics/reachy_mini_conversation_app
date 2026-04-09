@@ -56,7 +56,7 @@ def test_initialize_camera_and_vision_raises_when_head_tracker_init_fails() -> N
     )
 
     with patch("reachy_mini_conversation_app.utils.CameraWorker") as mock_camera_worker, patch(
-        "reachy_mini_conversation_app.utils.HeadTracker",
+        "reachy_mini_conversation_app.vision.head_tracker.HeadTracker",
         side_effect=RuntimeError("tracker init failed"),
     ):
         with pytest.raises(
@@ -66,3 +66,22 @@ def test_initialize_camera_and_vision_raises_when_head_tracker_init_fails() -> N
             initialize_camera_and_vision(args, MagicMock())
 
     mock_camera_worker.assert_not_called()
+
+
+def test_initialize_camera_and_vision_uses_mediapipe_head_tracker_in_process() -> None:
+    """MediaPipe head tracking should use the in-process toolbox tracker."""
+    args = argparse.Namespace(
+        no_camera=False,
+        head_tracker="mediapipe",
+        local_vision=False,
+    )
+
+    current_robot = MagicMock()
+    mediapipe_head_tracker = MagicMock()
+    with patch("reachy_mini_conversation_app.utils.CameraWorker") as mock_camera_worker, patch(
+        "reachy_mini_toolbox.vision.HeadTracker",
+        return_value=mediapipe_head_tracker,
+    ):
+        initialize_camera_and_vision(args, current_robot)
+
+    mock_camera_worker.assert_called_once_with(current_robot, mediapipe_head_tracker)

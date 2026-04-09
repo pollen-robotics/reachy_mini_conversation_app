@@ -1,4 +1,4 @@
-"""Run head-tracking backends in a dedicated subprocess."""
+"""Run the optional YOLO head tracker in a dedicated subprocess."""
 
 from __future__ import annotations
 import os
@@ -11,7 +11,7 @@ import struct
 import logging
 import threading
 import subprocess
-from typing import IO, Protocol, TypeAlias, TypeGuard
+from typing import IO, Any, Protocol, TypeAlias, TypeGuard
 from pathlib import Path
 
 import numpy as np
@@ -25,7 +25,7 @@ _REQUEST_TIMEOUT = 0.5
 _SHUTDOWN_TIMEOUT = 2.0
 _HEADER_STRUCT = struct.Struct("!I")
 
-TrackerResult: TypeAlias = tuple[NDArray[np.float32] | None, float | None]
+TrackerResult: TypeAlias = tuple[NDArray[np.float32] | None, float | np.floating[Any] | None]
 
 
 class TrackerBackend(Protocol):
@@ -35,19 +35,12 @@ class TrackerBackend(Protocol):
         """Return the detected head position for a frame."""
 
 
-def _build_tracker_backend(backend: str) -> TrackerBackend:
+def _build_tracker_backend() -> TrackerBackend:
     """Instantiate a concrete head-tracker backend."""
-    if backend == "yolo":
-        from reachy_mini_conversation_app.vision.yolo_face_detector import YoloFaceDetector
+    from reachy_mini_conversation_app.vision.yolo_head_tracker import HeadTracker as YoloHeadTracker
 
-        yolo_tracker: TrackerBackend = YoloFaceDetector()
-        return yolo_tracker
-    if backend == "mediapipe":
-        from reachy_mini_toolbox.vision import HeadTracker as MediapipeHeadTracker
-
-        mediapipe_tracker: TrackerBackend = MediapipeHeadTracker()
-        return mediapipe_tracker
-    raise ValueError(f"Unsupported head tracker backend: {backend}")
+    yolo_tracker: TrackerBackend = YoloHeadTracker()
+    return yolo_tracker
 
 
 def _read_exact(stream: IO[bytes], size: int) -> bytes:
@@ -89,13 +82,13 @@ def _reader_loop(stream: IO[bytes], messages: queue.Queue[tuple[str, object | No
         messages.put(("error", repr(exc)))
 
 
-def _worker_main(backend: str) -> int:
+def _worker_main() -> int:
     """Run the tracker worker protocol."""
     protocol_out = sys.stdout.buffer
     sys.stdout = sys.stderr
 
     try:
-        tracker = _build_tracker_backend(backend)
+        tracker = _build_tracker_backend()
         _send_message(protocol_out, ("ready", None))
     except Exception as exc:
         _send_message(protocol_out, ("error", repr(exc)))
@@ -135,22 +128,22 @@ def _is_tracker_result(payload: object) -> TypeGuard[TrackerResult]:
     eye_center, roll = payload
     if eye_center is not None and not isinstance(eye_center, np.ndarray):
         return False
-    if roll is not None and not isinstance(roll, float):
+    if roll is not None and not isinstance(roll, (float, np.floating)):
         return False
     return True
 
 
 class HeadTracker:
-    """Proxy that runs the configured head-tracker backend out of process."""
+    """Proxy that runs the optional YOLO head tracker out of process."""
 
-    def __init__(self, backend: str, *, request_timeout: float = _REQUEST_TIMEOUT) -> None:
+    def __init__(self, *, request_timeout: float = _REQUEST_TIMEOUT) -> None:
         """Start the child process and wait until the tracker is ready."""
-        self.backend = backend
         self.request_timeout = request_timeout
         self._closed = False
         self._send_lock = threading.Lock()
         self._messages: queue.Queue[tuple[str, object | None]] = queue.Queue()
         self._next_request_id = 0
+        self._tracker_name = "yolo"
 
         module_path = "reachy_mini_conversation_app.vision.head_tracker"
         env = os.environ.copy()
@@ -164,7 +157,7 @@ class HeadTracker:
         env["PYTHONUNBUFFERED"] = "1"
 
         self._process = subprocess.Popen(
-            [sys.executable, "-m", module_path, backend],
+            [sys.executable, "-m", module_path],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=None,
@@ -174,7 +167,7 @@ class HeadTracker:
 
         if self._process.stdin is None or self._process.stdout is None:
             self.close()
-            raise RuntimeError(f"Failed to create pipes for {backend} head tracker process")
+            raise RuntimeError("Failed to create pipes for yolo head tracker process")
 
         self._stdin = self._process.stdin
         self._stdout = self._process.stdout
@@ -182,7 +175,7 @@ class HeadTracker:
             target=_reader_loop,
             args=(self._stdout, self._messages),
             daemon=True,
-            name=f"{backend}-head-tracker-reader",
+            name="yolo-head-tracker-reader",
         )
         self._reader.start()
         atexit.register(self.close)
@@ -190,25 +183,25 @@ class HeadTracker:
         message = self._wait_for_message(_PROCESS_START_TIMEOUT)
         if not (isinstance(message, tuple) and len(message) == 2 and isinstance(message[0], str)):
             self.close()
-            raise RuntimeError(f"{backend} head tracker returned an invalid startup message: {message!r}")
+            raise RuntimeError(f"yolo head tracker returned an invalid startup message: {message!r}")
 
         status, payload = message
         if status != "ready":
             self.close()
-            raise RuntimeError(f"Failed to initialize {backend} head tracker: {payload}")
+            raise RuntimeError(f"Failed to initialize yolo head tracker: {payload}")
 
     def _wait_for_message(self, timeout: float) -> object:
         """Wait for the next child-process message payload."""
         try:
             event, payload = self._messages.get(timeout=timeout)
         except queue.Empty as exc:
-            raise RuntimeError(f"{self.backend} head tracker timed out after {timeout:.2f}s") from exc
+            raise RuntimeError(f"{self._tracker_name} head tracker timed out after {timeout:.2f}s") from exc
 
         if event == "message":
             return payload
         if event == "eof":
-            raise RuntimeError(f"{self.backend} head tracker exited unexpectedly")
-        raise RuntimeError(f"{self.backend} head tracker reader failed: {payload}")
+            raise RuntimeError(f"{self._tracker_name} head tracker exited unexpectedly")
+        raise RuntimeError(f"{self._tracker_name} head tracker reader failed: {payload}")
 
     def _wait_for_response(self, request_id: int, timeout: float) -> tuple[str, object]:
         """Wait for the response matching the requested frame."""
@@ -216,7 +209,7 @@ class HeadTracker:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise RuntimeError(f"{self.backend} head tracker timed out after {timeout:.2f}s")
+                raise RuntimeError(f"{self._tracker_name} head tracker timed out after {timeout:.2f}s")
 
             message = self._wait_for_message(remaining)
             if not (
@@ -225,13 +218,13 @@ class HeadTracker:
                 and isinstance(message[0], str)
                 and isinstance(message[1], int)
             ):
-                raise RuntimeError(f"{self.backend} head tracker returned an invalid response: {message!r}")
+                raise RuntimeError(f"{self._tracker_name} head tracker returned an invalid response: {message!r}")
 
             status, message_request_id, payload = message
             if message_request_id < request_id:
                 logger.debug(
                     "Discarding stale reply from %s head tracker: expected request %s, got %s",
-                    self.backend,
+                    self._tracker_name,
                     request_id,
                     message_request_id,
                 )
@@ -239,7 +232,7 @@ class HeadTracker:
 
             if message_request_id > request_id:
                 raise RuntimeError(
-                    f"{self.backend} head tracker returned out-of-order response "
+                    f"{self._tracker_name} head tracker returned out-of-order response "
                     f"{message_request_id} while waiting for {request_id}"
                 )
 
@@ -254,7 +247,7 @@ class HeadTracker:
             return None, None
 
         if self._process.poll() is not None:
-            logger.error("Head tracker process for %s is not alive", self.backend)
+            logger.error("Head tracker process for %s is not alive", self._tracker_name)
             return None, None
 
         try:
@@ -264,18 +257,18 @@ class HeadTracker:
                 _send_message(self._stdin, ("frame", request_id, frame))
                 status, payload = self._wait_for_response(request_id, self.request_timeout)
         except Exception as exc:
-            logger.error("Head tracker %s communication failed: %s", self.backend, exc)
+            logger.error("Head tracker %s communication failed: %s", self._tracker_name, exc)
             return None, None
 
         if status == "result":
             if _is_tracker_result(payload):
                 eye_center, roll = payload
-                return eye_center, roll
+                return eye_center, None if roll is None else float(roll)
 
-            logger.error("%s head tracker returned an invalid result: %r", self.backend, payload)
+            logger.error("%s head tracker returned an invalid result: %r", self._tracker_name, payload)
             return None, None
 
-        logger.error("%s head tracker failed to process frame: %s", self.backend, payload)
+        logger.error("%s head tracker failed to process frame: %s", self._tracker_name, payload)
         return None, None
 
     def close(self) -> None:
@@ -300,12 +293,12 @@ class HeadTracker:
         try:
             self._process.wait(timeout=_SHUTDOWN_TIMEOUT)
         except subprocess.TimeoutExpired:
-            logger.warning("Force-terminating %s head tracker process", self.backend)
+            logger.warning("Force-terminating %s head tracker process", self._tracker_name)
             self._process.terminate()
             try:
                 self._process.wait(timeout=_SHUTDOWN_TIMEOUT)
             except subprocess.TimeoutExpired:
-                logger.warning("Force-killing %s head tracker process", self.backend)
+                logger.warning("Force-killing %s head tracker process", self._tracker_name)
                 self._process.kill()
                 self._process.wait()
 
@@ -321,10 +314,10 @@ class HeadTracker:
 
 def main() -> int:
     """CLI entrypoint for the head-tracker worker process."""
-    if len(sys.argv) != 2:
-        print("usage: python -m reachy_mini_conversation_app.vision.head_tracker <backend>", file=sys.stderr)
+    if len(sys.argv) != 1:
+        print("usage: python -m reachy_mini_conversation_app.vision.head_tracker", file=sys.stderr)
         return 2
-    return _worker_main(sys.argv[1])
+    return _worker_main()
 
 
 if __name__ == "__main__":

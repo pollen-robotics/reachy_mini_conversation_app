@@ -10,7 +10,7 @@ try:
     from ultralytics import YOLO  # type: ignore
 except ImportError as e:
     raise ImportError(
-        "To use the YOLO face-detection backend, please install the extra dependencies: pip install '.[yolo_vision]'",
+        "To use YOLO head tracker, please install the extra dependencies: pip install '.[yolo_vision]'",
     ) from e
 from huggingface_hub import hf_hub_download
 
@@ -18,8 +18,8 @@ from huggingface_hub import hf_hub_download
 logger = logging.getLogger(__name__)
 
 
-class YoloFaceDetector:
-    """YOLO face detector used by the head-tracking subprocess."""
+class HeadTracker:
+    """Lightweight head tracker using YOLO for face detection."""
 
     def __init__(
         self,
@@ -28,7 +28,7 @@ class YoloFaceDetector:
         confidence_threshold: float = 0.3,
         device: str = "cpu",
     ) -> None:
-        """Initialize the YOLO face-detection backend."""
+        """Initialize YOLO-based head tracker."""
         self.confidence_threshold = confidence_threshold
 
         try:
@@ -40,7 +40,7 @@ class YoloFaceDetector:
             raise
 
     def _select_best_face(self, detections: Detections) -> int | None:
-        """Pick the highest-scoring face above the confidence threshold."""
+        """Select the best face based on confidence and area (largest face with highest confidence)."""
         if detections.xyxy.shape[0] == 0:
             return None
 
@@ -62,7 +62,7 @@ class YoloFaceDetector:
         return int(best_idx)
 
     def _bbox_to_mp_coords(self, bbox: NDArray[np.float32], w: int, h: int) -> NDArray[np.float32]:
-        """Convert a bounding box center to MediaPipe-style coordinates."""
+        """Convert bounding box center to MediaPipe-style coordinates [-1, 1]."""
         center_x = (bbox[0] + bbox[2]) / 2.0
         center_y = (bbox[1] + bbox[3]) / 2.0
 
@@ -72,7 +72,7 @@ class YoloFaceDetector:
         return np.array([norm_x, norm_y], dtype=np.float32)
 
     def get_head_position(self, img: NDArray[np.uint8]) -> tuple[NDArray[np.float32] | None, float | None]:
-        """Return the face center and roll estimate for a frame."""
+        """Get head position from face detection."""
         h, w = img.shape[:2]
 
         try:

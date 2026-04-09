@@ -92,7 +92,7 @@ def test_head_tracker_discards_stale_reply_after_timeout(tmp_path: Path, monkeyp
         """,
     )
 
-    tracker = HeadTracker("fake", request_timeout=0.01)
+    tracker = HeadTracker(request_timeout=0.01)
     try:
         frame = np.zeros((12, 20, 3), dtype=np.uint8)
 
@@ -106,5 +106,46 @@ def test_head_tracker_discards_stale_reply_after_timeout(tmp_path: Path, monkeyp
         assert eye_center is not None
         assert np.allclose(eye_center, np.array([2.0, 2.0], dtype=np.float32))
         assert roll == 2.0
+    finally:
+        tracker.close()
+
+
+def test_head_tracker_accepts_numpy_floating_roll_values(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The proxy should accept NumPy floating roll values from backend implementations."""
+    _patch_fake_worker(
+        monkeypatch,
+        tmp_path,
+        """
+        _send_message(("ready", None))
+
+        while True:
+            try:
+                message = _receive_message()
+            except EOFError:
+                raise SystemExit(0)
+
+            if message[0] == "close":
+                raise SystemExit(0)
+
+            request_id = message[1]
+            _send_message(
+                (
+                    "result",
+                    request_id,
+                    (np.array([0.25, -0.5], dtype=np.float32), np.float64(0.75)),
+                )
+            )
+        """,
+    )
+
+    tracker = HeadTracker()
+    try:
+        eye_center, roll = tracker.get_head_position(np.zeros((12, 20, 3), dtype=np.uint8))
+        assert eye_center is not None
+        assert np.allclose(eye_center, np.array([0.25, -0.5], dtype=np.float32))
+        assert roll == pytest.approx(0.75)
     finally:
         tracker.close()
