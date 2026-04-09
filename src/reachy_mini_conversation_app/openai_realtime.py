@@ -30,7 +30,6 @@ from openai.types.realtime.realtime_audio_input_turn_detection_param import Serv
 
 from reachy_mini_conversation_app.config import AVAILABLE_VOICES, config
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
-from reachy_mini_conversation_app.image_encoding import bgr_to_rgb
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_tool_specs,
@@ -429,7 +428,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 if self.deps.camera_worker is not None:
                     np_img = self.deps.camera_worker.get_latest_frame()
                     if np_img is not None:
-                        rgb_frame = bgr_to_rgb(np_img)
+                        rgb_frame = np.ascontiguousarray(np_img[..., ::-1])
                     else:
                         rgb_frame = None
                     img = gr.Image(value=rgb_frame)

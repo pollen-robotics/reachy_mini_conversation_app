@@ -11,7 +11,6 @@ from transformers import AutoProcessor, ProcessorMixin, AutoModelForImageTextToT
 from huggingface_hub import snapshot_download
 
 from reachy_mini_conversation_app.config import config
-from reachy_mini_conversation_app.image_encoding import bgr_to_rgb
 
 
 logger = logging.getLogger(__name__)
@@ -95,7 +94,7 @@ class VisionProcessor:
 
         processor = self.processor
         model = self.model
-        rgb_image = Image.fromarray(bgr_to_rgb(frame))
+        rgb_image = Image.fromarray(np.ascontiguousarray(frame[..., ::-1]))
         request_parts = [LOCAL_VISION_RESPONSE_INSTRUCTIONS]
         request_parts.insert(0, prompt_text)
         request = "\n\n".join(request_parts)
