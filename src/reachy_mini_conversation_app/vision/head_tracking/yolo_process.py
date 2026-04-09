@@ -92,6 +92,8 @@ def _worker_main() -> int:
             message = _receive_message(sys.stdin.buffer)
         except EOFError:
             return 0
+        except KeyboardInterrupt:
+            return 0
 
         if not isinstance(message, tuple) or not message or not isinstance(message[0], str):
             _send_message(protocol_out, ("error", -1, f"Invalid command: {message!r}"))
@@ -156,6 +158,7 @@ class YoloHeadTrackerProcess:
             stderr=None,
             bufsize=0,
             env=env,
+            start_new_session=True,
         )
 
         if self._process.stdin is None or self._process.stdout is None:

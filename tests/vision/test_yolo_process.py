@@ -13,7 +13,11 @@ import reachy_mini_conversation_app.vision.head_tracking.yolo_process as head_tr
 from reachy_mini_conversation_app.vision.head_tracking.yolo_process import YoloHeadTrackerProcess
 
 
-def _patch_fake_worker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, worker_body: str) -> None:
+def _patch_fake_worker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    worker_body: str,
+) -> None:
     """Patch the tracker subprocess with a test worker script."""
     worker_script = tmp_path / "fake_head_tracker_worker.py"
     worker_script.write_text(
@@ -108,8 +112,6 @@ def test_head_tracker_discards_stale_reply_after_timeout(tmp_path: Path, monkeyp
         assert roll == 2.0
     finally:
         tracker.close()
-
-
 def test_head_tracker_accepts_numpy_floating_roll_values(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
