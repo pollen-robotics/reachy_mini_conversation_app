@@ -37,7 +37,7 @@ class TrackerBackend(Protocol):
 
 def _build_tracker_backend() -> TrackerBackend:
     """Instantiate a concrete head-tracker backend."""
-    from reachy_mini_conversation_app.vision.yolo_head_tracker import HeadTracker as YoloHeadTracker
+    from reachy_mini_conversation_app.vision.head_tracking.yolo_head_tracker import YoloHeadTracker
 
     yolo_tracker: TrackerBackend = YoloHeadTracker()
     return yolo_tracker
@@ -133,7 +133,7 @@ def _is_tracker_result(payload: object) -> TypeGuard[TrackerResult]:
     return True
 
 
-class HeadTracker:
+class YoloHeadTrackerProcess:
     """Proxy that runs the optional YOLO head tracker out of process."""
 
     def __init__(self, *, request_timeout: float = _REQUEST_TIMEOUT) -> None:
@@ -145,7 +145,7 @@ class HeadTracker:
         self._next_request_id = 0
         self._tracker_name = "yolo"
 
-        module_path = "reachy_mini_conversation_app.vision.head_tracker"
+        module_path = "reachy_mini_conversation_app.vision.head_tracking.yolo_head_tracker_process"
         env = os.environ.copy()
         project_src = Path(__file__).resolve().parents[2]
         existing_pythonpath = env.get("PYTHONPATH")
@@ -315,7 +315,10 @@ class HeadTracker:
 def main() -> int:
     """CLI entrypoint for the head-tracker worker process."""
     if len(sys.argv) != 1:
-        print("usage: python -m reachy_mini_conversation_app.vision.head_tracker", file=sys.stderr)
+        print(
+            "usage: python -m reachy_mini_conversation_app.vision.head_tracking.yolo_head_tracker_process",
+            file=sys.stderr,
+        )
         return 2
     return _worker_main()
 

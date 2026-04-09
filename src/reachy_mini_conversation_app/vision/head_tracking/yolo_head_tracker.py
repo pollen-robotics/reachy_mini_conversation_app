@@ -18,7 +18,7 @@ from huggingface_hub import hf_hub_download
 logger = logging.getLogger(__name__)
 
 
-class HeadTracker:
+class YoloHeadTracker:
     """Lightweight head tracker using YOLO for face detection."""
 
     def __init__(

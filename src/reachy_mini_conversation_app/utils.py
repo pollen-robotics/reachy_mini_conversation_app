@@ -11,7 +11,7 @@ from reachy_mini_conversation_app.camera_worker import CameraWorker
 
 
 if TYPE_CHECKING:
-    from reachy_mini_conversation_app.vision.processors import VisionProcessor
+    from reachy_mini_conversation_app.vision.local_vision import VisionProcessor
 
 
 class CameraVisionInitializationError(Exception):
@@ -61,14 +61,18 @@ def initialize_camera_and_vision(
         if args.head_tracker is not None:
             try:
                 if args.head_tracker == "yolo":
-                    from reachy_mini_conversation_app.vision.head_tracker import HeadTracker
+                    from reachy_mini_conversation_app.vision.head_tracking.yolo_head_tracker_process import (
+                        YoloHeadTrackerProcess,
+                    )
 
-                    head_tracker = HeadTracker()
+                    head_tracker = YoloHeadTrackerProcess()
                     logging.getLogger(__name__).info("Using yolo head tracker subprocess")
                 else:
-                    from reachy_mini_toolbox import vision
+                    from reachy_mini_conversation_app.vision.head_tracking.mediapipe_head_tracker import (
+                        MediapipeHeadTracker,
+                    )
 
-                    head_tracker = vision.HeadTracker()
+                    head_tracker = MediapipeHeadTracker()
                     logging.getLogger(__name__).info("Using mediapipe head tracker in process")
             except Exception as e:
                 raise CameraVisionInitializationError(
@@ -82,7 +86,7 @@ def initialize_camera_and_vision(
                 [
                     sys.executable,
                     "-c",
-                    "from reachy_mini_conversation_app.vision.processors import VisionProcessor",
+                    "from reachy_mini_conversation_app.vision.local_vision import VisionProcessor",
                 ],
                 capture_output=True,
                 text=True,
@@ -94,7 +98,7 @@ def initialize_camera_and_vision(
                     "Run without --local-vision or install compatible dependencies.",
                 )
             try:
-                from reachy_mini_conversation_app.vision.processors import initialize_vision_processor
+                from reachy_mini_conversation_app.vision.local_vision import initialize_vision_processor
 
             except ImportError as e:
                 raise CameraVisionInitializationError(

@@ -1,4 +1,4 @@
-"""Tests for head tracker process management."""
+"""Tests for the YOLO head tracker process."""
 
 import sys
 import time
@@ -9,8 +9,8 @@ from textwrap import dedent
 import numpy as np
 import pytest
 
-import reachy_mini_conversation_app.vision.head_tracker as head_tracker_module
-from reachy_mini_conversation_app.vision.head_tracker import HeadTracker
+import reachy_mini_conversation_app.vision.head_tracking.yolo_head_tracker_process as head_tracker_module
+from reachy_mini_conversation_app.vision.head_tracking.yolo_head_tracker_process import YoloHeadTrackerProcess
 
 
 def _patch_fake_worker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, worker_body: str) -> None:
@@ -92,7 +92,7 @@ def test_head_tracker_discards_stale_reply_after_timeout(tmp_path: Path, monkeyp
         """,
     )
 
-    tracker = HeadTracker(request_timeout=0.01)
+    tracker = YoloHeadTrackerProcess(request_timeout=0.01)
     try:
         frame = np.zeros((12, 20, 3), dtype=np.uint8)
 
@@ -141,7 +141,7 @@ def test_head_tracker_accepts_numpy_floating_roll_values(
         """,
     )
 
-    tracker = HeadTracker()
+    tracker = YoloHeadTrackerProcess()
     try:
         eye_center, roll = tracker.get_head_position(np.zeros((12, 20, 3), dtype=np.uint8))
         assert eye_center is not None
