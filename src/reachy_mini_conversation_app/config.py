@@ -71,6 +71,18 @@ S2S_AVAILABLE_VOICES: list[str] = [
 ]
 S2S_DEFAULT_VOICE = "Aiden"
 
+# Voices supported by the Gemini Live API
+GEMINI_AVAILABLE_VOICES: list[str] = [
+    "Aoede",
+    "Charon",
+    "Fenrir",
+    "Kore",
+    "Leda",
+    "Orus",
+    "Puck",
+    "Zephyr",
+]
+
 logger = logging.getLogger(__name__)
 
 
@@ -164,8 +176,9 @@ else:
 class Config:
     """Configuration class for the conversation app."""
 
-    # Required
+    # Required (one of these depending on MODEL_NAME)
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # The key is downloaded in console.py if needed
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
     # Optional
     OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", "gpt-realtime")
@@ -255,6 +268,11 @@ AVAILABLE_VOICES: list[str] = list(
     S2S_AVAILABLE_VOICES if config.BACKEND_PROVIDER == "speech-to-speech" else OPENAI_AVAILABLE_VOICES,
 )
 DEFAULT_VOICE = S2S_DEFAULT_VOICE if config.BACKEND_PROVIDER == "speech-to-speech" else OPENAI_DEFAULT_VOICE
+
+
+def is_gemini_model() -> bool:
+    """Return True if the configured MODEL_NAME is a Gemini Live model."""
+    return config.MODEL_NAME.lower().startswith("gemini")
 
 
 def set_custom_profile(profile: str | None) -> None:
