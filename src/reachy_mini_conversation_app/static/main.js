@@ -57,7 +57,14 @@ async function waitForPersonalityData(timeoutMs = 15000) {
   }
 }
 
+// Populated during init from /status response
+let activeBackendProvider = "openai";
+
 async function validateKey(key) {
+  // Gemini keys don't have a client-side validation endpoint — accept them directly
+  if (activeBackendProvider === "gemini") {
+    return { valid: true };
+  }
   const body = { openai_api_key: key };
   const resp = await fetch("/validate_api_key", {
     method: "POST",
@@ -215,6 +222,22 @@ async function init() {
   show(personalityPanel, false);
 
   const st = (await waitForStatus()) || { has_key: false, credentials_required: false };
+
+  // Dynamically update UI labels based on backend
+  const backendProvider = st.backend_provider || "openai";
+  activeBackendProvider = backendProvider;
+  const formTitle = document.getElementById("form-title");
+  const apiKeyLabel = document.getElementById("api-key-label");
+  if (backendProvider === "gemini") {
+    if (formTitle) formTitle.textContent = "Connect Gemini";
+    if (apiKeyLabel) apiKeyLabel.textContent = "Gemini API Key";
+    input.placeholder = "AIza...";
+  } else if (backendProvider === "openai") {
+    if (formTitle) formTitle.textContent = "Connect OpenAI";
+    if (apiKeyLabel) apiKeyLabel.textContent = "OpenAI API Key";
+    input.placeholder = "sk-...";
+  }
+
   if (st.credentials_required && st.has_key) {
     statusEl.textContent = "";
     show(configuredPanel, true);

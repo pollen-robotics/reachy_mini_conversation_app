@@ -13,8 +13,7 @@ from typing import Any, Callable, Optional
 
 from fastapi import FastAPI
 
-from .config import DEFAULT_VOICE, LOCKED_PROFILE, AVAILABLE_VOICES, config
-from .openai_realtime import OpenaiRealtimeHandler
+from .config import DEFAULT_VOICE, LOCKED_PROFILE, AVAILABLE_VOICES, GEMINI_AVAILABLE_VOICES, config, is_gemini_model
 from .headless_personality import (
     DEFAULT_OPTION,
     _sanitize_name,
@@ -25,10 +24,22 @@ from .headless_personality import (
     read_instructions_for,
 )
 
+# Accept either handler type
+try:
+    from .openai_realtime import OpenaiRealtimeHandler
+except ImportError:
+    OpenaiRealtimeHandler = None  # type: ignore[misc,assignment]
+try:
+    from .gemini_live import GeminiLiveHandler
+except ImportError:
+    GeminiLiveHandler = None  # type: ignore[misc,assignment]
+
+from typing import Any as _HandlerType  # placeholder for union type
+
 
 def mount_personality_routes(
     app: FastAPI,
-    handler: OpenaiRealtimeHandler,
+    handler: _HandlerType,
     get_loop: Callable[[], asyncio.AbstractEventLoop | None],
     *,
     persist_personality: Callable[[Optional[str]], None] | None = None,

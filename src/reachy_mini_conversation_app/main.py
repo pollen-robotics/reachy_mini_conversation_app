@@ -156,9 +156,16 @@ def run(
         personality_ui = PersonalityUI()
         personality_ui.create_components()
         additional_inputs = [chatbot, *personality_ui.additional_inputs_ordered()]
-        if config.BACKEND_PROVIDER == "openai":
+        if is_gemini_model():
             api_key_textbox = gr.Textbox(
-                label="OPENAI API Key",
+                label="Gemini API Key",
+                type="password",
+                value=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "",
+            )
+            additional_inputs.insert(1, api_key_textbox)
+        elif config.BACKEND_PROVIDER == "openai":
+            api_key_textbox = gr.Textbox(
+                label="OpenAI API Key",
                 type="password",
                 value=os.getenv("OPENAI_API_KEY") if not get_space() else "",
             )

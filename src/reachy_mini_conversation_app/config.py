@@ -82,7 +82,7 @@ GEMINI_AVAILABLE_VOICES: list[str] = [
     "Puck",
     "Zephyr",
 ]
-
+GEMINI_DEFAULT_VOICE = "Kore"
 logger = logging.getLogger(__name__)
 
 
@@ -264,10 +264,18 @@ class Config:
 
 
 config = Config()
-AVAILABLE_VOICES: list[str] = list(
-    S2S_AVAILABLE_VOICES if config.BACKEND_PROVIDER == "speech-to-speech" else OPENAI_AVAILABLE_VOICES,
-)
-DEFAULT_VOICE = S2S_DEFAULT_VOICE if config.BACKEND_PROVIDER == "speech-to-speech" else OPENAI_DEFAULT_VOICE
+
+
+def _resolve_voices() -> tuple[list[str], str]:
+    """Return (available_voices, default_voice) based on the active backend."""
+    if config.MODEL_NAME.lower().startswith("gemini"):
+        return list(GEMINI_AVAILABLE_VOICES), GEMINI_DEFAULT_VOICE
+    if config.BACKEND_PROVIDER == "speech-to-speech":
+        return list(S2S_AVAILABLE_VOICES), S2S_DEFAULT_VOICE
+    return list(OPENAI_AVAILABLE_VOICES), OPENAI_DEFAULT_VOICE
+
+
+AVAILABLE_VOICES, DEFAULT_VOICE = _resolve_voices()
 
 
 def is_gemini_model() -> bool:

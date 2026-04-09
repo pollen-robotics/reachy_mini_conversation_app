@@ -118,27 +118,36 @@ class LocalStream:
         """Persist API key to environment and instance ``.env`` if possible.
 
         Behavior:
-        - Always sets ``OPENAI_API_KEY`` in process env and in-memory config.
-        - Writes/updates ``<instance_path>/.env``:
-          * If ``.env`` exists, replaces/append OPENAI_API_KEY line.
-          * Else, copies template from ``<instance_path>/.env.example`` when present,
-            otherwise falls back to the packaged template
-            ``reachy_mini_conversation_app/.env.example``.
-          * Ensures the resulting file contains the full template plus the key.
+        - Detects the active backend and persists the appropriate key
+          (``GEMINI_API_KEY`` for Gemini, ``OPENAI_API_KEY`` otherwise).
+        - Writes/updates ``<instance_path>/.env``.
         - Loads the written ``.env`` into the current process environment.
         """
         k = (key or "").strip()
         if not k:
             return
-        # Update live process env and config so consumers see it immediately
-        try:
-            os.environ["OPENAI_API_KEY"] = k
-        except Exception:  # best-effort
-            pass
-        try:
-            config.OPENAI_API_KEY = k
-        except Exception:
-            pass
+
+        # Determine which key to set based on the active backend
+        if is_gemini_model():
+            env_var = "GEMINI_API_KEY"
+            try:
+                os.environ[env_var] = k
+            except Exception:
+                pass
+            try:
+                config.GEMINI_API_KEY = k
+            except Exception:
+                pass
+        else:
+            env_var = "OPENAI_API_KEY"
+            try:
+                os.environ[env_var] = k
+            except Exception:
+                pass
+            try:
+                config.OPENAI_API_KEY = k
+            except Exception:
+                pass
 
         if not self._instance_path:
             return
@@ -148,15 +157,15 @@ class LocalStream:
             lines = self._read_env_lines(env_path)
             replaced = False
             for i, ln in enumerate(lines):
-                if ln.strip().startswith("OPENAI_API_KEY="):
-                    lines[i] = f"OPENAI_API_KEY={k}"
+                if ln.strip().startswith(f"{env_var}="):
+                    lines[i] = f"{env_var}={k}"
                     replaced = True
                     break
             if not replaced:
-                lines.append(f"OPENAI_API_KEY={k}")
+                lines.append(f"{env_var}={k}")
             final_text = "\n".join(lines) + "\n"
             env_path.write_text(final_text, encoding="utf-8")
-            logger.info("Persisted OPENAI_API_KEY to %s", env_path)
+            logger.info("Persisted %s to %s", env_var, env_path)
 
             # Load the newly written .env into this process to ensure downstream imports see it
             try:
@@ -166,7 +175,7 @@ class LocalStream:
             except Exception:
                 pass
         except Exception as e:
-            logger.warning("Failed to persist OPENAI_API_KEY: %s", e)
+            logger.warning("Failed to persist %s: %s", env_var, e)
 
     def _persist_personality(self, profile: Optional[str]) -> None:
         """Persist the startup personality to the instance .env and config."""
@@ -263,6 +272,15 @@ class LocalStream:
         # GET /status -> current backend and whether credentials are required
         @self._settings_app.get("/status")
         def _status() -> JSONResponse:
+            if is_gemini_model():
+                has_key = bool(config.GEMINI_API_KEY and str(config.GEMINI_API_KEY).strip())
+                return JSONResponse(
+                    {
+                        "backend_provider": "gemini",
+                        "credentials_required": True,
+                        "has_key": has_key,
+                    }
+                )
             has_key = bool(config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip())
             credentials_required = config.BACKEND_PROVIDER == "openai"
             return JSONResponse(
