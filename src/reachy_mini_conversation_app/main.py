@@ -183,7 +183,7 @@ def run(
             handler,
             instance_path=instance_path,
             dev_mode=args.debug,
-            robot=robot,
+            robot=robot if not is_simulation else None,
         )
     else:
         stream_manager = LocalStream(
