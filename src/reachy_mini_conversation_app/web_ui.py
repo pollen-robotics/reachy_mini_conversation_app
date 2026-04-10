@@ -124,10 +124,8 @@ class WebUI:
 
         self._setup_events_and_static()
 
-    def _push_audio_to_robot(self, sample_rate: int, audio_data: NDArray[np.int16]) -> None:
-        """Send an audio frame to the robot's physical speaker."""
-        if self._robot is None:
-            return
+    def _push_audio_to_robot_sync(self, sample_rate: int, audio_data: NDArray[np.int16]) -> None:
+        """Send an audio frame to the robot's physical speaker (blocking, run in executor)."""
         try:
             output_sr = self._robot.media.get_output_audio_samplerate()
             data = audio_data
@@ -160,7 +158,8 @@ class WebUI:
             result = await _original_emit()
             if isinstance(result, tuple):
                 sr, audio = result
-                self._push_audio_to_robot(sr, audio)
+                loop = asyncio.get_event_loop()
+                loop.run_in_executor(None, self._push_audio_to_robot_sync, sr, audio)
                 return None
             return result
 
@@ -176,14 +175,20 @@ class WebUI:
     async def _robot_record_loop(self) -> None:
         """Read audio from the robot's mic and feed it to the active handler."""
         input_sr = self._robot.media.get_input_audio_samplerate()
+        loop = asyncio.get_event_loop()
         logger.info("Robot mic recording loop started at %d Hz", input_sr)
         while True:
             try:
-                audio_frame = self._robot.media.get_audio_sample()
-                if audio_frame is not None:
-                    handler = self._active_handler or self.handler
-                    real_recv = getattr(handler, "_real_receive", handler.receive)
+                audio_frame = await loop.run_in_executor(
+                    None, self._robot.media.get_audio_sample
+                )
+                if audio_frame is not None and self._active_handler is not None:
+                    real_recv = getattr(self._active_handler, "_real_receive", self._active_handler.receive)
                     await real_recv((input_sr, audio_frame))
+                elif audio_frame is None:
+                    await asyncio.sleep(0.01)
+            except asyncio.CancelledError:
+                break
             except Exception as e:
                 logger.debug("Robot mic read error: %s", e)
             await asyncio.sleep(0)
