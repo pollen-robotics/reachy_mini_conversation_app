@@ -117,8 +117,7 @@ export default function SettingsDialog({ open, onClose, settings, onUpdate, hasK
       {/* Body */}
       <Box sx={{ flex: 1, overflow: "auto", p: 2.5, display: "flex", flexDirection: "column", gap: 3 }}>
         {/* API Key */}
-        <Fade in timeout={300}>
-          <Box>
+        <Box>
             <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 2 }}>
               <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
                 OpenAI API Key
@@ -250,13 +249,11 @@ export default function SettingsDialog({ open, onClose, settings, onUpdate, hasK
               )}
             </Box>
           </Box>
-        </Fade>
 
         <Divider />
 
         {/* Robot */}
-        <Fade in timeout={375}>
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
               Robot
             </Typography>
@@ -306,7 +303,6 @@ export default function SettingsDialog({ open, onClose, settings, onUpdate, hasK
               />
             </Box>
           </Box>
-        </Fade>
       </Box>
 
       {/* Footer */}
