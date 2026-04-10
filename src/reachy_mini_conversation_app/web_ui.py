@@ -476,6 +476,8 @@ class WebUI:
                             event = _format_control_message(msg)
                             if event:
                                 yield f"data: {json.dumps(event)}\n\n"
+                except asyncio.CancelledError:
+                    logger.debug("SSE stream cancelled for %s (shutdown)", webrtc_id)
                 except Exception as e:
                     logger.debug("SSE stream ended for %s: %s", webrtc_id, e)
 
@@ -510,10 +512,16 @@ class WebUI:
                 self._record_task = asyncio.create_task(self._robot_record_loop())
 
         logger.info("Starting web UI on http://%s:%s", self.host, self.port)
-        uvicorn.run(self.app, host=self.host, port=self.port, log_level="info")
+        config = uvicorn.Config(self.app, host=self.host, port=self.port, log_level="info")
+        self._server = uvicorn.Server(config)
+        self._server.run()
 
     def close(self) -> None:
-        """Stop robot media if running."""
+        """Gracefully stop the web server and robot media."""
+        server = getattr(self, "_server", None)
+        if server is not None:
+            server.should_exit = True
+
         if self._robot is not None:
             task = getattr(self, "_record_task", None)
             if task and not task.done():
