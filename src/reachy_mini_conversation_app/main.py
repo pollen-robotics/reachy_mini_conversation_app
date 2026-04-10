@@ -179,7 +179,7 @@ def run(
     if use_web:
         from reachy_mini_conversation_app.web_ui import WebUI
 
-        stream_manager = WebUI(handler, instance_path=instance_path, dev_mode=args.debug)
+        stream_manager = WebUI(handler, instance_path=instance_path, dev_mode=args.debug, robot=robot)
     else:
         stream_manager = LocalStream(
             handler,

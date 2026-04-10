@@ -19,13 +19,16 @@ import logging
 from typing import Any, Optional
 from pathlib import Path
 
+import numpy as np
 import cv2
 import uvicorn
+from numpy.typing import NDArray
 from fastapi import FastAPI, Request
-from fastrtc import Stream, AdditionalOutputs
+from fastrtc import Stream, AdditionalOutputs, audio_to_float32
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from scipy.signal import resample
 
 from reachy_mini_conversation_app.config import config, set_custom_profile
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
@@ -92,6 +95,7 @@ class WebUI:
         port: int = 7860,
         instance_path: Optional[str] = None,
         dev_mode: bool = False,
+        robot: Optional[Any] = None,
     ):
         """Initialize the web UI server with a realtime handler."""
         self.handler = handler
@@ -99,6 +103,7 @@ class WebUI:
         self.port = port
         self._instance_path = instance_path
         self.dev_mode = dev_mode
+        self._robot = robot
         self.app = FastAPI(title="Reachy Mini Conversation")
         self._active_handler: Optional[OpenaiRealtimeHandler] = None
 
@@ -119,6 +124,40 @@ class WebUI:
 
         self._setup_events_and_static()
 
+    def _push_audio_to_robot(self, sample_rate: int, audio_data: NDArray[np.int16]) -> None:
+        """Mirror an audio frame to the robot's physical speaker (best-effort)."""
+        if self._robot is None:
+            return
+        try:
+            output_sr = self._robot.media.get_output_audio_samplerate()
+            data = audio_data
+            if data.ndim == 2:
+                if data.shape[1] > data.shape[0]:
+                    data = data.T
+                if data.shape[1] > 1:
+                    data = data[:, 0]
+            frame = audio_to_float32(data)
+            if sample_rate != output_sr:
+                frame = resample(frame, int(len(frame) * output_sr / sample_rate))
+            self._robot.media.push_audio_sample(frame)
+        except Exception as e:
+            logger.debug("Robot speaker push failed: %s", e)
+
+    def _wrap_emit(self, handler: OpenaiRealtimeHandler) -> None:
+        """Wrap handler.emit() to tee audio to the robot speaker alongside WebRTC."""
+        if self._robot is None:
+            return
+        _original_emit = handler.emit
+
+        async def _tee_emit():
+            result = await _original_emit()
+            if isinstance(result, tuple):
+                sr, audio = result
+                self._push_audio_to_robot(sr, audio)
+            return result
+
+        handler.emit = _tee_emit  # type: ignore[assignment]
+
     def _patch_handler_copy(self) -> None:
         """Override handler.copy() to track the active session and wire interrupts."""
         _original_copy = self.handler.copy
@@ -136,6 +175,7 @@ class WebUI:
                 new_handler.output_queue.put_nowait(AdditionalOutputs({"_state": "interrupt"}))
 
             new_handler._clear_queue = _clear_queue  # type: ignore[attr-defined]
+            self._wrap_emit(new_handler)
             return new_handler
 
         self.handler.copy = _tracked_copy  # type: ignore[assignment]
@@ -420,8 +460,19 @@ class WebUI:
 
     def launch(self) -> None:
         """Start the web server (blocking)."""
+        if self._robot is not None:
+            try:
+                self._robot.media.start_playing()
+                logger.info("Robot speaker enabled for WebUI audio tee")
+            except Exception as e:
+                logger.warning("Could not start robot media player: %s", e)
         logger.info("Starting web UI on http://%s:%s", self.host, self.port)
         uvicorn.run(self.app, host=self.host, port=self.port, log_level="info")
 
     def close(self) -> None:
-        """No-op - uvicorn handles its own shutdown."""
+        """Stop robot media if running."""
+        if self._robot is not None:
+            try:
+                self._robot.media.stop_playing()
+            except Exception:
+                pass
