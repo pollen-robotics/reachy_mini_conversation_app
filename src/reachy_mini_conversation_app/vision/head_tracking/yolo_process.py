@@ -245,7 +245,7 @@ class YoloHeadTrackerProcess:
             return status, payload
 
     def _drain_timed_out_reply(self) -> bool:
-        """Return whether the last timed-out request has been consumed"""
+        """Return whether the last timed-out request has been consumed."""
         if self._timed_out_request_id is None:
             return True
 
