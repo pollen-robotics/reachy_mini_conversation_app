@@ -47,8 +47,8 @@ export const lightTheme = createTheme({
     secondary: { main: "#764ba2" },
     success: { main: "#22c55e" },
     error: { main: "#ef4444" },
-    background: { default: "#ffffff", paper: "#ffffff" },
-    divider: "rgba(0, 0, 0, 0.08)",
+    background: { default: "#fafafc", paper: "#fff" },
+    divider: "rgba(0, 0, 0, 0.18)",
   },
   components: {
     ...shared.components,
@@ -79,8 +79,7 @@ export const darkTheme = createTheme({
     secondary: { main: "#764ba2" },
     success: { main: "#22c55e" },
     error: { main: "#ef4444" },
-    background: { default: "#0A0E17", paper: "#111827" },
-    text: { primary: "#F1F5F9", secondary: "#94A3B8" },
+    background: { default: "#1a1a1a", paper: "#242424" },
     divider: "rgba(255, 255, 255, 0.12)",
   },
   components: {
