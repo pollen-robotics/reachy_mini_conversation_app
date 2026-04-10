@@ -68,8 +68,11 @@ def _patch_fake_worker(
     monkeypatch.setattr(head_tracker_module.subprocess, "Popen", _spawn_fake_worker)
 
 
-def test_head_tracker_discards_stale_reply_after_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Late replies from timed-out requests should not leak into the next frame."""
+def test_head_tracker_skips_new_frame_until_timed_out_reply_is_drained(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A timed-out request should not let the next frame block on the worker pipe."""
     _patch_fake_worker(
         monkeypatch,
         tmp_path,
@@ -98,20 +101,28 @@ def test_head_tracker_discards_stale_reply_after_timeout(tmp_path: Path, monkeyp
 
     tracker = YoloHeadTrackerProcess(request_timeout=0.01)
     try:
-        frame = np.zeros((12, 20, 3), dtype=np.uint8)
+        frame = np.zeros((1024, 1024, 3), dtype=np.uint8)
 
         eye_center, roll = tracker.get_head_position(frame)
         assert eye_center is None
         assert roll is None
 
-        time.sleep(0.08)
+        blocked_started = time.monotonic()
+        eye_center, roll = tracker.get_head_position(frame)
+        blocked_elapsed = time.monotonic() - blocked_started
+        assert eye_center is None
+        assert roll is None
+        assert blocked_elapsed < 0.05
 
+        time.sleep(0.08)
         eye_center, roll = tracker.get_head_position(frame)
         assert eye_center is not None
         assert np.allclose(eye_center, np.array([2.0, 2.0], dtype=np.float32))
         assert roll == 2.0
     finally:
         tracker.close()
+
+
 def test_head_tracker_accepts_numpy_floating_roll_values(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

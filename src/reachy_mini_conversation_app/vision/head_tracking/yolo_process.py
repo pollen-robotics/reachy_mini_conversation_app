@@ -138,6 +138,7 @@ class YoloHeadTrackerProcess:
         self._send_lock = threading.Lock()
         self._messages: queue.Queue[tuple[str, object | None]] = queue.Queue()
         self._next_request_id = 0
+        self._timed_out_request_id: int | None = None
         self._tracker_name = "yolo"
 
         module_path = "reachy_mini_conversation_app.vision.head_tracking.yolo_process"
@@ -186,12 +187,17 @@ class YoloHeadTrackerProcess:
             self.close()
             raise RuntimeError(f"Failed to initialize yolo head tracker: {payload}")
 
-    def _wait_for_message(self, timeout: float) -> object:
-        """Wait for the next child-process message payload."""
+    def _wait_for_message(self, timeout: float | None = None) -> object | None:
+        """Return the next child-process message payload, or None if no queued payload is available."""
         try:
-            event, payload = self._messages.get(timeout=timeout)
+            if timeout is None:
+                event, payload = self._messages.get_nowait()
+            else:
+                event, payload = self._messages.get(timeout=timeout)
         except queue.Empty as exc:
-            raise RuntimeError(f"{self._tracker_name} head tracker timed out after {timeout:.2f}s") from exc
+            if timeout is None:
+                return None
+            raise TimeoutError(f"{self._tracker_name} head tracker timed out after {timeout:.2f}s") from exc
 
         if event == "message":
             return payload
@@ -205,7 +211,7 @@ class YoloHeadTrackerProcess:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise RuntimeError(f"{self._tracker_name} head tracker timed out after {timeout:.2f}s")
+                raise TimeoutError(f"{self._tracker_name} head tracker timed out after {timeout:.2f}s")
 
             wait_started = time.monotonic()
             message = self._wait_for_message(remaining)
@@ -236,6 +242,50 @@ class YoloHeadTrackerProcess:
 
             return status, payload
 
+    def _drain_timed_out_reply(self) -> bool:
+        """Return whether the last timed-out request has been consumed"""
+        if self._timed_out_request_id is None:
+            return True
+
+        while True:
+            message = self._wait_for_message()
+            if message is None:
+                return False
+
+            if not (
+                isinstance(message, tuple)
+                and len(message) == 3
+                and isinstance(message[0], str)
+                and isinstance(message[1], int)
+            ):
+                raise RuntimeError(f"{self._tracker_name} head tracker returned an invalid response: {message!r}")
+
+            status, message_request_id, payload = message
+            if message_request_id < self._timed_out_request_id:
+                logger.debug(
+                    "Discarding stale reply from %s head tracker: expected request %s, got %s",
+                    self._tracker_name,
+                    self._timed_out_request_id,
+                    message_request_id,
+                )
+                continue
+
+            if message_request_id > self._timed_out_request_id:
+                raise RuntimeError(
+                    f"{self._tracker_name} head tracker returned out-of-order response "
+                    f"{message_request_id} while waiting for {self._timed_out_request_id}"
+                )
+
+            logger.debug(
+                "Discarding delayed %s reply from %s head tracker for request %s: %r",
+                status,
+                self._tracker_name,
+                message_request_id,
+                payload,
+            )
+            self._timed_out_request_id = None
+            return True
+
     def get_head_position(
         self,
         frame: NDArray[np.uint8],
@@ -248,12 +298,22 @@ class YoloHeadTrackerProcess:
             logger.error("Head tracker process for %s is not alive", self._tracker_name)
             return None, None
 
+        request_id: int | None = None
         try:
             with self._send_lock:
+                # Avoid writing another frame while the child is still finishing a timed-out one.
+                if not self._drain_timed_out_reply():
+                    return None, None
+
                 request_id = self._next_request_id
                 self._next_request_id += 1
                 _send_message(self._stdin, ("frame", request_id, frame))
                 status, payload = self._wait_for_response(request_id, self.request_timeout)
+        except TimeoutError as exc:
+            if request_id is not None:
+                self._timed_out_request_id = request_id
+            logger.warning("Head tracker %s communication timed out: %s", self._tracker_name, exc)
+            return None, None
         except Exception as exc:
             logger.error("Head tracker %s communication failed: %s", self._tracker_name, exc)
             return None, None
