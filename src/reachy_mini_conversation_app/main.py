@@ -45,8 +45,8 @@ def run(
     """Run the Reachy Mini conversation app."""
     # Putting these dependencies here makes the dashboard faster to load when the conversation app is installed
     from reachy_mini_conversation_app.moves import MovementManager
-    from reachy_mini_conversation_app.console import LocalStream
     from reachy_mini_conversation_app.config import config, is_gemini_model
+    from reachy_mini_conversation_app.console import LocalStream
     from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
     from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
 
@@ -54,10 +54,7 @@ def run(
     logger.info("Starting Reachy Mini Conversation App")
 
     if args.no_camera and args.head_tracker is not None:
-        logger.warning(
-            "Head tracking disabled: --no-camera flag is set. "
-            "Remove --no-camera to enable head tracking."
-        )
+        logger.warning("Head tracking disabled: --no-camera flag is set. Remove --no-camera to enable head tracking.")
 
     if robot is None:
         try:
@@ -69,25 +66,17 @@ def run(
             robot = ReachyMini(**robot_kwargs)
 
         except TimeoutError as e:
-            logger.error(
-                "Connection timeout: Failed to connect to Reachy Mini daemon. "
-                f"Details: {e}"
-            )
+            logger.error(f"Connection timeout: Failed to connect to Reachy Mini daemon. Details: {e}")
             log_connection_troubleshooting(logger, args.robot_name)
             sys.exit(1)
 
         except ConnectionError as e:
-            logger.error(
-                "Connection failed: Unable to establish connection to Reachy Mini. "
-                f"Details: {e}"
-            )
+            logger.error(f"Connection failed: Unable to establish connection to Reachy Mini. Details: {e}")
             log_connection_troubleshooting(logger, args.robot_name)
             sys.exit(1)
 
         except Exception as e:
-            logger.error(
-                f"Unexpected error during robot initialization: {type(e).__name__}: {e}"
-            )
+            logger.error(f"Unexpected error during robot initialization: {type(e).__name__}: {e}")
             logger.error("Please check your configuration and try again.")
             sys.exit(1)
 
@@ -140,12 +129,14 @@ def run(
 
     if is_gemini_model():
         from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
+
         logger.info("Using Gemini Live handler for model: %s", config.MODEL_NAME)
         handler = GeminiLiveHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)
     else:
         from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
+
         logger.info("Using OpenAI Realtime handler for model: %s", config.MODEL_NAME)
-        handler = OpenaiRealtimeHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)
+        handler = OpenaiRealtimeHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)  # type: ignore[assignment]
 
     stream_manager: gr.Blocks | LocalStream | None = None
 

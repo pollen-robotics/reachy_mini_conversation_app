@@ -26,6 +26,7 @@ from reachy_mini_conversation_app.config import LOCKED_PROFILE, config, is_gemin
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
 
+
 try:
     from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
 except ImportError:
@@ -57,7 +58,7 @@ class LocalStream:
 
     def __init__(
         self,
-        handler: "OpenaiRealtimeHandler | GeminiLiveHandler",  # type: ignore[type-arg]
+        handler: "OpenaiRealtimeHandler | GeminiLiveHandler",
         robot: ReachyMini,
         *,
         settings_app: Optional[FastAPI] = None,
@@ -368,9 +369,8 @@ class LocalStream:
         self._init_settings_ui_if_needed()
 
         # If key is still missing -> wait until provided via the settings UI
-        _need_key = (
-            (is_gemini_model() and not (config.GEMINI_API_KEY and str(config.GEMINI_API_KEY).strip()))
-            or (not is_gemini_model() and not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()))
+        _need_key = (is_gemini_model() and not (config.GEMINI_API_KEY and str(config.GEMINI_API_KEY).strip())) or (
+            not is_gemini_model() and not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip())
         )
         if _need_key:
             key_name = "GEMINI_API_KEY" if is_gemini_model() else "OPENAI_API_KEY"

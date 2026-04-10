@@ -104,11 +104,7 @@ def _collect_tool_module_names(tools_root: Path) -> set[str]:
     if not tools_root.exists() or not tools_root.is_dir():
         return set()
     ignored = {"__init__", "core_tools"}
-    return {
-        p.stem
-        for p in tools_root.glob("*.py")
-        if p.is_file() and p.stem not in ignored
-    }
+    return {p.stem for p in tools_root.glob("*.py") if p.is_file() and p.stem not in ignored}
 
 
 def _raise_on_name_collisions(
@@ -230,8 +226,7 @@ class Config:
             )
         else:
             logger.info(
-                "'REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY' is not set. "
-                "Using built-in profiles from %s.",
+                "'REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY' is not set. Using built-in profiles from %s.",
                 DEFAULT_PROFILES_DIRECTORY,
             )
 
@@ -242,10 +237,7 @@ class Config:
                 self.TOOLS_DIRECTORY,
             )
         else:
-            logger.info(
-                "'REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY' is not set. "
-                "Using built-in shared tools only."
-            )
+            logger.info("'REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY' is not set. Using built-in shared tools only.")
 
 
 config = Config()

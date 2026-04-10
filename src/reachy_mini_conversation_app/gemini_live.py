@@ -13,15 +13,15 @@ import uuid
 import random
 import asyncio
 import logging
-from typing import Any, Dict, Final, List, Tuple, Literal, Optional
+from typing import Any, Dict, List, Final, Tuple, Literal, Optional
 from datetime import datetime
 
 import cv2
 import numpy as np
 import gradio as gr
 from google import genai
-from google.genai import types
 from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item, audio_to_int16
+from google.genai import types
 from numpy.typing import NDArray
 from scipy.signal import resample
 
@@ -106,10 +106,7 @@ def _convert_schema_types(schema: Any) -> Any:
 
     # Recurse into properties
     if "properties" in result and isinstance(result["properties"], dict):
-        result["properties"] = {
-            k: _convert_schema_types(v)
-            for k, v in result["properties"].items()
-        }
+        result["properties"] = {k: _convert_schema_types(v) for k, v in result["properties"].items()}
 
     # Recurse into items (for arrays)
     if "items" in result:
@@ -178,7 +175,6 @@ class GeminiLiveHandler(AsyncStreamHandler):
         session.update equivalent.
         """
         try:
-            from reachy_mini_conversation_app.config import config as _config
             from reachy_mini_conversation_app.config import set_custom_profile
 
             set_custom_profile(profile)
@@ -233,7 +229,9 @@ class GeminiLiveHandler(AsyncStreamHandler):
             except Exception as e:
                 logger.warning(
                     "Gemini Live session closed unexpectedly (attempt %d/%d): %s",
-                    attempt, max_attempts, e,
+                    attempt,
+                    max_attempts,
+                    e,
                 )
                 if attempt < max_attempts:
                     base_delay = 2 ** (attempt - 1)
@@ -296,9 +294,7 @@ class GeminiLiveHandler(AsyncStreamHandler):
 
         live_config = types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
-            system_instruction=types.Content(
-                parts=[types.Part(text=instructions)]
-            ),
+            system_instruction=types.Content(parts=[types.Part(text=instructions)]),
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
@@ -313,7 +309,9 @@ class GeminiLiveHandler(AsyncStreamHandler):
 
         logger.info(
             "Gemini Live config: model=%r voice=%r tools=%d",
-            config.MODEL_NAME, voice, len(function_declarations),
+            config.MODEL_NAME,
+            voice,
+            len(function_declarations),
         )
         return live_config
 
@@ -330,7 +328,10 @@ class GeminiLiveHandler(AsyncStreamHandler):
 
             logger.info(
                 "Gemini tool call: tool_name=%r, call_id=%s, is_idle=%s, args=%s",
-                tool_name, call_id, self.is_idle_tool_call, args_json_str,
+                tool_name,
+                call_id,
+                self.is_idle_tool_call,
+                args_json_str,
             )
 
             bg_tool = await self.tool_manager.start_tool(
@@ -403,10 +404,9 @@ class GeminiLiveHandler(AsyncStreamHandler):
 
                 # Send image via realtime input as video frame
                 import base64
+
                 image_bytes = base64.b64decode(b64_im)
-                await self.session.send_realtime_input(
-                    video=types.Blob(data=image_bytes, mime_type="image/jpeg")
-                )
+                await self.session.send_realtime_input(video=types.Blob(data=image_bytes, mime_type="image/jpeg"))
                 logger.info("Sent camera image to Gemini via video input")
 
                 if self.deps.camera_worker is not None:
@@ -435,15 +435,11 @@ class GeminiLiveHandler(AsyncStreamHandler):
                 if self.session and self.deps.camera_worker is not None:
                     frame = self.deps.camera_worker.get_latest_frame()
                     if frame is not None:
-                        success, buffer = cv2.imencode(
-                            ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70]
-                        )
+                        success, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
                         if success:
                             jpeg_bytes = buffer.tobytes()
                             await self.session.send_realtime_input(
-                                video=types.Blob(
-                                    data=jpeg_bytes, mime_type="image/jpeg"
-                                )
+                                video=types.Blob(data=jpeg_bytes, mime_type="image/jpeg")
                             )
             except Exception as e:
                 if self._stop_event.is_set():
@@ -477,9 +473,7 @@ class GeminiLiveHandler(AsyncStreamHandler):
 
                 # Start video sender if camera is available
                 if self.deps.camera_worker is not None:
-                    video_task = asyncio.create_task(
-                        self._video_sender_loop(), name="gemini-video-sender"
-                    )
+                    video_task = asyncio.create_task(self._video_sender_loop(), name="gemini-video-sender")
 
                 # session.receive() yields responses for the current turn then completes.
                 # We loop so the session stays alive across multiple conversation turns.
@@ -503,12 +497,13 @@ class GeminiLiveHandler(AsyncStreamHandler):
                                         self.deps.head_wobbler.reset()
 
                                 # Handle audio output from model
-                                if content.model_turn:
+                                if content.model_turn and content.model_turn.parts:
                                     for part in content.model_turn.parts:
                                         if part.inline_data and part.inline_data.data:
                                             audio_bytes = part.inline_data.data
                                             if isinstance(audio_bytes, str):
                                                 import base64
+
                                                 audio_bytes = base64.b64decode(audio_bytes)
 
                                             if len(audio_bytes) == 0:
@@ -521,6 +516,7 @@ class GeminiLiveHandler(AsyncStreamHandler):
 
                                             if self.deps.head_wobbler is not None:
                                                 import base64 as b64mod
+
                                                 self.deps.head_wobbler.feed(
                                                     b64mod.b64encode(audio_bytes).decode("utf-8")
                                                 )
@@ -598,9 +594,7 @@ class GeminiLiveHandler(AsyncStreamHandler):
         # Send raw PCM bytes to Gemini
         try:
             pcm_bytes = audio_frame.tobytes()
-            await self.session.send_realtime_input(
-                audio=types.Blob(data=pcm_bytes, mime_type="audio/pcm;rate=16000")
-            )
+            await self.session.send_realtime_input(audio=types.Blob(data=pcm_bytes, mime_type="audio/pcm;rate=16000"))
         except Exception as e:
             logger.debug("Dropping audio frame: session not ready (%s)", e)
             return
