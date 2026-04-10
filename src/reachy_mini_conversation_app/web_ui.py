@@ -149,7 +149,7 @@ class WebUI:
         - emit() pushes audio to the robot speaker and returns None to WebRTC
           (AdditionalOutputs still flow through for SSE events).
         - receive() becomes a no-op so browser mic audio is ignored;
-          the robot mic is fed via _robot_record_loop instead.
+          the original receive is saved as _real_receive for the record loop.
         """
         if self._robot is None:
             return
@@ -166,6 +166,8 @@ class WebUI:
 
         handler.emit = _robot_emit  # type: ignore[assignment]
 
+        handler._real_receive = handler.receive  # type: ignore[attr-defined]
+
         async def _noop_receive(frame):
             pass
 
@@ -180,7 +182,8 @@ class WebUI:
                 audio_frame = self._robot.media.get_audio_sample()
                 if audio_frame is not None:
                     handler = self._active_handler or self.handler
-                    await handler.receive((input_sr, audio_frame))
+                    real_recv = getattr(handler, "_real_receive", handler.receive)
+                    await real_recv((input_sr, audio_frame))
             except Exception as e:
                 logger.debug("Robot mic read error: %s", e)
             await asyncio.sleep(0)
