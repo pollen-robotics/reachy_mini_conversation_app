@@ -32,8 +32,7 @@ def _build_tracker_backend() -> HeadTracker:
     """Instantiate a concrete head-tracker backend."""
     from reachy_mini_conversation_app.vision.head_tracking.yolo import YoloHeadTracker
 
-    yolo_tracker: HeadTracker = YoloHeadTracker()
-    return yolo_tracker
+    return YoloHeadTracker()
 
 
 def _read_exact(stream: IO[bytes], size: int) -> bytes:
@@ -90,9 +89,7 @@ def _worker_main() -> int:
     while True:
         try:
             message = _receive_message(sys.stdin.buffer)
-        except EOFError:
-            return 0
-        except KeyboardInterrupt:
+        except (EOFError, KeyboardInterrupt):
             return 0
 
         if not isinstance(message, tuple) or not message or not isinstance(message[0], str):
@@ -205,6 +202,19 @@ class YoloHeadTrackerProcess:
             raise RuntimeError(f"{self._tracker_name} head tracker exited unexpectedly")
         raise RuntimeError(f"{self._tracker_name} head tracker reader failed: {payload}")
 
+    def _unpack_response(self, message: object) -> tuple[str, int, object]:
+        """Validate a tracker response and return its fields."""
+        if not (
+            isinstance(message, tuple)
+            and len(message) == 3
+            and isinstance(message[0], str)
+            and isinstance(message[1], int)
+        ):
+            raise RuntimeError(f"{self._tracker_name} head tracker returned an invalid response: {message!r}")
+
+        status, message_request_id, payload = message
+        return status, message_request_id, payload
+
     def _wait_for_response(self, request_id: int, timeout: float) -> tuple[str, object]:
         """Wait for the response matching the requested frame."""
         deadline = time.monotonic() + timeout
@@ -215,15 +225,7 @@ class YoloHeadTrackerProcess:
 
             wait_started = time.monotonic()
             message = self._wait_for_message(remaining)
-            if not (
-                isinstance(message, tuple)
-                and len(message) == 3
-                and isinstance(message[0], str)
-                and isinstance(message[1], int)
-            ):
-                raise RuntimeError(f"{self._tracker_name} head tracker returned an invalid response: {message!r}")
-
-            status, message_request_id, payload = message
+            status, message_request_id, payload = self._unpack_response(message)
             if message_request_id < request_id:
                 deadline += time.monotonic() - wait_started
                 logger.debug(
@@ -252,15 +254,7 @@ class YoloHeadTrackerProcess:
             if message is None:
                 return False
 
-            if not (
-                isinstance(message, tuple)
-                and len(message) == 3
-                and isinstance(message[0], str)
-                and isinstance(message[1], int)
-            ):
-                raise RuntimeError(f"{self._tracker_name} head tracker returned an invalid response: {message!r}")
-
-            status, message_request_id, payload = message
+            status, message_request_id, payload = self._unpack_response(message)
             if message_request_id < self._timed_out_request_id:
                 logger.debug(
                     "Discarding stale reply from %s head tracker: expected request %s, got %s",
