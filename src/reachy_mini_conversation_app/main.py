@@ -123,6 +123,55 @@ def run(
         vision_processor=vision_processor,
         head_wobbler=head_wobbler,
     )
+    # Load instance .env and auto-download API key if missing (shared by both WebUI and LocalStream)
+    if instance_path:
+        try:
+            from dotenv import load_dotenv
+            from pathlib import Path
+
+            env_path = Path(instance_path) / ".env"
+            if env_path.exists():
+                load_dotenv(dotenv_path=str(env_path), override=True)
+                import os
+                new_key = os.getenv("OPENAI_API_KEY", "").strip()
+                if new_key:
+                    from reachy_mini_conversation_app.config import config as _cfg
+                    _cfg.OPENAI_API_KEY = new_key
+        except Exception:
+            pass
+
+    from reachy_mini_conversation_app.config import config as _cfg
+    if not (_cfg.OPENAI_API_KEY and str(_cfg.OPENAI_API_KEY).strip()):
+        logger.info("OPENAI_API_KEY not set, attempting to download from HuggingFace...")
+        try:
+            from gradio_client import Client
+
+            client = Client("HuggingFaceM4/gradium_setup", verbose=False)
+            key, status = client.predict(api_name="/claim_b_key")
+            if key and key.strip():
+                logger.info("Successfully downloaded API key from HuggingFace")
+                import os
+                os.environ["OPENAI_API_KEY"] = key.strip()
+                _cfg.OPENAI_API_KEY = key.strip()
+                if instance_path:
+                    try:
+                        from pathlib import Path
+                        env_path = Path(instance_path) / ".env"
+                        lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+                        replaced = False
+                        for i, ln in enumerate(lines):
+                            if ln.strip().startswith("OPENAI_API_KEY="):
+                                lines[i] = f"OPENAI_API_KEY={key.strip()}"
+                                replaced = True
+                                break
+                        if not replaced:
+                            lines.append(f"OPENAI_API_KEY={key.strip()}")
+                        env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.warning(f"Failed to download API key from HuggingFace: {e}")
+
     handler = OpenaiRealtimeHandler(deps, instance_path=instance_path)
 
     stream_manager: Union["WebUI", "LocalStream", None] = None
