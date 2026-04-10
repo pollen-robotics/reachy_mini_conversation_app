@@ -125,7 +125,7 @@ class WebUI:
         self._setup_events_and_static()
 
     def _push_audio_to_robot(self, sample_rate: int, audio_data: NDArray[np.int16]) -> None:
-        """Mirror an audio frame to the robot's physical speaker (best-effort)."""
+        """Send an audio frame to the robot's physical speaker."""
         if self._robot is None:
             return
         try:
@@ -143,20 +143,47 @@ class WebUI:
         except Exception as e:
             logger.debug("Robot speaker push failed: %s", e)
 
-    def _wrap_emit(self, handler: OpenaiRealtimeHandler) -> None:
-        """Wrap handler.emit() to tee audio to the robot speaker alongside WebRTC."""
+    def _patch_handler_for_robot(self, handler: OpenaiRealtimeHandler) -> None:
+        """Route all audio I/O through the robot hardware instead of WebRTC.
+
+        - emit() pushes audio to the robot speaker and returns None to WebRTC
+          (AdditionalOutputs still flow through for SSE events).
+        - receive() becomes a no-op so browser mic audio is ignored;
+          the robot mic is fed via _robot_record_loop instead.
+        """
         if self._robot is None:
             return
+
         _original_emit = handler.emit
 
-        async def _tee_emit():
+        async def _robot_emit():
             result = await _original_emit()
             if isinstance(result, tuple):
                 sr, audio = result
                 self._push_audio_to_robot(sr, audio)
+                return None
             return result
 
-        handler.emit = _tee_emit  # type: ignore[assignment]
+        handler.emit = _robot_emit  # type: ignore[assignment]
+
+        async def _noop_receive(frame):
+            pass
+
+        handler.receive = _noop_receive  # type: ignore[assignment]
+
+    async def _robot_record_loop(self) -> None:
+        """Read audio from the robot's mic and feed it to the active handler."""
+        input_sr = self._robot.media.get_input_audio_samplerate()
+        logger.info("Robot mic recording loop started at %d Hz", input_sr)
+        while True:
+            try:
+                audio_frame = self._robot.media.get_audio_sample()
+                if audio_frame is not None:
+                    handler = self._active_handler or self.handler
+                    await handler.receive((input_sr, audio_frame))
+            except Exception as e:
+                logger.debug("Robot mic read error: %s", e)
+            await asyncio.sleep(0)
 
     def _patch_handler_copy(self) -> None:
         """Override handler.copy() to track the active session and wire interrupts."""
@@ -175,7 +202,7 @@ class WebUI:
                 new_handler.output_queue.put_nowait(AdditionalOutputs({"_state": "interrupt"}))
 
             new_handler._clear_queue = _clear_queue  # type: ignore[attr-defined]
-            self._wrap_emit(new_handler)
+            self._patch_handler_for_robot(new_handler)
             return new_handler
 
         self.handler.copy = _tracked_copy  # type: ignore[assignment]
@@ -463,15 +490,30 @@ class WebUI:
         if self._robot is not None:
             try:
                 self._robot.media.start_playing()
-                logger.info("Robot speaker enabled for WebUI audio tee")
+                self._robot.media.start_recording()
+                import time
+                time.sleep(1)
+                logger.info("Robot audio I/O enabled (mic + speaker)")
             except Exception as e:
-                logger.warning("Could not start robot media player: %s", e)
+                logger.warning("Could not start robot media pipelines: %s", e)
+
+            @self.app.on_event("startup")
+            async def _start_robot_mic() -> None:
+                self._record_task = asyncio.create_task(self._robot_record_loop())
+
         logger.info("Starting web UI on http://%s:%s", self.host, self.port)
         uvicorn.run(self.app, host=self.host, port=self.port, log_level="info")
 
     def close(self) -> None:
         """Stop robot media if running."""
         if self._robot is not None:
+            task = getattr(self, "_record_task", None)
+            if task and not task.done():
+                task.cancel()
+            try:
+                self._robot.media.stop_recording()
+            except Exception:
+                pass
             try:
                 self._robot.media.stop_playing()
             except Exception:
