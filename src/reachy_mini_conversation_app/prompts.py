@@ -75,19 +75,24 @@ def get_session_instructions() -> str:
             logger.info(f"Loading prompt from profile '{profile}'")
         instructions_file = config.PROFILES_DIRECTORY / profile / INSTRUCTIONS_FILENAME
 
+    default_file = PROMPTS_LIBRARY_DIRECTORY / "default_prompt.txt"
+
     try:
         if instructions_file.exists():
             instructions = instructions_file.read_text(encoding="utf-8").strip()
             if instructions:
-                # Expand [<name>] placeholders with content from prompts library
                 expanded_instructions = _expand_prompt_includes(instructions)
                 return expanded_instructions
-            logger.error(f"Profile '{profile}' has empty {INSTRUCTIONS_FILENAME}")
-            sys.exit(1)
-        logger.error(f"Profile {profile} has no {INSTRUCTIONS_FILENAME}")
-        sys.exit(1)
+            logger.warning(f"Profile '{profile}' has empty {INSTRUCTIONS_FILENAME}, falling back to default")
+        else:
+            logger.warning(f"Profile '{profile}' has no {INSTRUCTIONS_FILENAME}, falling back to default")
     except Exception as e:
-        logger.error(f"Failed to load instructions from profile '{profile}': {e}")
+        logger.warning(f"Failed to load instructions from profile '{profile}': {e}, falling back to default")
+
+    try:
+        return default_file.read_text(encoding="utf-8").strip()
+    except Exception:
+        logger.error("Could not load default prompt either")
         sys.exit(1)
 
 
