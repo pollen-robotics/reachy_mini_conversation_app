@@ -1,15 +1,18 @@
 """Tests for the YOLO tracking process."""
 
+from __future__ import annotations
+import os
 import sys
 import time
 import subprocess
+import importlib.util
+from typing import Any
 from pathlib import Path
 from textwrap import dedent
 
 import numpy as np
 import pytest
 
-import reachy_mini_conversation_app.vision.head_tracking.yolo_process as head_tracker_module
 from reachy_mini_conversation_app.vision.head_tracking.yolo_process import YoloHeadTrackerProcess
 
 
@@ -17,6 +20,7 @@ def _patch_fake_worker(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     worker_body: str,
+    popen_kwargs: dict[str, Any] | None = None,
 ) -> None:
     """Patch the tracker subprocess with a test worker script."""
     worker_script = tmp_path / "fake_head_tracker_worker.py"
@@ -60,12 +64,17 @@ def _patch_fake_worker(
         encoding="utf-8",
     )
 
-    real_popen = subprocess.Popen
+    real_popen: Any = subprocess.Popen
 
-    def _spawn_fake_worker(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+    def _spawn_fake_worker(*args: object, **kwargs: Any) -> Any:
+        if popen_kwargs is not None:
+            popen_kwargs.update(kwargs)
         return real_popen([sys.executable, str(worker_script)], **kwargs)
 
-    monkeypatch.setattr(head_tracker_module.subprocess, "Popen", _spawn_fake_worker)
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.vision.head_tracking.yolo_process.subprocess.Popen",
+        _spawn_fake_worker,
+    )
 
 
 def test_head_tracker_skips_new_frame_until_timed_out_reply_is_drained(
@@ -160,5 +169,45 @@ def test_head_tracker_accepts_numpy_floating_roll_values(
         assert eye_center is not None
         assert np.allclose(eye_center, np.array([0.25, -0.5], dtype=np.float32))
         assert roll == pytest.approx(0.75)
+    finally:
+        tracker.close()
+
+
+def test_head_tracker_bootstrap_adds_src_parent_to_pythonpath(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The subprocess bootstrap should prepend the src directory to PYTHONPATH."""
+    popen_kwargs: dict[str, Any] = {}
+    _patch_fake_worker(
+        monkeypatch,
+        tmp_path,
+        """
+        _send_message(("ready", None))
+
+        while True:
+            try:
+                message = _receive_message()
+            except EOFError:
+                raise SystemExit(0)
+
+            if message[0] == "close":
+                raise SystemExit(0)
+        """,
+        popen_kwargs=popen_kwargs,
+    )
+
+    tracker = YoloHeadTrackerProcess()
+    try:
+        env = popen_kwargs["env"]
+        assert isinstance(env, dict)
+        pythonpath = env["PYTHONPATH"]
+        assert isinstance(pythonpath, str)
+        package_spec = importlib.util.find_spec("reachy_mini_conversation_app")
+        package_locations = None if package_spec is None else package_spec.submodule_search_locations
+        assert package_locations
+        assert pythonpath.split(os.pathsep)[0] == str(
+            Path(next(iter(package_locations))).resolve().parent
+        )
     finally:
         tracker.close()

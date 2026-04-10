@@ -11,6 +11,7 @@ import struct
 import logging
 import threading
 import subprocess
+import importlib.util
 from typing import IO, TypeGuard
 from pathlib import Path
 
@@ -140,7 +141,11 @@ class YoloHeadTrackerProcess:
 
         module_path = "reachy_mini_conversation_app.vision.head_tracking.yolo_process"
         env = os.environ.copy()
-        project_src = Path(__file__).resolve().parents[2]
+        package_spec = importlib.util.find_spec("reachy_mini_conversation_app")
+        package_locations = None if package_spec is None else package_spec.submodule_search_locations
+        if not package_locations:
+            raise RuntimeError("Unable to determine the reachy_mini_conversation_app package path")
+        project_src = Path(next(iter(package_locations))).resolve().parent
         existing_pythonpath = env.get("PYTHONPATH")
         env["PYTHONPATH"] = (
             str(project_src)
