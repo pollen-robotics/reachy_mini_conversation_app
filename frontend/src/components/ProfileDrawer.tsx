@@ -197,8 +197,8 @@ export default function ProfileDrawer({ open, onClose, settings, onUpdate, initi
             <Box
               sx={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
-                gap: 1.5,
+                gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+                gap: 1,
                 mb: 3,
               }}
             >
@@ -223,8 +223,8 @@ export default function ProfileDrawer({ open, onClose, settings, onUpdate, initi
             <Box
               sx={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
-                gap: 1.5,
+                gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+                gap: 1,
               }}
             >
               {BUILTIN_PROFILES.map((p) => (

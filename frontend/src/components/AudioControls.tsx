@@ -155,42 +155,59 @@ export default function AudioControls({
   const [vadActive, setVadActive] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const serverDoneRef = useRef(false);
+  const pendingSilentRef = useRef(false);
+  const safetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearSpeaking = useCallback(() => {
+    serverDoneRef.current = false;
+    pendingSilentRef.current = false;
+    if (safetyTimerRef.current) { clearTimeout(safetyTimerRef.current); safetyTimerRef.current = null; }
+    setIsSpeaking(false);
+    setIsProcessing(false);
+  }, []);
 
   useEffect(() => {
     if (!isConnected) {
-      serverDoneRef.current = false;
-      setIsSpeaking(false);
+      clearSpeaking();
       setVadActive(false);
-      setIsProcessing(false);
     }
-  }, [isConnected]);
+  }, [isConnected, clearSpeaking]);
 
   useEffect(() => {
     const unsubs = [
       voiceEventBus.on("tts:start", () => {
         serverDoneRef.current = false;
+        pendingSilentRef.current = false;
+        if (safetyTimerRef.current) { clearTimeout(safetyTimerRef.current); safetyTimerRef.current = null; }
         setIsSpeaking(true);
         setIsProcessing(false);
       }),
       voiceEventBus.on("response:done", () => {
         serverDoneRef.current = true;
+        if (pendingSilentRef.current) {
+          clearSpeaking();
+        } else {
+          safetyTimerRef.current = setTimeout(clearSpeaking, 2000);
+        }
       }),
       voiceEventBus.on("tts:stop", () => {
-        serverDoneRef.current = false;
-        setIsSpeaking(false);
-        setIsProcessing(false);
+        clearSpeaking();
       }),
       voiceEventBus.on("bot:audio_silent", () => {
         if (serverDoneRef.current) {
-          serverDoneRef.current = false;
-          setIsSpeaking(false);
+          clearSpeaking();
+        } else {
+          pendingSilentRef.current = true;
         }
       }),
       voiceEventBus.on("vad:start", () => { setVadActive(true); setIsProcessing(false); }),
       voiceEventBus.on("vad:end", () => { setVadActive(false); setIsProcessing(true); }),
     ];
-    return () => unsubs.forEach((fn) => fn());
-  }, []);
+    return () => {
+      unsubs.forEach((fn) => fn());
+      if (safetyTimerRef.current) clearTimeout(safetyTimerRef.current);
+    };
+  }, [clearSpeaking]);
 
   const { levelRef, setBarRef } = useAudioLevel(isConnected, getLocalStream);
 
@@ -238,9 +255,8 @@ export default function AudioControls({
         flexDirection: "column",
         alignItems: "center",
         gap: 0.5,
-        borderTop: 1,
-        borderColor: "divider",
-        bgcolor: "background.paper",
+        borderTop: "1px solid",
+        borderColor: (t) => t.palette.mode === "dark" ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)",
       }}
     >
       {/* Main row: [Mic] -- ORB -- [Stop] */}

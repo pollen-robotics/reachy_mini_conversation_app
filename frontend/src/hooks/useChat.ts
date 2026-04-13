@@ -8,9 +8,14 @@ export interface ChatMessage {
   content: string;
   partial?: boolean;
   toolName?: string;
+  toolCallId?: string;
   toolStatus?: ToolStatus;
   imageUrl?: string;
   ts: number;
+}
+
+function normalizeToolName(raw: string): string {
+  return raw.replace(/^🛠️\s*Used tool\s*/i, "").trim();
 }
 
 export function useChat() {
@@ -98,20 +103,34 @@ export function useChat() {
   );
 
   const addToolMessage = useCallback(
-    (toolName: string, result: string, status: ToolStatus = "done") => {
+    (toolName: string, result: string, status: ToolStatus = "done", callId?: string) => {
+      const normalized = normalizeToolName(toolName);
       if (status === "done") {
         setMessages((prev) => {
-          for (let i = prev.length - 1; i >= 0; i--) {
-            if (prev[i].role === "tool" && prev[i].toolName === toolName && prev[i].toolStatus === "running") {
-              const updated = [...prev];
-              updated[i] = { ...updated[i], content: result, toolStatus: "done" };
-              return updated;
+          for (let i = 0; i < prev.length; i++) {
+            const m = prev[i];
+            if (m.role !== "tool" || m.toolStatus !== "running") continue;
+            if (callId && m.toolCallId) {
+              if (m.toolCallId !== callId) continue;
+            } else if (normalizeToolName(m.toolName ?? "") !== normalized) {
+              continue;
             }
+            const updated = [...prev];
+            updated[i] = { ...updated[i], content: result, toolStatus: "done", toolName: normalized, toolCallId: callId };
+            return updated;
           }
-          return [...prev, { ...{ role: "tool" as const, content: result, toolName, toolStatus: status }, id: ++nextId.current, ts: Date.now() }];
+          return [...prev, { role: "tool" as const, content: result, toolName: normalized, toolCallId: callId, toolStatus: status, id: ++nextId.current, ts: Date.now() }];
         });
       } else {
-        addMessage({ role: "tool", content: result, toolName, toolStatus: status });
+        setMessages((prev) => {
+          const isToolError = (m: ChatMessage) => {
+            if (m.role !== "tool" || m.toolStatus !== "done") return false;
+            if (normalizeToolName(m.toolName ?? "") !== normalized) return false;
+            try { return JSON.parse(m.content).error != null; } catch { return false; }
+          };
+          const cleaned = prev.filter((m) => !isToolError(m));
+          return [...cleaned, { role: "tool" as const, content: result, toolName: normalized, toolCallId: callId, toolStatus: status, id: ++nextId.current, ts: Date.now() }];
+        });
       }
     },
     [addMessage],

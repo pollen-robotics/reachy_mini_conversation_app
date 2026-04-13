@@ -47,11 +47,14 @@ export const lightTheme = createTheme({
     secondary: { main: "#764ba2" },
     success: { main: "#22c55e" },
     error: { main: "#ef4444" },
-    background: { default: "#fafafc", paper: "#fff" },
+    background: { default: "#f5f5f5", paper: "#f5f5f5" },
     divider: "rgba(0, 0, 0, 0.18)",
   },
   components: {
     ...shared.components,
+    MuiCssBaseline: {
+      styleOverrides: { body: { margin: 0, overflow: "hidden", backgroundColor: "#f5f5f5" } },
+    },
     MuiTooltip: {
       styleOverrides: {
         tooltip: {
@@ -79,11 +82,14 @@ export const darkTheme = createTheme({
     secondary: { main: "#764ba2" },
     success: { main: "#22c55e" },
     error: { main: "#ef4444" },
-    background: { default: "#1a1a1a", paper: "#242424" },
+    background: { default: "#1a1a1a", paper: "#1a1a1a" },
     divider: "rgba(255, 255, 255, 0.12)",
   },
   components: {
     ...shared.components,
+    MuiCssBaseline: {
+      styleOverrides: { body: { margin: 0, overflow: "hidden", backgroundColor: "#1a1a1a" } },
+    },
     MuiTooltip: {
       styleOverrides: {
         tooltip: {

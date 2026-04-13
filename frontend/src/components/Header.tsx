@@ -38,9 +38,8 @@ export default function Header({
         display: "flex",
         alignItems: "center",
         gap: 1,
-        borderBottom: 1,
-        borderColor: "divider",
-        bgcolor: "background.paper",
+        borderBottom: "1px solid",
+        borderColor: (t) => t.palette.mode === "dark" ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)",
         minHeight: 52,
         flexShrink: 0,
       }}

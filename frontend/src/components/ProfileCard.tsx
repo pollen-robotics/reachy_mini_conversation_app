@@ -21,7 +21,7 @@ interface Props {
 const cardSx = (selected: boolean) => ({
   position: "relative" as const,
   display: "flex",
-  flexDirection: "column" as const,
+  flexDirection: "row" as const,
   borderColor: selected ? "primary.main" : "divider",
   borderWidth: selected ? 2 : 1,
   transition: "all 0.2s ease",
@@ -36,12 +36,12 @@ export function ProfileCard({ name, description, avatar, selected, onSelect, onD
     <Card variant="outlined" sx={cardSx(selected)}>
       <CardActionArea
         onClick={onSelect}
-        sx={{ p: 2, display: "flex", flexDirection: "column", alignItems: "center", gap: 1.5, flex: 1 }}
+        sx={{ px: 1.5, py: 1.25, display: "flex", flexDirection: "row", alignItems: "center", gap: 1.5, flex: 1 }}
       >
         <Box
           sx={{
-            width: 88,
-            height: 88,
+            width: 40,
+            height: 40,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -54,14 +54,14 @@ export function ProfileCard({ name, description, avatar, selected, onSelect, onD
             style={{ width: "100%", height: "100%", objectFit: "contain" }}
           />
         </Box>
-        <Box sx={{ textAlign: "center", minHeight: 48 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 600, lineHeight: 1.3 }}>
+        <Box sx={{ minWidth: 0, flex: 1 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, lineHeight: 1.3, fontSize: "0.8rem" }}>
             {name}
           </Typography>
           <Typography
             variant="caption"
             color="text.secondary"
-            sx={{ display: "block", mt: 0.25, lineHeight: 1.3 }}
+            sx={{ display: "block", mt: 0.15, lineHeight: 1.3, fontSize: "0.7rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
           >
             {description}
           </Typography>
@@ -71,7 +71,7 @@ export function ProfileCard({ name, description, avatar, selected, onSelect, onD
       {selected && (
         <CheckCircleIcon
           color="primary"
-          sx={{ position: "absolute", top: 8, left: 8, fontSize: 18 }}
+          sx={{ position: "absolute", top: 6, left: 6, fontSize: 14 }}
         />
       )}
 
@@ -81,15 +81,15 @@ export function ProfileCard({ name, description, avatar, selected, onSelect, onD
         onClick={(e) => { e.stopPropagation(); onDetails(); }}
         sx={{
           position: "absolute",
-          top: 6,
-          right: 6,
+          top: 4,
+          right: 4,
           opacity: selected ? 0.7 : 0,
           transition: "opacity 0.15s ease",
           bgcolor: "background.paper",
           "&:hover": { bgcolor: "action.hover", opacity: 1 },
         }}
       >
-        <InfoOutlinedIcon sx={{ fontSize: 16 }} />
+        <InfoOutlinedIcon sx={{ fontSize: 14 }} />
       </IconButton>
     </Card>
   );
@@ -108,12 +108,12 @@ export function SavedCustomCard({ name, selected, onSelect, onEdit }: SavedCusto
     <Card variant="outlined" sx={cardSx(selected)}>
       <CardActionArea
         onClick={onSelect}
-        sx={{ p: 2, display: "flex", flexDirection: "column", alignItems: "center", gap: 1.5, flex: 1 }}
+        sx={{ px: 1.5, py: 1.25, display: "flex", flexDirection: "row", alignItems: "center", gap: 1.5, flex: 1 }}
       >
         <Box
           sx={{
-            width: 64,
-            height: 64,
+            width: 36,
+            height: 36,
             borderRadius: "50%",
             display: "flex",
             alignItems: "center",
@@ -121,21 +121,21 @@ export function SavedCustomCard({ name, selected, onSelect, onEdit }: SavedCusto
             border: "2px solid",
             borderColor: "primary.main",
             color: "primary.main",
-            fontSize: "1.3rem",
+            fontSize: "0.85rem",
             fontWeight: 700,
-            bgcolor: "primary.50",
+            flexShrink: 0,
           }}
         >
           {initial}
         </Box>
-        <Box sx={{ textAlign: "center", minHeight: 48 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 600, lineHeight: 1.3 }}>
+        <Box sx={{ minWidth: 0, flex: 1 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, lineHeight: 1.3, fontSize: "0.8rem" }}>
             {name}
           </Typography>
           <Typography
             variant="caption"
             color="text.secondary"
-            sx={{ display: "block", mt: 0.25, lineHeight: 1.3 }}
+            sx={{ display: "block", mt: 0.15, lineHeight: 1.3, fontSize: "0.7rem" }}
           >
             Custom profile
           </Typography>
@@ -145,7 +145,7 @@ export function SavedCustomCard({ name, selected, onSelect, onEdit }: SavedCusto
       {selected && (
         <CheckCircleIcon
           color="primary"
-          sx={{ position: "absolute", top: 8, left: 8, fontSize: 18 }}
+          sx={{ position: "absolute", top: 6, left: 6, fontSize: 14 }}
         />
       )}
 
@@ -155,15 +155,15 @@ export function SavedCustomCard({ name, selected, onSelect, onEdit }: SavedCusto
         onClick={(e) => { e.stopPropagation(); onEdit(); }}
         sx={{
           position: "absolute",
-          top: 6,
-          right: 6,
+          top: 4,
+          right: 4,
           opacity: selected ? 0.7 : 0,
           transition: "opacity 0.15s ease",
           bgcolor: "background.paper",
           "&:hover": { bgcolor: "action.hover", opacity: 1 },
         }}
       >
-        <EditOutlinedIcon sx={{ fontSize: 16 }} />
+        <EditOutlinedIcon sx={{ fontSize: 14 }} />
       </IconButton>
     </Card>
   );
@@ -184,18 +184,18 @@ export function NewCustomCard({ onSelect }: NewCustomProps) {
         borderStyle: "dashed",
         transition: "all 0.2s ease",
         display: "flex",
-        flexDirection: "column",
+        flexDirection: "row",
         "&:hover": { borderColor: "text.secondary" },
       }}
     >
       <CardActionArea
         onClick={onSelect}
-        sx={{ p: 2, display: "flex", flexDirection: "column", alignItems: "center", gap: 1.5, flex: 1 }}
+        sx={{ px: 1.5, py: 1.25, display: "flex", flexDirection: "row", alignItems: "center", gap: 1.5, flex: 1 }}
       >
         <Box
           sx={{
-            width: 64,
-            height: 64,
+            width: 36,
+            height: 36,
             borderRadius: "50%",
             display: "flex",
             alignItems: "center",
@@ -203,18 +203,19 @@ export function NewCustomCard({ onSelect }: NewCustomProps) {
             border: "2px dashed",
             borderColor: "text.secondary",
             color: "text.secondary",
+            flexShrink: 0,
           }}
         >
-          <AddIcon />
+          <AddIcon sx={{ fontSize: 18 }} />
         </Box>
-        <Box sx={{ textAlign: "center", minHeight: 48 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 600, lineHeight: 1.3 }}>
+        <Box sx={{ minWidth: 0, flex: 1 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, lineHeight: 1.3, fontSize: "0.8rem" }}>
             New Profile
           </Typography>
           <Typography
             variant="caption"
             color="text.secondary"
-            sx={{ display: "block", mt: 0.25, lineHeight: 1.3 }}
+            sx={{ display: "block", mt: 0.15, lineHeight: 1.3, fontSize: "0.7rem" }}
           >
             Create a personality
           </Typography>

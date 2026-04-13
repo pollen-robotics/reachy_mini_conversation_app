@@ -374,6 +374,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         {
                             "role": "assistant",
                             "content": json.dumps(tool_result),
+                            "call_id": bg_tool.id,
                             "metadata": {
                                 "title": f"🛠️ Used tool {bg_tool.tool_name}",
                                 "status": "done",
@@ -610,6 +611,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                     {
                                         "role": "assistant",
                                         "content": f"🛠️ Used tool {tool_name} with args {args_json_str}. The tool is now running. Tool ID: {bg_tool.tool_id}",
+                                        "call_id": call_id,
                                     },
                                 ),
                             )

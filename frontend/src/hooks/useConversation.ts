@@ -148,7 +148,8 @@ export function useConversation(
         const title = (msg.title as string) ?? "";
         const content = (msg.content as string) ?? "";
         const toolStatus = (msg.status as "running" | "done") ?? "done";
-        chatRef.current.addToolMessage(title, content, toolStatus);
+        const callId = (msg.call_id as string) ?? undefined;
+        chatRef.current.addToolMessage(title, content, toolStatus, callId);
         break;
       }
 

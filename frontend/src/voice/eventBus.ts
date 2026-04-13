@@ -2,6 +2,7 @@ export interface VoiceEvents {
   "tts:start": Record<string, never>;
   "tts:done": Record<string, never>;
   "tts:stop": Record<string, never>;
+  "response:done": Record<string, never>;
   "stt:partial": { text: string };
   "stt:complete": { text: string };
   "vad:start": Record<string, never>;

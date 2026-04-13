@@ -21,8 +21,9 @@ function useThemeFromContext() {
 
   if (!bgParam) return base;
 
+  const bg = `#${bgParam}`;
   return createTheme(base, {
-    palette: { background: { default: `#${bgParam}` } },
+    palette: { background: { default: bg, paper: bg } },
   });
 }
 

@@ -61,19 +61,27 @@ def _format_control_message(msg: dict[str, Any]) -> dict[str, Any] | None:
     if isinstance(content, str) and content.startswith("data:image"):
         return {"type": "image", "data": content}
 
+    call_id = msg.get("call_id")
+
     if metadata:
-        return {
+        event: dict[str, Any] = {
             "type": "tool",
             "title": metadata.get("title", ""),
             "content": content if isinstance(content, str) else json.dumps(content),
             "status": "done",
         }
+        if call_id:
+            event["call_id"] = call_id
+        return event
 
     if isinstance(content, str) and content.startswith("\U0001f6e0\ufe0f Used tool"):
         parts = content.split(" with args ", 1)
         tool_name = parts[0].replace("\U0001f6e0\ufe0f Used tool ", "")
         args_str = parts[1].split(". The tool is now running.")[0] if len(parts) > 1 else "{}"
-        return {"type": "tool", "title": tool_name, "content": args_str, "status": "running"}
+        event = {"type": "tool", "title": tool_name, "content": args_str, "status": "running"}
+        if call_id:
+            event["call_id"] = call_id
+        return event
 
     if isinstance(content, str) and content.startswith("[error]"):
         return {"type": "error", "content": content[len("[error] "):]}

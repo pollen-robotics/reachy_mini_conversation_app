@@ -233,9 +233,9 @@ export default function WelcomeScreen({ onSelect, onCreateCustom, onSkip }: Prop
           <Box
             sx={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
-              gap: 1.5,
-              maxWidth: 720,
+              gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)" },
+              gap: 1,
+              maxWidth: 520,
               width: "100%",
             }}
           >
@@ -304,10 +304,11 @@ function RandomTile({
       disabled={isActive}
       sx={{
         display: "flex",
-        flexDirection: "column",
+        flexDirection: "row",
         alignItems: "center",
         gap: 1.5,
-        p: 2,
+        px: 1.5,
+        py: 1.25,
         borderRadius: 1,
         border: 1,
         borderColor: isActive ? "primary.main" : "divider",
@@ -315,19 +316,19 @@ function RandomTile({
         transition: "all 0.2s ease",
         "&:hover": {
           borderColor: "primary.main",
-          transform: isActive ? "none" : "translateY(-2px)",
+          transform: isActive ? "none" : "translateY(-1px)",
         },
       }}
     >
       <Box
         sx={{
-          width: 88,
-          height: 88,
+          width: 40,
+          height: 40,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           flexShrink: 0,
-          gap: "8px",
+          gap: "4px",
         }}
       >
         <Box
@@ -337,7 +338,7 @@ function RandomTile({
             transition: "transform 0.2s ease",
           }}
         >
-          <DiceFace value={diceValues.d1} size={34} color={isShaking ? color : theme.palette.text.secondary} />
+          <DiceFace value={diceValues.d1} size={18} color={isShaking ? color : theme.palette.text.secondary} />
         </Box>
         <Box
           sx={{
@@ -346,18 +347,18 @@ function RandomTile({
             transition: "transform 0.2s ease",
           }}
         >
-          <DiceFace value={diceValues.d2} size={34} color={isShaking ? color : theme.palette.text.secondary} />
+          <DiceFace value={diceValues.d2} size={18} color={isShaking ? color : theme.palette.text.secondary} />
         </Box>
       </Box>
 
-      <Box sx={{ textAlign: "center", minHeight: 48 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 600, lineHeight: 1.3 }}>
+      <Box sx={{ textAlign: "left", minWidth: 0, flex: 1 }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 600, lineHeight: 1.3, fontSize: "0.8rem" }}>
           {isActive ? "Rolling..." : "Surprise Me"}
         </Typography>
         <Typography
           variant="caption"
           color="text.secondary"
-          sx={{ display: "block", mt: 0.25, lineHeight: 1.3 }}
+          sx={{ display: "block", mt: 0.15, lineHeight: 1.3, fontSize: "0.7rem" }}
         >
           Random personality
         </Typography>
@@ -373,10 +374,11 @@ function CreateCustomTile({ onSelect, disabled = false }: { onSelect: () => void
       disabled={disabled}
       sx={{
         display: "flex",
-        flexDirection: "column",
+        flexDirection: "row",
         alignItems: "center",
         gap: 1.5,
-        p: 2,
+        px: 1.5,
+        py: 1.25,
         borderRadius: 1,
         border: 1,
         borderStyle: "dashed",
@@ -386,15 +388,14 @@ function CreateCustomTile({ onSelect, disabled = false }: { onSelect: () => void
         opacity: disabled ? 0.4 : 1,
         "&:hover": {
           borderColor: disabled ? "divider" : "primary.main",
-          transform: disabled ? "none" : "translateY(-2px)",
+          transform: disabled ? "none" : "translateY(-1px)",
         },
       }}
     >
       <Box
         sx={{
-          width: 64,
-          height: 64,
-          my: "12px",
+          width: 36,
+          height: 36,
           borderRadius: "50%",
           display: "flex",
           alignItems: "center",
@@ -402,18 +403,19 @@ function CreateCustomTile({ onSelect, disabled = false }: { onSelect: () => void
           border: "2px dashed",
           borderColor: "text.secondary",
           color: "text.secondary",
+          flexShrink: 0,
         }}
       >
-        <AddIcon />
+        <AddIcon sx={{ fontSize: 18 }} />
       </Box>
-      <Box sx={{ textAlign: "center", minHeight: 48 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 600, lineHeight: 1.3 }}>
+      <Box sx={{ textAlign: "left", minWidth: 0, flex: 1 }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 600, lineHeight: 1.3, fontSize: "0.8rem" }}>
           Create Your Own
         </Typography>
         <Typography
           variant="caption"
           color="text.secondary"
-          sx={{ display: "block", mt: 0.25, lineHeight: 1.3 }}
+          sx={{ display: "block", mt: 0.15, lineHeight: 1.3, fontSize: "0.7rem" }}
         >
           Custom personality
         </Typography>
@@ -441,26 +443,27 @@ function PersonalityTile({
       disabled={disabled}
       sx={{
         display: "flex",
-        flexDirection: "column",
+        flexDirection: "row",
         alignItems: "center",
         gap: 1.5,
-        p: 2,
+        px: 1.5,
+        py: 1.25,
         borderRadius: 1,
         border: 2,
         borderColor: highlighted ? "primary.main" : "divider",
         bgcolor: "background.paper",
         transition: highlighted ? "all 0.06s ease-out" : "all 0.2s ease",
-        transform: highlighted ? "scale(1.05)" : "scale(1)",
+        transform: highlighted ? "scale(1.03)" : "scale(1)",
         boxShadow: highlighted ? (theme) => `0 0 20px ${theme.palette.primary.main}44, 0 4px 16px ${theme.palette.primary.main}22` : "none",
         zIndex: highlighted ? 2 : 1,
         "&:hover": {
           borderColor: disabled ? "divider" : "primary.main",
-          transform: disabled ? "none" : highlighted ? "scale(1.05)" : "translateY(-2px)",
+          transform: disabled ? "none" : highlighted ? "scale(1.03)" : "translateY(-1px)",
           boxShadow: disabled ? "none" : `0 4px 20px ${gradient[0]}22`,
         },
       }}
     >
-      <Box sx={{ width: 88, height: 88, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+      <Box sx={{ width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
         <img
           src={profile.avatar.image}
           alt=""
@@ -473,14 +476,14 @@ function PersonalityTile({
           }}
         />
       </Box>
-      <Box sx={{ textAlign: "center", minHeight: 48 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 600, lineHeight: 1.3 }}>
+      <Box sx={{ textAlign: "left", minWidth: 0, flex: 1 }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 600, lineHeight: 1.3, fontSize: "0.8rem" }}>
           {profile.name}
         </Typography>
         <Typography
           variant="caption"
           color="text.secondary"
-          sx={{ display: "block", mt: 0.25, lineHeight: 1.3 }}
+          sx={{ display: "block", mt: 0.15, lineHeight: 1.3, fontSize: "0.7rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
         >
           {profile.description}
         </Typography>

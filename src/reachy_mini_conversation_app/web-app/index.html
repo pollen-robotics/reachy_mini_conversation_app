@@ -8,7 +8,25 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
     />
-    <script type="module" crossorigin src="/assets/index-BlKxNovV.js"></script>
+    <style>
+      html, body { background-color: #fafafc !important; }
+      @media (prefers-color-scheme: dark) { html, body { background-color: #1a1a1a !important; } }
+    </style>
+    <script>
+      (function() {
+        var p = new URLSearchParams(window.location.search);
+        var bg = p.get('bg');
+        var theme = p.get('theme');
+        if (bg || theme) {
+          var color = bg ? '#' + bg : (theme === 'dark' ? '#1a1a1a' : '#fafafc');
+          var s = 'html,body{background-color:' + color + '!important}';
+          var el = document.createElement('style');
+          el.textContent = s;
+          document.head.appendChild(el);
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-DW5K1ge-.js"></script>
   </head>
   <body>
     <div id="root"></div>
