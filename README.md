@@ -33,7 +33,7 @@ Conversational app for the Reachy Mini robot combining real-time voice APIs (Ope
 - Real-time audio conversation loop with `fastrtc` for low-latency streaming. Supports two backends:
   - **OpenAI Realtime** (`gpt-realtime`) â€” default
   - **Gemini Live** (`gemini-3.1-flash-live-preview`) â€” alternative, using the Google GenAI SDK
-- Vision processing uses gpt-realtime by default (when camera tool is used), with optional on-device local vision using SmolVLM2 (CPU/GPU/MPS) via `--local-vision`.
+- Vision processing uses the selected realtime backend by default (when camera tool is used), with optional on-device local vision using SmolVLM2 (CPU/GPU/MPS) via `--local-vision`.
 - Layered motion system queues primary moves (dances, emotions, goto poses, breathing) while blending speech-reactive wobble and head-tracking.
 - Async tool dispatch integrates robot motion, camera capture, and optional head-tracking capabilities through a Gradio web UI with live transcripts.
 
@@ -121,13 +121,14 @@ Some wheels (like PyTorch) are large and require compatible CUDA or CPU buildsâ€
 ## Configuration
 
 1. Copy `.env.example` to `.env`
-2. Fill in your API key and model choice
+2. Fill in your API key and backend choice
 
 | Variable | Description |
 |----------|-------------|
 | `OPENAI_API_KEY` | Required for OpenAI mode. Grants access to the OpenAI realtime endpoint. |
 | `GEMINI_API_KEY` | Required for Gemini mode. Also accepts `GOOGLE_API_KEY`. Get one at [aistudio.google.com](https://aistudio.google.com/apikey). |
-| `MODEL_NAME` | Which backend to use. `gpt-realtime` (default) for OpenAI, or `gemini-3.1-flash-live-preview` for Gemini Live. |
+| `BACKEND_PROVIDER` | Realtime backend to use: `openai` (default) or `gemini`. |
+| `MODEL_NAME` | Optional model override for the selected backend. Defaults to `gpt-realtime` for OpenAI and `gemini-3.1-flash-live-preview` for Gemini Live. |
 | `HF_HOME` | Cache directory for local Hugging Face downloads (only used with `--local-vision` flag, defaults to `./cache`). |
 | `HF_TOKEN` | Optional token for Hugging Face access (for gated/private assets). |
 | `LOCAL_VISION_MODEL` | Hugging Face model path for local vision processing (only used with `--local-vision` flag, defaults to `HuggingFaceTB/SmolVLM2-2.2B-Instruct`). |
@@ -137,11 +138,12 @@ Some wheels (like PyTorch) are large and require compatible CUDA or CPU buildsâ€
 To use Gemini Live instead of OpenAI Realtime, update your `.env`:
 
 ```env
+BACKEND_PROVIDER="gemini"
 MODEL_NAME="gemini-3.1-flash-live-preview"
 GEMINI_API_KEY=your-gemini-api-key
 ```
 
-The app auto-selects the correct handler based on `MODEL_NAME`. All features (tools, profiles, head tracking) work with both backends.
+`BACKEND_PROVIDER` is the primary switch. The app still falls back to `MODEL_NAME` for compatibility with older configs, and all features (tools, profiles, head tracking) work with both backends.
 
 > [!NOTE]
 > Gemini Live uses a different set of voices: Aoede, Charon, Fenrir, Kore (default), Leda, Orus, Puck, Zephyr. If your profile's `voice.txt` specifies an OpenAI voice, it will fall back to Kore.

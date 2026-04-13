@@ -69,7 +69,56 @@ GEMINI_AVAILABLE_VOICES: list[str] = [
     "Zephyr",
 ]
 
+OPENAI_BACKEND = "openai"
+GEMINI_BACKEND = "gemini"
+DEFAULT_BACKEND_PROVIDER = OPENAI_BACKEND
+DEFAULT_MODEL_NAME_BY_BACKEND = {
+    OPENAI_BACKEND: "gpt-realtime",
+    GEMINI_BACKEND: "gemini-3.1-flash-live-preview",
+}
+DEFAULT_VOICE_BY_BACKEND = {
+    OPENAI_BACKEND: "cedar",
+    GEMINI_BACKEND: "Kore",
+}
+
 logger = logging.getLogger(__name__)
+
+
+def _is_gemini_model_name(model_name: str | None) -> bool:
+    """Return True when the provided model name targets Gemini."""
+    candidate = (model_name or "").strip().lower()
+    return candidate.startswith("gemini")
+
+
+def _normalize_backend_provider(
+    backend_provider: str | None = None,
+    model_name: str | None = None,
+) -> str:
+    """Normalize backend selection, falling back to MODEL_NAME for compatibility."""
+    candidate = (backend_provider or "").strip().lower()
+    if candidate in DEFAULT_MODEL_NAME_BY_BACKEND:
+        return candidate
+    return GEMINI_BACKEND if _is_gemini_model_name(model_name) else DEFAULT_BACKEND_PROVIDER
+
+
+def _default_model_name_for_backend(backend_provider: str) -> str:
+    """Return the default model name for a normalized backend provider."""
+    return DEFAULT_MODEL_NAME_BY_BACKEND[_normalize_backend_provider(backend_provider)]
+
+
+def _resolve_model_name(
+    backend_provider: str | None = None,
+    model_name: str | None = None,
+) -> str:
+    """Return a model name that matches the selected backend provider."""
+    normalized_backend = _normalize_backend_provider(backend_provider, model_name)
+    candidate = (model_name or "").strip()
+    if candidate:
+        if normalized_backend == GEMINI_BACKEND and _is_gemini_model_name(candidate):
+            return candidate
+        if normalized_backend == OPENAI_BACKEND and not _is_gemini_model_name(candidate):
+            return candidate
+    return _default_model_name_for_backend(normalized_backend)
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -158,17 +207,27 @@ else:
 class Config:
     """Configuration class for the conversation app."""
 
-    # Required (one of these depending on MODEL_NAME)
+    # Required (one of these depending on BACKEND_PROVIDER)
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # The key is downloaded in console.py if needed
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
     # Optional
-    MODEL_NAME = os.getenv("MODEL_NAME", "gpt-realtime")
+    BACKEND_PROVIDER = _normalize_backend_provider(
+        os.getenv("BACKEND_PROVIDER"),
+        os.getenv("MODEL_NAME"),
+    )
+    MODEL_NAME = _resolve_model_name(BACKEND_PROVIDER, os.getenv("MODEL_NAME"))
     HF_HOME = os.getenv("HF_HOME", "./cache")
     LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "HuggingFaceTB/SmolVLM2-2.2B-Instruct")
     HF_TOKEN = os.getenv("HF_TOKEN")  # Optional, falls back to hf auth login if not set
 
-    logger.debug(f"Model: {MODEL_NAME}, HF_HOME: {HF_HOME}, Vision Model: {LOCAL_VISION_MODEL}")
+    logger.debug(
+        "Backend provider: %s, Model: %s, HF_HOME: %s, Vision Model: %s",
+        BACKEND_PROVIDER,
+        MODEL_NAME,
+        HF_HOME,
+        LOCAL_VISION_MODEL,
+    )
 
     # Filesystem root containing profile directories, not a Python import path.
     _profiles_directory_env = os.getenv("REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY")
@@ -243,9 +302,47 @@ class Config:
 config = Config()
 
 
+def refresh_runtime_config_from_env() -> None:
+    """Refresh mutable runtime config fields from the current environment."""
+    config.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    config.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    config.BACKEND_PROVIDER = _normalize_backend_provider(
+        os.getenv("BACKEND_PROVIDER"),
+        os.getenv("MODEL_NAME"),
+    )
+    config.MODEL_NAME = _resolve_model_name(config.BACKEND_PROVIDER, os.getenv("MODEL_NAME"))
+    config.REACHY_MINI_CUSTOM_PROFILE = LOCKED_PROFILE or os.getenv("REACHY_MINI_CUSTOM_PROFILE")
+
+
+def get_backend_choice(model_name: str | None = None) -> str:
+    """Return the configured backend family."""
+    if model_name is not None:
+        return _normalize_backend_provider(model_name=model_name)
+    return _normalize_backend_provider(config.BACKEND_PROVIDER, config.MODEL_NAME)
+
+
+def get_model_name_for_backend(backend: str) -> str:
+    """Return the default model name for a backend selector value."""
+    return _default_model_name_for_backend(_normalize_backend_provider(backend))
+
+
+def get_available_voices_for_backend(backend: str | None = None) -> list[str]:
+    """Return the curated voice list for a backend selector value."""
+    normalized_backend = get_backend_choice() if backend is None else _normalize_backend_provider(backend)
+    if normalized_backend == GEMINI_BACKEND:
+        return list(GEMINI_AVAILABLE_VOICES)
+    return list(AVAILABLE_VOICES)
+
+
+def get_default_voice_for_backend(backend: str | None = None) -> str:
+    """Return the default voice for a backend selector value."""
+    normalized_backend = get_backend_choice() if backend is None else _normalize_backend_provider(backend)
+    return DEFAULT_VOICE_BY_BACKEND[normalized_backend]
+
+
 def is_gemini_model() -> bool:
     """Return True if the configured MODEL_NAME is a Gemini Live model."""
-    return config.MODEL_NAME.lower().startswith("gemini")
+    return get_backend_choice() == GEMINI_BACKEND
 
 
 def set_custom_profile(profile: str | None) -> None:

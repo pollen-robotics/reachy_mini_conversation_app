@@ -4,8 +4,13 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from reachy_mini.media.media_manager import MediaBackend
+from reachy_mini_conversation_app.config import GEMINI_AVAILABLE_VOICES, config
 from reachy_mini_conversation_app.console import LocalStream
+from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
 
 
 def test_clear_audio_queue_prefers_clear_player_when_available() -> None:
@@ -56,3 +61,67 @@ def test_clear_audio_queue_falls_back_when_backend_is_unknown() -> None:
     audio.clear_output_buffer.assert_called_once()
     assert isinstance(handler.output_queue, asyncio.Queue)
     assert handler.output_queue.empty()
+
+
+def test_backend_config_persists_gemini_selection_and_status(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Settings API should persist Gemini backend choice and token."""
+    monkeypatch.setattr(config, "BACKEND_PROVIDER", "openai")
+    monkeypatch.setattr(config, "MODEL_NAME", "gpt-realtime")
+    monkeypatch.setattr(config, "OPENAI_API_KEY", None)
+    monkeypatch.setattr(config, "GEMINI_API_KEY", None)
+    monkeypatch.setenv("BACKEND_PROVIDER", "openai")
+    monkeypatch.setenv("MODEL_NAME", "gpt-realtime")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    app = FastAPI()
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(MagicMock(), robot, settings_app=app, instance_path=str(tmp_path))
+    stream._init_settings_ui_if_needed()
+
+    client = TestClient(app)
+
+    response = client.post(
+        "/backend_config",
+        json={"backend": "gemini", "api_key": "gem-test-token"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["backend_provider"] == "gemini"
+    assert data["active_backend"] == "openai"
+    assert data["has_gemini_key"] is True
+    assert data["has_key"] is True
+    assert data["requires_restart"] is True
+
+    status = client.get("/status")
+    assert status.status_code == 200
+    status_data = status.json()
+    assert status_data["backend_provider"] == "gemini"
+    assert status_data["active_backend"] == "openai"
+    assert status_data["has_gemini_key"] is True
+
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "BACKEND_PROVIDER=gemini" in env_text
+    assert "MODEL_NAME=gemini-3.1-flash-live-preview" in env_text
+    assert "GEMINI_API_KEY=gem-test-token" in env_text
+
+
+def test_headless_personality_routes_return_gemini_voices_when_backend_selected(monkeypatch) -> None:
+    """Headless personality UI should expose Gemini voices when Gemini is selected."""
+    monkeypatch.setattr(config, "BACKEND_PROVIDER", "gemini")
+    monkeypatch.setattr(config, "MODEL_NAME", "gemini-3.1-flash-live-preview")
+
+    app = FastAPI()
+    handler = MagicMock()
+    mount_personality_routes(app, handler, lambda: None)
+
+    client = TestClient(app)
+    response = client.get("/voices")
+
+    assert response.status_code == 200
+    assert response.json() == GEMINI_AVAILABLE_VOICES

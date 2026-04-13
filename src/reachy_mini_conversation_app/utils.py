@@ -94,7 +94,7 @@ def initialize_camera_and_vision(
             vision_processor = initialize_vision_processor()
         else:
             logging.getLogger(__name__).info(
-                "Using gpt-realtime for vision (default). Use --local-vision for local processing.",
+                "Using the selected realtime backend for vision (default). Use --local-vision for local processing.",
             )
 
     return camera_worker, vision_processor

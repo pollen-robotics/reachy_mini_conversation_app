@@ -7,6 +7,7 @@ import asyncio
 import argparse
 import threading
 from typing import Any, Dict, List, Optional
+from pathlib import Path
 
 import gradio as gr
 from fastapi import FastAPI
@@ -45,13 +46,26 @@ def run(
     """Run the Reachy Mini conversation app."""
     # Putting these dependencies here makes the dashboard faster to load when the conversation app is installed
     from reachy_mini_conversation_app.moves import MovementManager
-    from reachy_mini_conversation_app.config import config, is_gemini_model
-    from reachy_mini_conversation_app.console import LocalStream
-    from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
-    from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
+    from reachy_mini_conversation_app.config import config, is_gemini_model, refresh_runtime_config_from_env
 
     logger = setup_logger(args.debug)
     logger.info("Starting Reachy Mini Conversation App")
+
+    if instance_path is not None:
+        try:
+            from dotenv import load_dotenv
+
+            env_path = Path(instance_path) / ".env"
+            if env_path.exists():
+                load_dotenv(dotenv_path=str(env_path), override=True)
+                refresh_runtime_config_from_env()
+                logger.info("Loaded instance configuration from %s", env_path)
+        except Exception as e:
+            logger.warning("Failed to load instance configuration: %s", e)
+
+    from reachy_mini_conversation_app.console import LocalStream
+    from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+    from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
 
     if args.no_camera and args.head_tracker is not None:
         logger.warning("Head tracking disabled: --no-camera flag is set. Remove --no-camera to enable head tracking.")
@@ -141,10 +155,13 @@ def run(
     stream_manager: gr.Blocks | LocalStream | None = None
 
     if args.gradio:
+        uses_gemini_backend = is_gemini_model()
         api_key_textbox = gr.Textbox(
-            label="OPENAI API Key",
+            label="GEMINI_API_KEY" if uses_gemini_backend else "OPENAI API Key",
             type="password",
-            value=os.getenv("OPENAI_API_KEY") if not get_space() else "",
+            value=(os.getenv("GEMINI_API_KEY") if uses_gemini_backend else os.getenv("OPENAI_API_KEY"))
+            if not get_space()
+            else "",
         )
 
         from reachy_mini_conversation_app.gradio_personality import PersonalityUI
