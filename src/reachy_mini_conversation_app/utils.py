@@ -106,6 +106,7 @@ def setup_logger(debug: bool) -> logging.Logger:
     logging.basicConfig(
         level=getattr(logging, log_level, logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s:%(lineno)d | %(message)s",
+        force=True,
     )
     logger = logging.getLogger(__name__)
 
