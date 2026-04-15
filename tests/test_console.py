@@ -96,6 +96,9 @@ def test_backend_config_persists_gemini_selection_and_status(
     assert data["active_backend"] == "openai"
     assert data["has_gemini_key"] is True
     assert data["has_key"] is True
+    assert data["can_proceed"] is True
+    assert data["can_proceed_with_openai"] is False
+    assert data["can_proceed_with_gemini"] is True
     assert data["requires_restart"] is True
 
     status = client.get("/status")
@@ -104,6 +107,9 @@ def test_backend_config_persists_gemini_selection_and_status(
     assert status_data["backend_provider"] == "gemini"
     assert status_data["active_backend"] == "openai"
     assert status_data["has_gemini_key"] is True
+    assert status_data["can_proceed"] is True
+    assert status_data["can_proceed_with_openai"] is False
+    assert status_data["can_proceed_with_gemini"] is True
 
     env_text = (tmp_path / ".env").read_text(encoding="utf-8")
     assert "BACKEND_PROVIDER=gemini" in env_text
@@ -120,9 +126,11 @@ def test_backend_config_preserves_explicit_model_override_when_saving_key(
     monkeypatch.setattr(config, "BACKEND_PROVIDER", "openai")
     monkeypatch.setattr(config, "MODEL_NAME", custom_model)
     monkeypatch.setattr(config, "OPENAI_API_KEY", None)
+    monkeypatch.setattr(config, "GEMINI_API_KEY", None)
     monkeypatch.setenv("BACKEND_PROVIDER", "openai")
     monkeypatch.setenv("MODEL_NAME", custom_model)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
     app = FastAPI()
     robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
@@ -136,7 +144,11 @@ def test_backend_config_preserves_explicit_model_override_when_saving_key(
     )
 
     assert response.status_code == 200
-    assert response.json()["ok"] is True
+    data = response.json()
+    assert data["ok"] is True
+    assert data["can_proceed"] is True
+    assert data["can_proceed_with_openai"] is True
+    assert data["can_proceed_with_gemini"] is False
     assert config.MODEL_NAME == custom_model
 
     env_text = (tmp_path / ".env").read_text(encoding="utf-8")

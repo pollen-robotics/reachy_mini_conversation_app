@@ -301,14 +301,19 @@ class LocalStream:
             active_backend = self._active_backend()
             has_openai_key = _has_key(config.OPENAI_API_KEY)
             has_gemini_key = _has_key(config.GEMINI_API_KEY)
-            has_key = has_gemini_key if backend_provider == GEMINI_BACKEND else has_openai_key
+            can_proceed_with_openai = has_openai_key
+            can_proceed_with_gemini = has_gemini_key
+            can_proceed = can_proceed_with_gemini if backend_provider == GEMINI_BACKEND else can_proceed_with_openai
             requires_restart = backend_provider != active_backend
             return {
                 "active_backend": active_backend,
                 "backend_provider": backend_provider,
-                "has_key": has_key,
+                "has_key": can_proceed,
                 "has_openai_key": has_openai_key,
                 "has_gemini_key": has_gemini_key,
+                "can_proceed": can_proceed,
+                "can_proceed_with_openai": can_proceed_with_openai,
+                "can_proceed_with_gemini": can_proceed_with_gemini,
                 "requires_restart": requires_restart,
             }
 

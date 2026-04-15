@@ -31,6 +31,7 @@ const BACKEND_META = {
     readyTitle: "OpenAI Realtime ready",
     readyCopy: "OpenAI Realtime is configured. You can jump straight to personalities.",
     formCopy: "OpenAI Realtime uses the distributed key when available. Paste your own key if you want an override or need a fallback.",
+    requiredCredentialsCopy: "OpenAI Realtime usually uses the distributed key. If it is unavailable here, paste your own OpenAI key to continue.",
     note: "OpenAI Realtime uses the distributed OpenAI key. You can still paste your own key if you want to override it.",
   },
   [GEMINI_BACKEND]: {
@@ -53,7 +54,14 @@ function backendHasCredentials(status, backend) {
 }
 
 function backendCanProceed(status, backend) {
-  return backend === OPENAI_BACKEND || backendHasCredentials(status, backend);
+  if (backend === GEMINI_BACKEND) {
+    return status.can_proceed_with_gemini !== undefined
+      ? !!status.can_proceed_with_gemini
+      : backendHasCredentials(status, backend);
+  }
+  return status.can_proceed_with_openai !== undefined
+    ? !!status.can_proceed_with_openai
+    : backendHasCredentials(status, backend);
 }
 
 function backendMeta(backend) {
@@ -344,6 +352,9 @@ async function init() {
     has_key: false,
     has_openai_key: false,
     has_gemini_key: false,
+    can_proceed: false,
+    can_proceed_with_openai: false,
+    can_proceed_with_gemini: false,
     requires_restart: false,
   };
   setSelectedBackend(st.backend_provider || OPENAI_BACKEND);
@@ -429,7 +440,7 @@ async function init() {
     }
   });
 
-  if (!backendCanProceed(st, st.backend_provider || OPENAI_BACKEND) || st.requires_restart) {
+  if (!(st.can_proceed ?? backendCanProceed(st, st.backend_provider || OPENAI_BACKEND)) || st.requires_restart) {
     show(loading, false);
     return;
   }
