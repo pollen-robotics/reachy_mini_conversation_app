@@ -10,6 +10,7 @@ Audio formats (per Gemini Live API spec):
 
 import json
 import uuid
+import base64
 import random
 import asyncio
 import logging
@@ -31,6 +32,7 @@ from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_tool_specs,
 )
+from reachy_mini_conversation_app.audio.playback_sync import SpeechMotionReset
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolCallRoutine,
     ToolNotification,
@@ -163,10 +165,61 @@ class GeminiLiveHandler(AsyncStreamHandler):
 
         # Stop event for the receive loop
         self._stop_event: asyncio.Event = asyncio.Event()
+        self._pending_user_transcript_chunks: list[str] = []
+        self._pending_assistant_transcript_chunks: list[str] = []
+        self._speech_reset = SpeechMotionReset(deps.head_wobbler, deps.reachy_mini) if deps.head_wobbler else None
+        self._listening_state = False
 
     def copy(self) -> "GeminiLiveHandler":
         """Create a copy of the handler."""
         return GeminiLiveHandler(self.deps, self.gradio_mode, self.instance_path)
+
+    def _set_listening_state(self, listening: bool) -> None:
+        """Avoid queueing redundant listening-state updates."""
+        if self._listening_state == listening:
+            return
+        self._listening_state = listening
+        self.deps.movement_manager.set_listening(listening)
+
+    async def _flush_transcript_chunks(self, role: str, chunks: list[str]) -> None:
+        """Emit one finalized transcript message for the current turn."""
+        if not chunks:
+            return
+
+        transcript = "".join(chunks).strip()
+        chunks.clear()
+        if not transcript:
+            return
+
+        await self.output_queue.put(AdditionalOutputs({"role": role, "content": transcript}))
+
+    async def _mark_model_response_started(self) -> None:
+        """Switch out of user-listening mode when the model begins responding."""
+        if self._speech_reset:
+            self._speech_reset.cancel()
+        await self._flush_transcript_chunks("user", self._pending_user_transcript_chunks)
+        self._set_listening_state(False)
+
+    async def _handle_interruption(self) -> None:
+        """Stop current playback and preserve any transcript already spoken."""
+        logger.debug("Gemini: user interrupted")
+        if self._speech_reset:
+            self._speech_reset.cancel()
+        await self._flush_transcript_chunks("assistant", self._pending_assistant_transcript_chunks)
+        if hasattr(self, "_clear_queue") and callable(self._clear_queue):
+            self._clear_queue()
+        if self.deps.head_wobbler is not None:
+            self.deps.head_wobbler.reset()
+        self._set_listening_state(True)
+
+    async def _handle_turn_complete(self) -> None:
+        """Finalize the current turn and restore post-speech motion state."""
+        logger.debug("Gemini turn complete")
+        await self._flush_transcript_chunks("user", self._pending_user_transcript_chunks)
+        await self._flush_transcript_chunks("assistant", self._pending_assistant_transcript_chunks)
+        self._set_listening_state(False)
+        if self._speech_reset:
+            self._speech_reset.schedule()
 
     async def apply_personality(self, profile: str | None) -> str:
         """Apply a new personality (profile) at runtime.
@@ -359,57 +412,66 @@ class GeminiLiveHandler(AsyncStreamHandler):
             logger.info("Started background tool: %s (id=%s, call_id=%s)", tool_name, bg_tool.tool_id, call_id)
 
     async def _handle_tool_result(self, bg_tool: ToolNotification) -> None:
-        """Process the result of a completed tool and send it back to Gemini."""
-        if bg_tool.error is not None:
-            logger.error("Tool '%s' (id=%s) failed: %s", bg_tool.tool_name, bg_tool.id, bg_tool.error)
-            tool_result = {"error": bg_tool.error}
-        elif bg_tool.result is not None:
-            tool_result = bg_tool.result
-            logger.info("Tool '%s' (id=%s) succeeded.", bg_tool.tool_name, bg_tool.id)
-        else:
-            logger.warning("Tool '%s' (id=%s) returned no result and no error", bg_tool.tool_name, bg_tool.id)
-            tool_result = {"error": "No result returned from tool execution"}
+            """Process the result of a completed tool and send it back to Gemini."""
+            if bg_tool.error is not None:
+                logger.error("Tool '%s' (id=%s) failed: %s", bg_tool.tool_name, bg_tool.id, bg_tool.error)
+                tool_result = {"error": bg_tool.error}
+            elif bg_tool.result is not None:
+                tool_result = bg_tool.result
+                logger.info("Tool '%s' (id=%s) succeeded.", bg_tool.tool_name, bg_tool.id)
+            else:
+                logger.warning("Tool '%s' (id=%s) returned no result and no error", bg_tool.tool_name, bg_tool.id)
+                tool_result = {"error": "No result returned from tool execution"}
 
-        if not self.session:
-            logger.warning("Connection closed during tool '%s' execution", bg_tool.tool_name)
-            return
+            if not self.session:
+                logger.warning("Connection closed during tool '%s' execution", bg_tool.tool_name)
+                return
 
-        try:
-            # Send tool response back to Gemini
-            function_response = types.FunctionResponse(
-                id=bg_tool.id if isinstance(bg_tool.id, str) else str(bg_tool.id),
-                name=bg_tool.tool_name,
-                response=tool_result,
-            )
-            await self.session.send_tool_response(function_responses=[function_response])
+            try:
+                if bg_tool.tool_name == "camera" and isinstance(tool_result, dict) and "b64_im" in tool_result:
+                    b64_im = tool_result.pop("b64_im")
+                    if not tool_result:
+                        tool_result = {"status": "image_captured"}
 
-            await self.output_queue.put(
-                AdditionalOutputs(
-                    {
-                        "role": "assistant",
-                        "content": json.dumps(tool_result),
-                        "metadata": {
-                            "title": f"🛠️ Used tool {bg_tool.tool_name}",
-                            "status": "done",
+                    # Push the captured frame so Gemini has visual context
+                    # (supplements the ~1 FPS video feed with the exact moment).
+                    try:
+                        if isinstance(b64_im, str):
+                            image_bytes = base64.b64decode(b64_im)
+                        else:
+                            image_bytes = bytes(b64_im)
+                        await self.session.send_realtime_input(
+                            video=types.Blob(data=image_bytes, mime_type="image/jpeg")
+                        )
+                        logger.info("Pushed camera snapshot to Gemini via realtime video input")
+                    except Exception as ve:
+                        logger.warning("Failed to push camera snapshot to Gemini: %s", ve)
+
+                console_content = json.dumps(tool_result)
+
+                # Send tool response back to Gemini (text-only, JSON-safe)
+                function_response = types.FunctionResponse(
+                    id=bg_tool.id if isinstance(bg_tool.id, str) else str(bg_tool.id),
+                    name=bg_tool.tool_name,
+                    response=tool_result,
+                )
+                await self.session.send_tool_response(function_responses=[function_response])
+
+                await self.output_queue.put(
+                    AdditionalOutputs(
+                        {
+                            "role": "assistant",
+                            "content": console_content,
+                            "metadata": {
+                                "title": f"🛠️ Used tool {bg_tool.tool_name}",
+                                "status": "done",
+                            },
                         },
-                    },
-                ),
-            )
+                    ),
+                )
 
-            # Handle camera images
-            if bg_tool.tool_name == "camera" and bg_tool.result and "b64_im" in bg_tool.result:
-                b64_im = bg_tool.result["b64_im"]
-                if not isinstance(b64_im, str):
-                    b64_im = str(b64_im)
-
-                # Send image via realtime input as video frame
-                import base64
-
-                image_bytes = base64.b64decode(b64_im)
-                await self.session.send_realtime_input(video=types.Blob(data=image_bytes, mime_type="image/jpeg"))
-                logger.info("Sent camera image to Gemini via video input")
-
-                if self.deps.camera_worker is not None:
+                # Show the camera frame in the Gradio UI
+                if bg_tool.tool_name == "camera" and self.deps.camera_worker is not None:
                     np_img = self.deps.camera_worker.get_latest_frame()
                     if np_img is not None:
                         rgb_frame = cv2.cvtColor(np_img, cv2.COLOR_BGR2RGB)
@@ -420,8 +482,8 @@ class GeminiLiveHandler(AsyncStreamHandler):
                         AdditionalOutputs({"role": "assistant", "content": img}),
                     )
 
-        except Exception as e:
-            logger.warning("Error sending tool result to Gemini: %s", e)
+            except Exception as e:
+                logger.warning("Error sending tool result to Gemini: %s", e)
 
     async def _video_sender_loop(self) -> None:
         """Send camera frames to Gemini Live at ~1 FPS for continuous visual context.
@@ -490,14 +552,16 @@ class GeminiLiveHandler(AsyncStreamHandler):
 
                                 # Handle interruption / barge-in
                                 if content.interrupted is True:
-                                    logger.debug("Gemini: user interrupted")
-                                    if hasattr(self, "_clear_queue") and callable(self._clear_queue):
-                                        self._clear_queue()
-                                    if self.deps.head_wobbler is not None:
-                                        self.deps.head_wobbler.reset()
+                                    await self._handle_interruption()
 
                                 # Handle audio output from model
                                 if content.model_turn and content.model_turn.parts:
+                                    has_audio_part = any(
+                                        part.inline_data and part.inline_data.data for part in content.model_turn.parts
+                                    )
+                                    if has_audio_part:
+                                        await self._mark_model_response_started()
+
                                     for part in content.model_turn.parts:
                                         if part.inline_data and part.inline_data.data:
                                             audio_bytes = part.inline_data.data
@@ -514,7 +578,7 @@ class GeminiLiveHandler(AsyncStreamHandler):
                                             if len(audio_array) == 0:
                                                 continue
 
-                                            if self.deps.head_wobbler is not None:
+                                            if self.gradio_mode and self.deps.head_wobbler is not None:
                                                 import base64 as b64mod
 
                                                 self.deps.head_wobbler.feed(
@@ -530,23 +594,20 @@ class GeminiLiveHandler(AsyncStreamHandler):
                                 # Handle input transcription (user speech)
                                 if content.input_transcription and content.input_transcription.text:
                                     transcript = content.input_transcription.text
-                                    logger.debug("User transcript: %s", transcript)
-                                    await self.output_queue.put(
-                                        AdditionalOutputs({"role": "user", "content": transcript})
-                                    )
+                                    logger.debug("User transcript chunk: %s", transcript)
+                                    self._pending_user_transcript_chunks.append(transcript)
+                                    self._set_listening_state(True)
 
                                 # Handle output transcription (model speech)
                                 if content.output_transcription and content.output_transcription.text:
                                     transcript = content.output_transcription.text
-                                    logger.debug("Assistant transcript: %s", transcript)
-                                    await self.output_queue.put(
-                                        AdditionalOutputs({"role": "assistant", "content": transcript})
-                                    )
+                                    logger.debug("Assistant transcript chunk: %s", transcript)
+                                    await self._mark_model_response_started()
+                                    self._pending_assistant_transcript_chunks.append(transcript)
 
                                 # Turn complete
                                 if content.turn_complete:
-                                    logger.debug("Gemini turn complete")
-                                    self.deps.movement_manager.set_listening(True)
+                                    await self._handle_turn_complete()
 
                             # Handle tool calls
                             if response.tool_call:
@@ -559,6 +620,8 @@ class GeminiLiveHandler(AsyncStreamHandler):
                         await asyncio.sleep(0.1)
 
             finally:
+                if self._speech_reset:
+                    self._speech_reset.cancel()
                 if video_task is not None:
                     video_task.cancel()
                     try:

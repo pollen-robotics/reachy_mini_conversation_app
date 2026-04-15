@@ -34,6 +34,7 @@ from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_tool_specs,
 )
+from reachy_mini_conversation_app.audio.playback_sync import SpeechMotionReset
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolCallRoutine,
     ToolNotification,
@@ -133,6 +134,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self._response_done_event: asyncio.Event = asyncio.Event()
         self._response_done_event.set()
         self._last_response_rejected: bool = False
+        self._speech_reset = SpeechMotionReset(deps.head_wobbler, deps.reachy_mini) if deps.head_wobbler else None
 
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
@@ -518,6 +520,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     if event.type == "input_audio_buffer.speech_started":
                         if hasattr(self, "_clear_queue") and callable(self._clear_queue):
                             self._clear_queue()
+                        if self._speech_reset:
+                            self._speech_reset.cancel()
                         if self.deps.head_wobbler is not None:
                             self.deps.head_wobbler.reset()
                         self.deps.movement_manager.set_listening(True)
@@ -528,9 +532,13 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         logger.debug("User speech stopped - server will auto-commit with VAD")
 
                     if event.type == "response.output_audio.done":
+                        if self._speech_reset:
+                            self._speech_reset.schedule()
                         logger.debug("response completed")
 
                     if event.type == "response.created":
+                        if self._speech_reset:
+                            self._speech_reset.cancel()
                         self._response_done_event.clear()
                         logger.debug("Response created (active)")
 
@@ -597,7 +605,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
                     # Handle audio delta
                     if event.type == "response.output_audio.delta":
-                        if self.deps.head_wobbler is not None:
+                        if self._speech_reset:
+                            self._speech_reset.cancel()
+                        if self.gradio_mode and self.deps.head_wobbler is not None:
                             self.deps.head_wobbler.feed(event.delta)
                         self.last_activity_time = asyncio.get_event_loop().time()
                         logger.debug("last activity time updated to %s", self.last_activity_time)
@@ -673,6 +683,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                 AdditionalOutputs({"role": "assistant", "content": f"[error] {msg}"})
                             )
             finally:
+                if self._speech_reset:
+                    self._speech_reset.cancel()
                 # Stop the response sender worker.
                 if response_sender_task is not None:
                     response_sender_task.cancel()

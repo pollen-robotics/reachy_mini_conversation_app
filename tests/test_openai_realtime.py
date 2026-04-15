@@ -1,6 +1,8 @@
+import base64
 import random
 import asyncio
 import logging
+from types import SimpleNamespace
 from typing import Any
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -224,6 +226,104 @@ async def test_non_idle_tool_call_does_not_queue_progress_response(monkeypatch: 
 
     start_tool.assert_awaited_once()
     safe_response_create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_output_audio_done_resets_head_wobbler(monkeypatch: Any) -> None:
+    """OpenAI speech completion should explicitly restore neutral wobble state."""
+    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
+    monkeypatch.setattr(rt_mod, "get_session_voice", lambda: "alloy")
+    monkeypatch.setattr(rt_mod, "get_tool_specs", lambda: [])
+
+    class FakeEvent:
+        def __init__(self, etype: str, **kwargs: Any) -> None:
+            self.type = etype
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+    class FakeSession:
+        async def update(self, **_kw: Any) -> None:
+            pass
+
+    class FakeInputAudioBuffer:
+        async def append(self, **_kw: Any) -> None:
+            pass
+
+    class FakeItem:
+        async def create(self, **_kw: Any) -> None:
+            pass
+
+    class FakeConversation:
+        item = FakeItem()
+
+    class FakeResponse:
+        async def create(self, **_kw: Any) -> None:
+            pass
+
+        async def cancel(self, **_kw: Any) -> None:
+            pass
+
+    class FakeConn:
+        session = FakeSession()
+        input_audio_buffer = FakeInputAudioBuffer()
+        conversation = FakeConversation()
+        response = FakeResponse()
+
+        def __init__(self) -> None:
+            self._events = iter(
+                [
+                    FakeEvent("response.created"),
+                    FakeEvent(
+                        "response.output_audio.delta",
+                        delta=base64.b64encode(b"\x00\x00\x10\x00").decode("ascii"),
+                    ),
+                    FakeEvent("response.output_audio.done"),
+                ]
+            )
+
+        async def __aenter__(self) -> "FakeConn":
+            return self
+
+        async def __aexit__(self, *_args: Any) -> bool:
+            return False
+
+        async def close(self) -> None:
+            pass
+
+        def __aiter__(self) -> "FakeConn":
+            return self
+
+        async def __anext__(self) -> FakeEvent:
+            try:
+                return next(self._events)
+            except StopIteration:
+                raise StopAsyncIteration
+
+    class FakeRealtime:
+        def connect(self, **_kw: Any) -> FakeConn:
+            return FakeConn()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.realtime = FakeRealtime()
+
+    head_wobbler = MagicMock()
+    audio = SimpleNamespace()
+    reachy_mini = SimpleNamespace(media=SimpleNamespace(audio=audio))
+    deps = ToolDependencies(
+        reachy_mini=reachy_mini,
+        movement_manager=MagicMock(),
+        head_wobbler=head_wobbler,
+    )
+    handler = OpenaiRealtimeHandler(deps, gradio_mode=True)
+    handler.client = FakeClient()
+    object.__setattr__(handler.tool_manager, "start_up", MagicMock())
+    object.__setattr__(handler.tool_manager, "shutdown", AsyncMock())
+
+    await handler._run_realtime_session()
+
+    head_wobbler.feed.assert_called_once()
+    head_wobbler.reset.assert_called_once()
 
 
 def test_format_timestamp_uses_wall_clock() -> None:

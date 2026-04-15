@@ -44,7 +44,7 @@ def _start_wobbler() -> Tuple[HeadWobbler, List[Tuple[float, Tuple[float, float,
 
 
 def test_reset_drops_pending_offsets() -> None:
-    """Reset should stop wobble output derived from pre-reset audio."""
+    """Reset should stop prior wobble and restore neutral speech offsets."""
     wobbler, captured = _start_wobbler()
     try:
         wobbler.feed(_make_audio_chunk(duration_s=0.35))
@@ -52,8 +52,10 @@ def test_reset_drops_pending_offsets() -> None:
 
         pre_reset_count = len(captured)
         wobbler.reset()
+        assert _wait_for(lambda: len(captured) == pre_reset_count + 1), "reset did not emit neutral offsets"
+        assert captured[-1][1] == (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         time.sleep(0.3)
-        assert len(captured) == pre_reset_count, "offsets continued after reset without new audio"
+        assert len(captured) == pre_reset_count + 1, "offsets continued after reset without new audio"
     finally:
         wobbler.stop()
 

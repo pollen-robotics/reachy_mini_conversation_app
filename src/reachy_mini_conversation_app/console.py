@@ -34,6 +34,7 @@ from reachy_mini_conversation_app.config import (
     refresh_runtime_config_from_env,
 )
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
+from reachy_mini_conversation_app.audio.playback_sync import estimate_pending_playback_seconds
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
 
 
@@ -611,6 +612,11 @@ class LocalStream:
                         audio_frame,
                         num_samples,
                     )
+
+                head_wobbler = self.handler.deps.head_wobbler
+                if head_wobbler is not None:
+                    playback_delay_s = estimate_pending_playback_seconds(self._robot)
+                    head_wobbler.feed_pcm(audio_data.reshape(1, -1), input_sample_rate, start_delay_s=playback_delay_s)
 
                 self._robot.media.push_audio_sample(audio_frame)
 
