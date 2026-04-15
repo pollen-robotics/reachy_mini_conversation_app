@@ -101,11 +101,6 @@ def _normalize_backend_provider(
     return GEMINI_BACKEND if _is_gemini_model_name(model_name) else DEFAULT_BACKEND_PROVIDER
 
 
-def _default_model_name_for_backend(backend_provider: str) -> str:
-    """Return the default model name for a normalized backend provider."""
-    return DEFAULT_MODEL_NAME_BY_BACKEND[_normalize_backend_provider(backend_provider)]
-
-
 def _resolve_model_name(
     backend_provider: str | None = None,
     model_name: str | None = None,
@@ -118,7 +113,13 @@ def _resolve_model_name(
             return candidate
         if normalized_backend == OPENAI_BACKEND and not _is_gemini_model_name(candidate):
             return candidate
-    return _default_model_name_for_backend(normalized_backend)
+        logger.warning(
+            "MODEL_NAME=%r does not match BACKEND_PROVIDER=%r, using default %r",
+            candidate,
+            normalized_backend,
+            DEFAULT_MODEL_NAME_BY_BACKEND[normalized_backend],
+        )
+    return DEFAULT_MODEL_NAME_BY_BACKEND[normalized_backend]
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -323,7 +324,7 @@ def get_backend_choice(model_name: str | None = None) -> str:
 
 def get_model_name_for_backend(backend: str) -> str:
     """Return the default model name for a backend selector value."""
-    return _default_model_name_for_backend(_normalize_backend_provider(backend))
+    return DEFAULT_MODEL_NAME_BY_BACKEND[_normalize_backend_provider(backend)]
 
 
 def get_available_voices_for_backend(backend: str | None = None) -> list[str]:
