@@ -11,7 +11,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
-from fastapi import FastAPI, Query, Request
+from fastapi import Query, FastAPI, Request
 
 from .config import (
     LOCKED_PROFILE,
