@@ -34,6 +34,8 @@ from .headless_personality import (
     read_instructions_for,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def mount_personality_routes(
     app: FastAPI,
@@ -216,8 +218,6 @@ def mount_personality_routes(
             return {"ok": True, "value": value, "choices": choices}
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
-
-    logger = logging.getLogger(__name__)
 
     @app.post("/personalities/apply")
     async def _apply(
