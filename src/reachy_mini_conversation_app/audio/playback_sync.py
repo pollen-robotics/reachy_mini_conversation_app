@@ -31,6 +31,13 @@ class SpeechMotionReset:
     """
 
     def __init__(self, head_wobbler: Any, robot: Any) -> None:
+        """Initialize the reset helper.
+
+        Args:
+            head_wobbler: Object exposing a ``reset()`` method.
+            robot: Robot instance used to estimate queued local playback.
+
+        """
         self._head_wobbler = head_wobbler
         self._robot = robot
         self._task: asyncio.Task[None] | None = None
