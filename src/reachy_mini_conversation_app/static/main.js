@@ -243,6 +243,14 @@ function show(el, flag) {
   el.classList.toggle("hidden", !flag);
 }
 
+function setStatusMessage(el, text, tone = "") {
+  el.textContent = text;
+  el.className = tone ? `status ${tone}` : "status";
+  el.setAttribute("role", tone === "error" ? "alert" : "status");
+  el.setAttribute("aria-live", tone === "error" ? "assertive" : "polite");
+  el.setAttribute("aria-atomic", "true");
+}
+
 async function init() {
   const loading = document.getElementById("loading");
   show(loading, true);
@@ -326,18 +334,23 @@ async function init() {
     backendSaveBtn.textContent = `Use ${meta.label}`;
 
     if (requiresRestart && selectedMatchesPersisted) {
-      backendStatusEl.textContent = `Backend saved. Restart Reachy Mini Conversation from the dashboard or desktop app to use ${backendMeta(persistedBackend).label}.`;
-      backendStatusEl.className = "status warn";
+      setStatusMessage(
+        backendStatusEl,
+        `Backend saved. Restart Reachy Mini Conversation from the dashboard or desktop app to use ${backendMeta(persistedBackend).label}.`,
+        "warn",
+      );
     } else if (!selectedMatchesPersisted) {
-      backendStatusEl.textContent = canProceedWithSelectedBackend
-        ? selectedMatchesActive && requiresRestart
-          ? `Use ${meta.label} to cancel the pending backend change.`
-          : `Ready to switch to ${meta.label}.`
-        : meta.requiredCredentialsCopy;
-      backendStatusEl.className = canProceedWithSelectedBackend ? "status" : "status warn";
+      setStatusMessage(
+        backendStatusEl,
+        canProceedWithSelectedBackend
+          ? selectedMatchesActive && requiresRestart
+            ? `Use ${meta.label} to cancel the pending backend change.`
+            : `Ready to switch to ${meta.label}.`
+          : meta.requiredCredentialsCopy,
+        canProceedWithSelectedBackend ? "" : "warn",
+      );
     } else {
-      backendStatusEl.textContent = "";
-      backendStatusEl.className = "status";
+      setStatusMessage(backendStatusEl, "");
     }
   }
 
@@ -365,8 +378,7 @@ async function init() {
   changeKeyBtn.addEventListener("click", () => {
     editingCredentials = true;
     input.value = "";
-    statusEl.textContent = "";
-    statusEl.className = "status";
+    setStatusMessage(statusEl, "");
     renderCredentialPanels(st);
   });
 
@@ -385,58 +397,53 @@ async function init() {
   });
 
   backendSaveBtn.addEventListener("click", async () => {
-    backendStatusEl.textContent = `Saving ${backendMeta(selectedBackend).label}...`;
-    backendStatusEl.className = "status";
+    setStatusMessage(backendStatusEl, `Saving ${backendMeta(selectedBackend).label}...`);
     try {
       const response = await saveBackendConfig(selectedBackend);
-      backendStatusEl.textContent = response.message || "Saved. Reloading…";
-      backendStatusEl.className = "status ok";
+      setStatusMessage(backendStatusEl, response.message || "Saved. Reloading…", "ok");
       window.location.reload();
     } catch (e) {
-      backendStatusEl.textContent = "Failed to save backend selection. Please try again.";
-      backendStatusEl.className = "status error";
+      setStatusMessage(backendStatusEl, "Failed to save backend selection. Please try again.", "error");
     }
   });
 
   saveBtn.addEventListener("click", async () => {
     const key = input.value.trim();
     if (!key) {
-      statusEl.textContent = "Please enter a valid key.";
-      statusEl.className = "status warn";
+      setStatusMessage(statusEl, "Please enter a valid key.", "warn");
       input.classList.add("error");
       return;
     }
-    statusEl.textContent = selectedBackend === GEMINI_BACKEND ? "Saving token..." : "Validating API key...";
-    statusEl.className = "status";
+    setStatusMessage(statusEl, selectedBackend === GEMINI_BACKEND ? "Saving token..." : "Validating API key...");
     input.classList.remove("error");
     try {
       if (selectedBackend === OPENAI_BACKEND) {
         const validation = await validateKey(key);
         if (!validation.valid) {
-          statusEl.textContent = "Invalid API key. Please check your key and try again.";
-          statusEl.className = "status error";
+          setStatusMessage(statusEl, "Invalid API key. Please check your key and try again.", "error");
           input.classList.add("error");
           return;
         }
-        statusEl.textContent = "Key valid! Saving...";
+        setStatusMessage(statusEl, "Key valid! Saving...", "ok");
       } else {
-        statusEl.textContent = "Saving Gemini token...";
+        setStatusMessage(statusEl, "Saving Gemini token...", "ok");
       }
-      statusEl.className = "status ok";
       await saveBackendConfig(selectedBackend, key);
-      statusEl.textContent = "Saved. Reloading…";
-      statusEl.className = "status ok";
+      setStatusMessage(statusEl, "Saved. Reloading…", "ok");
       window.location.reload();
     } catch (e) {
       input.classList.add("error");
       if (selectedBackend === OPENAI_BACKEND && e.message === "invalid_api_key") {
-        statusEl.textContent = "Invalid API key. Please check your key and try again.";
+        setStatusMessage(statusEl, "Invalid API key. Please check your key and try again.", "error");
       } else {
-        statusEl.textContent = selectedBackend === GEMINI_BACKEND
-          ? "Failed to save Gemini token. Please try again."
-          : "Failed to validate/save key. Please try again.";
+        setStatusMessage(
+          statusEl,
+          selectedBackend === GEMINI_BACKEND
+            ? "Failed to save Gemini token. Please try again."
+            : "Failed to validate/save key. Please try again.",
+          "error",
+        );
       }
-      statusEl.className = "status error";
     }
   });
 
@@ -447,11 +454,10 @@ async function init() {
 
   // Wait until backend routes are ready before rendering personalities UI
   const list = (await waitForPersonalityData()) || { choices: [] };
-  statusEl.textContent = "";
+  setStatusMessage(statusEl, "");
   show(formPanel, false);
   if (!list.choices.length) {
-    statusEl.textContent = "Personality endpoints not ready yet. Retry shortly.";
-    statusEl.className = "status warn";
+    setStatusMessage(statusEl, "Personality endpoints not ready yet. Retry shortly.", "warn");
     show(loading, false);
     return;
   }
@@ -482,10 +488,17 @@ async function init() {
     }
     const voices = await getVoices();
     pVoice.innerHTML = "";
-    for (const v of voices) {
+    if (voices.length) {
+      for (const v of voices) {
+        const opt = document.createElement("option");
+        opt.value = v;
+        opt.textContent = v;
+        pVoice.appendChild(opt);
+      }
+    } else {
       const opt = document.createElement("option");
-      opt.value = v;
-      opt.textContent = v;
+      opt.value = "";
+      opt.textContent = "Backend default (recommended)";
       pVoice.appendChild(opt);
     }
     setStartupLabel(startupChoice);
@@ -563,41 +576,37 @@ async function init() {
       // Default name field to last segment of selection
       const idx = selected.lastIndexOf("/");
       pName.value = idx >= 0 ? selected.slice(idx + 1) : "";
-      pStatus.textContent = `Loaded ${selected}`;
-      pStatus.className = "status";
+      setStatusMessage(pStatus, `Loaded ${selected}`);
     }
 
     pSelect.addEventListener("change", loadSelected);
     await loadSelected();
+    if (!voices.length) {
+      setStatusMessage(pStatus, "Voices unavailable. The backend default voice will be used.", "warn");
+    }
     show(personalityPanel, true);
 
     // pAvail change handler registered in attachToolHandlers()
 
     pApply.addEventListener("click", async () => {
-      pStatus.textContent = "Applying...";
-      pStatus.className = "status";
+      setStatusMessage(pStatus, "Applying...");
       try {
         const res = await applyPersonality(pSelect.value);
         if (res.startup) setStartupLabel(res.startup);
-        pStatus.textContent = res.status || "Applied.";
-        pStatus.className = "status ok";
+        setStatusMessage(pStatus, res.status || "Applied.", "ok");
       } catch (e) {
-        pStatus.textContent = `Failed to apply${e.message ? ": " + e.message : ""}`;
-        pStatus.className = "status error";
+        setStatusMessage(pStatus, `Failed to apply${e.message ? ": " + e.message : ""}`, "error");
       }
     });
 
     pPersist.addEventListener("click", async () => {
-      pStatus.textContent = "Saving for startup...";
-      pStatus.className = "status";
+      setStatusMessage(pStatus, "Saving for startup...");
       try {
         const res = await applyPersonality(pSelect.value, { persist: true });
         if (res.startup) setStartupLabel(res.startup);
-        pStatus.textContent = res.status || "Saved for startup.";
-        pStatus.className = "status ok";
+        setStatusMessage(pStatus, res.status || "Saved for startup.", "ok");
       } catch (e) {
-        pStatus.textContent = `Failed to persist${e.message ? ": " + e.message : ""}`;
-        pStatus.className = "status error";
+        setStatusMessage(pStatus, `Failed to persist${e.message ? ": " + e.message : ""}`, "error");
       }
     });
 
@@ -610,19 +619,16 @@ async function init() {
         el.checked = false;
       });
       pVoice.value = pVoice.options[0]?.value || "";
-      pStatus.textContent = "Fill fields and click Save.";
-      pStatus.className = "status";
+      setStatusMessage(pStatus, "Fill fields and click Save.");
     });
 
     pSave.addEventListener("click", async () => {
       const name = (pName.value || "").trim();
       if (!name) {
-        pStatus.textContent = "Enter a valid name.";
-        pStatus.className = "status warn";
+        setStatusMessage(pStatus, "Enter a valid name.", "warn");
         return;
       }
-      pStatus.textContent = "Saving...";
-      pStatus.className = "status";
+      setStatusMessage(pStatus, "Saving...");
       try {
         // Ensure tools.txt reflects checkbox selection and auto-includes
         syncToolsTextarea();
@@ -641,18 +647,15 @@ async function init() {
           if (n === res.value) opt.selected = true;
           pSelect.appendChild(opt);
         }
-        pStatus.textContent = "Saved.";
-        pStatus.className = "status ok";
+        setStatusMessage(pStatus, "Saved.", "ok");
         // Auto-apply
         try { await applyPersonality(pSelect.value); } catch {}
       } catch (e) {
-        pStatus.textContent = "Failed to save.";
-        pStatus.className = "status error";
+        setStatusMessage(pStatus, "Failed to save.", "error");
       }
     });
   } catch (e) {
-    statusEl.textContent = "UI failed to load. Please refresh.";
-    statusEl.className = "status warn";
+    setStatusMessage(statusEl, "UI failed to load. Please refresh.", "warn");
   } finally {
     // Hide loading when initial setup is done (regardless of key presence)
     show(loading, false);

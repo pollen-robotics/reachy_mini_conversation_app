@@ -32,7 +32,7 @@ def parse_args() -> tuple[argparse.Namespace, list]:  # type: ignore
         "--local-vision",
         default=False,
         action="store_true",
-        help="Use local vision model instead of gpt-realtime vision",
+        help="Use local vision model instead of the selected realtime backend vision",
     )
     parser.add_argument("--gradio", default=False, action="store_true", help="Open gradio interface")
     parser.add_argument("--debug", default=False, action="store_true", help="Enable debug logging")

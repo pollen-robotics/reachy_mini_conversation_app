@@ -125,7 +125,7 @@ Some wheels (like PyTorch) are large and require compatible CUDA or CPU buildsâ€
 
 | Variable | Description |
 |----------|-------------|
-| `OPENAI_API_KEY` | Required for OpenAI mode. Grants access to the OpenAI realtime endpoint. |
+| `OPENAI_API_KEY` | Optional override or fallback for OpenAI mode. In the headless settings flow, the app can use bundled OpenAI access when available; set your own key to override it or provide a fallback. |
 | `GEMINI_API_KEY` | Required for Gemini mode. Also accepts `GOOGLE_API_KEY`. Get one at [aistudio.google.com](https://aistudio.google.com/apikey). |
 | `BACKEND_PROVIDER` | Realtime backend to use: `openai` (default) or `gemini`. |
 | `MODEL_NAME` | Optional model override for the selected backend. Defaults to `gpt-realtime` for OpenAI and `gemini-3.1-flash-live-preview` for Gemini Live. |
@@ -167,7 +167,7 @@ The app runs in console mode by default. Add `--gradio` to launch a web UI at ht
 |--------|---------|-------------|
 | `--head-tracker {yolo,mediapipe}` | `None` | Select a head-tracking backend when a camera is available. `yolo` uses a local YOLO face detector, `mediapipe` comes from the `reachy_mini_toolbox` package. Requires the matching optional extra. |
 | `--no-camera` | `False` | Run without camera capture or head tracking. |
-| `--local-vision` | `False` | Use the local vision model (SmolVLM2) for camera-tool requests instead of gpt-realtime vision. Requires `local_vision` extra to be installed. |
+| `--local-vision` | `False` | Use the local vision model (SmolVLM2) for camera-tool requests instead of the selected realtime backend vision. Requires `local_vision` extra to be installed. |
 | `--gradio` | `False` | Launch the Gradio web UI. Without this flag, runs in console mode. Required when running in simulation mode. |
 | `--robot-name` | `None` | Optional. Connect to a specific robot by name when running multiple daemons on the same subnet. See [Multiple robots on the same subnet](#advanced-features). |
 | `--debug` | `False` | Enable verbose logging for troubleshooting. |
@@ -199,7 +199,7 @@ reachy-mini-conversation-app --gradio
 | Tool | Action | Dependencies |
 |------|--------|--------------|
 | `move_head` | Queue a head pose change (left/right/up/down/front). | Core install only. |
-| `camera` | Capture the latest camera frame and analyze it with gpt-realtime or the local vision model. | Requires camera worker. Uses local vision when `--local-vision` is enabled. |
+| `camera` | Capture the latest camera frame and analyze it with the selected realtime backend or the local vision model. | Requires camera worker. Uses local vision when `--local-vision` is enabled. |
 | `head_tracking` | Enable or disable head-tracking offsets (not identity recognition - only detects and tracks head position). | Camera worker with configured head tracker (`--head-tracker`). |
 | `dance` | Queue a dance from `reachy_mini_dances_library`. | Core install only. |
 | `stop_dance` | Clear queued dances. | Core install only. |
