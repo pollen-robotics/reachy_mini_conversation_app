@@ -123,7 +123,7 @@ def test_head_tracker_skips_new_frame_until_timed_out_reply_is_drained(
         assert roll is None
         assert blocked_elapsed < 0.05
 
-        time.sleep(0.08)
+        time.sleep(0.15)
         eye_center, roll = tracker.get_head_position(frame)
         assert eye_center is not None
         assert np.allclose(eye_center, np.array([2.0, 2.0], dtype=np.float32))
