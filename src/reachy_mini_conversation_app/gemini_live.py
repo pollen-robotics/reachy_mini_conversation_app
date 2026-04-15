@@ -26,7 +26,12 @@ from google.genai import types
 from numpy.typing import NDArray
 from scipy.signal import resample
 
-from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.config import (
+    config,
+    GEMINI_BACKEND,
+    GEMINI_AVAILABLE_VOICES,
+    DEFAULT_VOICE_BY_BACKEND,
+)
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
@@ -45,19 +50,6 @@ logger = logging.getLogger(__name__)
 GEMINI_INPUT_SAMPLE_RATE: Final[int] = 16000
 GEMINI_OUTPUT_SAMPLE_RATE: Final[int] = 24000
 
-# Voices supported by Gemini Live API
-GEMINI_AVAILABLE_VOICES: List[str] = [
-    "Aoede",
-    "Charon",
-    "Fenrir",
-    "Kore",
-    "Leda",
-    "Orus",
-    "Puck",
-    "Zephyr",
-]
-
-DEFAULT_GEMINI_VOICE = "Kore"
 
 
 def _openai_tool_specs_to_gemini(specs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -128,7 +120,7 @@ def _resolve_gemini_voice(profile_voice: str) -> str:
     Otherwise fall back to the default.
     """
     voice_map = {v.lower(): v for v in GEMINI_AVAILABLE_VOICES}
-    return voice_map.get(profile_voice.lower(), DEFAULT_GEMINI_VOICE)
+    return voice_map.get(profile_voice.lower(), DEFAULT_VOICE_BY_BACKEND[GEMINI_BACKEND])
 
 
 class GeminiLiveHandler(AsyncStreamHandler):
@@ -412,78 +404,74 @@ class GeminiLiveHandler(AsyncStreamHandler):
             logger.info("Started background tool: %s (id=%s, call_id=%s)", tool_name, bg_tool.tool_id, call_id)
 
     async def _handle_tool_result(self, bg_tool: ToolNotification) -> None:
-            """Process the result of a completed tool and send it back to Gemini."""
-            if bg_tool.error is not None:
-                logger.error("Tool '%s' (id=%s) failed: %s", bg_tool.tool_name, bg_tool.id, bg_tool.error)
-                tool_result = {"error": bg_tool.error}
-            elif bg_tool.result is not None:
-                tool_result = bg_tool.result
-                logger.info("Tool '%s' (id=%s) succeeded.", bg_tool.tool_name, bg_tool.id)
-            else:
-                logger.warning("Tool '%s' (id=%s) returned no result and no error", bg_tool.tool_name, bg_tool.id)
-                tool_result = {"error": "No result returned from tool execution"}
+        """Process the result of a completed tool and send it back to Gemini."""
+        if bg_tool.error is not None:
+            logger.error("Tool '%s' (id=%s) failed: %s", bg_tool.tool_name, bg_tool.id, bg_tool.error)
+            tool_result = {"error": bg_tool.error}
+        elif bg_tool.result is not None:
+            tool_result = bg_tool.result
+            logger.info("Tool '%s' (id=%s) succeeded.", bg_tool.tool_name, bg_tool.id)
+        else:
+            logger.warning("Tool '%s' (id=%s) returned no result and no error", bg_tool.tool_name, bg_tool.id)
+            tool_result = {"error": "No result returned from tool execution"}
 
-            if not self.session:
-                logger.warning("Connection closed during tool '%s' execution", bg_tool.tool_name)
-                return
+        if not self.session:
+            logger.warning("Connection closed during tool '%s' execution", bg_tool.tool_name)
+            return
 
-            try:
-                if bg_tool.tool_name == "camera" and isinstance(tool_result, dict) and "b64_im" in tool_result:
-                    b64_im = tool_result.pop("b64_im")
-                    if not tool_result:
-                        tool_result = {"status": "image_captured"}
+        try:
+            if bg_tool.tool_name == "camera" and isinstance(tool_result, dict) and "b64_im" in tool_result:
+                b64_im = tool_result.pop("b64_im")
+                if not tool_result:
+                    tool_result = {"status": "image_captured"}
 
-                    # Push the captured frame so Gemini has visual context
-                    # (supplements the ~1 FPS video feed with the exact moment).
-                    try:
-                        if isinstance(b64_im, str):
-                            image_bytes = base64.b64decode(b64_im)
-                        else:
-                            image_bytes = bytes(b64_im)
-                        await self.session.send_realtime_input(
-                            video=types.Blob(data=image_bytes, mime_type="image/jpeg")
-                        )
-                        logger.info("Pushed camera snapshot to Gemini via realtime video input")
-                    except Exception as ve:
-                        logger.warning("Failed to push camera snapshot to Gemini: %s", ve)
-
-                console_content = json.dumps(tool_result)
-
-                # Send tool response back to Gemini (text-only, JSON-safe)
-                function_response = types.FunctionResponse(
-                    id=bg_tool.id if isinstance(bg_tool.id, str) else str(bg_tool.id),
-                    name=bg_tool.tool_name,
-                    response=tool_result,
-                )
-                await self.session.send_tool_response(function_responses=[function_response])
-
-                await self.output_queue.put(
-                    AdditionalOutputs(
-                        {
-                            "role": "assistant",
-                            "content": console_content,
-                            "metadata": {
-                                "title": f"🛠️ Used tool {bg_tool.tool_name}",
-                                "status": "done",
-                            },
-                        },
-                    ),
-                )
-
-                # Show the camera frame in the Gradio UI
-                if bg_tool.tool_name == "camera" and self.deps.camera_worker is not None:
-                    np_img = self.deps.camera_worker.get_latest_frame()
-                    if np_img is not None:
-                        rgb_frame = cv2.cvtColor(np_img, cv2.COLOR_BGR2RGB)
+                try:
+                    if isinstance(b64_im, str):
+                        image_bytes = base64.b64decode(b64_im)
                     else:
-                        rgb_frame = None
-                    img = gr.Image(value=rgb_frame)
-                    await self.output_queue.put(
-                        AdditionalOutputs({"role": "assistant", "content": img}),
+                        image_bytes = bytes(b64_im)
+                    await self.session.send_realtime_input(
+                        video=types.Blob(data=image_bytes, mime_type="image/jpeg")
                     )
+                    logger.info("Pushed camera snapshot to Gemini via realtime video input")
+                except Exception as ve:
+                    logger.warning("Failed to push camera snapshot to Gemini: %s", ve)
 
-            except Exception as e:
-                logger.warning("Error sending tool result to Gemini: %s", e)
+            console_content = json.dumps(tool_result)
+
+            function_response = types.FunctionResponse(
+                id=bg_tool.id if isinstance(bg_tool.id, str) else str(bg_tool.id),
+                name=bg_tool.tool_name,
+                response=tool_result,
+            )
+            await self.session.send_tool_response(function_responses=[function_response])
+
+            await self.output_queue.put(
+                AdditionalOutputs(
+                    {
+                        "role": "assistant",
+                        "content": console_content,
+                        "metadata": {
+                            "title": f"🛠️ Used tool {bg_tool.tool_name}",
+                            "status": "done",
+                        },
+                    },
+                ),
+            )
+
+            if bg_tool.tool_name == "camera" and self.deps.camera_worker is not None:
+                np_img = self.deps.camera_worker.get_latest_frame()
+                if np_img is not None:
+                    rgb_frame = cv2.cvtColor(np_img, cv2.COLOR_BGR2RGB)
+                else:
+                    rgb_frame = None
+                img = gr.Image(value=rgb_frame)
+                await self.output_queue.put(
+                    AdditionalOutputs({"role": "assistant", "content": img}),
+                )
+
+        except Exception as e:
+            logger.warning("Error sending tool result to Gemini: %s", e)
 
     async def _video_sender_loop(self) -> None:
         """Send camera frames to Gemini Live at ~1 FPS for continuous visual context.
@@ -566,8 +554,6 @@ class GeminiLiveHandler(AsyncStreamHandler):
                                         if part.inline_data and part.inline_data.data:
                                             audio_bytes = part.inline_data.data
                                             if isinstance(audio_bytes, str):
-                                                import base64
-
                                                 audio_bytes = base64.b64decode(audio_bytes)
 
                                             if len(audio_bytes) == 0:
@@ -579,10 +565,8 @@ class GeminiLiveHandler(AsyncStreamHandler):
                                                 continue
 
                                             if self.gradio_mode and self.deps.head_wobbler is not None:
-                                                import base64 as b64mod
-
                                                 self.deps.head_wobbler.feed(
-                                                    b64mod.b64encode(audio_bytes).decode("utf-8")
+                                                    base64.b64encode(audio_bytes).decode("utf-8")
                                                 )
 
                                             self.last_activity_time = asyncio.get_event_loop().time()

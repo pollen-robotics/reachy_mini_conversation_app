@@ -176,18 +176,7 @@ class LocalStream:
             logger.warning("Failed to persist %s: %s", ", ".join(sorted(normalized_updates)), e)
 
     def _persist_api_key(self, key: str) -> None:
-        """Persist API key to environment and instance ``.env`` if possible.
-
-        Behavior:
-        - Always sets ``OPENAI_API_KEY`` in process env and in-memory config.
-        - Writes/updates ``<instance_path>/.env``:
-          * If ``.env`` exists, replaces/append OPENAI_API_KEY line.
-          * Else, copies template from ``<instance_path>/.env.example`` when present,
-            otherwise falls back to the packaged template
-            ``reachy_mini_conversation_app/.env.example``.
-          * Ensures the resulting file contains the full template plus the key.
-        - Loads the written ``.env`` into the current process environment.
-        """
+        """Persist OPENAI_API_KEY to environment and instance `.env`."""
         self._persist_env_value("OPENAI_API_KEY", key)
 
     def _persist_gemini_api_key(self, key: str) -> None:
