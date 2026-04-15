@@ -136,9 +136,6 @@ class LocalStream:
         """Persist non-empty environment values in memory and in the instance `.env`."""
         normalized_updates = {name: (value or "").strip() for name, value in updates.items()}
         normalized_updates = {name: value for name, value in normalized_updates.items() if value}
-        current_model_name = (os.getenv("MODEL_NAME") or "").strip()
-        if current_model_name and "MODEL_NAME" not in normalized_updates:
-            normalized_updates["MODEL_NAME"] = current_model_name
         if not normalized_updates:
             return
 
@@ -171,7 +168,7 @@ class LocalStream:
             try:
                 from dotenv import load_dotenv
 
-                load_dotenv(dotenv_path=str(env_path), override=True)
+                load_dotenv(dotenv_path=str(env_path))
             except Exception:
                 pass
             refresh_runtime_config_from_env()
