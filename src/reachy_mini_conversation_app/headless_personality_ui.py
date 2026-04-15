@@ -11,7 +11,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query, Request
 
 from .config import (
     LOCKED_PROFILE,
@@ -48,7 +48,6 @@ def mount_personality_routes(
 ) -> None:
     """Register personality management endpoints on a FastAPI app."""
     try:
-        from fastapi import Request
         from pydantic import BaseModel
         from fastapi.responses import JSONResponse
     except Exception:  # pragma: no cover - only when settings app not available
@@ -222,10 +221,10 @@ def mount_personality_routes(
 
     @app.post("/personalities/apply")
     async def _apply(
+        request: Request,
         payload: ApplyPayload | None = None,
         name: str | None = None,
         persist: Optional[bool] = None,
-        request: Optional[Request] = None,
     ) -> dict:  # type: ignore
         if LOCKED_PROFILE is not None:
             return JSONResponse(
@@ -244,7 +243,7 @@ def mount_personality_routes(
             persist_flag = bool(getattr(payload, "persist", False))
         elif name:
             sel_name = name
-        elif request is not None:
+        else:
             try:
                 body = await request.json()
                 if isinstance(body, dict) and body.get("name"):
@@ -253,13 +252,12 @@ def mount_personality_routes(
                     persist_flag = bool(body.get("persist"))
             except Exception:
                 sel_name = None
-        if request is not None:
-            try:
-                q_persist = request.query_params.get("persist")
-                if q_persist is not None:
-                    persist_flag = str(q_persist).lower() in {"1", "true", "yes", "on"}
-            except Exception:
-                pass
+        try:
+            q_persist = request.query_params.get("persist")
+            if q_persist is not None:
+                persist_flag = str(q_persist).lower() in {"1", "true", "yes", "on"}
+        except Exception:
+            pass
         if not sel_name:
             sel_name = DEFAULT_OPTION
 
@@ -302,12 +300,14 @@ def mount_personality_routes(
             return get_available_voices_for_backend()
 
     @app.post("/voices/apply")
-    async def _apply_voice(request: Request) -> dict:  # type: ignore
-        try:
-            raw = await request.json()
-        except Exception:
-            raw = {}
-        voice = str(raw.get("voice", "") or "")
+    async def _apply_voice(request: Request, voice: str | None = Query(None)) -> dict:  # type: ignore
+        voice = str(voice or "")
+        if not voice:
+            try:
+                raw = await request.json()
+            except Exception:
+                raw = {}
+            voice = str(raw.get("voice", "") or "")
         if not voice:
             return JSONResponse({"ok": False, "error": "missing_voice"}, status_code=400)  # type: ignore
         loop = get_loop()

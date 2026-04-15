@@ -1,8 +1,9 @@
 """Tests for the headless console stream."""
 
 import asyncio
+import threading
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
 import pytest
@@ -224,3 +225,36 @@ def test_headless_personality_routes_return_gemini_voices_when_backend_selected(
 
     assert response.status_code == 200
     assert response.json() == GEMINI_AVAILABLE_VOICES
+
+
+def test_headless_personality_routes_apply_voice_accepts_query_param() -> None:
+    """Headless personality UI should apply a voice change from a POST query param."""
+    app = FastAPI()
+    handler = MagicMock()
+    handler.change_voice = AsyncMock(return_value="Voice changed to cedar.")
+
+    loop = asyncio.new_event_loop()
+    started = threading.Event()
+
+    def _run_loop() -> None:
+        asyncio.set_event_loop(loop)
+        started.set()
+        loop.run_forever()
+
+    thread = threading.Thread(target=_run_loop, daemon=True)
+    thread.start()
+    started.wait(timeout=1.0)
+
+    try:
+        mount_personality_routes(app, handler, lambda: loop)
+
+        client = TestClient(app)
+        response = client.post("/voices/apply?voice=cedar")
+
+        assert response.status_code == 200
+        assert response.json() == {"ok": True, "status": "Voice changed to cedar."}
+        handler.change_voice.assert_awaited_once_with("cedar")
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(timeout=1.0)
+        loop.close()
