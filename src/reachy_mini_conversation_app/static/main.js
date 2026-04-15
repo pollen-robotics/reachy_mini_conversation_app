@@ -291,6 +291,8 @@ async function init() {
     const requiresRestart = !!status.requires_restart;
     const meta = backendMeta(selectedBackend);
     const hasSelectedKey = backendHasKey(status, selectedBackend);
+    const selectedMatchesPersisted = selectedBackend === persistedBackend;
+    const selectedMatchesActive = selectedBackend === activeBackend;
 
     backendChip.textContent = selectedBackend === persistedBackend ? "Saved" : "Selected";
     backendNote.innerHTML = formatBackendNote(meta.note);
@@ -308,16 +310,18 @@ async function init() {
     show(formPanel, editingCredentials || !hasSelectedKey);
     show(
       backendSaveBtn,
-      hasSelectedKey && selectedBackend !== persistedBackend && !requiresRestart,
+      hasSelectedKey && !selectedMatchesPersisted,
     );
     backendSaveBtn.textContent = `Use ${meta.label}`;
 
-    if (requiresRestart) {
-      backendStatusEl.textContent = `Backend saved. Restart Reachy Mini Conversation to use ${backendMeta(persistedBackend).label}.`;
+    if (requiresRestart && selectedMatchesPersisted) {
+      backendStatusEl.textContent = `Backend saved. Restart Reachy Mini Conversation from the dashboard or desktop app to use ${backendMeta(persistedBackend).label}.`;
       backendStatusEl.className = "status warn";
-    } else if (selectedBackend !== persistedBackend) {
+    } else if (!selectedMatchesPersisted) {
       backendStatusEl.textContent = hasSelectedKey
-        ? `Ready to switch to ${meta.label}.`
+        ? selectedMatchesActive && requiresRestart
+          ? `Use ${meta.label} to cancel the pending backend change.`
+          : `Ready to switch to ${meta.label}.`
         : meta.missingKeyCopy;
       backendStatusEl.className = hasSelectedKey ? "status" : "status warn";
     } else {
