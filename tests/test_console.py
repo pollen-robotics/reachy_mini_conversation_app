@@ -111,6 +111,41 @@ def test_backend_config_persists_gemini_selection_and_status(
     assert "GEMINI_API_KEY=gem-test-token" in env_text
 
 
+def test_backend_config_preserves_explicit_model_override_when_saving_key(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Saving credentials should not reset a custom model override."""
+    custom_model = "gpt-4o-realtime-preview-2025-06-03"
+    monkeypatch.setattr(config, "BACKEND_PROVIDER", "openai")
+    monkeypatch.setattr(config, "MODEL_NAME", custom_model)
+    monkeypatch.setattr(config, "OPENAI_API_KEY", None)
+    monkeypatch.setenv("BACKEND_PROVIDER", "openai")
+    monkeypatch.setenv("MODEL_NAME", custom_model)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    app = FastAPI()
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(MagicMock(), robot, settings_app=app, instance_path=str(tmp_path))
+    stream._init_settings_ui_if_needed()
+
+    client = TestClient(app)
+    response = client.post(
+        "/backend_config",
+        json={"backend": "openai", "api_key": "openai-test-key"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert config.MODEL_NAME == custom_model
+
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "BACKEND_PROVIDER=openai" in env_text
+    assert f"MODEL_NAME={custom_model}" in env_text
+    assert "MODEL_NAME=gpt-realtime" not in env_text
+    assert "OPENAI_API_KEY=openai-test-key" in env_text
+
+
 def test_headless_personality_routes_return_gemini_voices_when_backend_selected(monkeypatch) -> None:
     """Headless personality UI should expose Gemini voices when Gemini is selected."""
     monkeypatch.setattr(config, "BACKEND_PROVIDER", "gemini")

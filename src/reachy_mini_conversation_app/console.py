@@ -135,6 +135,9 @@ class LocalStream:
         """Persist non-empty environment values in memory and in the instance `.env`."""
         normalized_updates = {name: (value or "").strip() for name, value in updates.items()}
         normalized_updates = {name: value for name, value in normalized_updates.items() if value}
+        current_model_name = (os.getenv("MODEL_NAME") or "").strip()
+        if current_model_name and "MODEL_NAME" not in normalized_updates:
+            normalized_updates["MODEL_NAME"] = current_model_name
         if not normalized_updates:
             return
 
@@ -194,13 +197,15 @@ class LocalStream:
         self._persist_env_value("GEMINI_API_KEY", key)
 
     def _persist_backend_choice(self, backend: str) -> None:
-        """Persist the selected backend and its matching default model."""
-        self._persist_env_values(
-            {
-                "BACKEND_PROVIDER": backend,
-                "MODEL_NAME": get_model_name_for_backend(backend),
-            }
-        )
+        """Persist the selected backend without clobbering explicit model overrides."""
+        current_backend = get_backend_choice()
+        current_model_name = (os.getenv("MODEL_NAME") or "").strip()
+        updates = {"BACKEND_PROVIDER": backend}
+        if current_model_name and current_model_name != get_model_name_for_backend(current_backend):
+            updates["MODEL_NAME"] = current_model_name
+        else:
+            updates["MODEL_NAME"] = get_model_name_for_backend(backend)
+        self._persist_env_values(updates)
 
     def _persist_personality(self, profile: Optional[str]) -> None:
         """Persist the startup personality to the instance .env and config."""
@@ -360,7 +365,9 @@ class LocalStream:
             payload_data = _status_payload()
             message = "Backend saved."
             if payload_data["requires_restart"]:
-                message = "Backend saved. Restart Reachy Mini Conversation to apply it."
+                message = (
+                    "Backend saved. Restart Reachy Mini Conversation from the desktop app to apply it."
+                    )
             return JSONResponse(
                 {
                     "ok": True,
