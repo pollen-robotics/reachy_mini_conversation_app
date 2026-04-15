@@ -27,10 +27,10 @@ from numpy.typing import NDArray
 from scipy.signal import resample
 
 from reachy_mini_conversation_app.config import (
-    config,
     GEMINI_BACKEND,
     GEMINI_AVAILABLE_VOICES,
     DEFAULT_VOICE_BY_BACKEND,
+    config,
 )
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
 from reachy_mini_conversation_app.tools.core_tools import (
