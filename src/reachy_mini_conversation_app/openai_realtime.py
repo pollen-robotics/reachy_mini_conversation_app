@@ -8,7 +8,6 @@ from typing import Any, Final, Tuple, Literal, Optional
 from pathlib import Path
 from datetime import datetime
 
-import cv2
 import numpy as np
 import gradio as gr
 from openai import AsyncOpenAI
@@ -429,8 +428,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 if self.deps.camera_worker is not None:
                     np_img = self.deps.camera_worker.get_latest_frame()
                     if np_img is not None:
-                        # Camera frames are BGR from OpenCV; convert so Gradio displays correct colors.
-                        rgb_frame = cv2.cvtColor(np_img, cv2.COLOR_BGR2RGB)
+                        rgb_frame = np.ascontiguousarray(np_img[..., ::-1])
                     else:
                         rgb_frame = None
                     img = gr.Image(value=rgb_frame)

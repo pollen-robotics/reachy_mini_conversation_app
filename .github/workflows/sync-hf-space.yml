@@ -27,4 +27,4 @@ jobs:
           huggingface_repo_id: pollen-robotics/reachy_mini_conversation_app
           hf_token: ${{ secrets.HF_TOKEN }}
           repo_type: space
-          space_sdk: gradio
+          space_sdk: static

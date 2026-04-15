@@ -4233,13 +4233,13 @@ version = "0.4.3"
 source = { editable = "." }
 dependencies = [
     { name = "aiortc" },
+    { name = "av" },
     { name = "fastrtc" },
     { name = "google-genai" },
     { name = "gradio" },
     { name = "gradio-client" },
     { name = "huggingface-hub" },
     { name = "openai" },
-    { name = "opencv-python" },
     { name = "python-dotenv" },
     { name = "reachy-mini" },
     { name = "reachy-mini-dances-library" },
@@ -4251,6 +4251,7 @@ all-vision = [
     { name = "accelerate" },
     { name = "mediapipe" },
     { name = "num2words" },
+    { name = "opencv-python" },
     { name = "supervision" },
     { name = "torch" },
     { name = "transformers" },
@@ -4266,6 +4267,7 @@ mediapipe-vision = [
     { name = "mediapipe" },
 ]
 yolo-vision = [
+    { name = "opencv-python" },
     { name = "supervision" },
     { name = "ultralytics" },
 ]
@@ -4286,6 +4288,7 @@ requires-dist = [
     { name = "accelerate", marker = "extra == 'all-vision'", specifier = ">=1.13.0" },
     { name = "accelerate", marker = "extra == 'local-vision'", specifier = ">=1.13.0" },
     { name = "aiortc", specifier = ">=1.13.0" },
+    { name = "av" },
     { name = "fastrtc", specifier = ">=0.0.34" },
     { name = "google-genai", specifier = ">=1.0.0" },
     { name = "gradio", specifier = "==5.50.1.dev1" },
@@ -4296,7 +4299,8 @@ requires-dist = [
     { name = "num2words", marker = "extra == 'all-vision'" },
     { name = "num2words", marker = "extra == 'local-vision'" },
     { name = "openai", specifier = ">=2.30.0" },
-    { name = "opencv-python", specifier = ">=4.12.0.88" },
+    { name = "opencv-python", marker = "extra == 'all-vision'", specifier = ">=4.13.0.92" },
+    { name = "opencv-python", marker = "extra == 'yolo-vision'", specifier = ">=4.13.0.92" },
     { name = "python-dotenv" },
     { name = "reachy-mini", specifier = ">=1.6.2" },
     { name = "reachy-mini-dances-library" },

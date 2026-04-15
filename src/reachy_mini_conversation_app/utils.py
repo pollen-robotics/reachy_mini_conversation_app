@@ -8,10 +8,11 @@ from typing import TYPE_CHECKING, Optional
 
 from reachy_mini import ReachyMini
 from reachy_mini_conversation_app.camera_worker import CameraWorker
+from reachy_mini_conversation_app.vision.head_tracking import HeadTracker
 
 
 if TYPE_CHECKING:
-    from reachy_mini_conversation_app.vision.processors import VisionProcessor
+    from reachy_mini_conversation_app.vision.local_vision import VisionProcessor
 
 
 class CameraVisionInitializationError(Exception):
@@ -25,7 +26,10 @@ def parse_args() -> tuple[argparse.Namespace, list]:  # type: ignore
         "--head-tracker",
         choices=["yolo", "mediapipe"],
         default=None,
-        help="Head-tracking backend: yolo uses a local face detector, mediapipe uses reachy_mini_toolbox. Disabled by default.",
+        help=(
+            "Optional head-tracking backend: yolo uses a local face detector in a subprocess, "
+            "mediapipe uses reachy_mini_toolbox in process. Disabled by default."
+        ),
     )
     parser.add_argument("--no-camera", default=False, action="store_true", help="Disable camera usage")
     parser.add_argument(
@@ -51,19 +55,30 @@ def initialize_camera_and_vision(
 ) -> tuple[CameraWorker | None, VisionProcessor | None]:
     """Initialize camera capture, optional head tracking, and optional local vision."""
     camera_worker: Optional[CameraWorker] = None
-    head_tracker = None
+    head_tracker: HeadTracker | None = None
     vision_processor: Optional[VisionProcessor] = None
 
     if not args.no_camera:
         if args.head_tracker is not None:
-            if args.head_tracker == "yolo":
-                from reachy_mini_conversation_app.vision.yolo_head_tracker import HeadTracker
+            try:
+                if args.head_tracker == "yolo":
+                    from reachy_mini_conversation_app.vision.head_tracking.yolo_process import (
+                        YoloHeadTrackerProcess,
+                    )
 
-                head_tracker = HeadTracker()
-            elif args.head_tracker == "mediapipe":
-                from reachy_mini_toolbox.vision import HeadTracker  # type: ignore[no-redef]
+                    head_tracker = YoloHeadTrackerProcess()
+                    logging.getLogger(__name__).info("Using yolo head tracker subprocess")
+                else:
+                    from reachy_mini_conversation_app.vision.head_tracking.mediapipe import (
+                        MediapipeHeadTracker,
+                    )
 
-                head_tracker = HeadTracker()
+                    head_tracker = MediapipeHeadTracker()
+                    logging.getLogger(__name__).info("Using mediapipe head tracker in process")
+            except Exception as e:
+                raise CameraVisionInitializationError(
+                    f"Failed to initialize {args.head_tracker} head tracker: {e}",
+                ) from e
 
         camera_worker = CameraWorker(current_robot, head_tracker)
 
@@ -72,7 +87,7 @@ def initialize_camera_and_vision(
                 [
                     sys.executable,
                     "-c",
-                    "from reachy_mini_conversation_app.vision.processors import VisionProcessor",
+                    "from reachy_mini_conversation_app.vision.local_vision import VisionProcessor",
                 ],
                 capture_output=True,
                 text=True,
@@ -84,7 +99,7 @@ def initialize_camera_and_vision(
                     "Run without --local-vision or install compatible dependencies.",
                 )
             try:
-                from reachy_mini_conversation_app.vision.processors import initialize_vision_processor
+                from reachy_mini_conversation_app.vision.local_vision import initialize_vision_processor
 
             except ImportError as e:
                 raise CameraVisionInitializationError(
@@ -106,6 +121,7 @@ def setup_logger(debug: bool) -> logging.Logger:
     logging.basicConfig(
         level=getattr(logging, log_level, logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s:%(lineno)d | %(message)s",
+        force=True,
     )
     logger = logging.getLogger(__name__)
 

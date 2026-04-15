@@ -15,6 +15,7 @@
 - [ ] CI is green (lint, types, tests — runs on Linux, macOS & Windows)
 - [ ] Code is clear (types, docs, comments where needed)
 - [ ] `.env.example` updated (if new config vars were added)
+- [ ] Installation from the desktop app tested (if applicable)
 
 <details>
 <summary><strong>UI / run modes</strong> — expand if your PR touches these</summary>
