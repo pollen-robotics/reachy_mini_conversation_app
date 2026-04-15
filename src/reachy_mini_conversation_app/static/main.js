@@ -31,7 +31,6 @@ const BACKEND_META = {
     readyTitle: "OpenAI Realtime ready",
     readyCopy: "OpenAI Realtime is configured. You can jump straight to personalities.",
     formCopy: "OpenAI Realtime uses the distributed key when available. Paste your own key if you want an override or need a fallback.",
-    missingKeyCopy: "OpenAI Realtime is selected, but no OpenAI key is available yet. Paste one here to continue.",
     note: "OpenAI Realtime uses the distributed OpenAI key. You can still paste your own key if you want to override it.",
   },
   [GEMINI_BACKEND]: {
@@ -44,13 +43,17 @@ const BACKEND_META = {
     readyTitle: "Gemini Live ready",
     readyCopy: "Gemini Live is configured. Your saved Gemini token is ready to use.",
     formCopy: "Paste your GEMINI_API_KEY once and we will store it locally for the headless conversation loop.",
-    missingKeyCopy: "Gemini Live requires your own GEMINI_API_KEY before you can switch.",
+    requiredCredentialsCopy: "Gemini Live requires your own GEMINI_API_KEY before you can switch.",
     note: "OpenAI Realtime uses the distributed OpenAI key. Gemini Live needs your own GEMINI_API_KEY.",
   },
 };
 
-function backendHasKey(status, backend) {
+function backendHasCredentials(status, backend) {
   return backend === GEMINI_BACKEND ? !!status.has_gemini_key : !!status.has_openai_key;
+}
+
+function backendCanProceed(status, backend) {
+  return backend === OPENAI_BACKEND || backendHasCredentials(status, backend);
 }
 
 function backendMeta(backend) {
@@ -290,7 +293,7 @@ async function init() {
     const activeBackend = status.active_backend || persistedBackend;
     const requiresRestart = !!status.requires_restart;
     const meta = backendMeta(selectedBackend);
-    const hasSelectedKey = backendHasKey(status, selectedBackend);
+    const canProceedWithSelectedBackend = backendCanProceed(status, selectedBackend);
     const selectedMatchesPersisted = selectedBackend === persistedBackend;
     const selectedMatchesActive = selectedBackend === activeBackend;
 
@@ -300,17 +303,17 @@ async function init() {
     configuredTitle.textContent = meta.readyTitle;
     configuredCopy.textContent = meta.readyCopy;
     formTitle.textContent = meta.formTitle;
-    formCopy.textContent = hasSelectedKey ? meta.formCopy : meta.missingKeyCopy;
+    formCopy.textContent = canProceedWithSelectedBackend ? meta.formCopy : meta.requiredCredentialsCopy;
     apiKeyLabel.textContent = meta.inputLabel;
     input.placeholder = meta.placeholder;
     saveBtn.textContent = meta.saveButton;
     changeKeyBtn.textContent = meta.changeButton;
 
-    show(configuredPanel, hasSelectedKey && !editingCredentials);
-    show(formPanel, editingCredentials || !hasSelectedKey);
+    show(configuredPanel, canProceedWithSelectedBackend && !editingCredentials);
+    show(formPanel, editingCredentials || !canProceedWithSelectedBackend);
     show(
       backendSaveBtn,
-      hasSelectedKey && !selectedMatchesPersisted,
+      canProceedWithSelectedBackend && !selectedMatchesPersisted,
     );
     backendSaveBtn.textContent = `Use ${meta.label}`;
 
@@ -318,12 +321,12 @@ async function init() {
       backendStatusEl.textContent = `Backend saved. Restart Reachy Mini Conversation from the dashboard or desktop app to use ${backendMeta(persistedBackend).label}.`;
       backendStatusEl.className = "status warn";
     } else if (!selectedMatchesPersisted) {
-      backendStatusEl.textContent = hasSelectedKey
+      backendStatusEl.textContent = canProceedWithSelectedBackend
         ? selectedMatchesActive && requiresRestart
           ? `Use ${meta.label} to cancel the pending backend change.`
           : `Ready to switch to ${meta.label}.`
-        : meta.missingKeyCopy;
-      backendStatusEl.className = hasSelectedKey ? "status" : "status warn";
+        : meta.requiredCredentialsCopy;
+      backendStatusEl.className = canProceedWithSelectedBackend ? "status" : "status warn";
     } else {
       backendStatusEl.textContent = "";
       backendStatusEl.className = "status";
@@ -426,7 +429,7 @@ async function init() {
     }
   });
 
-  if (!st.has_key || st.requires_restart) {
+  if (!backendCanProceed(st, st.backend_provider || OPENAI_BACKEND) || st.requires_restart) {
     show(loading, false);
     return;
   }
