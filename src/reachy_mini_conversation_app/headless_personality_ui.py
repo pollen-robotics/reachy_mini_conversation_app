@@ -53,12 +53,6 @@ def mount_personality_routes(
     except Exception:  # pragma: no cover - only when settings app not available
         return
 
-    class SavePayload(BaseModel):
-        name: str
-        instructions: str
-        tools_text: str
-        voice: Optional[str] = None
-
     class ApplyPayload(BaseModel):
         name: str
         persist: Optional[bool] = False

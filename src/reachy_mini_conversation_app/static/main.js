@@ -1,23 +1,3 @@
-async function fetchStatus() {
-  try {
-    const url = new URL("/status", window.location.origin);
-    url.searchParams.set("_", Date.now().toString());
-    const resp = await fetchWithTimeout(url, {}, 2000);
-    if (!resp.ok) throw new Error("status error");
-    return await resp.json();
-  } catch (e) {
-    return {
-      active_backend: "openai",
-      backend_provider: "openai",
-      has_key: false,
-      has_openai_key: false,
-      has_gemini_key: false,
-      requires_restart: false,
-      error: true,
-    };
-  }
-}
-
 const OPENAI_BACKEND = "openai";
 const GEMINI_BACKEND = "gemini";
 const BACKEND_META = {
@@ -148,14 +128,6 @@ async function saveBackendConfig(backend, key = "") {
 }
 
 // ---------- Personalities API ----------
-async function getPersonalities() {
-  const url = new URL("/personalities", window.location.origin);
-  url.searchParams.set("_", Date.now().toString());
-  const resp = await fetchWithTimeout(url, {}, 2000);
-  if (!resp.ok) throw new Error("list_failed");
-  return await resp.json();
-}
-
 async function loadPersonality(name) {
   const url = new URL("/personalities/load", window.location.origin);
   url.searchParams.set("name", name);
@@ -237,8 +209,6 @@ async function applyPersonality(name, { persist = false } = {}) {
   return await resp.json();
 }
 
-const VOICE_FALLBACK = [];
-
 async function getVoices() {
   try {
     const url = new URL("/voices", window.location.origin);
@@ -247,7 +217,7 @@ async function getVoices() {
     if (!resp.ok) throw new Error("voices_failed");
     return await resp.json();
   } catch (e) {
-    return VOICE_FALLBACK;
+    return [];
   }
 }
 
@@ -560,21 +530,18 @@ async function init() {
       pTools.value = (comments.join("\n") + (comments.length ? "\n" : "") + body).trim() + "\n";
     }
 
-    function attachToolHandlers() {
-      pAvail.addEventListener("change", (ev) => {
-        const target = ev.target;
-        if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") return;
-        const name = target.value;
-        // If a main tool toggled, propagate to deps
-        if (AUTO_WITH[name]) {
-          for (const dep of AUTO_WITH[name]) {
-            const depEl = pAvail.querySelector(`input[value="${dep}"]`);
-            if (depEl) depEl.checked = target.checked || depEl.checked;
-          }
+    pAvail.addEventListener("change", (ev) => {
+      const target = ev.target;
+      if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") return;
+      const name = target.value;
+      if (AUTO_WITH[name]) {
+        for (const dep of AUTO_WITH[name]) {
+          const depEl = pAvail.querySelector(`input[value="${dep}"]`);
+          if (depEl) depEl.checked = target.checked || depEl.checked;
         }
-        syncToolsTextarea();
-      });
-    }
+      }
+      syncToolsTextarea();
+    });
 
     async function loadSelected() {
       const selected = pSelect.value;
@@ -585,7 +552,6 @@ async function init() {
       pVoice.value = voices.includes(data.voice) ? data.voice : fallbackVoice;
       // Available tools as checkboxes
       renderToolCheckboxes(data.available_tools, data.enabled_tools);
-      attachToolHandlers();
       // Default name field to last segment of selection
       const idx = selected.lastIndexOf("/");
       pName.value = idx >= 0 ? selected.slice(idx + 1) : "";
@@ -598,8 +564,6 @@ async function init() {
       setStatusMessage(pStatus, "Voices unavailable. The backend default voice will be used.", "warn");
     }
     show(personalityPanel, true);
-
-    // pAvail change handler registered in attachToolHandlers()
 
     pApplyVoice.addEventListener("click", async () => {
       const voice = pVoice.value;

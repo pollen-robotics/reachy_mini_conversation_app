@@ -111,9 +111,7 @@ body {
   line-height: inherit;
 }
 
-.privacy-notice p + p,
-.privacy-notice p + ul,
-.privacy-notice ul + p {
+.privacy-notice p + p {
   margin-top: 8px;
 }
 
@@ -158,28 +156,9 @@ body {
   margin-bottom: 6px;
 }
 
-.privacy-notice details > p,
-.privacy-notice details > ul {
+.privacy-notice details > p {
   font-size: 12.5px;
   line-height: 1.5;
-}
-
-.privacy-notice ul {
-  margin: 8px 0;
-  padding-left: 1.25em;
-  color: inherit;
-  font-size: inherit;
-  line-height: inherit;
-}
-
-.privacy-notice li {
-  margin: 0 0 4px;
-  font-size: inherit;
-  line-height: inherit;
-}
-
-.privacy-notice li:last-child {
-  margin-bottom: 0;
 }
 
 .backend-note {
@@ -414,20 +393,6 @@ button.ghost:hover { border-color: rgba(94, 240, 193, 0.4); }
 }
 .row-save .actions {
   justify-content: flex-start;
-}
-.input-field {
-  width: 100%;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text);
-  transition: border 0.15s ease, box-shadow 0.15s ease;
-}
-.input-field:focus {
-  border-color: rgba(94, 240, 193, 0.7);
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(94, 240, 193, 0.15);
 }
 .section {
   border: 1px solid var(--border);

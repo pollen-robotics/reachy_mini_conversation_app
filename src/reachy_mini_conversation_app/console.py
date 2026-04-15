@@ -424,7 +424,7 @@ class LocalStream:
                 from gradio_client import Client
 
                 client = Client("HuggingFaceM4/gradium_setup", verbose=False)
-                key, status = client.predict(api_name="/claim_b_key")
+                key, _ = client.predict(api_name="/claim_b_key")
                 if key and key.strip():
                     logger.info("Successfully downloaded API key from HuggingFace")
                     # Persist it immediately
