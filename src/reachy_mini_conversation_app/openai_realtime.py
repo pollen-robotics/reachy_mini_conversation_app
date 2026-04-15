@@ -109,6 +109,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.is_idle_tool_call = False
         self.gradio_mode = gradio_mode
         self.instance_path = instance_path
+        self._voice_override: str | None = None
         # Track how the API key was provided (env vs textbox) and its value
         self._key_source: Literal["env", "textbox"] = "env"
         self._provided_api_key: str | None = None
@@ -155,6 +156,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             from reachy_mini_conversation_app.config import set_custom_profile
 
             set_custom_profile(profile)
+            self._voice_override = None
             logger.info(
                 "Set custom profile to %r (config=%r)", profile, getattr(_config, "REACHY_MINI_CUSTOM_PROFILE", None)
             )
@@ -200,6 +202,18 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         except Exception as e:
             logger.error("Error applying personality '%s': %s", profile, e)
             return f"Failed to apply personality: {e}"
+
+    async def change_voice(self, voice: str) -> str:
+        """Change only the voice and restart the session."""
+        self._voice_override = voice
+        if self.connection is not None:
+            try:
+                await self._restart_session()
+                return f"Voice changed to {voice}."
+            except Exception as e:
+                logger.warning("Failed to restart session for voice change: %s", e)
+                return "Voice change failed. Will take effect on next connection."
+        return "Voice changed. Will take effect on next connection."
 
     async def _emit_debounced_partial(self, transcript: str, item_id: str, sequence_counter: int) -> None:
         """Emit partial transcript after debounce delay."""
@@ -473,7 +487,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         ),
                         output=RealtimeAudioConfigOutputParam(
                             format=AudioPCM(type="audio/pcm", rate=self.output_sample_rate),
-                            voice=get_session_voice(),
+                            voice=self._voice_override or get_session_voice(),
                         ),
                     ),
                     tools=get_tool_specs(), # type: ignore[typeddict-item]
@@ -483,7 +497,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 logger.info(
                     "Realtime session initialized with profile=%r voice=%r",
                     getattr(config, "REACHY_MINI_CUSTOM_PROFILE", None),
-                    get_session_voice(),
+                    self._voice_override or get_session_voice(),
                 )
                 # If we reached here, the session update succeeded which implies the API key worked.
                 # Persist the key to a newly created .env (copied from .env.example) if needed.

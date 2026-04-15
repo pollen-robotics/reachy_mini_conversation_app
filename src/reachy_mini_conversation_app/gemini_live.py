@@ -137,6 +137,7 @@ class GeminiLiveHandler(AsyncStreamHandler):
         self.deps = deps
         self.gradio_mode = gradio_mode
         self.instance_path = instance_path
+        self._voice_override: str | None = None
 
         self.session: Any = None  # google.genai live session
         self.output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]" = asyncio.Queue()
@@ -223,6 +224,7 @@ class GeminiLiveHandler(AsyncStreamHandler):
             from reachy_mini_conversation_app.config import set_custom_profile
 
             set_custom_profile(profile)
+            self._voice_override = None
             logger.info("Set custom profile to %r", profile)
 
             try:
@@ -245,6 +247,18 @@ class GeminiLiveHandler(AsyncStreamHandler):
         except Exception as e:
             logger.error("Error applying personality '%s': %s", profile, e)
             return f"Failed to apply personality: {e}"
+
+    async def change_voice(self, voice: str) -> str:
+        """Change only the voice and restart the session."""
+        self._voice_override = voice
+        if self.session is not None:
+            try:
+                await self._restart_session()
+                return f"Voice changed to {voice}."
+            except Exception as e:
+                logger.warning("Failed to restart session for voice change: %s", e)
+                return "Voice change failed. Will take effect on next connection."
+        return "Voice changed. Will take effect on next connection."
 
     async def start_up(self) -> None:
         """Start the handler with retries on unexpected closure."""
@@ -327,7 +341,7 @@ class GeminiLiveHandler(AsyncStreamHandler):
     def _build_live_config(self) -> types.LiveConnectConfig:
         """Build the LiveConnectConfig for a Gemini Live session."""
         instructions = get_session_instructions()
-        voice = _resolve_gemini_voice(get_session_voice())
+        voice = _resolve_gemini_voice(self._voice_override or get_session_voice())
 
         # Convert OpenAI-style tool specs to Gemini function declarations
         tool_specs = get_tool_specs()

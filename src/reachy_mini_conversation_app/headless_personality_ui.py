@@ -300,3 +300,26 @@ def mount_personality_routes(
             return fut.result(timeout=10)
         except Exception:
             return get_available_voices_for_backend()
+
+    @app.post("/voices/apply")
+    async def _apply_voice(request: Request) -> dict:  # type: ignore
+        try:
+            raw = await request.json()
+        except Exception:
+            raw = {}
+        voice = str(raw.get("voice", "") or "")
+        if not voice:
+            return JSONResponse({"ok": False, "error": "missing_voice"}, status_code=400)  # type: ignore
+        loop = get_loop()
+        if loop is None:
+            return JSONResponse({"ok": False, "error": "loop_unavailable"}, status_code=503)  # type: ignore
+
+        async def _do() -> str:
+            return await handler.change_voice(voice)
+
+        try:
+            fut = asyncio.run_coroutine_threadsafe(_do(), loop)
+            status = fut.result(timeout=10)
+            return {"ok": True, "status": status}
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore

@@ -209,6 +209,21 @@ async function savePersonality(payload) {
   throw new Error(data.error || "save_failed");
 }
 
+async function applyVoice(voice) {
+  const url = new URL("/voices/apply", window.location.origin);
+  url.searchParams.set("_", Date.now().toString());
+  const resp = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ voice }),
+  }, 5000);
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(data.error || "apply_voice_failed");
+  }
+  return await resp.json();
+}
+
 async function applyPersonality(name, { persist = false } = {}) {
   // Send as query param to avoid any body parsing issues on the server
   const url = new URL("/personalities/apply", window.location.origin);
@@ -285,6 +300,7 @@ async function init() {
   const pTools = document.getElementById("tools-ta");
   const pStatus = document.getElementById("personality-status");
   const pVoice = document.getElementById("voice-select");
+  const pApplyVoice = document.getElementById("apply-voice");
   const pAvail = document.getElementById("tools-available");
 
   const AUTO_WITH = {
@@ -587,6 +603,18 @@ async function init() {
     show(personalityPanel, true);
 
     // pAvail change handler registered in attachToolHandlers()
+
+    pApplyVoice.addEventListener("click", async () => {
+      const voice = pVoice.value;
+      if (!voice) return;
+      setStatusMessage(pStatus, "Applying voice...");
+      try {
+        const res = await applyVoice(voice);
+        setStatusMessage(pStatus, res.status || `Voice changed to ${voice}.`, "ok");
+      } catch (e) {
+        setStatusMessage(pStatus, `Failed to apply voice${e.message ? ": " + e.message : ""}`, "error");
+      }
+    });
 
     pApply.addEventListener("click", async () => {
       setStatusMessage(pStatus, "Applying...");
