@@ -17,7 +17,6 @@ import logging
 from typing import Any, Dict, List, Final, Tuple, Literal, Optional
 from datetime import datetime
 
-import cv2
 import numpy as np
 import gradio as gr
 from google import genai
@@ -38,6 +37,7 @@ from reachy_mini_conversation_app.tools.core_tools import (
     get_tool_specs,
 )
 from reachy_mini_conversation_app.audio.playback_sync import SpeechMotionReset
+from reachy_mini_conversation_app.camera_frame_encoding import encode_bgr_frame_as_jpeg
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolCallRoutine,
     ToolNotification,
@@ -49,7 +49,6 @@ logger = logging.getLogger(__name__)
 
 GEMINI_INPUT_SAMPLE_RATE: Final[int] = 16000
 GEMINI_OUTPUT_SAMPLE_RATE: Final[int] = 24000
-
 
 
 def _openai_tool_specs_to_gemini(specs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -476,7 +475,7 @@ class GeminiLiveHandler(AsyncStreamHandler):
             if bg_tool.tool_name == "camera" and self.deps.camera_worker is not None:
                 np_img = self.deps.camera_worker.get_latest_frame()
                 if np_img is not None:
-                    rgb_frame = cv2.cvtColor(np_img, cv2.COLOR_BGR2RGB)
+                    rgb_frame = np.ascontiguousarray(np_img[..., ::-1])
                 else:
                     rgb_frame = None
                 img = gr.Image(value=rgb_frame)
@@ -499,12 +498,10 @@ class GeminiLiveHandler(AsyncStreamHandler):
                 if self.session and self.deps.camera_worker is not None:
                     frame = self.deps.camera_worker.get_latest_frame()
                     if frame is not None:
-                        success, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                        if success:
-                            jpeg_bytes = buffer.tobytes()
-                            await self.session.send_realtime_input(
-                                video=types.Blob(data=jpeg_bytes, mime_type="image/jpeg")
-                            )
+                        jpeg_bytes = encode_bgr_frame_as_jpeg(frame)
+                        await self.session.send_realtime_input(
+                            video=types.Blob(data=jpeg_bytes, mime_type="image/jpeg")
+                        )
             except Exception as e:
                 if self._stop_event.is_set():
                     break
