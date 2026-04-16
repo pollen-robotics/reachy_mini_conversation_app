@@ -326,7 +326,7 @@ class GeminiLiveHandler(AsyncStreamHandler):
             self._stop_event.set()  # Signal the old receive loop to stop
             await asyncio.sleep(0.1)
             self._stop_event.clear()
-            asyncio.create_task(self._run_live_session(), name="gemini-live-restart")
+            asyncio.create_task(self.start_up(), name="gemini-live-restart")
             try:
                 await asyncio.wait_for(self._connected_event.wait(), timeout=5.0)
                 logger.info("Gemini Live session restarted and connected.")
@@ -609,8 +609,8 @@ class GeminiLiveHandler(AsyncStreamHandler):
                     except Exception as e:
                         if self._stop_event.is_set():
                             break
-                        logger.warning("Receive loop error (will continue): %s", e)
-                        await asyncio.sleep(0.1)
+                        logger.warning("Receive loop error, restarting Gemini session: %s", e)
+                        raise
 
             finally:
                 if video_task is not None:
