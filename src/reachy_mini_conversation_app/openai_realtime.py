@@ -213,6 +213,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 return "Voice change failed. Will take effect on next connection."
         return "Voice changed. Will take effect on next connection."
 
+    def get_current_voice(self) -> str:
+        """Return the voice currently selected for this handler."""
+        return self._voice_override or get_session_voice()
+
     async def _emit_debounced_partial(self, transcript: str, item_id: str, sequence_counter: int) -> None:
         """Emit partial transcript after debounce delay."""
         try:

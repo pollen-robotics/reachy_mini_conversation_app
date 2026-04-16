@@ -253,6 +253,10 @@ class GeminiLiveHandler(AsyncStreamHandler):
                 return "Voice change failed. Will take effect on next connection."
         return "Voice changed. Will take effect on next connection."
 
+    def get_current_voice(self) -> str:
+        """Return the resolved Gemini voice currently selected for this handler."""
+        return _resolve_gemini_voice(self._voice_override or get_session_voice())
+
     async def start_up(self) -> None:
         """Start the handler with retries on unexpected closure."""
         gemini_api_key = config.GEMINI_API_KEY

@@ -94,6 +94,7 @@ def mount_personality_routes(
         instr = read_instructions_for(name)
         tools_txt = ""
         voice = get_default_voice_for_backend()
+        uses_default_voice = True
         if name != DEFAULT_OPTION:
             pdir = resolve_profile_dir(name)
             tp = pdir / "tools.txt"
@@ -103,12 +104,14 @@ def mount_personality_routes(
             if vf.exists():
                 v = vf.read_text(encoding="utf-8").strip()
                 voice = v or get_default_voice_for_backend()
+                uses_default_voice = not bool(v)
         avail = available_tools_for(name)
         enabled = [ln.strip() for ln in tools_txt.splitlines() if ln.strip() and not ln.strip().startswith("#")]
         return {
             "instructions": instr,
             "tools_text": tools_txt,
             "voice": voice,
+            "uses_default_voice": uses_default_voice,
             "available_tools": avail,
             "enabled_tools": enabled,
         }
@@ -292,6 +295,25 @@ def mount_personality_routes(
             return fut.result(timeout=10)
         except Exception:
             return get_available_voices_for_backend()
+
+    @app.get("/voices/current")
+    async def _current_voice() -> dict[str, str]:
+        loop = get_loop()
+        fallback_voice = get_default_voice_for_backend()
+        if loop is None:
+            return {"voice": fallback_voice}
+
+        def _get_current() -> str:
+            try:
+                return handler.get_current_voice()
+            except Exception:
+                return fallback_voice
+
+        try:
+            fut = asyncio.run_coroutine_threadsafe(asyncio.to_thread(_get_current), loop)
+            return {"voice": fut.result(timeout=10)}
+        except Exception:
+            return {"voice": fallback_voice}
 
     @app.post("/voices/apply")
     async def _apply_voice(request: Request, voice: str | None = Query(None)) -> dict:  # type: ignore

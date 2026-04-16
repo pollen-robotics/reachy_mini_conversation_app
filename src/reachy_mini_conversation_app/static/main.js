@@ -221,6 +221,19 @@ async function getVoices() {
   }
 }
 
+async function getCurrentVoice() {
+  try {
+    const url = new URL("/voices/current", window.location.origin);
+    url.searchParams.set("_", Date.now().toString());
+    const resp = await fetchWithTimeout(url, {}, 3000);
+    if (!resp.ok) throw new Error("current_voice_failed");
+    const data = await resp.json();
+    return typeof data.voice === "string" ? data.voice : "";
+  } catch (e) {
+    return "";
+  }
+}
+
 function show(el, flag) {
   el.classList.toggle("hidden", !flag);
 }
@@ -470,6 +483,7 @@ async function init() {
       pSelect.value = preferred;
     }
     const voices = await getVoices();
+    let currentVoice = await getCurrentVoice();
     pVoice.innerHTML = "";
     if (voices.length) {
       for (const v of voices) {
@@ -549,7 +563,9 @@ async function init() {
       pInstr.value = data.instructions || "";
       pTools.value = data.tools_text || "";
       const fallbackVoice = pVoice.options[0]?.value || "";
-      pVoice.value = voices.includes(data.voice) ? data.voice : fallbackVoice;
+      const loadedVoice = voices.includes(data.voice) ? data.voice : fallbackVoice;
+      const activeVoice = voices.includes(currentVoice) ? currentVoice : loadedVoice;
+      pVoice.value = data.uses_default_voice ? activeVoice : loadedVoice;
       // Available tools as checkboxes
       renderToolCheckboxes(data.available_tools, data.enabled_tools);
       // Default name field to last segment of selection
@@ -571,6 +587,8 @@ async function init() {
       setStatusMessage(pStatus, "Applying voice...");
       try {
         const res = await applyVoice(voice);
+        currentVoice = voice;
+        pVoice.value = voice;
         setStatusMessage(pStatus, res.status || `Voice changed to ${voice}.`, "ok");
       } catch (e) {
         setStatusMessage(pStatus, `Failed to apply voice${e.message ? ": " + e.message : ""}`, "error");
@@ -581,6 +599,7 @@ async function init() {
       setStatusMessage(pStatus, "Applying...");
       try {
         const res = await applyPersonality(pSelect.value);
+        currentVoice = await getCurrentVoice();
         if (res.startup) setStartupLabel(res.startup);
         setStatusMessage(pStatus, res.status || "Applied.", "ok");
       } catch (e) {
@@ -592,6 +611,7 @@ async function init() {
       setStatusMessage(pStatus, "Saving for startup...");
       try {
         const res = await applyPersonality(pSelect.value, { persist: true });
+        currentVoice = await getCurrentVoice();
         if (res.startup) setStartupLabel(res.startup);
         setStatusMessage(pStatus, res.status || "Saved for startup.", "ok");
       } catch (e) {
