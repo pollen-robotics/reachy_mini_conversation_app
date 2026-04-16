@@ -10,7 +10,13 @@ from pathlib import Path
 
 import gradio as gr
 
-from .config import LOCKED_PROFILE, AVAILABLE_VOICES, DEFAULT_PROFILES_DIRECTORY, config
+from reachy_mini_conversation_app.config import (
+    LOCKED_PROFILE,
+    DEFAULT_PROFILES_DIRECTORY,
+    config,
+    get_default_voice_for_backend,
+    get_available_voices_for_backend,
+)
 
 
 class PersonalityUI:
@@ -108,7 +114,12 @@ class PersonalityUI:
         self.person_name_tb = gr.Textbox(label="Personality name", interactive=not is_locked)
         self.person_instr_ta = gr.TextArea(label="Personality instructions", lines=10, interactive=not is_locked)
         self.tools_txt_ta = gr.TextArea(label="tools.txt", lines=10, interactive=not is_locked)
-        self.voice_dropdown = gr.Dropdown(label="Voice", choices=list(AVAILABLE_VOICES), value="cedar", interactive=not is_locked)
+        self.voice_dropdown = gr.Dropdown(
+            label="Voice",
+            choices=get_available_voices_for_backend(),
+            value=get_default_voice_for_backend(),
+            interactive=not is_locked,
+        )
         self.new_personality_btn = gr.Button("New personality", interactive=not is_locked)
         self.available_tools_cg = gr.CheckboxGroup(label="Available tools (helper)", choices=[], value=[], interactive=not is_locked)
         self.save_btn = gr.Button("Save personality (instructions + tools)", interactive=not is_locked)
@@ -145,26 +156,30 @@ class PersonalityUI:
             return status, preview
 
         def _read_voice_for(name: str) -> str:
+            default_voice = get_default_voice_for_backend()
             try:
                 if name == self.DEFAULT_OPTION:
-                    return "cedar"
+                    return default_voice
                 vf = self._resolve_profile_dir(name) / "voice.txt"
                 if vf.exists():
                     v = vf.read_text(encoding="utf-8").strip()
-                    return v or "cedar"
+                    return v or default_voice
             except Exception:
                 pass
-            return "cedar"
+            return default_voice
 
         async def _fetch_voices(selected: str) -> dict[str, Any]:
             try:
                 voices = await handler.get_available_voices()
                 current = _read_voice_for(selected)
                 if current not in voices:
-                    current = "cedar"
+                    current = get_default_voice_for_backend()
                 return gr.update(choices=voices, value=current)
             except Exception:
-                return gr.update(choices=list(AVAILABLE_VOICES), value="cedar")
+                return gr.update(
+                    choices=get_available_voices_for_backend(),
+                    value=get_default_voice_for_backend(),
+                )
 
         def _available_tools_for(selected: str) -> tuple[list[str], list[str]]:
             shared: list[str] = []
@@ -224,7 +239,7 @@ class PersonalityUI:
                     gr.update(value=tools_txt_val),
                     gr.update(choices=sorted(_available_tools_for(self.DEFAULT_OPTION)[0]), value=[]),
                     "Fill in a name, instructions and (optional) tools, then Save.",
-                    gr.update(value="cedar"),
+                    gr.update(value=get_default_voice_for_backend()),
                 )
             except Exception:
                 return (
@@ -247,7 +262,10 @@ class PersonalityUI:
                 target_dir.mkdir(parents=True, exist_ok=True)
                 (target_dir / "instructions.txt").write_text(instructions.strip() + "\n", encoding="utf-8")
                 (target_dir / "tools.txt").write_text(tools_text.strip() + "\n", encoding="utf-8")
-                (target_dir / "voice.txt").write_text((voice or "cedar").strip() + "\n", encoding="utf-8")
+                (target_dir / "voice.txt").write_text(
+                    (voice or get_default_voice_for_backend()).strip() + "\n",
+                    encoding="utf-8",
+                )
 
                 choices = self._list_personalities()
                 value = f"user_personalities/{name_s}"

@@ -148,8 +148,8 @@ def test_backend_config_persists_gemini_selection_and_status(
     assert data["backend_provider"] == "gemini"
     assert data["active_backend"] == "openai"
     assert data["has_gemini_key"] is True
-    assert data["has_key"] is True
-    assert data["can_proceed"] is True
+    assert data["has_key"] is False
+    assert data["can_proceed"] is False
     assert data["can_proceed_with_openai"] is False
     assert data["can_proceed_with_gemini"] is True
     assert data["requires_restart"] is True
@@ -160,7 +160,7 @@ def test_backend_config_persists_gemini_selection_and_status(
     assert status_data["backend_provider"] == "gemini"
     assert status_data["active_backend"] == "openai"
     assert status_data["has_gemini_key"] is True
-    assert status_data["can_proceed"] is True
+    assert status_data["can_proceed"] is False
     assert status_data["can_proceed_with_openai"] is False
     assert status_data["can_proceed_with_gemini"] is True
 
@@ -168,7 +168,6 @@ def test_backend_config_persists_gemini_selection_and_status(
     assert "BACKEND_PROVIDER=gemini" in env_text
     assert "MODEL_NAME=gemini-3.1-flash-live-preview" in env_text
     assert "GEMINI_API_KEY=gem-test-token" in env_text
-
 
 def test_backend_config_preserves_explicit_model_override_when_saving_key(
     tmp_path,

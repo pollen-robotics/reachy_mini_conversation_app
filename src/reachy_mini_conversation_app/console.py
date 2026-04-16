@@ -28,7 +28,6 @@ from reachy_mini_conversation_app.config import (
     LOCKED_PROFILE,
     OPENAI_BACKEND,
     config,
-    is_gemini_model,
     get_backend_choice,
     get_model_name_for_backend,
     refresh_runtime_config_from_env,
@@ -146,6 +145,17 @@ class LocalStream:
         """Return the backend family of the currently running handler."""
         handler_name = type(self.handler).__name__.lower()
         return GEMINI_BACKEND if "gemini" in handler_name else OPENAI_BACKEND
+
+    @staticmethod
+    def _has_key(value: Optional[str]) -> bool:
+        """Return whether a runtime credential value is present."""
+        return bool(value and str(value).strip())
+
+    def _has_required_key(self, backend: str) -> bool:
+        """Return whether the requested backend has its required credential."""
+        if backend == GEMINI_BACKEND:
+            return self._has_key(config.GEMINI_API_KEY)
+        return self._has_key(config.OPENAI_API_KEY)
 
     def _persist_env_value(self, env_name: str, value: str) -> None:
         """Persist a non-empty environment value in memory and in the instance `.env`."""
@@ -299,17 +309,14 @@ class LocalStream:
             backend: str
             api_key: Optional[str] = None
 
-        def _has_key(value: Optional[str]) -> bool:
-            return bool(value and str(value).strip())
-
         def _status_payload() -> dict[str, object]:
             backend_provider = get_backend_choice()
             active_backend = self._active_backend()
-            has_openai_key = _has_key(config.OPENAI_API_KEY)
-            has_gemini_key = _has_key(config.GEMINI_API_KEY)
+            has_openai_key = self._has_required_key(OPENAI_BACKEND)
+            has_gemini_key = self._has_required_key(GEMINI_BACKEND)
             can_proceed_with_openai = has_openai_key
             can_proceed_with_gemini = has_gemini_key
-            can_proceed = can_proceed_with_gemini if backend_provider == GEMINI_BACKEND else can_proceed_with_openai
+            can_proceed = self._has_required_key(active_backend)
             requires_restart = backend_provider != active_backend
             return {
                 "active_backend": active_backend,
@@ -364,7 +371,7 @@ class LocalStream:
                 return JSONResponse({"ok": False, "error": "invalid_backend"}, status_code=400)
 
             api_key = (payload.api_key or "").strip()
-            if backend == GEMINI_BACKEND and not api_key and not _has_key(config.GEMINI_API_KEY):
+            if backend == GEMINI_BACKEND and not api_key and not self._has_required_key(GEMINI_BACKEND):
                 return JSONResponse({"ok": False, "error": "empty_key"}, status_code=400)
 
             if backend == OPENAI_BACKEND and api_key:
@@ -436,8 +443,10 @@ class LocalStream:
             except Exception:
                 pass  # Instance .env loading is optional; continue with defaults
 
+        active_backend = self._active_backend()
+
         # If key is still missing, try to download one from HuggingFace (OpenAI only)
-        if not is_gemini_model() and not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()):
+        if active_backend == OPENAI_BACKEND and not self._has_required_key(active_backend):
             logger.info("OPENAI_API_KEY not set, attempting to download from HuggingFace...")
             try:
                 from gradio_client import Client
@@ -456,21 +465,12 @@ class LocalStream:
         self._init_settings_ui_if_needed()
 
         # If key is still missing -> wait until provided via the settings UI
-        _need_key = (is_gemini_model() and not (config.GEMINI_API_KEY and str(config.GEMINI_API_KEY).strip())) or (
-            not is_gemini_model() and not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip())
-        )
-        if _need_key:
-            key_name = "GEMINI_API_KEY" if is_gemini_model() else "OPENAI_API_KEY"
+        if not self._has_required_key(active_backend):
+            key_name = "GEMINI_API_KEY" if active_backend == GEMINI_BACKEND else "OPENAI_API_KEY"
             logger.warning("%s not found. Open the app settings page to enter it.", key_name)
             # Poll until the key becomes available (set via the settings UI)
             try:
-                while True:
-                    if is_gemini_model():
-                        if config.GEMINI_API_KEY and str(config.GEMINI_API_KEY).strip():
-                            break
-                    else:
-                        if config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip():
-                            break
+                while not self._has_required_key(active_backend):
                     time.sleep(0.2)
             except KeyboardInterrupt:
                 logger.info("Interrupted while waiting for API key.")

@@ -78,6 +78,15 @@ def test_prompts_load_from_compact_builtin_profile(monkeypatch: pytest.MonkeyPat
     assert read_instructions_for("mad_scientist_assistant") == expected
 
 
+def test_session_voice_defaults_follow_selected_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Session voice should fall back to the active backend default."""
+    monkeypatch.setattr(config, "BACKEND_PROVIDER", "gemini")
+    monkeypatch.setattr(config, "MODEL_NAME", "gemini-3.1-flash-live-preview")
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
+
+    assert prompts_mod.get_session_voice() == "Kore"
+
+
 def test_packaged_profiles_win_outside_source_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
