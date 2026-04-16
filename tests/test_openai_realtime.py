@@ -229,8 +229,8 @@ async def test_non_idle_tool_call_does_not_queue_progress_response(monkeypatch: 
 
 
 @pytest.mark.asyncio
-async def test_output_audio_done_resets_head_wobbler(monkeypatch: Any) -> None:
-    """OpenAI speech completion should explicitly restore neutral wobble state."""
+async def test_output_audio_done_schedules_head_wobbler_reset(monkeypatch: Any) -> None:
+    """OpenAI speech completion should let the wobbler reset itself after queued audio."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda: "alloy")
     monkeypatch.setattr(rt_mod, "get_tool_specs", lambda: [])
@@ -323,7 +323,8 @@ async def test_output_audio_done_resets_head_wobbler(monkeypatch: Any) -> None:
     await handler._run_realtime_session()
 
     head_wobbler.feed.assert_called_once()
-    head_wobbler.reset.assert_called_once()
+    head_wobbler.request_reset_after_current_audio.assert_called_once()
+    head_wobbler.reset.assert_not_called()
 
 
 def test_format_timestamp_uses_wall_clock() -> None:

@@ -94,8 +94,8 @@ class _FakeLiveClient:
 
 
 @pytest.mark.asyncio
-async def test_gemini_turn_buffers_transcripts_and_restores_motion(monkeypatch) -> None:
-    """Gemini turns should emit one transcript per role and release listening state when speaking."""
+async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(monkeypatch) -> None:
+    """Gemini turns should emit one transcript per role and let the wobbler reset after speech."""
     monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda: "test")
     monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
     monkeypatch.setattr(gemini_mod, "get_tool_specs", lambda: [])
@@ -151,7 +151,7 @@ async def test_gemini_turn_buffers_transcripts_and_restores_motion(monkeypatch) 
     handler.client = _FakeLiveClient(session)
 
     task = asyncio.create_task(handler._run_live_session())
-    await _wait_for(lambda: head_wobbler.reset.called and handler.output_queue.qsize() >= 3)
+    await _wait_for(lambda: head_wobbler.request_reset_after_current_audio.called and handler.output_queue.qsize() >= 3)
 
     handler._stop_event.set()
     await asyncio.wait_for(task, timeout=1.0)
@@ -176,7 +176,8 @@ async def test_gemini_turn_buffers_transcripts_and_restores_motion(monkeypatch) 
     movement_manager.set_listening.assert_has_calls([call(True), call(False)])
     assert movement_manager.set_listening.call_args_list[-1] == call(False)
     head_wobbler.feed.assert_not_called()
-    head_wobbler.reset.assert_called_once()
+    head_wobbler.request_reset_after_current_audio.assert_called_once()
+    head_wobbler.reset.assert_not_called()
 
 
 @pytest.mark.asyncio

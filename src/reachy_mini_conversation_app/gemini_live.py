@@ -36,7 +36,6 @@ from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_tool_specs,
 )
-from reachy_mini_conversation_app.audio.playback_sync import SpeechMotionReset
 from reachy_mini_conversation_app.camera_frame_encoding import encode_bgr_frame_as_jpeg
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolCallRoutine,
@@ -159,7 +158,6 @@ class GeminiLiveHandler(AsyncStreamHandler):
         self._stop_event: asyncio.Event = asyncio.Event()
         self._pending_user_transcript_chunks: list[str] = []
         self._pending_assistant_transcript_chunks: list[str] = []
-        self._speech_reset = SpeechMotionReset(deps.head_wobbler, deps.reachy_mini) if deps.head_wobbler else None
         self._listening_state = False
 
     def copy(self) -> "GeminiLiveHandler":
@@ -187,16 +185,12 @@ class GeminiLiveHandler(AsyncStreamHandler):
 
     async def _mark_model_response_started(self) -> None:
         """Switch out of user-listening mode when the model begins responding."""
-        if self._speech_reset:
-            self._speech_reset.cancel()
         await self._flush_transcript_chunks("user", self._pending_user_transcript_chunks)
         self._set_listening_state(False)
 
     async def _handle_interruption(self) -> None:
         """Stop current playback and preserve any transcript already spoken."""
         logger.debug("Gemini: user interrupted")
-        if self._speech_reset:
-            self._speech_reset.cancel()
         await self._flush_transcript_chunks("assistant", self._pending_assistant_transcript_chunks)
         if hasattr(self, "_clear_queue") and callable(self._clear_queue):
             self._clear_queue()
@@ -210,8 +204,8 @@ class GeminiLiveHandler(AsyncStreamHandler):
         await self._flush_transcript_chunks("user", self._pending_user_transcript_chunks)
         await self._flush_transcript_chunks("assistant", self._pending_assistant_transcript_chunks)
         self._set_listening_state(False)
-        if self._speech_reset:
-            self._speech_reset.schedule()
+        if self.deps.head_wobbler is not None:
+            self.deps.head_wobbler.request_reset_after_current_audio()
 
     async def apply_personality(self, profile: str | None) -> str:
         """Apply a new personality (profile) at runtime.
@@ -615,8 +609,6 @@ class GeminiLiveHandler(AsyncStreamHandler):
                         await asyncio.sleep(0.1)
 
             finally:
-                if self._speech_reset:
-                    self._speech_reset.cancel()
                 if video_task is not None:
                     video_task.cancel()
                     try:
