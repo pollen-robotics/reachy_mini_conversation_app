@@ -204,7 +204,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
     async def change_voice(self, voice: str) -> str:
         """Change only the voice and restart the session."""
         self._voice_override = voice
-        if self.connection is not None:
+        if getattr(self, "client", None) is not None:
             try:
                 await self._restart_session()
                 return f"Voice changed to {voice}."
