@@ -46,7 +46,9 @@ class Camera(Tool):
 
         if deps.vision_processor is not None:
             vision_result = await asyncio.to_thread(
-                deps.vision_processor.process_image, frame, question,
+                deps.vision_processor.process_image,
+                frame,
+                question,
             )
             return (
                 {"image_description": vision_result}

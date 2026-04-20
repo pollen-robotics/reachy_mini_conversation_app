@@ -206,8 +206,6 @@ def test_head_tracker_bootstrap_adds_src_parent_to_pythonpath(
         package_spec = importlib.util.find_spec("reachy_mini_conversation_app")
         package_locations = None if package_spec is None else package_spec.submodule_search_locations
         assert package_locations
-        assert pythonpath.split(os.pathsep)[0] == str(
-            Path(next(iter(package_locations))).resolve().parent
-        )
+        assert pythonpath.split(os.pathsep)[0] == str(Path(next(iter(package_locations))).resolve().parent)
     finally:
         tracker.close()

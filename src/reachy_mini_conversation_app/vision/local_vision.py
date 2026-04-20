@@ -149,11 +149,7 @@ class VisionProcessor:
 
             except Exception as e:
                 oom_error = getattr(getattr(torch, "cuda", None), "OutOfMemoryError", None)
-                if (
-                    isinstance(oom_error, type)
-                    and issubclass(oom_error, BaseException)
-                    and isinstance(e, oom_error)
-                ):
+                if isinstance(oom_error, type) and issubclass(oom_error, BaseException) and isinstance(e, oom_error):
                     logger.error(f"CUDA OOM on attempt {attempt + 1}: {e}")
                     if self.device == "cuda":
                         torch.cuda.empty_cache()

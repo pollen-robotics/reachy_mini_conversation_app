@@ -148,9 +148,7 @@ class YoloHeadTrackerProcess:
         project_src = Path(next(iter(package_locations))).resolve().parent
         existing_pythonpath = env.get("PYTHONPATH")
         env["PYTHONPATH"] = (
-            str(project_src)
-            if not existing_pythonpath
-            else f"{project_src}{os.pathsep}{existing_pythonpath}"
+            str(project_src) if not existing_pythonpath else f"{project_src}{os.pathsep}{existing_pythonpath}"
         )
         env["PYTHONUNBUFFERED"] = "1"
 

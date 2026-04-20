@@ -39,7 +39,6 @@ def test_vision_config_custom_values() -> None:
     assert config.device_preference == "cpu"
 
 
-
 @pytest.fixture
 def mock_torch() -> Any:
     """Mock torch module to avoid loading actual models."""
@@ -54,9 +53,10 @@ def mock_torch() -> Any:
 @pytest.fixture
 def mock_transformers() -> Any:
     """Mock transformers module."""
-    with patch("reachy_mini_conversation_app.vision.local_vision.AutoProcessor") as proc, \
-         patch("reachy_mini_conversation_app.vision.local_vision.AutoModelForImageTextToText") as model:
-
+    with (
+        patch("reachy_mini_conversation_app.vision.local_vision.AutoProcessor") as proc,
+        patch("reachy_mini_conversation_app.vision.local_vision.AutoModelForImageTextToText") as model,
+    ):
         # Mock processor — apply_chat_template returns a BatchFeature-like object with .to()
         mock_batch = MagicMock()
         mock_batch.to.return_value = mock_batch
@@ -217,10 +217,7 @@ def test_vision_processor_process_image_appends_local_vision_instructions(
 
     processor_mock = mock_transformers["processor"].from_pretrained.return_value
     messages = processor_mock.apply_chat_template.call_args.args[0]
-    assert messages[0]["content"][1]["text"] == (
-        "What is on the table?\n\n"
-        f"{LOCAL_VISION_RESPONSE_INSTRUCTIONS}"
-    )
+    assert messages[0]["content"][1]["text"] == (f"What is on the table?\n\n{LOCAL_VISION_RESPONSE_INSTRUCTIONS}")
 
 
 def test_vision_processor_process_image_with_retry(mock_torch: Any, mock_transformers: Any) -> None:
@@ -271,10 +268,11 @@ def test_vision_processor_process_image_retries_input_transfer_failure(
 
 def test_initialize_vision_processor_success(mock_torch: Any, mock_transformers: Any) -> None:
     """Test initialize_vision_processor creates VisionProcessor successfully."""
-    with patch("reachy_mini_conversation_app.vision.local_vision.snapshot_download") as mock_download, \
-         patch("reachy_mini_conversation_app.vision.local_vision.os.makedirs"), \
-         patch("reachy_mini_conversation_app.vision.local_vision.config") as mock_config:
-
+    with (
+        patch("reachy_mini_conversation_app.vision.local_vision.snapshot_download") as mock_download,
+        patch("reachy_mini_conversation_app.vision.local_vision.os.makedirs"),
+        patch("reachy_mini_conversation_app.vision.local_vision.config") as mock_config,
+    ):
         mock_config.LOCAL_VISION_MODEL = "test/model"
         mock_config.HF_HOME = "/tmp/hf_cache"
 
@@ -284,12 +282,14 @@ def test_initialize_vision_processor_success(mock_torch: Any, mock_transformers:
         assert result._initialized
         mock_download.assert_called_once()
 
+
 def test_initialize_vision_processor_download_failure(mock_torch: Any) -> None:
     """Test initialize_vision_processor surfaces download failures."""
-    with patch("reachy_mini_conversation_app.vision.local_vision.snapshot_download") as mock_download, \
-         patch("reachy_mini_conversation_app.vision.local_vision.os.makedirs"), \
-         patch("reachy_mini_conversation_app.vision.local_vision.config") as mock_config:
-
+    with (
+        patch("reachy_mini_conversation_app.vision.local_vision.snapshot_download") as mock_download,
+        patch("reachy_mini_conversation_app.vision.local_vision.os.makedirs"),
+        patch("reachy_mini_conversation_app.vision.local_vision.config") as mock_config,
+    ):
         mock_config.LOCAL_VISION_MODEL = "test/model"
         mock_config.HF_HOME = "/tmp/hf_cache"
         mock_download.side_effect = Exception("Network error")
@@ -297,13 +297,15 @@ def test_initialize_vision_processor_download_failure(mock_torch: Any) -> None:
         with pytest.raises(Exception, match="Network error"):
             initialize_vision_processor()
 
+
 def test_initialize_vision_processor_processor_failure(mock_torch: Any) -> None:
     """Test initialize_vision_processor surfaces processor initialization failures."""
-    with patch("reachy_mini_conversation_app.vision.local_vision.snapshot_download"), \
-         patch("reachy_mini_conversation_app.vision.local_vision.os.makedirs"), \
-         patch("reachy_mini_conversation_app.vision.local_vision.config") as mock_config, \
-         patch("reachy_mini_conversation_app.vision.local_vision.AutoProcessor") as mock_proc:
-
+    with (
+        patch("reachy_mini_conversation_app.vision.local_vision.snapshot_download"),
+        patch("reachy_mini_conversation_app.vision.local_vision.os.makedirs"),
+        patch("reachy_mini_conversation_app.vision.local_vision.config") as mock_config,
+        patch("reachy_mini_conversation_app.vision.local_vision.AutoProcessor") as mock_proc,
+    ):
         mock_config.LOCAL_VISION_MODEL = "test/model"
         mock_config.HF_HOME = "/tmp/hf_cache"
         mock_proc.from_pretrained.side_effect = Exception("Model load error")
@@ -320,7 +322,9 @@ def test_vision_processor_cuda_oom_recovery(mock_torch: Any, mock_transformers: 
 
     # Make generate raise OOM error
     mock_torch.cuda.OutOfMemoryError = type("OutOfMemoryError", (Exception,), {})
-    mock_transformers["model"].from_pretrained.return_value.generate.side_effect = mock_torch.cuda.OutOfMemoryError("OOM")
+    mock_transformers["model"].from_pretrained.return_value.generate.side_effect = mock_torch.cuda.OutOfMemoryError(
+        "OOM"
+    )
 
     test_image = np.zeros((480, 640, 3), dtype=np.uint8)
     result = processor.process_image(test_image, "Describe this image.")

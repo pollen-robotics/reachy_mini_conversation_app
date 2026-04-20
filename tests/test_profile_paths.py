@@ -40,6 +40,7 @@ from reachy_mini_conversation_app.headless_personality import (
 WINDOWS_PATH_BUDGET = 130
 WINDOWS_WHEEL_PATH_BUDGET = 71
 
+
 def _git_tracked_files(project_root: Path) -> list[Path]:
     """Return git-tracked files that still exist in the working tree."""
     try:
@@ -71,8 +72,10 @@ def test_prompts_load_from_compact_builtin_profile(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(config, "PROFILES_DIRECTORY", DEFAULT_PROFILES_DIRECTORY)
 
     expected = (
-        DEFAULT_PROFILES_DIRECTORY / "mad_scientist_assistant" / "instructions.txt"
-    ).read_text(encoding="utf-8").strip()
+        (DEFAULT_PROFILES_DIRECTORY / "mad_scientist_assistant" / "instructions.txt")
+        .read_text(encoding="utf-8")
+        .strip()
+    )
 
     assert prompts_mod.get_session_instructions() == expected
     assert read_instructions_for("mad_scientist_assistant") == expected
@@ -87,9 +90,7 @@ def test_session_voice_defaults_follow_selected_backend(monkeypatch: pytest.Monk
     assert prompts_mod.get_session_voice() == "Kore"
 
 
-def test_packaged_profiles_win_outside_source_checkout(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_packaged_profiles_win_outside_source_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Installed builds should use packaged profiles, not an unrelated sibling folder."""
     unrelated_profiles = tmp_path / "profiles"
     unrelated_profiles.mkdir()
@@ -113,8 +114,7 @@ def test_project_file_paths_stay_within_windows_budget() -> None:
         length = len(relative)
         if length > WINDOWS_PATH_BUDGET:
             violations.append(
-                f"Windows path budget exceeded ({WINDOWS_PATH_BUDGET}): "
-                f"{relative} is {length} characters long"
+                f"Windows path budget exceeded ({WINDOWS_PATH_BUDGET}): {relative} is {length} characters long"
             )
 
     assert not violations, "\n".join(violations)

@@ -19,12 +19,14 @@ def test_initialize_camera_and_vision_propagates_local_vision_init_failures() ->
         local_vision=True,
     )
 
-    with patch("reachy_mini_conversation_app.utils.CameraWorker") as mock_camera_worker, \
-         patch("reachy_mini_conversation_app.utils.subprocess.run", return_value=MagicMock(returncode=0)), \
-         patch(
-             "reachy_mini_conversation_app.vision.local_vision.initialize_vision_processor",
-             side_effect=RuntimeError("Vision processor initialization failed"),
-         ):
+    with (
+        patch("reachy_mini_conversation_app.utils.CameraWorker") as mock_camera_worker,
+        patch("reachy_mini_conversation_app.utils.subprocess.run", return_value=MagicMock(returncode=0)),
+        patch(
+            "reachy_mini_conversation_app.vision.local_vision.initialize_vision_processor",
+            side_effect=RuntimeError("Vision processor initialization failed"),
+        ),
+    ):
         with pytest.raises(RuntimeError, match="Vision processor initialization failed"):
             initialize_camera_and_vision(args, MagicMock())
 
@@ -39,8 +41,10 @@ def test_initialize_camera_and_vision_raises_when_local_vision_import_crashes() 
         local_vision=True,
     )
 
-    with patch("reachy_mini_conversation_app.utils.CameraWorker") as mock_camera_worker, \
-         patch("reachy_mini_conversation_app.utils.subprocess.run", return_value=MagicMock(returncode=-4)):
+    with (
+        patch("reachy_mini_conversation_app.utils.CameraWorker") as mock_camera_worker,
+        patch("reachy_mini_conversation_app.utils.subprocess.run", return_value=MagicMock(returncode=-4)),
+    ):
         with pytest.raises(CameraVisionInitializationError, match="Local vision import crashed"):
             initialize_camera_and_vision(args, MagicMock())
 
@@ -55,9 +59,12 @@ def test_initialize_camera_and_vision_raises_when_head_tracker_init_fails() -> N
         local_vision=False,
     )
 
-    with patch("reachy_mini_conversation_app.utils.CameraWorker") as mock_camera_worker, patch(
-        "reachy_mini_conversation_app.vision.head_tracking.yolo_process.YoloHeadTrackerProcess",
-        side_effect=RuntimeError("tracker init failed"),
+    with (
+        patch("reachy_mini_conversation_app.utils.CameraWorker") as mock_camera_worker,
+        patch(
+            "reachy_mini_conversation_app.vision.head_tracking.yolo_process.YoloHeadTrackerProcess",
+            side_effect=RuntimeError("tracker init failed"),
+        ),
     ):
         with pytest.raises(
             CameraVisionInitializationError,
@@ -78,9 +85,12 @@ def test_initialize_camera_and_vision_uses_mediapipe_head_tracker_in_process() -
 
     current_robot = MagicMock()
     mediapipe_head_tracker = MagicMock()
-    with patch("reachy_mini_conversation_app.utils.CameraWorker") as mock_camera_worker, patch(
-        "reachy_mini_conversation_app.vision.head_tracking.mediapipe.MediapipeHeadTracker",
-        return_value=mediapipe_head_tracker,
+    with (
+        patch("reachy_mini_conversation_app.utils.CameraWorker") as mock_camera_worker,
+        patch(
+            "reachy_mini_conversation_app.vision.head_tracking.mediapipe.MediapipeHeadTracker",
+            return_value=mediapipe_head_tracker,
+        ),
     ):
         initialize_camera_and_vision(args, current_robot)
 
