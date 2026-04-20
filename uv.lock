@@ -4186,7 +4186,7 @@ wheels = [
 
 [[package]]
 name = "reachy-mini"
-version = "1.6.2"
+version = "1.6.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -4222,9 +4222,9 @@ dependencies = [
     { name = "websockets" },
     { name = "zeroconf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/90/b0/8894dd9d80d1209132e69e33e316bddac9fecc32bd1d3ebb78106947d02a/reachy_mini-1.6.2.tar.gz", hash = "sha256:9b00a05de4e1744bbb0a08df652606b2c5d52b5b436588c60fb0a43262322853", size = 24705533, upload-time = "2026-04-09T08:09:51.024Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1c/fd/d5b2c5f06c2075fa9a6d315dc1455bb224a58eaefb8885c3d0a6444e32b1/reachy_mini-1.6.4.tar.gz", hash = "sha256:f873460ce95237953130e1aa7a4f678132a0e55e778ea74b1c77d3f5aa736daf", size = 24707904, upload-time = "2026-04-20T10:39:15.69Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/54/86/767fed906c1d815f03ac5dceb991eb6e6ef32bb99a19d5894071fb850df3/reachy_mini-1.6.2-py3-none-any.whl", hash = "sha256:20959ea89b0a357d7412cc89a304469fcac5236304ab31399ef60177e7ee8041", size = 24808320, upload-time = "2026-04-09T08:09:47.923Z" },
+    { url = "https://files.pythonhosted.org/packages/38/e7/7e871d5d02aed83d9b18b6ee6483fe3262f89c1b23c1061682becc27697b/reachy_mini-1.6.4-py3-none-any.whl", hash = "sha256:b23aaccf44c95da9cca6f7b17ceb09e614b89eec37fc512421b9c8069234bdfd", size = 24809998, upload-time = "2026-04-20T10:39:12.572Z" },
 ]
 
 [[package]]
@@ -4302,7 +4302,7 @@ requires-dist = [
     { name = "opencv-python", marker = "extra == 'all-vision'", specifier = ">=4.13.0.92" },
     { name = "opencv-python", marker = "extra == 'yolo-vision'", specifier = ">=4.13.0.92" },
     { name = "python-dotenv" },
-    { name = "reachy-mini", specifier = ">=1.6.2" },
+    { name = "reachy-mini", specifier = ">=1.6.4" },
     { name = "reachy-mini-dances-library" },
     { name = "reachy-mini-toolbox" },
     { name = "supervision", marker = "extra == 'all-vision'" },

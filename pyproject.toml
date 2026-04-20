@@ -29,7 +29,7 @@ dependencies = [
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
-    "reachy-mini>=1.6.2",
+    "reachy-mini>=1.6.4",
     "gradio_client>=1.13.3",
 ]
 
