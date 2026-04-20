@@ -177,7 +177,7 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_SPACE_ID: ${{ steps.preview.outputs.space_id }}
-        run: uvx hf repos delete "${HF_SPACE_ID}" --repo-type space --missing-ok
+        run: uvx hf repos delete "${HF_SPACE_ID}" --repo-type space --missing-ok --yes
 
       - name: Update comment to reflect deletion
         uses: actions/github-script@v8
