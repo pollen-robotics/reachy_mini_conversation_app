@@ -37,7 +37,7 @@ jobs:
           echo "space_url=https://huggingface.co/spaces/${HF_SPACE_NAMESPACE}/${HF_SPACE_BASE_NAME}_PR${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout pull request branch
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
@@ -46,7 +46,7 @@ jobs:
       - name: Sync preview space
         id: sync
         continue-on-error: true
-        uses: huggingface/hub-sync@v0.1.0
+        uses: huggingface/hub-sync@6fbce0a787a7146710e588abe7a4fd5eca07f47c  # v0.1.0
         with:
           github_repo_id: ${{ github.repository }}
           huggingface_repo_id: ${{ steps.preview.outputs.space_id }}
@@ -64,7 +64,7 @@ jobs:
 
       - name: Create or update preview comment
         if: steps.sync.outcome == 'success'
-        uses: actions/github-script@v8
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
         env:
           HF_PREVIEW_COMMENT_MARKER: ${{ env.HF_PREVIEW_COMMENT_MARKER }}
           HF_SPACE_URL: ${{ steps.preview.outputs.space_url }}
@@ -113,7 +113,7 @@ jobs:
 
       - name: Comment sync failure
         if: steps.sync.outcome == 'failure'
-        uses: actions/github-script@v8
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
         env:
           HF_PREVIEW_COMMENT_MARKER: ${{ env.HF_PREVIEW_COMMENT_MARKER }}
         with:
@@ -171,7 +171,7 @@ jobs:
           echo "space_id=${HF_SPACE_NAMESPACE}/${HF_SPACE_BASE_NAME}_PR${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
 
       - name: Delete preview space
         env:
@@ -180,7 +180,7 @@ jobs:
         run: uvx hf repos delete "${HF_SPACE_ID}" --repo-type space --missing-ok
 
       - name: Update comment to reflect deletion
-        uses: actions/github-script@v8
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
         env:
           HF_PREVIEW_COMMENT_MARKER: ${{ env.HF_PREVIEW_COMMENT_MARKER }}
         with:
