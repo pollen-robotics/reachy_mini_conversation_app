@@ -169,6 +169,7 @@ def test_backend_config_persists_gemini_selection_and_status(
     assert "MODEL_NAME=gemini-3.1-flash-live-preview" in env_text
     assert "GEMINI_API_KEY=gem-test-token" in env_text
 
+
 def test_backend_config_preserves_explicit_model_override_when_saving_key(
     tmp_path,
     monkeypatch,

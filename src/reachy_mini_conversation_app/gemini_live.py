@@ -441,9 +441,7 @@ class GeminiLiveHandler(AsyncStreamHandler):
                         image_bytes = base64.b64decode(b64_im)
                     else:
                         image_bytes = bytes(b64_im)
-                    await self.session.send_realtime_input(
-                        video=types.Blob(data=image_bytes, mime_type="image/jpeg")
-                    )
+                    await self.session.send_realtime_input(video=types.Blob(data=image_bytes, mime_type="image/jpeg"))
                     logger.info("Pushed camera snapshot to Gemini via realtime video input")
                 except Exception as ve:
                     logger.warning("Failed to push camera snapshot to Gemini: %s", ve)

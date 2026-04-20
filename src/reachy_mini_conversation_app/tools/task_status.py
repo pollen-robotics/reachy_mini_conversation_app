@@ -79,7 +79,9 @@ class TaskStatus(Tool):
             }
 
         tools_info = []
-        for tool in [tool for tool in running if tool.tool_name not in [system_tool.value for system_tool in SystemTool]]:
+        for tool in [
+            tool for tool in running if tool.tool_name not in [system_tool.value for system_tool in SystemTool]
+        ]:
             elapsed = time.monotonic() - tool.started_at
             tool_info: Dict[str, Any] = {
                 "tool_id": tool.tool_id,

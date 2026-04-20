@@ -88,9 +88,7 @@ class _FakeConnectContext:
 
 class _FakeLiveClient:
     def __init__(self, session: _FakeSession):
-        self.aio = SimpleNamespace(
-            live=SimpleNamespace(connect=lambda **_kwargs: _FakeConnectContext(session))
-        )
+        self.aio = SimpleNamespace(live=SimpleNamespace(connect=lambda **_kwargs: _FakeConnectContext(session)))
 
 
 @pytest.mark.asyncio
@@ -151,7 +149,9 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(monkey
     handler.client = _FakeLiveClient(session)
 
     task = asyncio.create_task(handler._run_live_session())
-    await _wait_for(lambda: head_wobbler.request_reset_after_current_audio.called and handler.output_queue.qsize() >= 3)
+    await _wait_for(
+        lambda: head_wobbler.request_reset_after_current_audio.called and handler.output_queue.qsize() >= 3
+    )
 
     handler._stop_event.set()
     await asyncio.wait_for(task, timeout=1.0)

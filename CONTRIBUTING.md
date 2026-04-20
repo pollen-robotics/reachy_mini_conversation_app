@@ -156,7 +156,7 @@ uv run pytest tests/ -v --cov  # With coverage
 
 ### All at Once
 ```bash
-uv run mypy --pretty --show-error-codes && uv run ruff check . --fix && uv run pytest tests/ -v
+uv run ruff check . --fix && uv run ruff format . && uv run mypy --pretty --show-error-codes && uv run pytest tests/ -v
 ```
 
 </details>

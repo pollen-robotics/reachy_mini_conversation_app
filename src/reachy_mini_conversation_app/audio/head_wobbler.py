@@ -83,7 +83,9 @@ class HeadWobbler:
         while not self._stop_event.is_set():
             queue_ref = self.audio_queue
             try:
-                chunk_generation, sr, chunk, start_delay_s = queue_ref.get(timeout=hop_dt)  # (gen, sr, data, start_delay)
+                chunk_generation, sr, chunk, start_delay_s = queue_ref.get(
+                    timeout=hop_dt
+                )  # (gen, sr, data, start_delay)
             except queue.Empty:
                 if self._should_reset_after_audio(hop_dt):
                     self.reset()
