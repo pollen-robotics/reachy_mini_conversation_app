@@ -229,7 +229,10 @@ class YoloHeadTrackerProcess:
                 raise TimeoutError(f"{self._tracker_name} head tracker timed out after {timeout:.2f}s")
 
             wait_started = time.monotonic()
-            message = self._wait_for_message(remaining)
+            try:
+                message = self._wait_for_message(remaining)
+            except TimeoutError as exc:
+                raise TimeoutError(f"{self._tracker_name} head tracker timed out after {timeout:.2f}s") from exc
             status, message_request_id, payload = self._unpack_response(message)
             if message_request_id < request_id:
                 deadline += time.monotonic() - wait_started
@@ -240,6 +243,9 @@ class YoloHeadTrackerProcess:
                     message_request_id,
                 )
                 continue
+
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"{self._tracker_name} head tracker timed out after {timeout:.2f}s")
 
             if message_request_id > request_id:
                 raise RuntimeError(
