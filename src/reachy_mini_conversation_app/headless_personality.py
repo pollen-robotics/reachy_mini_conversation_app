@@ -76,6 +76,16 @@ def read_instructions_for(name: str) -> str:
         return f"Could not load instructions: {e}"
 
 
+def read_tools_for(name: str) -> str:
+    """Read the tools.txt content for the given profile name."""
+    try:
+        profile_name = "default" if name == DEFAULT_OPTION else name
+        target = resolve_profile_dir(profile_name) / "tools.txt"
+        return target.read_text(encoding="utf-8") if target.exists() else ""
+    except Exception:
+        return ""
+
+
 def available_tools_for(selected: str) -> List[str]:
     """List available tool modules for the given profile selection."""
     shared: List[str] = []

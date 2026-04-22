@@ -79,6 +79,44 @@ class PersonalityUI:
         except Exception as e:
             return f"Could not load instructions: {e}"
 
+    def _read_tools_for(self, name: str) -> str:
+        try:
+            profile_name = "default" if name == self.DEFAULT_OPTION else name
+            target = self._resolve_profile_dir(profile_name) / "tools.txt"
+            if target.exists():
+                return target.read_text(encoding="utf-8")
+        except Exception:
+            pass
+        return ""
+
+    def _available_tools_for(self, selected: str) -> tuple[list[str], list[str]]:
+        shared: list[str] = []
+        try:
+            for py in self._tools_dir.glob("*.py"):
+                if py.stem in {"__init__", "core_tools"}:
+                    continue
+                shared.append(py.stem)
+        except Exception:
+            pass
+        local: list[str] = []
+        try:
+            if selected != self.DEFAULT_OPTION:
+                for py in (self._profiles_root / selected).glob("*.py"):
+                    local.append(py.stem)
+        except Exception:
+            pass
+        return sorted(shared), sorted(local)
+
+    @staticmethod
+    def _parse_enabled_tools(text: str) -> list[str]:
+        enabled: list[str] = []
+        for line in text.splitlines():
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            enabled.append(s)
+        return enabled
+
     @staticmethod
     def _sanitize_name(name: str) -> str:
         import re
@@ -101,6 +139,10 @@ class PersonalityUI:
             current_value = config.REACHY_MINI_CUSTOM_PROFILE or self.DEFAULT_OPTION
             dropdown_label = "Select personality"
             dropdown_choices = [self.DEFAULT_OPTION, *(self._list_personalities())]
+        initial_tools_txt = self._read_tools_for(current_value)
+        shared_tools, local_tools = self._available_tools_for(current_value)
+        initial_available_tools = sorted(set(shared_tools + local_tools))
+        initial_enabled_tools = self._parse_enabled_tools(initial_tools_txt)
 
         self.personalities_dropdown = gr.Dropdown(
             label=dropdown_label,
@@ -113,7 +155,12 @@ class PersonalityUI:
         self.preview_md = gr.Markdown(value=self._read_instructions_for(current_value))
         self.person_name_tb = gr.Textbox(label="Personality name", interactive=not is_locked)
         self.person_instr_ta = gr.TextArea(label="Personality instructions", lines=10, interactive=not is_locked)
-        self.tools_txt_ta = gr.TextArea(label="tools.txt", lines=10, interactive=not is_locked)
+        self.tools_txt_ta = gr.TextArea(
+            label="tools.txt",
+            value=initial_tools_txt,
+            lines=10,
+            interactive=not is_locked,
+        )
         self.voice_dropdown = gr.Dropdown(
             label="Voice",
             choices=get_available_voices_for_backend(),
@@ -122,7 +169,10 @@ class PersonalityUI:
         )
         self.new_personality_btn = gr.Button("New personality", interactive=not is_locked)
         self.available_tools_cg = gr.CheckboxGroup(
-            label="Available tools (helper)", choices=[], value=[], interactive=not is_locked
+            label="Available tools (helper)",
+            choices=initial_available_tools,
+            value=initial_enabled_tools,
+            interactive=not is_locked,
         )
         self.save_btn = gr.Button("Save personality (instructions + tools)", interactive=not is_locked)
 
@@ -183,43 +233,12 @@ class PersonalityUI:
                     value=get_default_voice_for_backend(),
                 )
 
-        def _available_tools_for(selected: str) -> tuple[list[str], list[str]]:
-            shared: list[str] = []
-            try:
-                for py in self._tools_dir.glob("*.py"):
-                    if py.stem in {"__init__", "core_tools"}:
-                        continue
-                    shared.append(py.stem)
-            except Exception:
-                pass
-            local: list[str] = []
-            try:
-                if selected != self.DEFAULT_OPTION:
-                    for py in (self._profiles_root / selected).glob("*.py"):
-                        local.append(py.stem)
-            except Exception:
-                pass
-            return sorted(shared), sorted(local)
-
-        def _parse_enabled_tools(text: str) -> list[str]:
-            enabled: list[str] = []
-            for line in text.splitlines():
-                s = line.strip()
-                if not s or s.startswith("#"):
-                    continue
-                enabled.append(s)
-            return enabled
-
         def _load_profile_for_edit(selected: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str]:
             instr = self._read_instructions_for(selected)
-            tools_txt = ""
-            if selected != self.DEFAULT_OPTION:
-                tp = self._resolve_profile_dir(selected) / "tools.txt"
-                if tp.exists():
-                    tools_txt = tp.read_text(encoding="utf-8")
-            shared, local = _available_tools_for(selected)
+            tools_txt = self._read_tools_for(selected)
+            shared, local = self._available_tools_for(selected)
             all_tools = sorted(set(shared + local))
-            enabled = _parse_enabled_tools(tools_txt)
+            enabled = self._parse_enabled_tools(tools_txt)
             status_text = f"Loaded profile '{selected}'."
             return (
                 gr.update(value=instr),
@@ -239,7 +258,7 @@ class PersonalityUI:
                     gr.update(value=""),
                     gr.update(value=instr_val),
                     gr.update(value=tools_txt_val),
-                    gr.update(choices=sorted(_available_tools_for(self.DEFAULT_OPTION)[0]), value=[]),
+                    gr.update(choices=sorted(self._available_tools_for(self.DEFAULT_OPTION)[0]), value=[]),
                     "Fill in a name, instructions and (optional) tools, then Save.",
                     gr.update(value=get_default_voice_for_backend()),
                 )
