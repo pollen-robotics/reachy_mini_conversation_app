@@ -30,6 +30,7 @@ from .headless_personality import (
     _write_profile,
     list_personalities,
     available_tools_for,
+    read_tools_for,
     resolve_profile_dir,
     read_instructions_for,
 )
@@ -92,14 +93,11 @@ def mount_personality_routes(
     @app.get("/personalities/load")
     def _load(name: str) -> dict:  # type: ignore
         instr = read_instructions_for(name)
-        tools_txt = ""
+        tools_txt = read_tools_for(name)
         voice = get_default_voice_for_backend()
         uses_default_voice = True
         if name != DEFAULT_OPTION:
             pdir = resolve_profile_dir(name)
-            tp = pdir / "tools.txt"
-            if tp.exists():
-                tools_txt = tp.read_text(encoding="utf-8")
             vf = pdir / "voice.txt"
             if vf.exists():
                 v = vf.read_text(encoding="utf-8").strip()

@@ -227,6 +227,22 @@ def test_headless_personality_routes_return_gemini_voices_when_backend_selected(
     assert response.json() == GEMINI_AVAILABLE_VOICES
 
 
+def test_headless_personality_routes_load_builtin_default_tools() -> None:
+    """Headless personality UI should expose built-in default tools on initial load."""
+    app = FastAPI()
+    handler = MagicMock()
+    mount_personality_routes(app, handler, lambda: None)
+
+    client = TestClient(app)
+    response = client.get("/personalities/load", params={"name": "(built-in default)"})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["tools_text"]
+    assert "dance" in data["enabled_tools"]
+    assert "camera" in data["enabled_tools"]
+
+
 def test_headless_personality_routes_apply_voice_accepts_query_param() -> None:
     """Headless personality UI should apply a voice change from a POST query param."""
     app = FastAPI()
