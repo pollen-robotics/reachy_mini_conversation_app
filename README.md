@@ -218,7 +218,9 @@ Built-in motion content is published as open Hugging Face datasets:
 
 Create custom profiles with dedicated instructions and enabled tools.
 
-Set `REACHY_MINI_CUSTOM_PROFILE=<name>` to load `profiles/<name>/` (see `.env.example`). If unset, the `default` profile is used.
+For normal usage, select a profile from the UI and save it for startup. That selection is persisted in `startup_settings.json`.
+
+If no startup settings have been saved yet, you can still seed startup from the environment with `REACHY_MINI_CUSTOM_PROFILE=<name>` to load `profiles/<name>/`. If neither is set, the `default` profile is used.
 
 Each profile should include `instructions.txt` (prompt text). `tools.txt` (list of allowed tools) is recommended. If missing for a non-default profile, the app falls back to `profiles/default/tools.txt`. Profiles can optionally contain custom tool implementations.
 
@@ -266,7 +268,7 @@ To create a locked variant of the app that cannot switch profiles, edit `src/rea
 ```python
 LOCKED_PROFILE: str | None = "mars_rover"  # Lock to this profile
 ```
-When `LOCKED_PROFILE` is set, the app always uses that profile, ignoring `REACHY_MINI_CUSTOM_PROFILE` env var & the Gradio UI shows "(locked)" and disables all profile editing controls.
+When `LOCKED_PROFILE` is set, the app always uses that profile, ignoring saved startup settings, `REACHY_MINI_CUSTOM_PROFILE`, and the Gradio UI. The UI shows "(locked)" and disables all profile editing controls.
 This is useful for creating dedicated clones of the app with a fixed personality. Clone scripts can simply edit this constant to lock the variant.
 
 </details>
@@ -294,9 +296,10 @@ external_content/
 
 **Environment variables:**
 
-Set these values in your `.env` (copy from `.env.example`):
+Set these values in your `.env` when you want env-driven external profile/tool selection:
 
 ```env
+# Optional fallback/manual profile selector:
 REACHY_MINI_CUSTOM_PROFILE=my_profile
 REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY=./external_content/external_profiles
 REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY=./external_content/external_tools
