@@ -348,13 +348,13 @@ async def test_apply_personality_preserves_manual_voice_override(monkeypatch: An
     assert session["audio"]["output"]["voice"] == "marin"
 
 
-def test_handler_uses_valid_persisted_voice_override_at_startup(monkeypatch: Any) -> None:
-    """OpenAI handler startup should restore a persisted OpenAI voice override."""
-    monkeypatch.setenv("REACHY_MINI_VOICE_OVERRIDE", "shimmer")
+def test_handler_uses_startup_voice_at_startup() -> None:
+    """OpenAI handler startup should restore a persisted startup voice."""
+    handler = OpenaiRealtimeHandler(
+        ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()),
+        startup_voice="shimmer",
+    )
 
-    handler = OpenaiRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
-
-    assert handler.get_voice_override() == "shimmer"
     assert handler.get_current_voice() == "shimmer"
 
 

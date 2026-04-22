@@ -16,6 +16,5 @@ if str(SRC_PATH) not in sys.path:
 # local .env and fail before tests run.
 os.environ["REACHY_MINI_SKIP_DOTENV"] = "1"
 os.environ.pop("REACHY_MINI_CUSTOM_PROFILE", None)
-os.environ.pop("REACHY_MINI_VOICE_OVERRIDE", None)
 os.environ.pop("REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY", None)
 os.environ.pop("REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY", None)

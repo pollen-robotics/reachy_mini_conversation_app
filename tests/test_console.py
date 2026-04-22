@@ -265,7 +265,7 @@ def test_headless_personality_routes_persist_startup_with_voice_override() -> No
     app = FastAPI()
     handler = MagicMock()
     handler.apply_personality = AsyncMock(return_value="Applied personality and restarted realtime session.")
-    handler.get_voice_override = MagicMock(return_value="shimmer")
+    handler.get_current_voice = MagicMock(return_value="shimmer")
     persist_personality = MagicMock()
 
     loop = asyncio.new_event_loop()
@@ -302,6 +302,7 @@ def test_local_stream_persist_personality_stores_voice_override(tmp_path) -> Non
 
     stream._persist_personality("sorry_bro", "shimmer")
 
-    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
-    assert "REACHY_MINI_CUSTOM_PROFILE=sorry_bro" in env_text
-    assert "REACHY_MINI_VOICE_OVERRIDE=shimmer" in env_text
+    settings_path = tmp_path / "startup_settings.json"
+    assert settings_path.exists()
+    assert settings_path.read_text(encoding="utf-8") == '{\n  "profile": "sorry_bro",\n  "voice": "shimmer"\n}\n'
+    assert stream._read_persisted_personality() == "sorry_bro"

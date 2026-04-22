@@ -27,13 +27,13 @@ from reachy_mini_conversation_app.config import (
     GEMINI_BACKEND,
     LOCKED_PROFILE,
     OPENAI_BACKEND,
-    VOICE_OVERRIDE_ENV_VAR,
     config,
     get_backend_choice,
     get_model_name_for_backend,
     refresh_runtime_config_from_env,
 )
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
+from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
 
 
@@ -225,7 +225,7 @@ class LocalStream:
         self._persist_env_values(updates)
 
     def _persist_personality(self, profile: Optional[str], voice_override: Optional[str] = None) -> None:
-        """Persist the startup personality and voice override to the instance .env."""
+        """Persist startup profile and voice in instance-local UI settings."""
         if LOCKED_PROFILE is not None:
             return
         selection = (profile or "").strip() or None
@@ -236,60 +236,22 @@ class LocalStream:
             set_custom_profile(selection)
         except Exception:
             pass
-        try:
-            if normalized_voice_override:
-                os.environ[VOICE_OVERRIDE_ENV_VAR] = normalized_voice_override
-            else:
-                os.environ.pop(VOICE_OVERRIDE_ENV_VAR, None)
-            refresh_runtime_config_from_env()
-        except Exception:
-            pass
 
         if not self._instance_path:
             return
         try:
-            env_path = Path(self._instance_path) / ".env"
-            lines = self._read_env_lines(env_path)
-            managed_values = {
-                "REACHY_MINI_CUSTOM_PROFILE": selection,
-                VOICE_OVERRIDE_ENV_VAR: normalized_voice_override,
-            }
-            lines = [
-                ln for ln in lines if not any(ln.strip().startswith(f"{env_name}=") for env_name in managed_values)
-            ]
-            for env_name, value in managed_values.items():
-                if value:
-                    lines.append(f"{env_name}={value}")
-            if not any(managed_values.values()) and not env_path.exists():
-                return
-            final_text = "\n".join(lines) + "\n"
-            env_path.write_text(final_text, encoding="utf-8")
-            logger.info("Persisted startup personality settings to %s", env_path)
-            try:
-                from dotenv import load_dotenv
-
-                load_dotenv(dotenv_path=str(env_path), override=True)
-                refresh_runtime_config_from_env()
-            except Exception:
-                pass
+            write_startup_settings(
+                self._instance_path,
+                profile=selection,
+                voice=normalized_voice_override,
+            )
+            logger.info("Persisted startup personality settings to %s", Path(self._instance_path))
         except Exception as e:
             logger.warning("Failed to persist startup personality settings: %s", e)
 
     def _read_persisted_personality(self) -> Optional[str]:
-        """Read persisted startup personality from instance .env (if any)."""
-        if not self._instance_path:
-            return None
-        env_path = Path(self._instance_path) / ".env"
-        try:
-            if env_path.exists():
-                for ln in env_path.read_text(encoding="utf-8").splitlines():
-                    if ln.strip().startswith("REACHY_MINI_CUSTOM_PROFILE="):
-                        _, _, val = ln.partition("=")
-                        v = val.strip()
-                        return v or None
-        except Exception:
-            pass
-        return None
+        """Read the saved startup personality from instance-local UI settings."""
+        return read_startup_settings(self._instance_path).profile
 
     def _init_settings_ui_if_needed(self) -> None:
         """Attach minimal settings UI to the settings app.

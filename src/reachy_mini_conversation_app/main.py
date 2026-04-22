@@ -47,9 +47,14 @@ def run(
     # Putting these dependencies here makes the dashboard faster to load when the conversation app is installed
     from reachy_mini_conversation_app.moves import MovementManager
     from reachy_mini_conversation_app.config import config, is_gemini_model, refresh_runtime_config_from_env
+    from reachy_mini_conversation_app.startup_settings import (
+        StartupSettings,
+        load_startup_settings_into_runtime,
+    )
 
     logger = setup_logger(args.debug)
     logger.info("Starting Reachy Mini Conversation App")
+    startup_settings = StartupSettings()
 
     if instance_path is not None:
         try:
@@ -62,6 +67,11 @@ def run(
                 logger.info("Loaded instance configuration from %s", env_path)
         except Exception as e:
             logger.warning("Failed to load instance configuration: %s", e)
+
+        try:
+            startup_settings = load_startup_settings_into_runtime(instance_path)
+        except Exception as e:
+            logger.warning("Failed to load startup settings: %s", e)
 
     from reachy_mini_conversation_app.console import LocalStream
     from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
@@ -145,12 +155,22 @@ def run(
         from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
 
         logger.info("Using Gemini Live handler for model: %s", config.MODEL_NAME)
-        handler = GeminiLiveHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)
+        handler = GeminiLiveHandler(
+            deps,
+            gradio_mode=args.gradio,
+            instance_path=instance_path,
+            startup_voice=startup_settings.voice,
+        )
     else:
         from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 
         logger.info("Using OpenAI Realtime handler for model: %s", config.MODEL_NAME)
-        handler = OpenaiRealtimeHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)  # type: ignore[assignment]
+        handler = OpenaiRealtimeHandler(
+            deps,
+            gradio_mode=args.gradio,
+            instance_path=instance_path,
+            startup_voice=startup_settings.voice,
+        )  # type: ignore[assignment]
 
     stream_manager: gr.Blocks | LocalStream | None = None
 

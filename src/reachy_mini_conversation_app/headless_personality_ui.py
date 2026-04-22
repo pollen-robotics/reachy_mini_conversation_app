@@ -261,8 +261,8 @@ def mount_personality_routes(
         async def _do_apply() -> tuple[str, Optional[str]]:
             sel = None if sel_name == DEFAULT_OPTION else sel_name
             status = await handler.apply_personality(sel)
-            get_voice_override = getattr(handler, "get_voice_override", None)
-            voice_override = get_voice_override() if callable(get_voice_override) else None
+            get_current_voice = getattr(handler, "get_current_voice", None)
+            voice_override = get_current_voice() if callable(get_current_voice) else None
             return status, voice_override
 
         try:

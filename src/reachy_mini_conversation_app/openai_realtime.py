@@ -28,7 +28,7 @@ from openai.resources.realtime.realtime import AsyncRealtimeConnection
 from openai.types.realtime.realtime_audio_formats_param import AudioPCM
 from openai.types.realtime.realtime_audio_input_turn_detection_param import ServerVad
 
-from reachy_mini_conversation_app.config import OPENAI_BACKEND, AVAILABLE_VOICES, config, get_persisted_voice_override
+from reachy_mini_conversation_app.config import AVAILABLE_VOICES, config
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
@@ -78,10 +78,25 @@ def _compute_response_cost(usage: Any) -> float:
     return cost
 
 
+def _normalize_startup_voice(voice: str | None) -> str | None:
+    """Return a valid persisted OpenAI startup voice or None."""
+    if voice in AVAILABLE_VOICES:
+        return voice
+    if voice:
+        logger.warning("Ignoring persisted OpenAI startup voice %r; expected one of %s", voice, AVAILABLE_VOICES)
+    return None
+
+
 class OpenaiRealtimeHandler(AsyncStreamHandler):
     """An OpenAI realtime handler for fastrtc Stream."""
 
-    def __init__(self, deps: ToolDependencies, gradio_mode: bool = False, instance_path: Optional[str] = None):
+    def __init__(
+        self,
+        deps: ToolDependencies,
+        gradio_mode: bool = False,
+        instance_path: Optional[str] = None,
+        startup_voice: Optional[str] = None,
+    ):
         """Initialize the handler."""
         super().__init__(
             expected_layout="mono",
@@ -107,7 +122,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.is_idle_tool_call = False
         self.gradio_mode = gradio_mode
         self.instance_path = instance_path
-        self._voice_override: str | None = get_persisted_voice_override(OPENAI_BACKEND)
+        self._voice_override: str | None = _normalize_startup_voice(startup_voice)
         # Track how the API key was provided (env vs textbox) and its value
         self._key_source: Literal["env", "textbox"] = "env"
         self._provided_api_key: str | None = None
@@ -214,10 +229,6 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
     def get_current_voice(self) -> str:
         """Return the voice currently selected for this handler."""
         return self._voice_override or get_session_voice()
-
-    def get_voice_override(self) -> str | None:
-        """Return the manual voice override currently active for this handler."""
-        return self._voice_override
 
     async def _emit_debounced_partial(self, transcript: str, item_id: str, sequence_counter: int) -> None:
         """Emit partial transcript after debounce delay."""
