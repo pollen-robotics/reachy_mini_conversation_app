@@ -7,6 +7,8 @@ import logging
 from pathlib import Path
 from dataclasses import dataclass
 
+from dotenv import dotenv_values
+
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,24 @@ def _startup_settings_path(instance_path: str | Path | None) -> Path | None:
     if instance_path is None:
         return None
     return Path(instance_path) / STARTUP_SETTINGS_FILENAME
+
+
+def _read_instance_env_override(instance_path: str | Path | None, env_name: str) -> str | None:
+    """Return an instance-local env override value when it is explicitly set."""
+    if instance_path is None:
+        return None
+
+    env_path = Path(instance_path) / ".env"
+    if not env_path.exists():
+        return None
+
+    try:
+        payload = dotenv_values(env_path)
+    except Exception as exc:
+        logger.warning("Failed to read startup env override from %s: %s", env_path, exc)
+        return None
+
+    return _normalize_optional_text(payload.get(env_name))
 
 
 def read_startup_settings(instance_path: str | Path | None) -> StartupSettings:
@@ -96,9 +116,13 @@ def load_startup_settings_into_runtime(instance_path: str | Path | None) -> Star
     if LOCKED_PROFILE is not None:
         return StartupSettings()
 
+    settings_path = _startup_settings_path(instance_path)
     settings = read_startup_settings(instance_path)
-    if os.getenv("REACHY_MINI_CUSTOM_PROFILE"):
+    if _read_instance_env_override(instance_path, "REACHY_MINI_CUSTOM_PROFILE") is not None:
         return StartupSettings(voice=settings.voice)
+    if settings_path is None or not settings_path.exists():
+        if os.getenv("REACHY_MINI_CUSTOM_PROFILE"):
+            return StartupSettings(voice=settings.voice)
 
     set_custom_profile(settings.profile)
     return settings
