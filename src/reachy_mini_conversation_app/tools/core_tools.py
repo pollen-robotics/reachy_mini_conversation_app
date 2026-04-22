@@ -27,14 +27,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s:%(lineno)d | %(message)s")
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-
-
 ALL_TOOLS: Dict[str, "Tool"] = {}
 ALL_TOOL_SPECS: List[Dict[str, Any]] = []
 _TOOLS_INITIALIZED = False
