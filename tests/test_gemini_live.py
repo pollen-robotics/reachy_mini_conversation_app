@@ -235,3 +235,23 @@ async def test_gemini_camera_tool_sends_snapshot_and_returns_json_result() -> No
             "metadata": {"title": "🛠️ Used tool camera", "status": "done"},
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_apply_personality_preserves_manual_voice_override(monkeypatch) -> None:
+    """Applying a profile should keep a manually selected Gemini voice active."""
+    monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda: "test")
+    monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
+    monkeypatch.setattr("reachy_mini_conversation_app.config.set_custom_profile", lambda _profile: None)
+
+    handler = GeminiLiveHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.session = object()
+    handler._voice_override = "Orus"
+    restart = AsyncMock()
+    monkeypatch.setattr(handler, "_restart_session", restart)
+
+    status = await handler.apply_personality("example")
+
+    assert status == "Applied personality and restarted Gemini session."
+    assert handler.get_current_voice() == "Orus"
+    restart.assert_awaited_once()

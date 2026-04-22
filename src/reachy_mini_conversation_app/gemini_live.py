@@ -217,7 +217,6 @@ class GeminiLiveHandler(AsyncStreamHandler):
             from reachy_mini_conversation_app.config import set_custom_profile
 
             set_custom_profile(profile)
-            self._voice_override = None
             logger.info("Set custom profile to %r", profile)
 
             try:

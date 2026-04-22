@@ -153,14 +153,13 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             from reachy_mini_conversation_app.config import set_custom_profile
 
             set_custom_profile(profile)
-            self._voice_override = None
             logger.info(
                 "Set custom profile to %r (config=%r)", profile, getattr(_config, "REACHY_MINI_CUSTOM_PROFILE", None)
             )
 
             try:
                 instructions = get_session_instructions()
-                voice = get_session_voice()
+                voice = self._voice_override or get_session_voice()
             except BaseException as e:  # catch SystemExit from prompt loader without crashing
                 logger.error("Failed to resolve personality content: %s", e)
                 return f"Failed to apply personality: {e}"
