@@ -59,6 +59,11 @@ except Exception:  # pragma: no cover - only loaded when settings_app is used
 
 logger = logging.getLogger(__name__)
 
+LEGACY_STARTUP_ENV_NAMES = (
+    "REACHY_MINI_CUSTOM_PROFILE",
+    "REACHY_MINI_VOICE_OVERRIDE",
+)
+
 
 def _estimate_pending_playback_seconds(robot: ReachyMini) -> float:
     """Best-effort estimate of audio still queued in the local player."""
@@ -205,6 +210,34 @@ class LocalStream:
         except Exception as e:
             logger.warning("Failed to persist %s: %s", ", ".join(sorted(normalized_updates)), e)
 
+    def _remove_persisted_env_values(self, env_names: tuple[str, ...]) -> None:
+        """Remove keys from the instance `.env` without mutating the current runtime."""
+        normalized_names = tuple(sorted({name.strip() for name in env_names if name and name.strip()}))
+        if not normalized_names or not self._instance_path:
+            return
+
+        env_path = Path(self._instance_path) / ".env"
+        if not env_path.exists():
+            return
+
+        try:
+            lines = env_path.read_text(encoding="utf-8").splitlines()
+            filtered_lines = [
+                line
+                for line in lines
+                if not any(line.strip().startswith(f"{env_name}=") for env_name in normalized_names)
+            ]
+            if filtered_lines == lines:
+                return
+
+            final_text = "\n".join(filtered_lines)
+            if final_text:
+                final_text += "\n"
+            env_path.write_text(final_text, encoding="utf-8")
+            logger.info("Removed %s from %s", ", ".join(normalized_names), env_path)
+        except Exception as e:
+            logger.warning("Failed to remove %s: %s", ", ".join(normalized_names), e)
+
     def _persist_api_key(self, key: str) -> None:
         """Persist OPENAI_API_KEY to environment and instance `.env`."""
         self._persist_env_value("OPENAI_API_KEY", key)
@@ -245,6 +278,7 @@ class LocalStream:
                 profile=selection,
                 voice=normalized_voice_override,
             )
+            self._remove_persisted_env_values(LEGACY_STARTUP_ENV_NAMES)
             logger.info("Persisted startup personality settings to %s", Path(self._instance_path))
         except Exception as e:
             logger.warning("Failed to persist startup personality settings: %s", e)

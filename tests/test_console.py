@@ -13,6 +13,10 @@ from fastapi.testclient import TestClient
 from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.config import GEMINI_AVAILABLE_VOICES, config
 from reachy_mini_conversation_app.console import LocalStream
+from reachy_mini_conversation_app.startup_settings import (
+    StartupSettings,
+    load_startup_settings_into_runtime,
+)
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
 
 
@@ -322,3 +326,34 @@ def test_local_stream_persist_personality_stores_voice_override(tmp_path) -> Non
     assert settings_path.exists()
     assert settings_path.read_text(encoding="utf-8") == '{\n  "profile": "sorry_bro",\n  "voice": "shimmer"\n}\n'
     assert stream._read_persisted_personality() == "sorry_bro"
+
+
+def test_local_stream_persist_personality_clears_legacy_startup_env_overrides(tmp_path, monkeypatch) -> None:
+    """Saving startup settings should remove legacy `.env` profile and voice overrides."""
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "OPENAI_API_KEY=test-key\n"
+        "REACHY_MINI_CUSTOM_PROFILE=mad_scientist_assistant\n"
+        "REACHY_MINI_VOICE_OVERRIDE=shimmer\n",
+        encoding="utf-8",
+    )
+    stream = LocalStream(MagicMock(), MagicMock(), instance_path=str(tmp_path))
+
+    stream._persist_personality(None, "Aiden")
+
+    env_text = env_path.read_text(encoding="utf-8")
+    assert "OPENAI_API_KEY=test-key" in env_text
+    assert "REACHY_MINI_CUSTOM_PROFILE=" not in env_text
+    assert "REACHY_MINI_VOICE_OVERRIDE=" not in env_text
+
+    applied_profiles: list[str | None] = []
+    monkeypatch.delenv("REACHY_MINI_CUSTOM_PROFILE", raising=False)
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.config.set_custom_profile",
+        lambda profile: applied_profiles.append(profile),
+    )
+
+    settings = load_startup_settings_into_runtime(tmp_path)
+
+    assert settings == StartupSettings(voice="Aiden")
+    assert applied_profiles == [None]
