@@ -91,8 +91,10 @@ def test_builtin_default_profile_tools_load_for_ui() -> None:
     assert read_tools_for(DEFAULT_OPTION) == expected
 
 
-def test_gradio_personality_ui_prefills_builtin_default_tools() -> None:
+def test_gradio_personality_ui_prefills_builtin_default_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     """Gradio should show the built-in default profile tools on first render."""
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
+
     ui = PersonalityUI()
     ui.create_components()
 

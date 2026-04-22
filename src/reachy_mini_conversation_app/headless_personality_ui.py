@@ -28,9 +28,9 @@ from .headless_personality import (
     DEFAULT_OPTION,
     _sanitize_name,
     _write_profile,
+    read_tools_for,
     list_personalities,
     available_tools_for,
-    read_tools_for,
     resolve_profile_dir,
     read_instructions_for,
 )
