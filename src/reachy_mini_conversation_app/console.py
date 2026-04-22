@@ -255,9 +255,7 @@ class LocalStream:
                 VOICE_OVERRIDE_ENV_VAR: normalized_voice_override,
             }
             lines = [
-                ln
-                for ln in lines
-                if not any(ln.strip().startswith(f"{env_name}=") for env_name in managed_values)
+                ln for ln in lines if not any(ln.strip().startswith(f"{env_name}=") for env_name in managed_values)
             ]
             for env_name, value in managed_values.items():
                 if value:
