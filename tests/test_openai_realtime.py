@@ -358,6 +358,19 @@ def test_handler_uses_startup_voice_at_startup() -> None:
     assert handler.get_current_voice() == "shimmer"
 
 
+def test_copy_preserves_current_voice_override() -> None:
+    """Copied OpenAI handlers should keep the current voice override."""
+    handler = OpenaiRealtimeHandler(
+        ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()),
+        startup_voice="shimmer",
+    )
+    handler._voice_override = "marin"
+
+    copied_handler = handler.copy()
+
+    assert copied_handler.get_current_voice() == "marin"
+
+
 def test_format_timestamp_uses_wall_clock() -> None:
     """Test that format_timestamp uses wall clock time."""
     loop = asyncio.new_event_loop()

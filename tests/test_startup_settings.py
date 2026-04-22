@@ -32,7 +32,7 @@ def test_load_startup_settings_into_runtime_applies_profile_when_no_env(monkeypa
 
 
 def test_load_startup_settings_into_runtime_ignores_explicit_profile_env(monkeypatch, tmp_path) -> None:
-    """Explicit profile env config should win over persisted startup UI state."""
+    """Explicit profile env config should win for profile selection only."""
     write_startup_settings(tmp_path, profile="sorry_bro", voice="shimmer")
     applied_profiles: list[str | None] = []
     monkeypatch.setenv("REACHY_MINI_CUSTOM_PROFILE", "env_profile")
@@ -43,5 +43,5 @@ def test_load_startup_settings_into_runtime_ignores_explicit_profile_env(monkeyp
 
     settings = load_startup_settings_into_runtime(tmp_path)
 
-    assert settings == StartupSettings()
+    assert settings == StartupSettings(voice="shimmer")
     assert applied_profiles == []

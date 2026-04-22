@@ -265,3 +265,16 @@ def test_handler_uses_startup_voice_at_startup() -> None:
     )
 
     assert handler.get_current_voice() == "Orus"
+
+
+def test_copy_preserves_current_voice_override() -> None:
+    """Copied Gemini handlers should keep the current voice override."""
+    handler = GeminiLiveHandler(
+        ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()),
+        startup_voice="Orus",
+    )
+    handler._voice_override = "Zephyr"
+
+    copied_handler = handler.copy()
+
+    assert copied_handler.get_current_voice() == "Zephyr"

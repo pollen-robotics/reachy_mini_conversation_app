@@ -95,9 +95,10 @@ def load_startup_settings_into_runtime(instance_path: str | Path | None) -> Star
 
     if LOCKED_PROFILE is not None:
         return StartupSettings()
-    if os.getenv("REACHY_MINI_CUSTOM_PROFILE"):
-        return StartupSettings()
 
     settings = read_startup_settings(instance_path)
+    if os.getenv("REACHY_MINI_CUSTOM_PROFILE"):
+        return StartupSettings(voice=settings.voice)
+
     set_custom_profile(settings.profile)
     return settings

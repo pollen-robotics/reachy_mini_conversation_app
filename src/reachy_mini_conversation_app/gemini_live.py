@@ -184,7 +184,12 @@ class GeminiLiveHandler(AsyncStreamHandler):
 
     def copy(self) -> "GeminiLiveHandler":
         """Create a copy of the handler."""
-        return GeminiLiveHandler(self.deps, self.gradio_mode, self.instance_path)
+        return GeminiLiveHandler(
+            self.deps,
+            self.gradio_mode,
+            self.instance_path,
+            startup_voice=self._voice_override,
+        )
 
     def _set_listening_state(self, listening: bool) -> None:
         """Avoid queueing redundant listening-state updates."""
