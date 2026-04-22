@@ -258,3 +258,50 @@ def test_headless_personality_routes_apply_voice_accepts_query_param() -> None:
         loop.call_soon_threadsafe(loop.stop)
         thread.join(timeout=1.0)
         loop.close()
+
+
+def test_headless_personality_routes_persist_startup_with_voice_override() -> None:
+    """Saving a startup personality should persist the active manual voice override."""
+    app = FastAPI()
+    handler = MagicMock()
+    handler.apply_personality = AsyncMock(return_value="Applied personality and restarted realtime session.")
+    handler.get_voice_override = MagicMock(return_value="shimmer")
+    persist_personality = MagicMock()
+
+    loop = asyncio.new_event_loop()
+    started = threading.Event()
+
+    def _run_loop() -> None:
+        asyncio.set_event_loop(loop)
+        started.set()
+        loop.run_forever()
+
+    thread = threading.Thread(target=_run_loop, daemon=True)
+    thread.start()
+    started.wait(timeout=1.0)
+
+    try:
+        mount_personality_routes(app, handler, lambda: loop, persist_personality=persist_personality)
+
+        client = TestClient(app)
+        response = client.post("/personalities/apply?name=sorry_bro&persist=1")
+
+        assert response.status_code == 200
+        assert response.json()["ok"] is True
+        handler.apply_personality.assert_awaited_once_with("sorry_bro")
+        persist_personality.assert_called_once_with("sorry_bro", "shimmer")
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(timeout=1.0)
+        loop.close()
+
+
+def test_local_stream_persist_personality_stores_voice_override(tmp_path) -> None:
+    """Persisting startup settings should write both profile and voice override."""
+    stream = LocalStream(MagicMock(), MagicMock(), instance_path=str(tmp_path))
+
+    stream._persist_personality("sorry_bro", "shimmer")
+
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "REACHY_MINI_CUSTOM_PROFILE=sorry_bro" in env_text
+    assert "REACHY_MINI_VOICE_OVERRIDE=shimmer" in env_text

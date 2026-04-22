@@ -80,6 +80,7 @@ DEFAULT_VOICE_BY_BACKEND = {
     OPENAI_BACKEND: "cedar",
     GEMINI_BACKEND: "Kore",
 }
+VOICE_OVERRIDE_ENV_VAR = "REACHY_MINI_VOICE_OVERRIDE"
 
 logger = logging.getLogger(__name__)
 
@@ -339,6 +340,25 @@ def get_default_voice_for_backend(backend: str | None = None) -> str:
     """Return the default voice for a backend selector value."""
     normalized_backend = get_backend_choice() if backend is None else _normalize_backend_provider(backend)
     return DEFAULT_VOICE_BY_BACKEND[normalized_backend]
+
+
+def get_persisted_voice_override(backend: str | None = None) -> str | None:
+    """Return a persisted voice override when it is valid for the selected backend."""
+    voice = (os.getenv(VOICE_OVERRIDE_ENV_VAR) or "").strip()
+    if not voice:
+        return None
+
+    available_voices = get_available_voices_for_backend(backend)
+    if voice in available_voices:
+        return voice
+
+    logger.warning(
+        "Ignoring persisted voice override %r for backend %r; expected one of %s",
+        voice,
+        get_backend_choice() if backend is None else _normalize_backend_provider(backend),
+        available_voices,
+    )
+    return None
 
 
 def is_gemini_model() -> bool:

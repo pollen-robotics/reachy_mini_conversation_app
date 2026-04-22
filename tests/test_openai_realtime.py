@@ -348,6 +348,16 @@ async def test_apply_personality_preserves_manual_voice_override(monkeypatch: An
     assert session["audio"]["output"]["voice"] == "marin"
 
 
+def test_handler_uses_valid_persisted_voice_override_at_startup(monkeypatch: Any) -> None:
+    """OpenAI handler startup should restore a persisted OpenAI voice override."""
+    monkeypatch.setenv("REACHY_MINI_VOICE_OVERRIDE", "shimmer")
+
+    handler = OpenaiRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+
+    assert handler.get_voice_override() == "shimmer"
+    assert handler.get_current_voice() == "shimmer"
+
+
 def test_format_timestamp_uses_wall_clock() -> None:
     """Test that format_timestamp uses wall clock time."""
     loop = asyncio.new_event_loop()

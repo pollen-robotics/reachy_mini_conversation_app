@@ -43,7 +43,7 @@ def mount_personality_routes(
     handler: OpenaiRealtimeHandler | GeminiLiveHandler,
     get_loop: Callable[[], asyncio.AbstractEventLoop | None],
     *,
-    persist_personality: Callable[[Optional[str]], None] | None = None,
+    persist_personality: Callable[[Optional[str], Optional[str]], None] | None = None,
     get_persisted_personality: Callable[[], Optional[str]] | None = None,
 ) -> None:
     """Register personality management endpoints on a FastAPI app."""
@@ -258,19 +258,21 @@ def mount_personality_routes(
         if not sel_name:
             sel_name = DEFAULT_OPTION
 
-        async def _do_apply() -> str:
+        async def _do_apply() -> tuple[str, Optional[str]]:
             sel = None if sel_name == DEFAULT_OPTION else sel_name
             status = await handler.apply_personality(sel)
-            return status
+            get_voice_override = getattr(handler, "get_voice_override", None)
+            voice_override = get_voice_override() if callable(get_voice_override) else None
+            return status, voice_override
 
         try:
             logger.info("Headless apply: requested name=%r", sel_name)
             fut = asyncio.run_coroutine_threadsafe(_do_apply(), loop)
-            status = fut.result(timeout=10)
+            status, voice_override = fut.result(timeout=10)
             persisted_choice = _startup_choice()
             if persist_flag and persist_personality is not None:
                 try:
-                    persist_personality(None if sel_name == DEFAULT_OPTION else sel_name)
+                    persist_personality(None if sel_name == DEFAULT_OPTION else sel_name, voice_override)
                     persisted_choice = _startup_choice()
                 except Exception as e:
                     logger.warning("Failed to persist startup personality: %s", e)

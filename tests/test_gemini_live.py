@@ -255,3 +255,13 @@ async def test_apply_personality_preserves_manual_voice_override(monkeypatch) ->
     assert status == "Applied personality and restarted Gemini session."
     assert handler.get_current_voice() == "Orus"
     restart.assert_awaited_once()
+
+
+def test_handler_uses_valid_persisted_voice_override_at_startup(monkeypatch) -> None:
+    """Gemini handler startup should restore a persisted Gemini voice override."""
+    monkeypatch.setenv("REACHY_MINI_VOICE_OVERRIDE", "Orus")
+
+    handler = GeminiLiveHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+
+    assert handler.get_voice_override() == "Orus"
+    assert handler.get_current_voice() == "Orus"

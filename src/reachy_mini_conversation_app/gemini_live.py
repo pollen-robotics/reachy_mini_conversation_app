@@ -30,6 +30,7 @@ from reachy_mini_conversation_app.config import (
     GEMINI_AVAILABLE_VOICES,
     DEFAULT_VOICE_BY_BACKEND,
     config,
+    get_persisted_voice_override,
 )
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
 from reachy_mini_conversation_app.tools.core_tools import (
@@ -135,7 +136,7 @@ class GeminiLiveHandler(AsyncStreamHandler):
         self.deps = deps
         self.gradio_mode = gradio_mode
         self.instance_path = instance_path
-        self._voice_override: str | None = None
+        self._voice_override: str | None = get_persisted_voice_override(GEMINI_BACKEND)
 
         self.session: Any = None  # google.genai live session
         self.output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]" = asyncio.Queue()
@@ -255,6 +256,10 @@ class GeminiLiveHandler(AsyncStreamHandler):
     def get_current_voice(self) -> str:
         """Return the resolved Gemini voice currently selected for this handler."""
         return _resolve_gemini_voice(self._voice_override or get_session_voice())
+
+    def get_voice_override(self) -> str | None:
+        """Return the manual voice override currently active for this handler."""
+        return self._voice_override
 
     async def start_up(self) -> None:
         """Start the handler with retries on unexpected closure."""
