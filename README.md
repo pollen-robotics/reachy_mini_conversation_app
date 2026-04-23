@@ -74,6 +74,7 @@ uv sync
 uv sync --extra local_vision         # Local PyTorch/Transformers vision
 uv sync --extra yolo_vision          # YOLO face-detection backend for head tracking
 uv sync --extra mediapipe_vision     # MediaPipe-based head-tracking
+uv sync --extra remote_tools         # Hugging Face Space tools over MCP
 uv sync --extra all_vision           # All vision features
 ```
 
@@ -98,6 +99,7 @@ pip install -e .
 pip install -e .[local_vision]          # Local vision stack
 pip install -e .[yolo_vision]           # YOLO face-detection backend for head tracking
 pip install -e .[mediapipe_vision]      # MediaPipe-based vision
+pip install -e .[remote_tools]          # Hugging Face Space tools over MCP
 pip install -e .[all_vision]            # All vision features
 pip install -e .[dev]                   # Development tools
 ```
@@ -113,6 +115,7 @@ Some wheels (like PyTorch) are large and require compatible CUDA or CPU builds�
 | `local_vision` | Run the local VLM (SmolVLM2) through PyTorch/Transformers | GPU recommended. Ensure compatible PyTorch builds for your platform. |
 | `yolo_vision` | YOLOv11n face detection via `ultralytics` and `supervision` | Used as the `yolo` head-tracking backend. Runs on CPU (default). GPU improves performance. |
 | `mediapipe_vision` | Lightweight landmark tracking with MediaPipe | Works on CPU. Enables `--head-tracker mediapipe`. |
+| `remote_tools` | Install MCP dependencies for public Hugging Face Space tools | Required for `tool-spaces` commands and installed remote Space tools. |
 | `all_vision` | Convenience alias installing every vision extra | Install when you want the flexibility to experiment with every provider. |
 | `dev` | Developer tooling (`pytest`, `ruff`, `mypy`) | Development-only dependencies. Use `--group dev` with uv or `[dev]` with pip. |
 
@@ -244,6 +247,7 @@ play_emotion
 sweep_look
 ```
 Tools are resolved first from Python files in the profile folder (custom tools), then from the core library `src/reachy_mini_conversation_app/tools/` (like `dance`, `head_tracking`).
+Installed public Hugging Face Space tools can also be enabled here after you add them with `tool-spaces`.
 
 **Custom tools:**
 
@@ -290,8 +294,9 @@ external_content/
 │       ├── instructions.txt
 │       ├── tools.txt        # optional (see fallback behavior below)
 │       └── voice.txt        # optional
-└── external_tools/
-    └── my_custom_tool.py
+├── external_tools/
+│   └── my_custom_tool.py
+└── installed_tool_spaces.json
 ```
 
 **Environment variables:**
@@ -317,6 +322,41 @@ REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY=./external_content/external_tools
 This supports both:
 1. Local external tools used with built-in/default profile.
 2. Local external profiles used with built-in default tools.
+
+</details>
+
+<details>
+<summary><b>Public Hugging Face Space tools</b></summary>
+
+You can install public MCP-compatible Hugging Face Spaces as remote tool sources for this app.
+
+Install the optional dependencies first:
+
+```bash
+uv sync --extra remote_tools
+```
+
+Then add, list, or remove installed Space tool sources from the terminal:
+
+```bash
+reachy-mini-conversation-app tool-spaces add owner/space-name
+reachy-mini-conversation-app tool-spaces list
+reachy-mini-conversation-app tool-spaces remove owner/space-name
+```
+
+The app validates the public Space slug through the Hugging Face Hub, probes the standard public MCP endpoint, and writes the installed Space to:
+
+- `installed_tool_spaces.json` in the managed app instance directory
+- `external_content/installed_tool_spaces.json` in terminal mode
+
+After `tool-spaces add`, the command prints the discovered tool IDs. Add the ones you want to expose to a profile's `tools.txt` manually. Installing a Space does not auto-enable its tools.
+
+Recommended tags for discoverability on Hugging Face:
+
+- `reachy-mini-tool`
+- `mcp`
+
+These tags are advisory only. Installation still relies on successful MCP validation, not on tag presence.
 
 </details>
 
