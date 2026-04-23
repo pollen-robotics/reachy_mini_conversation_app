@@ -13,8 +13,6 @@ from contextlib import asynccontextmanager
 from dataclasses import field, dataclass
 from urllib.parse import urlparse
 
-import httpx
-
 
 if TYPE_CHECKING:
     from mcp import ClientSession
@@ -106,7 +104,8 @@ def _join_text_content(content_blocks: list[dict[str, Any]]) -> str | None:
 
 
 def _exception_contains_timeout(exc: BaseException) -> bool:
-    if isinstance(exc, (TimeoutError, httpx.TimeoutException)):
+    timeout_exception = _httpx_timeout_exception_type()
+    if isinstance(exc, timeout_exception):
         return True
 
     if "timed out" in str(exc).lower() or "deadline exceeded" in str(exc).lower():
@@ -130,10 +129,29 @@ def _load_mcp_sdk() -> tuple[type["ClientSession"], Any]:
         from mcp.client.streamable_http import streamable_http_client
     except ImportError as exc:
         raise McpDependencyError(
-            "The MCP client spike requires the optional 'mcp' package. "
-            "Install the project with the 'dev' dependency group before using this module."
+            "Remote MCP tools require the optional 'remote_tools' dependencies. "
+            "Install the project with the 'remote_tools' extra before using this module."
         ) from exc
     return ClientSession, streamable_http_client
+
+
+def _load_httpx() -> Any:
+    try:
+        import httpx
+    except ImportError as exc:
+        raise McpDependencyError(
+            "Remote MCP tools require the optional 'remote_tools' dependencies. "
+            "Install the project with the 'remote_tools' extra before using this module."
+        ) from exc
+    return httpx
+
+
+def _httpx_timeout_exception_type() -> tuple[type[BaseException], ...]:
+    try:
+        timeout_exception = _load_httpx().TimeoutException
+    except McpDependencyError:
+        return (TimeoutError,)
+    return (TimeoutError, timeout_exception)
 
 
 @dataclass(frozen=True)
@@ -276,6 +294,7 @@ class RemoteMcpToolClient:
     async def call_tool(self, namespaced_tool_name: str, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """Invoke a remote MCP tool by its namespaced local ID."""
         spec = await self._resolve_tool_spec(namespaced_tool_name)
+        timeout_exception = _httpx_timeout_exception_type()
 
         try:
             async with self._session() as session:
@@ -286,7 +305,7 @@ class RemoteMcpToolClient:
                 )
         except McpDependencyError:
             raise
-        except (TimeoutError, httpx.TimeoutException) as exc:
+        except timeout_exception as exc:
             raise McpToolTimeoutError(
                 f"Timed out calling MCP tool '{namespaced_tool_name}' from '{self.server.alias}'."
             ) from exc
@@ -329,6 +348,7 @@ class RemoteMcpToolClient:
     @asynccontextmanager
     async def _session(self) -> AsyncIterator["ClientSession"]:
         client_session_cls, streamable_http_client = _load_mcp_sdk()
+        httpx = _load_httpx()
         client_timeout = max(self.server.request_timeout_s, self.server.tool_timeout_s)
 
         async with httpx.AsyncClient(

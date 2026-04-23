@@ -7,9 +7,13 @@ import pytest
 import uvicorn
 import pytest_asyncio
 from starlette.routing import Mount
-from mcp.server.fastmcp import FastMCP
 from starlette.responses import PlainTextResponse
 from starlette.applications import Starlette
+
+
+pytest.importorskip("mcp.server.fastmcp")
+
+from mcp.server.fastmcp import FastMCP
 
 from reachy_mini_conversation_app.mcp_client import (
     McpTransportError,

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import pytest
+
+
+pytest.importorskip("mcp.types")
+
 from mcp.types import Tool, TextContent, CallToolResult
 
 from reachy_mini_conversation_app.mcp_client import (
