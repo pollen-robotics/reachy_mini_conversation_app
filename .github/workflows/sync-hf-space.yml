@@ -17,14 +17,14 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           lfs: true
       - name: Sync GitHub to Hugging Face Hub
-        uses: huggingface/hub-sync@v0.1.0
+        uses: huggingface/hub-sync@6fbce0a787a7146710e588abe7a4fd5eca07f47c  # v0.1.0
         with:
           github_repo_id: pollen-robotics/reachy_mini_conversation_app
           huggingface_repo_id: pollen-robotics/reachy_mini_conversation_app
           hf_token: ${{ secrets.HF_TOKEN }}
           repo_type: space
-          space_sdk: gradio
+          space_sdk: static

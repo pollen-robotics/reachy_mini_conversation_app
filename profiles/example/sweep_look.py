@@ -15,7 +15,9 @@ class SweepLook(Tool):
     """Sweep head from left to right and back to center, pausing at each position."""
 
     name = "sweep_look"
-    description = "Sweep head from left to right while rotating the body, pausing at each extreme, then return to center"
+    description = (
+        "Sweep head from left to right while rotating the body, pausing at each extreme, then return to center"
+    )
     parameters_schema = {
         "type": "object",
         "properties": {},

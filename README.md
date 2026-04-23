@@ -14,7 +14,7 @@ tags:
 
 # Reachy Mini conversation app
 
-Conversational app for the Reachy Mini robot combining OpenAI's realtime APIs, vision pipelines, and choreographed motion libraries.
+Conversational app for the Reachy Mini robot combining real-time voice APIs (OpenAI Realtime or Gemini Live), vision pipelines, and choreographed motion libraries.
 
 ![Reachy Mini Dance](docs/assets/reachy_mini_dance.gif)
 
@@ -30,8 +30,10 @@ Conversational app for the Reachy Mini robot combining OpenAI's realtime APIs, v
 - [License](#license)
 
 ## Overview
-- Real-time audio conversation loop powered by the OpenAI realtime API and `fastrtc` for low-latency streaming.
-- Vision processing uses gpt-realtime by default (when camera tool is used), with optional local vision processing using SmolVLM2 model running on-device (CPU/GPU/MPS) via `--local-vision` flag.
+- Real-time audio conversation loop with `fastrtc` for low-latency streaming. Supports two backends:
+  - **OpenAI Realtime** (`gpt-realtime`) — default
+  - **Gemini Live** (`gemini-3.1-flash-live-preview`) — alternative, using the Google GenAI SDK
+- Vision processing uses the selected realtime backend by default (when camera tool is used), with optional on-device local vision using SmolVLM2 (CPU/GPU/MPS) via `--local-vision`.
 - Layered motion system queues primary moves (dances, emotions, goto poses, breathing) while blending speech-reactive wobble and head-tracking.
 - Async tool dispatch integrates robot motion, camera capture, and optional head-tracking capabilities through a Gradio web UI with live transcripts.
 
@@ -70,7 +72,7 @@ uv sync
 **Install optional features:**
 ```bash
 uv sync --extra local_vision         # Local PyTorch/Transformers vision
-uv sync --extra yolo_vision          # YOLO-based head-tracking
+uv sync --extra yolo_vision          # YOLO face-detection backend for head tracking
 uv sync --extra mediapipe_vision     # MediaPipe-based head-tracking
 uv sync --extra all_vision           # All vision features
 ```
@@ -94,7 +96,7 @@ pip install -e .
 **Install optional features:**
 ```bash
 pip install -e .[local_vision]          # Local vision stack
-pip install -e .[yolo_vision]           # YOLO-based vision
+pip install -e .[yolo_vision]           # YOLO face-detection backend for head tracking
 pip install -e .[mediapipe_vision]      # MediaPipe-based vision
 pip install -e .[all_vision]            # All vision features
 pip install -e .[dev]                   # Development tools
@@ -109,7 +111,7 @@ Some wheels (like PyTorch) are large and require compatible CUDA or CPU builds�
 | Extra | Purpose | Notes |
 |-------|---------|-------|
 | `local_vision` | Run the local VLM (SmolVLM2) through PyTorch/Transformers | GPU recommended. Ensure compatible PyTorch builds for your platform. |
-| `yolo_vision` | YOLOv11n head tracking via `ultralytics` and `supervision` | Runs on CPU (default). GPU improves performance. Supports the `--head-tracker yolo` option. |
+| `yolo_vision` | YOLOv11n face detection via `ultralytics` and `supervision` | Used as the `yolo` head-tracking backend. Runs on CPU (default). GPU improves performance. |
 | `mediapipe_vision` | Lightweight landmark tracking with MediaPipe | Works on CPU. Enables `--head-tracker mediapipe`. |
 | `all_vision` | Convenience alias installing every vision extra | Install when you want the flexibility to experiment with every provider. |
 | `dev` | Developer tooling (`pytest`, `ruff`, `mypy`) | Development-only dependencies. Use `--group dev` with uv or `[dev]` with pip. |
@@ -119,15 +121,32 @@ Some wheels (like PyTorch) are large and require compatible CUDA or CPU builds�
 ## Configuration
 
 1. Copy `.env.example` to `.env`
-2. Fill in required values, notably the OpenAI API key
+2. Fill in your API key and backend choice
 
 | Variable | Description |
 |----------|-------------|
-| `OPENAI_API_KEY` | Required. Grants access to the OpenAI realtime endpoint. |
-| `MODEL_NAME` | Override the realtime model (defaults to `gpt-realtime`). Used for both conversation and vision (unless `--local-vision` flag is used). |
+| `OPENAI_API_KEY` | Optional override or fallback for OpenAI mode. In the headless settings flow, the app can use bundled OpenAI access when available; set your own key to override it or provide a fallback. |
+| `GEMINI_API_KEY` | Required for Gemini mode. Also accepts `GOOGLE_API_KEY`. Get one at [aistudio.google.com](https://aistudio.google.com/apikey). |
+| `BACKEND_PROVIDER` | Realtime backend to use: `openai` (default) or `gemini`. |
+| `MODEL_NAME` | Optional model override for the selected backend. Defaults to `gpt-realtime` for OpenAI and `gemini-3.1-flash-live-preview` for Gemini Live. |
 | `HF_HOME` | Cache directory for local Hugging Face downloads (only used with `--local-vision` flag, defaults to `./cache`). |
 | `HF_TOKEN` | Optional token for Hugging Face access (for gated/private assets). |
 | `LOCAL_VISION_MODEL` | Hugging Face model path for local vision processing (only used with `--local-vision` flag, defaults to `HuggingFaceTB/SmolVLM2-2.2B-Instruct`). |
+
+### Switching to Gemini Live
+
+To use Gemini Live instead of OpenAI Realtime, update your `.env`:
+
+```env
+BACKEND_PROVIDER="gemini"
+MODEL_NAME="gemini-3.1-flash-live-preview"
+GEMINI_API_KEY=your-gemini-api-key
+```
+
+`BACKEND_PROVIDER` is the primary switch. The app still falls back to `MODEL_NAME` for compatibility with older configs, and all features (tools, profiles, head tracking) work with both backends.
+
+> [!NOTE]
+> Gemini Live uses a different set of voices: Aoede, Charon, Fenrir, Kore (default), Leda, Orus, Puck, Zephyr. If your profile's `voice.txt` specifies an OpenAI voice, it will fall back to Kore.
 
 ## Running the app
 
@@ -146,9 +165,9 @@ The app runs in console mode by default. Add `--gradio` to launch a web UI at ht
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--head-tracker {yolo,mediapipe}` | `None` | Select a head-tracking backend when a camera is available. YOLO is implemented locally, MediaPipe comes from the `reachy_mini_toolbox` package. Requires the matching optional extra. |
+| `--head-tracker {yolo,mediapipe}` | `None` | Select a head-tracking backend when a camera is available. `yolo` uses a local YOLO face detector, `mediapipe` comes from the `reachy_mini_toolbox` package. Requires the matching optional extra. |
 | `--no-camera` | `False` | Run without camera capture or head tracking. |
-| `--local-vision` | `False` | Use local vision model (SmolVLM2) for periodic image processing instead of gpt-realtime vision. Requires `local_vision` extra to be installed. |
+| `--local-vision` | `False` | Use the local vision model (SmolVLM2) for camera-tool requests instead of the selected realtime backend vision. Requires `local_vision` extra to be installed. |
 | `--gradio` | `False` | Launch the Gradio web UI. Without this flag, runs in console mode. Required when running in simulation mode. |
 | `--robot-name` | `None` | Optional. Connect to a specific robot by name when running multiple daemons on the same subnet. See [Multiple robots on the same subnet](#advanced-features). |
 | `--debug` | `False` | Enable verbose logging for troubleshooting. |
@@ -158,6 +177,9 @@ The app runs in console mode by default. Add `--gradio` to launch a web UI at ht
 ```bash
 # Run with MediaPipe head tracking
 reachy-mini-conversation-app --head-tracker mediapipe
+
+# Run with the YOLO face-detection backend for head tracking
+reachy-mini-conversation-app --head-tracker yolo
 
 # Run with local vision processing (requires local_vision extra)
 reachy-mini-conversation-app --local-vision
@@ -169,12 +191,15 @@ reachy-mini-conversation-app --no-camera
 reachy-mini-conversation-app --gradio
 ```
 
+> [!WARNING]
+> `--local-vision` is not supported when running the conversation app directly on Reachy Mini Wireless / the Raspberry Pi. For local vision, keep the daemon running on the robot and start the conversation app from your laptop or workstation instead.
+
 ## LLM tools exposed to the assistant
 
 | Tool | Action | Dependencies |
 |------|--------|--------------|
 | `move_head` | Queue a head pose change (left/right/up/down/front). | Core install only. |
-| `camera` | Capture the latest camera frame and send it to gpt-realtime for vision analysis. | Requires camera worker. Uses gpt-realtime vision by default. |
+| `camera` | Capture the latest camera frame and analyze it with the selected realtime backend or the local vision model. | Requires camera worker. Uses local vision when `--local-vision` is enabled. |
 | `head_tracking` | Enable or disable head-tracking offsets (not identity recognition - only detects and tracks head position). | Camera worker with configured head tracker (`--head-tracker`). |
 | `dance` | Queue a dance from `reachy_mini_dances_library`. | Core install only. |
 | `stop_dance` | Clear queued dances. | Core install only. |
@@ -193,7 +218,9 @@ Built-in motion content is published as open Hugging Face datasets:
 
 Create custom profiles with dedicated instructions and enabled tools.
 
-Set `REACHY_MINI_CUSTOM_PROFILE=<name>` to load `src/reachy_mini_conversation_app/profiles/<name>/` (see `.env.example`). If unset, the `default` profile is used.
+For normal usage, select a profile from the UI and save it for startup. That selection is persisted in `startup_settings.json`.
+
+If no startup settings have been saved yet, you can still seed startup from the environment with `REACHY_MINI_CUSTOM_PROFILE=<name>` to load `profiles/<name>/`. If neither is set, the `default` profile is used.
 
 Each profile should include `instructions.txt` (prompt text). `tools.txt` (list of allowed tools) is recommended. If missing for a non-default profile, the app falls back to `profiles/default/tools.txt`. Profiles can optionally contain custom tool implementations.
 
@@ -204,7 +231,7 @@ Write plain-text prompts in `instructions.txt`. To reuse shared prompt pieces, a
 [passion_for_lobster_jokes]
 [identities/witty_identity]
 ```
-Each placeholder pulls the matching file under `src/reachy_mini_conversation_app/prompts/` (nested paths allowed). See `src/reachy_mini_conversation_app/profiles/example/` for a reference layout.
+Each placeholder pulls the matching file under `src/reachy_mini_conversation_app/prompts/` (nested paths allowed). See `profiles/example/` for a reference layout.
 
 **Enabling tools:**
 
@@ -226,7 +253,7 @@ Custom tools must subclass `reachy_mini_conversation_app.tools.core_tools.Tool` 
 **Edit personalities from the UI:**
 
 When running with `--gradio`, open the "Personality" accordion:
-- Select among available profiles (folders under `src/reachy_mini_conversation_app/profiles/`) or the built‑in default.
+- Select among available profiles (folders under `profiles/`) or the built‑in default.
 - Click "Apply" to update the current session instructions live.
 - Create a new personality by entering a name and instructions text. It stores files under `profiles/<name>/` and copies `tools.txt` from the `default` profile.
 
@@ -241,7 +268,7 @@ To create a locked variant of the app that cannot switch profiles, edit `src/rea
 ```python
 LOCKED_PROFILE: str | None = "mars_rover"  # Lock to this profile
 ```
-When `LOCKED_PROFILE` is set, the app always uses that profile, ignoring `REACHY_MINI_CUSTOM_PROFILE` env var & the Gradio UI shows "(locked)" and disables all profile editing controls.
+When `LOCKED_PROFILE` is set, the app always uses that profile, ignoring saved startup settings, `REACHY_MINI_CUSTOM_PROFILE`, and the Gradio UI. The UI shows "(locked)" and disables all profile editing controls.
 This is useful for creating dedicated clones of the app with a fixed personality. Clone scripts can simply edit this constant to lock the variant.
 
 </details>
@@ -249,9 +276,9 @@ This is useful for creating dedicated clones of the app with a fixed personality
 <details>
 <summary><b>External profiles and tools</b></summary>
 
-You can extend the app with profiles/tools stored outside `src/reachy_mini_conversation_app/`.
+You can extend the app with profiles/tools stored outside the repository defaults.
 
-- Core profiles are under `src/reachy_mini_conversation_app/profiles/`.
+- Core profiles are under `profiles/`.
 - Core tools are under `src/reachy_mini_conversation_app/tools/`.
 
 **Recommended layout:**
@@ -269,9 +296,10 @@ external_content/
 
 **Environment variables:**
 
-Set these values in your `.env` (copy from `.env.example`):
+Set these values in your `.env` when you want env-driven external profile/tool selection:
 
 ```env
+# Optional fallback/manual profile selector:
 REACHY_MINI_CUSTOM_PROFILE=my_profile
 REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY=./external_content/external_profiles
 REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY=./external_content/external_tools

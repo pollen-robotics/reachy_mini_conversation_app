@@ -5,9 +5,7 @@ import pytest
 import reachy_mini_conversation_app.config as config_mod
 
 
-def test_config_raises_on_external_profile_name_collision(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_config_raises_on_external_profile_name_collision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Config should fail fast when external/built-in profile names collide."""
     external_profiles = tmp_path / "external_profiles"
     external_profiles.mkdir(parents=True)
@@ -20,9 +18,22 @@ def test_config_raises_on_external_profile_name_collision(
         config_mod.Config()
 
 
-def test_config_raises_on_external_tool_name_collision(
+def test_config_raises_on_external_profile_name_collision_with_builtin_alias(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Config should treat compact built-in profile names as reserved."""
+    external_profiles = tmp_path / "external_profiles"
+    external_profiles.mkdir(parents=True)
+    (external_profiles / "mad_scientist_assistant").mkdir()
+
+    monkeypatch.setattr(config_mod.Config, "PROFILES_DIRECTORY", external_profiles)
+    monkeypatch.setattr(config_mod.Config, "TOOLS_DIRECTORY", None)
+
+    with pytest.raises(RuntimeError, match="Ambiguous profile names"):
+        config_mod.Config()
+
+
+def test_config_raises_on_external_tool_name_collision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Config should fail fast when external/built-in tool names collide."""
     external_tools = tmp_path / "external_tools"
     external_tools.mkdir(parents=True)

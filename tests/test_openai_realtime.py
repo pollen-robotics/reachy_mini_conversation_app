@@ -1,6 +1,8 @@
+import base64
 import random
 import asyncio
 import logging
+from types import SimpleNamespace
 from typing import Any
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -27,9 +29,7 @@ async def test_tool_completion_does_not_reset_head_wobbler(monkeypatch: Any) -> 
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda: "alloy")
     monkeypatch.setattr(rt_mod, "get_tool_specs", lambda: [])
 
-    async def _fake_dispatch(
-        tool_name: str, args_json: str, deps: Any, **_kw: Any
-    ) -> dict[str, Any]:
+    async def _fake_dispatch(tool_name: str, args_json: str, deps: Any, **_kw: Any) -> dict[str, Any]:
         return {"image_description": "A person in front of a door.", "tool": tool_name}
 
     monkeypatch.setattr(btm_mod, "dispatch_tool_call", _fake_dispatch)
@@ -226,6 +226,151 @@ async def test_non_idle_tool_call_does_not_queue_progress_response(monkeypatch: 
     safe_response_create.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_output_audio_done_schedules_head_wobbler_reset(monkeypatch: Any) -> None:
+    """OpenAI speech completion should let the wobbler reset itself after queued audio."""
+    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
+    monkeypatch.setattr(rt_mod, "get_session_voice", lambda: "alloy")
+    monkeypatch.setattr(rt_mod, "get_tool_specs", lambda: [])
+
+    class FakeEvent:
+        def __init__(self, etype: str, **kwargs: Any) -> None:
+            self.type = etype
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+    class FakeSession:
+        async def update(self, **_kw: Any) -> None:
+            pass
+
+    class FakeInputAudioBuffer:
+        async def append(self, **_kw: Any) -> None:
+            pass
+
+    class FakeItem:
+        async def create(self, **_kw: Any) -> None:
+            pass
+
+    class FakeConversation:
+        item = FakeItem()
+
+    class FakeResponse:
+        async def create(self, **_kw: Any) -> None:
+            pass
+
+        async def cancel(self, **_kw: Any) -> None:
+            pass
+
+    class FakeConn:
+        session = FakeSession()
+        input_audio_buffer = FakeInputAudioBuffer()
+        conversation = FakeConversation()
+        response = FakeResponse()
+
+        def __init__(self) -> None:
+            self._events = iter(
+                [
+                    FakeEvent("response.created"),
+                    FakeEvent(
+                        "response.output_audio.delta",
+                        delta=base64.b64encode(b"\x00\x00\x10\x00").decode("ascii"),
+                    ),
+                    FakeEvent("response.output_audio.done"),
+                ]
+            )
+
+        async def __aenter__(self) -> "FakeConn":
+            return self
+
+        async def __aexit__(self, *_args: Any) -> bool:
+            return False
+
+        async def close(self) -> None:
+            pass
+
+        def __aiter__(self) -> "FakeConn":
+            return self
+
+        async def __anext__(self) -> FakeEvent:
+            try:
+                return next(self._events)
+            except StopIteration:
+                raise StopAsyncIteration
+
+    class FakeRealtime:
+        def connect(self, **_kw: Any) -> FakeConn:
+            return FakeConn()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.realtime = FakeRealtime()
+
+    head_wobbler = MagicMock()
+    audio = SimpleNamespace()
+    reachy_mini = SimpleNamespace(media=SimpleNamespace(audio=audio))
+    deps = ToolDependencies(
+        reachy_mini=reachy_mini,
+        movement_manager=MagicMock(),
+        head_wobbler=head_wobbler,
+    )
+    handler = OpenaiRealtimeHandler(deps, gradio_mode=True)
+    handler.client = FakeClient()
+    object.__setattr__(handler.tool_manager, "start_up", MagicMock())
+    object.__setattr__(handler.tool_manager, "shutdown", AsyncMock())
+
+    await handler._run_realtime_session()
+
+    head_wobbler.feed.assert_called_once()
+    head_wobbler.request_reset_after_current_audio.assert_called_once()
+    head_wobbler.reset.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_apply_personality_preserves_manual_voice_override(monkeypatch: Any) -> None:
+    """Applying a profile should not discard a voice manually selected in the current session."""
+    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
+    monkeypatch.setattr(rt_mod, "get_session_voice", lambda: "cedar")
+    monkeypatch.setattr("reachy_mini_conversation_app.config.set_custom_profile", lambda _profile: None)
+
+    handler = OpenaiRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    update = AsyncMock()
+    handler.connection = SimpleNamespace(session=SimpleNamespace(update=update))
+    handler._voice_override = "marin"
+    restart = AsyncMock()
+    monkeypatch.setattr(handler, "_restart_session", restart)
+
+    status = await handler.apply_personality("example")
+
+    assert status == "Applied personality and restarted realtime session."
+    assert handler.get_current_voice() == "marin"
+    restart.assert_awaited_once()
+    session = update.await_args.kwargs["session"]
+    assert session["audio"]["output"]["voice"] == "marin"
+
+
+def test_handler_uses_startup_voice_at_startup() -> None:
+    """OpenAI handler startup should restore a persisted startup voice."""
+    handler = OpenaiRealtimeHandler(
+        ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()),
+        startup_voice="shimmer",
+    )
+
+    assert handler.get_current_voice() == "shimmer"
+
+
+def test_copy_preserves_current_voice_override() -> None:
+    """Copied OpenAI handlers should keep the current voice override."""
+    handler = OpenaiRealtimeHandler(
+        ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()),
+        startup_voice="shimmer",
+    )
+    handler._voice_override = "marin"
+
+    copied_handler = handler.copy()
+
+    assert copied_handler.get_current_voice() == "marin"
+
+
 def test_format_timestamp_uses_wall_clock() -> None:
     """Test that format_timestamp uses wall clock time."""
     loop = asyncio.new_event_loop()
@@ -242,6 +387,7 @@ def test_format_timestamp_uses_wall_clock() -> None:
     year = int(formatted[1:5])
     assert year == datetime.now(timezone.utc).year
 
+
 @pytest.mark.asyncio
 async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -> None:
     """First connection dies with ConnectionClosedError during iteration -> retried.
@@ -257,7 +403,10 @@ async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -
 
     # Make asyncio.sleep return immediately (for backoff)
     _real_sleep = asyncio.sleep
-    async def _mock_sleep(*_a: Any, **_kw: Any) -> None: await _real_sleep(0)
+
+    async def _mock_sleep(*_a: Any, **_kw: Any) -> None:
+        await _real_sleep(0)
+
     monkeypatch.setattr(asyncio, "sleep", _mock_sleep, raising=False)
 
     attempt_counter = {"n": 0}
@@ -269,31 +418,48 @@ async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -
             self._mode = mode
 
             class _Session:
-                async def update(self, **_kw: Any) -> None: return None
+                async def update(self, **_kw: Any) -> None:
+                    return None
+
             self.session = _Session()
 
             class _InputAudioBuffer:
-                async def append(self, **_kw: Any) -> None: return None
+                async def append(self, **_kw: Any) -> None:
+                    return None
+
             self.input_audio_buffer = _InputAudioBuffer()
 
             class _Item:
-                async def create(self, **_kw: Any) -> None: return None
+                async def create(self, **_kw: Any) -> None:
+                    return None
 
             class _Conversation:
                 item = _Item()
+
             self.conversation = _Conversation()
 
             class _Response:
-                async def create(self, **_kw: Any) -> None: return None
-                async def cancel(self, **_kw: Any) -> None: return None
+                async def create(self, **_kw: Any) -> None:
+                    return None
+
+                async def cancel(self, **_kw: Any) -> None:
+                    return None
+
             self.response = _Response()
 
-        async def __aenter__(self) -> "FakeConn": return self
-        async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> bool: return False
-        async def close(self) -> None: return None
+        async def __aenter__(self) -> "FakeConn":
+            return self
+
+        async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+            return False
+
+        async def close(self) -> None:
+            return None
 
         # Async iterator protocol
-        def __aiter__(self) -> "FakeConn": return self
+        def __aiter__(self) -> "FakeConn":
+            return self
+
         async def __anext__(self) -> None:
             if self._mode == "raise_on_iter":
                 raise FakeCCE("abrupt close (simulated)")
@@ -306,7 +472,8 @@ async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -
             return FakeConn(mode)
 
     class FakeClient:
-        def __init__(self, **_kw: Any) -> None: self.realtime = FakeRealtime()
+        def __init__(self, **_kw: Any) -> None:
+            self.realtime = FakeRealtime()
 
     # Patch the OpenAI client used by the handler
     monkeypatch.setattr(rt_mod, "AsyncOpenAI", FakeClient)
@@ -325,6 +492,7 @@ async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -
     # Optional: confirm we logged the unexpected close once
     warnings = [r for r in caplog.records if r.levelname == "WARNING" and "closed unexpectedly" in r.msg]
     assert len(warnings) == 1
+
 
 # ---- Cost calculation tests ----
 
@@ -474,9 +642,7 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
                     )
                 )
                 await asyncio.sleep(0)
-                await event_queue.put(
-                    FakeEvent("response.done", response=MagicMock())
-                )
+                await event_queue.put(FakeEvent("response.done", response=MagicMock()))
                 return
 
             # Intentional rejections (simulating a race where another
@@ -499,10 +665,7 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
             else:
                 await event_queue.put(FakeEvent("response.created"))
 
-            await event_queue.put(
-                FakeEvent("response.done", response=MagicMock())
-            )
-
+            await event_queue.put(FakeEvent("response.done", response=MagicMock()))
 
         async def cancel(self, **_kw: Any) -> None:
             pass
@@ -559,9 +722,7 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
     monkeypatch.setattr(rt_mod, "AsyncOpenAI", FakeClient)
 
     # Patch dispatch_tool_call so tools complete with a result.
-    async def _fake_dispatch(
-        tool_name: str, args_json: str, deps: Any, **_kw: Any
-    ) -> dict[str, Any]:
+    async def _fake_dispatch(tool_name: str, args_json: str, deps: Any, **_kw: Any) -> dict[str, Any]:
         await asyncio.sleep(random.uniform(0.3, 0.5))
         return {"ok": True, "tool": tool_name}
 
@@ -590,14 +751,15 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
         )
 
     # Yield so spawned tool tasks, the listener, and the sender can drain.
-    await asyncio.sleep(5)
+    # This stress test queues hundreds of serialized response.create calls, so
+    # slower CI runners need a wider drain window before teardown.
+    await asyncio.sleep(10)
 
     # ---- Tear down ----
 
     await event_queue.put(None)  # sentinel stops event iteration
 
     await handler.shutdown()
-
 
     # ---- Assertions ----
 
@@ -618,23 +780,15 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
 
     # The error event handler must have set _last_response_rejected for each
     # rejection (the log message comes from the event handler code path).
-    rejection_logs = [
-        r for r in caplog.records
-        if "worker will retry" in getattr(r, "msg", "")
-    ]
+    rejection_logs = [r for r in caplog.records if "worker will retry" in getattr(r, "msg", "")]
     assert len(rejection_logs) == len(REJECT_CALL_NUMBERS), (
-        f"Expected {len(REJECT_CALL_NUMBERS)} rejection entries from error handler, "
-        f"got {len(rejection_logs)}"
+        f"Expected {len(REJECT_CALL_NUMBERS)} rejection entries from error handler, got {len(rejection_logs)}"
     )
 
     # The sender loop must have retried after each rejection.
-    retry_logs = [
-        r for r in caplog.records
-        if "response.create was rejected; retrying" in getattr(r, "msg", "")
-    ]
+    retry_logs = [r for r in caplog.records if "response.create was rejected; retrying" in getattr(r, "msg", "")]
     assert len(retry_logs) == len(REJECT_CALL_NUMBERS), (
-        f"Expected {len(REJECT_CALL_NUMBERS)} retry entries from sender loop, "
-        f"got {len(retry_logs)}"
+        f"Expected {len(REJECT_CALL_NUMBERS)} retry entries from sender loop, got {len(retry_logs)}"
     )
 
 
@@ -643,7 +797,8 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
 
 @pytest.mark.asyncio
 async def test_response_sender_loop_times_out_waiting_for_response_done(
-    monkeypatch: Any, caplog: Any,
+    monkeypatch: Any,
+    caplog: Any,
 ) -> None:
     """If response.done is never received the sender loop should time out.
 
@@ -688,18 +843,14 @@ async def test_response_sender_loop_times_out_waiting_for_response_done(
 
     assert create_count == 2, f"Expected 2 response.create calls, got {create_count}"
 
-    timeout_logs = [
-        r for r in caplog.records
-        if "Timed out waiting for response.done" in r.getMessage()
-    ]
-    assert len(timeout_logs) == 2, (
-        f"Expected 2 timeout warnings, got {len(timeout_logs)}"
-    )
+    timeout_logs = [r for r in caplog.records if "Timed out waiting for response.done" in r.getMessage()]
+    assert len(timeout_logs) == 2, f"Expected 2 timeout warnings, got {len(timeout_logs)}"
 
 
 @pytest.mark.asyncio
 async def test_response_sender_loop_times_out_waiting_for_previous_response(
-    monkeypatch: Any, caplog: Any,
+    monkeypatch: Any,
+    caplog: Any,
 ) -> None:
     """If a previous response never completes, the pre-condition wait times out.
 
@@ -741,10 +892,5 @@ async def test_response_sender_loop_times_out_waiting_for_previous_response(
     handler._response_done_event.set()
     await asyncio.wait_for(sender_task, timeout=2.0)
 
-    timeout_logs = [
-        r for r in caplog.records
-        if "Timed out waiting for previous response" in r.getMessage()
-    ]
-    assert len(timeout_logs) == 1, (
-        f"Expected 1 pre-condition timeout warning, got {len(timeout_logs)}"
-    )
+    timeout_logs = [r for r in caplog.records if "Timed out waiting for previous response" in r.getMessage()]
+    assert len(timeout_logs) == 1, f"Expected 1 pre-condition timeout warning, got {len(timeout_logs)}"

@@ -28,23 +28,38 @@ class HeadWobbler:
         self._base_ts: float | None = None
         self._hops_done: int = 0
 
-        self.audio_queue: "queue.Queue[Tuple[int, int, NDArray[np.int16]]]" = queue.Queue()
+        self.audio_queue: "queue.Queue[Tuple[int, int, NDArray[np.int16], float]]" = queue.Queue()
         self.sway = SwayRollRT()
 
         # Synchronization primitives
         self._state_lock = threading.Lock()
         self._sway_lock = threading.Lock()
         self._generation = 0
+        self._reset_after_audio = False
 
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
-    def feed(self, delta_b64: str) -> None:
-        """Thread-safe: push audio into the consumer queue."""
+    def feed(self, delta_b64: str, start_delay_s: float = 0.0) -> None:
+        """Thread-safe: push base64 audio into the consumer queue."""
         buf = np.frombuffer(base64.b64decode(delta_b64), dtype=np.int16).reshape(1, -1)
+        self.feed_pcm(buf, SAMPLE_RATE, start_delay_s=start_delay_s)
+
+    def feed_pcm(self, pcm: NDArray[np.int16], sample_rate: int, start_delay_s: float = 0.0) -> None:
+        """Thread-safe: push PCM audio into the consumer queue."""
         with self._state_lock:
             generation = self._generation
-        self.audio_queue.put((generation, SAMPLE_RATE, buf))
+            self._reset_after_audio = False
+        self.audio_queue.put((generation, sample_rate, pcm, max(0.0, start_delay_s)))
+
+    def request_reset_after_current_audio(self) -> None:
+        """Reset once the current generation finishes playing."""
+        should_reset_now = False
+        with self._state_lock:
+            self._reset_after_audio = True
+            should_reset_now = self._base_ts is None and self.audio_queue.empty()
+        if should_reset_now:
+            self.reset()
 
     def start(self) -> None:
         """Start the head wobbler loop in a thread."""
@@ -68,10 +83,12 @@ class HeadWobbler:
         while not self._stop_event.is_set():
             queue_ref = self.audio_queue
             try:
-                chunk_generation, sr, chunk = queue_ref.get_nowait()  # (gen, sr, data)
+                chunk_generation, sr, chunk, start_delay_s = queue_ref.get(
+                    timeout=hop_dt
+                )  # (gen, sr, data, start_delay)
             except queue.Empty:
-                # avoid while to never exit
-                time.sleep(MOVEMENT_LATENCY_S)
+                if self._should_reset_after_audio(hop_dt):
+                    self.reset()
                 continue
 
             try:
@@ -83,7 +100,7 @@ class HeadWobbler:
                 if self._base_ts is None:
                     with self._state_lock:
                         if self._base_ts is None:
-                            self._base_ts = time.monotonic()
+                            self._base_ts = time.monotonic() + start_delay_s
 
                 pcm = np.asarray(chunk).squeeze(0)
                 with self._sway_lock:
@@ -146,6 +163,16 @@ class HeadWobbler:
                 queue_ref.task_done()
         logger.debug("Head wobbler thread exited")
 
+    def _should_reset_after_audio(self, hop_dt: float) -> bool:
+        """Return True when a requested reset has reached the end of queued audio."""
+        with self._state_lock:
+            if not self._reset_after_audio or self._base_ts is None:
+                return False
+            if not self.audio_queue.empty():
+                return False
+            reset_at = self._base_ts + MOVEMENT_LATENCY_S + self._hops_done * hop_dt
+        return time.monotonic() >= reset_at
+
     '''
     def drain_audio_queue(self) -> None:
         """Empty the audio queue."""
@@ -162,12 +189,13 @@ class HeadWobbler:
             self._generation += 1
             self._base_ts = None
             self._hops_done = 0
+            self._reset_after_audio = False
 
         # Drain any queued audio chunks from previous generations
         drained_any = False
         while True:
             try:
-                _, _, _ = self.audio_queue.get_nowait()
+                _, _, _, _ = self.audio_queue.get_nowait()
             except queue.Empty:
                 break
             else:
@@ -176,6 +204,8 @@ class HeadWobbler:
 
         with self._sway_lock:
             self.sway.reset()
+
+        self._apply_offsets((0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
 
         if drained_any:
             logger.debug("Head wobbler queue drained during reset")

@@ -3,7 +3,7 @@ import sys
 import logging
 from pathlib import Path
 
-from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY, config
+from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY, config, get_default_voice_for_backend
 
 
 logger = logging.getLogger(__name__)
@@ -27,9 +27,9 @@ def _expand_prompt_includes(content: str) -> str:
     # Pattern to match [<name>] where name is a valid file stem (alphanumeric, underscores, hyphens)
     # pattern = re.compile(r'^\[([a-zA-Z0-9_-]+)\]$')
     # Allow slashes for subdirectories
-    pattern = re.compile(r'^\[([a-zA-Z0-9/_-]+)\]$')
+    pattern = re.compile(r"^\[([a-zA-Z0-9/_-]+)\]$")
 
-    lines = content.split('\n')
+    lines = content.split("\n")
     expanded_lines = []
 
     for line in lines:
@@ -55,7 +55,7 @@ def _expand_prompt_includes(content: str) -> str:
         else:
             expanded_lines.append(line)
 
-    return '\n'.join(expanded_lines)
+    return "\n".join(expanded_lines)
 
 
 def get_session_instructions() -> str:
@@ -91,20 +91,22 @@ def get_session_instructions() -> str:
         sys.exit(1)
 
 
-def get_session_voice(default: str = "cedar") -> str:
+def get_session_voice(default: str | None = None) -> str:
     """Resolve the voice to use for the session.
 
     If a custom profile is selected and contains a voice.txt, return its
-    trimmed content; otherwise return the provided default ("cedar").
+    trimmed content; otherwise return the provided default or the active
+    backend default voice.
     """
+    fallback = get_default_voice_for_backend() if default is None else default
     profile = config.REACHY_MINI_CUSTOM_PROFILE
     if not profile:
-        return default
+        return fallback
     try:
         voice_file = config.PROFILES_DIRECTORY / profile / VOICE_FILENAME
         if voice_file.exists():
             voice = voice_file.read_text(encoding="utf-8").strip()
-            return voice or default
+            return voice or fallback
     except Exception:
         pass
-    return default
+    return fallback

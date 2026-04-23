@@ -11,12 +11,14 @@ from __future__ import annotations
 from typing import List
 from pathlib import Path
 
+from .config import DEFAULT_PROFILES_DIRECTORY
+
 
 DEFAULT_OPTION = "(built-in default)"
 
 
 def _profiles_root() -> Path:
-    return Path(__file__).parent / "profiles"
+    return DEFAULT_PROFILES_DIRECTORY
 
 
 def _prompts_dir() -> Path:
@@ -72,6 +74,16 @@ def read_instructions_for(name: str) -> str:
         return target.read_text(encoding="utf-8").strip() if target.exists() else ""
     except Exception as e:
         return f"Could not load instructions: {e}"
+
+
+def read_tools_for(name: str) -> str:
+    """Read the tools.txt content for the given profile name."""
+    try:
+        profile_name = "default" if name == DEFAULT_OPTION else name
+        target = resolve_profile_dir(profile_name) / "tools.txt"
+        return target.read_text(encoding="utf-8") if target.exists() else ""
+    except Exception:
+        return ""
 
 
 def available_tools_for(selected: str) -> List[str]:

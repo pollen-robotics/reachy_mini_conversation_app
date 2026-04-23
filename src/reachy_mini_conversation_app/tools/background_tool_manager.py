@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 _SYSTEM_TOOL_NAMES: set[str] = {t.value for t in SystemTool}
 
+
 class ToolProgress(BaseModel):
     """Progress of a background tool."""
 
@@ -53,7 +54,9 @@ class ToolCallRoutine(BaseModel):
         """Execute the stored callable with its arguments."""
         if self.tool_name in _SYSTEM_TOOL_NAMES:
             # For safety purposes, we only allow system tools to be called with the tool manager
-            return await dispatch_tool_call_with_manager(tool_name=self.tool_name, args_json=self.args_json_str, deps=self.deps, tool_manager=tool_manager)
+            return await dispatch_tool_call_with_manager(
+                tool_name=self.tool_name, args_json=self.args_json_str, deps=self.deps, tool_manager=tool_manager
+            )
         return await dispatch_tool_call(tool_name=self.tool_name, args_json=self.args_json_str, deps=self.deps)
 
 
@@ -157,7 +160,6 @@ class BackgroundToolManager(BaseModel):
             except RuntimeError:
                 self._loop = asyncio.new_event_loop()
         logger.debug("BackgroundToolManager: event loop set")
-
 
     async def start_tool(
         self,
@@ -319,7 +321,8 @@ class BackgroundToolManager(BaseModel):
             "BackgroundToolManager started. "
             "Max tool execution duration: %s seconds (tools running longer will be auto-cancelled). "
             "Max tool memory retention: %s seconds (completed/failed/cancelled tools older than this are purged).",
-            self._max_tool_duration_seconds, self._max_tool_memory_seconds,
+            self._max_tool_duration_seconds,
+            self._max_tool_memory_seconds,
         )
 
     async def shutdown(self) -> None:

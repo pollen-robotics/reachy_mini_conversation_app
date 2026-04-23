@@ -16,15 +16,19 @@
       <header class="hero">
         <div class="pill">Headless control</div>
         <h1>Reachy Mini Conversation</h1>
-        <p class="subtitle">Configure your OpenAI key and tweak personalities without the full UI.</p>
+        <p class="subtitle">Choose a realtime backend, add a Gemini token if needed, and tweak personalities without the full UI.</p>
       </header>
 
       <aside class="privacy-notice" role="note" aria-label="Privacy notice">
         <p>
           <strong>Privacy notice:</strong>
-          By default, speech and camera data are sent to OpenAI's Realtime API for inference. See OpenAI's
+          Speech and camera data are sent to your selected realtime backend for inference. See OpenAI's
           <a href="https://platform.openai.com/docs/guides/your-data" target="_blank" rel="noopener">
             data usage policy
+          </a>
+          and Google's
+          <a href="https://ai.google.dev/gemini-api/docs/data-usage" target="_blank" rel="noopener">
+            Gemini API data usage policy
           </a>
           for details.
         </p>
@@ -42,15 +46,51 @@
         </details>
       </aside>
 
+      <div id="backend-panel" class="panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Backend</p>
+            <h2>Choose your realtime backend</h2>
+          </div>
+          <span id="backend-chip" class="chip">Required</span>
+        </div>
+        <p id="backend-note" class="muted backend-note">
+          OpenAI Realtime uses the distributed OpenAI key. Gemini Live needs your own <code>GEMINI_API_KEY</code>.
+        </p>
+        <p class="muted backend-note">
+          Backend changes are saved here, then applied after you restart Reachy Mini Conversation from the dashboard or desktop app.
+        </p>
+        <div class="backend-choice-grid" role="radiogroup" aria-label="Conversation backend">
+          <label class="backend-choice is-selected" data-backend-card="openai">
+            <input type="radio" name="backend" value="openai" checked />
+            <span class="backend-choice-body">
+              <span class="backend-choice-title">OpenAI Realtime</span>
+              <span class="backend-choice-copy">Start quickly with the bundled OpenAI access.</span>
+            </span>
+          </label>
+          <label class="backend-choice" data-backend-card="gemini">
+            <input type="radio" name="backend" value="gemini" />
+            <span class="backend-choice-body">
+              <span class="backend-choice-title">Gemini Live</span>
+              <span class="backend-choice-copy">Bring your own <code>GEMINI_API_KEY</code> to try Gemini.</span>
+            </span>
+          </label>
+        </div>
+        <div class="actions">
+          <button id="save-backend-btn" class="ghost hidden">Use selected backend</button>
+          <p id="backend-status" class="status" role="status" aria-live="polite" aria-atomic="true"></p>
+        </div>
+      </div>
+
       <div id="configured" class="panel hidden">
         <div class="panel-heading">
           <div>
             <p class="eyebrow">Credentials</p>
-            <h2>API key ready</h2>
+            <h2 id="configured-title">API key ready</h2>
           </div>
           <span class="chip chip-ok">Connected</span>
         </div>
-        <p class="muted">OpenAI API key is already configured. You can jump straight to personalities.</p>
+        <p id="configured-copy" class="muted">OpenAI API key is already configured. You can jump straight to personalities.</p>
         <button id="change-key-btn" class="ghost">Change API key</button>
       </div>
 
@@ -58,16 +98,16 @@
         <div class="panel-heading">
           <div>
             <p class="eyebrow">Credentials</p>
-            <h2>Connect OpenAI</h2>
+            <h2 id="form-title">Connect OpenAI</h2>
           </div>
           <span class="chip">Required</span>
         </div>
-        <p class="muted">Paste your API key once and we will store it locally for the headless conversation loop.</p>
-        <label for="api-key">OpenAI API Key</label>
+        <p id="form-copy" class="muted">Paste your API key once and we will store it locally for the headless conversation loop.</p>
+        <label id="api-key-label" for="api-key">OpenAI API Key</label>
         <input id="api-key" type="password" placeholder="sk-..." autocomplete="off" />
         <div class="actions">
           <button id="save-btn">Save key</button>
-          <p id="status" class="status"></p>
+          <p id="status" class="status" role="status" aria-live="polite" aria-atomic="true"></p>
         </div>
       </div>
 
@@ -107,9 +147,12 @@
           </div>
           <div class="row">
             <label for="personality-name">Name</label>
-            <input id="personality-name" type="text" class="input-field" placeholder="my_profile" />
+            <input id="personality-name" type="text" placeholder="my_profile" />
+          </div>
+          <div class="row row-voice">
             <label for="voice-select">Voice</label>
             <select id="voice-select"></select>
+            <button id="apply-voice" class="ghost">Apply voice</button>
           </div>
           <div class="row">
             <label for="instructions-ta">Instructions</label>
@@ -130,7 +173,7 @@
             </div>
           </div>
         </div>
-        <p id="personality-status" class="status"></p>
+        <p id="personality-status" class="status" role="status" aria-live="polite" aria-atomic="true"></p>
       </div>
     </div>
 

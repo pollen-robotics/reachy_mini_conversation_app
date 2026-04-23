@@ -10,12 +10,12 @@ flowchart TB
     UI@{ label: "<span style='font-size:16px;font-weight:bold;'>UI Layer</span><br><span style='font-size:13px;color:#0277bd;'>Gradio/Console</span>" }
 
     UI -- audio stream --> 
-    OpenAI@{ label: "<span style='font-size:17px;font-weight:bold;'>gpt-realtime API</span><br><span style='font-size:13px; color:#7b1fa2;'>Audio+Tool Calls+Vision</span>" }
+    Backend@{ label: "<span style='font-size:16px;font-weight:bold;'>Realtime Backend</span><br><span style='font-size:12px; color:#7b1fa2;'>Audio + Tool Calls + Vision</span>" }
 
-    OpenAI -- audio stream --> 
+    Backend -- audio stream --> 
     Motion@{ label: "<span style='font-size:16px;font-weight:bold;'>Motion Control</span><br><span style='font-size:13px;color:#f57f17;'>Audio Sync + Tracking</span>" }
     
-    OpenAI -- tool calls --> 
+    Backend -- tool calls --> 
     Handlers@{ label: "<span style='font-size:16px;font-weight:bold;'>Tool Layer</span><br><span style='font-size:12px;color:#f9a825;'>Built-in tools + profile-local tools<br/>+ external tools (optional)</span>" }
 
     Profiles@{ label: "<span style='font-size:16px;font-weight:bold;'>Selected Profile</span><br><span style='font-size:12px;color:#6a1b9a;'>built-in or external<br/>instructions.txt + tools.txt</span>" }
@@ -29,7 +29,7 @@ flowchart TB
     Camera@{ label: "<span style='font-size:16px;font-weight:bold;'>Camera Worker</span><br><span style='font-size:13px;color:#f57f17;'>Frame Buffer + Head Tracking</span>" }
     
     Handlers -. image for 
-    analysis .-> OpenAI
+    analysis .-> Backend
 
     Camera -- head tracking --> Motion
 
@@ -44,11 +44,11 @@ flowchart TB
 
     Motion -- commands --> Robot
 
-    Handlers -- results --> OpenAI
+    Handlers -- results --> Backend
 
      User:::userStyle
      UI:::uiStyle
-     OpenAI:::aiStyle
+     Backend:::aiStyle
      Motion:::coreStyle
      Profiles:::toolStyle
      Handlers:::toolStyle
