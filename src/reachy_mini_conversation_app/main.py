@@ -33,6 +33,15 @@ def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> L
 def main() -> None:
     """Entrypoint for the Reachy Mini conversation app."""
     args, _ = parse_args()
+    if args.command == "tool-spaces":
+        from reachy_mini_conversation_app.tool_spaces import handle_tool_spaces_command
+
+        logger = setup_logger(args.debug)
+        try:
+            raise SystemExit(handle_tool_spaces_command(args))
+        except Exception as exc:
+            logger.error("tool-spaces command failed: %s", exc)
+            raise SystemExit(1) from exc
     run(args)
 
 
@@ -74,8 +83,14 @@ def run(
             logger.warning("Failed to load startup settings: %s", e)
 
     from reachy_mini_conversation_app.console import LocalStream
-    from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+    from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, initialize_tools
     from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
+
+    try:
+        initialize_tools(instance_path=instance_path)
+    except Exception as e:
+        logger.error("Failed to initialize tools: %s", e)
+        sys.exit(1)
 
     if args.no_camera and args.head_tracker is not None:
         logger.warning("Head tracking disabled: --no-camera flag is set. Remove --no-camera to enable head tracking.")

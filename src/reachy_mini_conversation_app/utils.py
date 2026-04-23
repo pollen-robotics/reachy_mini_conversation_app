@@ -46,6 +46,17 @@ def parse_args() -> tuple[argparse.Namespace, list]:  # type: ignore
         default=None,
         help="[Optional] Robot name to target. Must match the daemon's --robot-name when connecting to a specific robot, mainly useful for development with multiple robots.",
     )
+    subparsers = parser.add_subparsers(dest="command")
+    tool_spaces_parser = subparsers.add_parser("tool-spaces", help="Manage installed Hugging Face Space tool sources")
+    tool_spaces_subparsers = tool_spaces_parser.add_subparsers(dest="tool_spaces_command", required=True)
+
+    add_parser = tool_spaces_subparsers.add_parser("add", help="Install one public Space tool source by slug")
+    add_parser.add_argument("space_slug", help="Public Hugging Face Space slug in the form owner/space-name")
+
+    remove_parser = tool_spaces_subparsers.add_parser("remove", help="Remove one installed Space tool source")
+    remove_parser.add_argument("space_slug", help="Installed Hugging Face Space slug in the form owner/space-name")
+
+    tool_spaces_subparsers.add_parser("list", help="List installed Space tool sources")
     return parser.parse_known_args()
 
 
