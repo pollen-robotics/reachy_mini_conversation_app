@@ -31,16 +31,6 @@ def parse_args() -> Tuple[argparse.Namespace, list]:  # type: ignore
         default=None,
         help="[Optional] Robot name/prefix for Zenoh topics (must match daemon's --robot-name). Only needed for development with multiple robots.",
     )
-    parser.add_argument(
-        "--download-hf-tool",
-        type=str,
-        default=None,
-        help=(
-            "Download a tool .py module and optional requirements.txt from a Hugging Face Space, "
-            "sync dependencies via uv, copy the tool into REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY "
-            "(or ./external_content/external_tools), then exit without starting the conversation app."
-        ),
-    )
     return parser.parse_known_args()
 
 
@@ -107,13 +97,12 @@ def setup_logger(debug: bool) -> logging.Logger:
         logging.getLogger("aioice").setLevel(logging.INFO)
         logging.getLogger("openai").setLevel(logging.INFO)
         logging.getLogger("websockets").setLevel(logging.INFO)
-        logging.getLogger("httpx").setLevel(logging.INFO)
     else:
         logging.getLogger("aiortc").setLevel(logging.ERROR)
         logging.getLogger("fastrtc").setLevel(logging.ERROR)
         logging.getLogger("aioice").setLevel(logging.WARNING)
-        logging.getLogger("httpx").setLevel(logging.WARNING)
     return logger
+
 
 def log_connection_troubleshooting(logger: logging.Logger, robot_name: Optional[str]) -> None:
     """Log troubleshooting steps for connection issues."""
