@@ -152,19 +152,11 @@ def _build_tool_registry(tool_classes: List[type[Tool]]) -> Dict[str, Tool]:
         source = f"{cls.__module__}.{cls.__name__}"
         name_to_sources.setdefault(cls.name, []).append(source)
 
-    collisions = {
-        tool_name: sources
-        for tool_name, sources in name_to_sources.items()
-        if len(sources) > 1
-    }
+    collisions = {tool_name: sources for tool_name, sources in name_to_sources.items() if len(sources) > 1}
     if collisions:
-        details = "; ".join(
-            f"{tool_name}: {sources}"
-            for tool_name, sources in sorted(collisions.items())
-        )
+        details = "; ".join(f"{tool_name}: {sources}" for tool_name, sources in sorted(collisions.items()))
         raise RuntimeError(
-            "Duplicate Tool.name values detected while loading tools. "
-            f"Tool.name must be unique. Conflicts: {details}"
+            f"Duplicate Tool.name values detected while loading tools. Tool.name must be unique. Conflicts: {details}"
         )
 
     return {cls.name: cls() for cls in unique_classes}

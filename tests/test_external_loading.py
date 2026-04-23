@@ -80,9 +80,7 @@ def test_external_tools_can_be_loaded_without_external_profile(
     assert "ext_ping" in core_tools_mod.ALL_TOOLS
 
 
-def test_external_tools_fail_on_duplicate_tool_names(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_external_tools_fail_on_duplicate_tool_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Loading must fail if multiple tools declare the same Tool.name."""
     external_tools_root = tmp_path / "external_tools"
     external_tools_root.mkdir(parents=True)
@@ -93,12 +91,12 @@ def test_external_tools_fail_on_duplicate_tool_names(
             "from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies",
             "",
             "class DupTool(Tool):",
-            "    name = \"dup_tool\"",
-            "    description = \"Duplicate tool name\"",
-            "    parameters_schema = {\"type\": \"object\", \"properties\": {}, \"required\": []}",
+            '    name = "dup_tool"',
+            '    description = "Duplicate tool name"',
+            '    parameters_schema = {"type": "object", "properties": {}, "required": []}',
             "",
             "    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:",
-            "        return {\"status\": \"ok\"}",
+            '        return {"status": "ok"}',
             "",
         ]
     )

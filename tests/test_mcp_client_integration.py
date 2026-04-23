@@ -26,10 +26,7 @@ class _BearerAuthMiddleware:
 
     async def __call__(self, scope: dict, receive: object, send: object) -> None:
         if scope["type"] == "http" and scope["path"].startswith("/mcp"):
-            headers = {
-                key.decode("latin-1"): value.decode("latin-1")
-                for key, value in scope.get("headers", [])
-            }
+            headers = {key.decode("latin-1"): value.decode("latin-1") for key, value in scope.get("headers", [])}
             if headers.get("authorization") != f"Bearer {self.token}":
                 response = PlainTextResponse("Unauthorized", status_code=401)
                 await response(scope, receive, send)

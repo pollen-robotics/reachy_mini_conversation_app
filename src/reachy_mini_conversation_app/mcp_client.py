@@ -49,9 +49,7 @@ class McpToolTimeoutError(McpToolInvocationError):
 def _require_name_segment(label: str, value: str) -> str:
     candidate = value.strip()
     if _NAME_SEGMENT_PATTERN.fullmatch(candidate) is None:
-        raise ValueError(
-            f"Invalid {label} '{value}'. Expected pattern '[A-Za-z_][A-Za-z0-9_]*'."
-        )
+        raise ValueError(f"Invalid {label} '{value}'. Expected pattern '[A-Za-z_][A-Za-z0-9_]*'.")
     return candidate
 
 
@@ -100,9 +98,7 @@ def _dump_content_block(block: Any) -> dict[str, Any]:
 
 def _join_text_content(content_blocks: list[dict[str, Any]]) -> str | None:
     text_parts = [
-        block["text"]
-        for block in content_blocks
-        if block.get("type") == "text" and isinstance(block.get("text"), str)
+        block["text"] for block in content_blocks if block.get("type") == "text" and isinstance(block.get("text"), str)
     ]
     if not text_parts:
         return None
@@ -317,9 +313,7 @@ class RemoteMcpToolClient:
         await self.list_tool_specs()
         spec = self._tool_index.get(namespaced_tool_name)
         if spec is None:
-            raise ValueError(
-                f"Unknown remote MCP tool '{namespaced_tool_name}' for server '{self.server.alias}'."
-            )
+            raise ValueError(f"Unknown remote MCP tool '{namespaced_tool_name}' for server '{self.server.alias}'.")
         return spec
 
     async def _list_all_tools(self, session: "ClientSession") -> list[Any]:
@@ -363,12 +357,8 @@ def _index_remote_tools(specs: list[RemoteToolSpec]) -> dict[str, RemoteToolSpec
 
     if collisions:
         details = "; ".join(
-            f"{tool_name}: {sorted(remote_names)}"
-            for tool_name, remote_names in sorted(collisions.items())
+            f"{tool_name}: {sorted(remote_names)}" for tool_name, remote_names in sorted(collisions.items())
         )
-        raise ValueError(
-            "Remote MCP tool names collide after local namespacing/normalization. "
-            f"Conflicts: {details}"
-        )
+        raise ValueError(f"Remote MCP tool names collide after local namespacing/normalization. Conflicts: {details}")
 
     return index
