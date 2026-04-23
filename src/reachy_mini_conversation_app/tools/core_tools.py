@@ -8,7 +8,7 @@ import inspect
 import logging
 import importlib
 import importlib.util
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List, cast
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-ALL_TOOLS: Dict[str, "Tool"] = {}
+ALL_TOOLS: Dict[str, Any] = {}
 ALL_TOOL_SPECS: List[Dict[str, Any]] = []
 _TOOLS_INITIALIZED = False
 
@@ -89,6 +89,47 @@ class Tool(abc.ABC):
         raise NotImplementedError
 
 
+class RemoteMcpTool:
+    """Adapter exposing one remote MCP tool through the local Tool interface."""
+
+    def __init__(
+        self,
+        *,
+        slug: str,
+        name: str,
+        description: str,
+        parameters_schema: Dict[str, Any],
+        client_tool_name: str,
+        client: Any,
+    ) -> None:
+        """Store the resolved local/remote names and the shared MCP client."""
+        self.name = name
+        self.description = description
+        self.parameters_schema = parameters_schema
+        self._space_slug = slug
+        self._client_tool_name = client_tool_name
+        self._client = client
+        self._registry_source = f"space:{slug}:{client_tool_name}"
+
+    def spec(self) -> Dict[str, Any]:
+        """Return the function spec for LLM consumption."""
+        return {
+            "type": "function",
+            "name": self.name,
+            "description": self.description,
+            "parameters": self.parameters_schema,
+        }
+
+    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
+        """Invoke the underlying remote MCP tool."""
+        result = await self._client.call_tool(self._client_tool_name, kwargs)
+        payload = dict(result)
+        if payload.get("namespaced_tool_name") == self._client_tool_name:
+            payload["namespaced_tool_name"] = self.name
+        payload.setdefault("tool_space_slug", self._space_slug)
+        return payload
+
+
 def _load_module_from_file(module_name: str, file_path: Path) -> None:
     """Load a Python module from a file path."""
     if not file_path.is_file():
@@ -136,7 +177,10 @@ def _format_error(error: Exception) -> str:
     return f"{type(error).__name__}: {error}"
 
 
-def _build_tool_registry(tool_classes: List[type[Tool]]) -> Dict[str, Tool]:
+def _build_tool_registry(
+    tool_classes: List[type[Tool]],
+    extra_tools: list[Any] | None = None,
+) -> Dict[str, Any]:
     """Instantiate tools and fail if duplicate Tool.name values are detected."""
     unique_classes: List[type[Tool]] = []
     seen_class_ids: set[int] = set()
@@ -147,10 +191,14 @@ def _build_tool_registry(tool_classes: List[type[Tool]]) -> Dict[str, Tool]:
         seen_class_ids.add(cls_id)
         unique_classes.append(cls)
 
+    tool_instances = [cls() for cls in unique_classes]
+    if extra_tools:
+        tool_instances.extend(extra_tools)
+
     name_to_sources: Dict[str, List[str]] = {}
-    for cls in unique_classes:
-        source = f"{cls.__module__}.{cls.__name__}"
-        name_to_sources.setdefault(cls.name, []).append(source)
+    for tool in tool_instances:
+        source = getattr(tool, "_registry_source", f"{tool.__class__.__module__}.{tool.__class__.__name__}")
+        name_to_sources.setdefault(tool.name, []).append(source)
 
     collisions = {tool_name: sources for tool_name, sources in name_to_sources.items() if len(sources) > 1}
     if collisions:
@@ -159,18 +207,15 @@ def _build_tool_registry(tool_classes: List[type[Tool]]) -> Dict[str, Tool]:
             f"Duplicate Tool.name values detected while loading tools. Tool.name must be unique. Conflicts: {details}"
         )
 
-    return {cls.name: cls() for cls in unique_classes}
+    return {tool.name: tool for tool in tool_instances}
 
 
 # Registry & specs (dynamic)
-def _load_profile_tools() -> None:
-    """Load tools based on profile's tools.txt file."""
-    # Determine which profile to use
+def _resolve_profile_tools_txt_path() -> tuple[str, Path]:
+    """Resolve the active profile's tools.txt with fallback to the built-in default."""
     profile = config.REACHY_MINI_CUSTOM_PROFILE or "default"
     logger.info(f"Loading tools for profile: {profile}")
 
-    # Build path to tools.txt
-    # Get the profile directory path
     profile_dir = config.PROFILES_DIRECTORY / profile
     tools_txt_path = profile_dir / "tools.txt"
     default_tools_txt_path = DEFAULT_PROFILES_PATH / "default" / "tools.txt"
@@ -190,32 +235,31 @@ def _load_profile_tools() -> None:
                 tools_txt_path,
                 default_tools_txt_path,
             )
-            tools_txt_path = default_tools_txt_path
-        else:
-            logger.error(f"✗ tools.txt not found at {tools_txt_path}")
-            sys.exit(1)
+            return profile, default_tools_txt_path
+        logger.error(f"✗ tools.txt not found at {tools_txt_path}")
+        sys.exit(1)
 
-    # Read and parse tools.txt
+    return profile, tools_txt_path
+
+
+def _read_profile_tool_names() -> list[str]:
+    """Read enabled tool names from the active profile's tools.txt file."""
+    _, tools_txt_path = _resolve_profile_tools_txt_path()
+
     try:
-        with open(tools_txt_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
+        lines = tools_txt_path.read_text(encoding="utf-8").splitlines()
     except Exception as e:
         logger.error(f"✗ Failed to read tools.txt: {e}")
         sys.exit(1)
 
-    # Parse tool names (skip comments and blank lines)
-    tool_names = []
+    tool_names: list[str] = []
     for line in lines:
-        line = line.strip()
-        # Skip blank lines and comments
-        if not line or line.startswith("#"):
+        stripped_line = line.strip()
+        if not stripped_line or stripped_line.startswith("#"):
             continue
-        tool_names.append(line)
+        tool_names.append(stripped_line)
 
-    # Add system tools
     tool_names.extend({tool.value for tool in SystemTool})
-
-    logger.info(f"Found {len(tool_names)} tools to load: {tool_names}")
 
     if config.AUTOLOAD_EXTERNAL_TOOLS and config.TOOLS_DIRECTORY and config.TOOLS_DIRECTORY.is_dir():
         discovered_external_tools: List[str] = []
@@ -237,12 +281,61 @@ def _load_profile_tools() -> None:
                 extra_tools,
             )
 
+    logger.info(f"Found {len(tool_names)} tools to load: {tool_names}")
+    return tool_names
+
+
+def _resolve_remote_tools(tool_names: list[str], instance_path: str | Path | None) -> list[RemoteMcpTool]:
+    """Resolve installed public Space tools for the current runtime."""
+    from reachy_mini_conversation_app.tool_spaces import read_installed_tool_spaces, resolve_public_tool_space_sync
+
+    remote_tools: list[RemoteMcpTool] = []
+    for installed_space in read_installed_tool_spaces(instance_path).spaces:
+        enabled_space_tools = [name for name in tool_names if name.startswith(f"{installed_space.alias}__")]
+        try:
+            resolved_space = resolve_public_tool_space_sync(installed_space.slug)
+        except Exception as exc:
+            if enabled_space_tools:
+                raise RuntimeError(
+                    f"Enabled remote tools from '{installed_space.slug}' are unavailable: {', '.join(enabled_space_tools)}. "
+                    f"Details: {exc}"
+                ) from exc
+
+            logger.warning(
+                "Installed Space '%s' is unavailable but none of its tools are enabled in the active profile: %s",
+                installed_space.slug,
+                exc,
+            )
+            continue
+
+        for remote_tool in resolved_space.tools:
+            remote_tools.append(
+                RemoteMcpTool(
+                    slug=resolved_space.slug,
+                    name=remote_tool.local_name,
+                    description=remote_tool.description,
+                    parameters_schema=remote_tool.parameters_schema,
+                    client_tool_name=remote_tool.client_tool_name,
+                    client=resolved_space.client,
+                )
+            )
+
+    return remote_tools
+
+
+def _load_profile_tools(tool_names: list[str], remote_tool_names: set[str]) -> None:
+    """Load local profile/shared tools while skipping resolved remote tool IDs."""
+    profile = config.REACHY_MINI_CUSTOM_PROFILE or "default"
+
     for tool_name in tool_names:
+        if tool_name in remote_tool_names:
+            logger.info("✓ Registered remote tool: %s", tool_name)
+            continue
+
         loaded = False
         profile_error = None
         profile_tool_file = config.PROFILES_DIRECTORY / profile / f"{tool_name}.py"
 
-        # Profile-local tools live alongside the selected profile on disk
         try:
             _load_module_from_file(tool_name, profile_tool_file)
             profile_scope = "external" if config.PROFILES_DIRECTORY != DEFAULT_PROFILES_PATH else "built-in"
@@ -257,7 +350,6 @@ def _load_profile_tools() -> None:
             profile_error = _format_error(e)
             logger.error(f"❌ Failed to load profile tool '{tool_name}': {profile_error}")
 
-        # Try tools directory if not found in profile
         if not loaded:
             shared_module_path = f"reachy_mini_conversation_app.tools.{tool_name}"
             try:
@@ -281,17 +373,23 @@ def _load_profile_tools() -> None:
                 logger.error(f"  Module path: {shared_module_path}")
 
 
-def _initialize_tools() -> None:
-    """Populate registry once, even if module is imported repeatedly."""
+def initialize_tools(instance_path: str | Path | None = None) -> None:
+    """Populate the tool registry once for the current process."""
     global ALL_TOOLS, ALL_TOOL_SPECS, _TOOLS_INITIALIZED
 
     if _TOOLS_INITIALIZED:
         logger.debug("Tools already initialized; skipping reinitialization.")
         return
 
-    _load_profile_tools()
+    tool_names = _read_profile_tool_names()
+    remote_tools = _resolve_remote_tools(tool_names, instance_path)
+    remote_tool_names = {tool.name for tool in remote_tools}
+    _load_profile_tools(tool_names, remote_tool_names)
 
-    ALL_TOOLS = _build_tool_registry(get_concrete_subclasses(Tool))  # type: ignore[type-abstract]
+    ALL_TOOLS = _build_tool_registry(
+        get_concrete_subclasses(Tool),  # type: ignore[type-abstract]
+        extra_tools=remote_tools,
+    )
     ALL_TOOL_SPECS = [tool.spec() for tool in ALL_TOOLS.values()]
 
     for tool_name, tool in ALL_TOOLS.items():
@@ -300,11 +398,10 @@ def _initialize_tools() -> None:
     _TOOLS_INITIALIZED = True
 
 
-_initialize_tools()
-
-
 def get_tool_specs(exclusion_list: list[str] = []) -> list[Dict[str, Any]]:
     """Get tool specs, optionally excluding some tools."""
+    if not _TOOLS_INITIALIZED:
+        initialize_tools()
     return [spec for spec in ALL_TOOL_SPECS if spec.get("name") not in exclusion_list]
 
 
@@ -319,11 +416,13 @@ def _safe_load_obj(args_json: str) -> Dict[str, Any]:
 
 
 async def _dispatch_tool_call(tool_name: str, args: Dict[str, Any], deps: ToolDependencies) -> Dict[str, Any]:
+    if not _TOOLS_INITIALIZED:
+        initialize_tools()
     tool = ALL_TOOLS.get(tool_name)
     if not tool:
         return {"error": f"unknown tool: {tool_name}"}
     try:
-        return await tool(deps, **args)
+        return cast(Dict[str, Any], await tool(deps, **args))
     except asyncio.CancelledError:
         logger.info("Tool cancelled: %s", tool_name)
         return {"error": "Tool cancelled"}

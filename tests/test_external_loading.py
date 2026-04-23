@@ -21,6 +21,7 @@ def _reload_core_tools() -> ModuleType:
 
     sys.modules.pop("reachy_mini_conversation_app.tools.core_tools", None)
     core_tools_mod = importlib.import_module("reachy_mini_conversation_app.tools.core_tools")
+    core_tools_mod.initialize_tools()
     return core_tools_mod
 
 
