@@ -137,6 +137,7 @@ class YoloHeadTrackerProcess:
         self._messages: queue.Queue[tuple[str, object | None]] = queue.Queue()
         self._next_request_id = 0
         self._timed_out_request_id: int | None = None
+        self._recovery_call_pending = False
         self._tracker_name = "yolo"
 
         module_path = "reachy_mini_conversation_app.vision.head_tracking.yolo_process"
@@ -304,8 +305,14 @@ class YoloHeadTrackerProcess:
         request_id: int | None = None
         try:
             with self._send_lock:
-                # Avoid writing another frame while the child is still finishing a timed-out one.
-                if not self._drain_timed_out_reply():
+                # Reserve the immediate next call after a timeout for recovery
+                # only. Later calls may drain a delayed reply and continue with
+                # a fresh request in the same turn.
+                if self._recovery_call_pending:
+                    self._recovery_call_pending = False
+                    self._drain_timed_out_reply()
+                    return None, None
+                if self._timed_out_request_id is not None and not self._drain_timed_out_reply():
                     return None, None
 
                 request_id = self._next_request_id
@@ -315,6 +322,7 @@ class YoloHeadTrackerProcess:
         except TimeoutError as exc:
             if request_id is not None:
                 self._timed_out_request_id = request_id
+                self._recovery_call_pending = True
             logger.warning("Head tracker %s communication timed out: %s", self._tracker_name, exc)
             return None, None
         except Exception as exc:
