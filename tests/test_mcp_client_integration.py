@@ -109,7 +109,7 @@ async def local_mcp_server(unused_tcp_port: int) -> AsyncIterator[tuple[str, str
 async def test_remote_mcp_tool_client_discovers_calls_and_handles_timeout(
     local_mcp_server: tuple[str, str],
 ) -> None:
-    """The spike should discover tools, map schemas, invoke tools, and handle timeouts/auth."""
+    """The client should discover tools, map schemas, invoke tools, and handle timeouts/auth."""
     server_url, token = local_mcp_server
     client = RemoteMcpToolClient(
         RemoteMcpServerConfig(

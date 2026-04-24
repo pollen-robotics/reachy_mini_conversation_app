@@ -1,8 +1,8 @@
-"""Helpers for a narrow MCP client spike.
+"""Helpers for consuming remote MCP tools over HTTP(S).
 
-This module is intentionally not wired into the conversation runtime yet.
-It exists to validate a safe path for consuming remote tools over MCP without
-mutating the local project environment or downloading third-party Python code.
+This module validates remote endpoints, discovers tools, and maps calls/results
+into the app's tool interface without mutating the local project environment or
+downloading third-party Python code.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ _NAMESPACE_SEPARATOR = "__"
 
 
 class McpClientError(RuntimeError):
-    """Base error for the MCP client spike."""
+    """Base error for the MCP client."""
 
 
 class McpDependencyError(McpClientError):
@@ -156,7 +156,7 @@ def _httpx_timeout_exception_type() -> tuple[type[BaseException], ...]:
 
 @dataclass(frozen=True)
 class RemoteMcpServerConfig:
-    """Allowlisted MCP server configuration for the spike."""
+    """Allowlisted MCP server configuration."""
 
     alias: str
     url: str
