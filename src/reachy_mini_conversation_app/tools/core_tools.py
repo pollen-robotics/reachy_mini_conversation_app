@@ -8,7 +8,7 @@ import inspect
 import logging
 import importlib
 import importlib.util
-from typing import TYPE_CHECKING, Any, Dict, List, cast
+from typing import TYPE_CHECKING, Any, Dict, List, Protocol, Sequence
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -21,15 +21,11 @@ from reachy_mini_conversation_app.tools.tool_constants import SystemTool
 
 
 if TYPE_CHECKING:
+    from reachy_mini_conversation_app.mcp_client import RemoteMcpToolClient
     from reachy_mini_conversation_app.tools.background_tool_manager import BackgroundToolManager
 
 
 logger = logging.getLogger(__name__)
-
-
-ALL_TOOLS: Dict[str, Any] = {}
-ALL_TOOL_SPECS: List[Dict[str, Any]] = []
-_TOOLS_INITIALIZED = False
 
 
 class MissingToolFileError(FileNotFoundError):
@@ -89,6 +85,26 @@ class Tool(abc.ABC):
         raise NotImplementedError
 
 
+class ToolLike(Protocol):
+    """Minimal typed surface shared by local and remote tools."""
+
+    name: str
+    description: str
+
+    def spec(self) -> Dict[str, Any]:
+        """Return the function spec for LLM consumption."""
+        ...
+
+    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
+        """Async tool execution entrypoint."""
+        ...
+
+
+ALL_TOOLS: Dict[str, ToolLike] = {}
+ALL_TOOL_SPECS: List[Dict[str, Any]] = []
+_TOOLS_INITIALIZED = False
+
+
 class RemoteMcpTool:
     """Adapter exposing one remote MCP tool through the local Tool interface."""
 
@@ -100,7 +116,7 @@ class RemoteMcpTool:
         description: str,
         parameters_schema: Dict[str, Any],
         client_tool_name: str,
-        client: Any,
+        client: "RemoteMcpToolClient",
     ) -> None:
         """Store the resolved local/remote names and the shared MCP client."""
         self.name = name
@@ -179,8 +195,8 @@ def _format_error(error: Exception) -> str:
 
 def _build_tool_registry(
     tool_classes: List[type[Tool]],
-    extra_tools: list[Any] | None = None,
-) -> Dict[str, Any]:
+    extra_tools: Sequence[ToolLike] | None = None,
+) -> Dict[str, ToolLike]:
     """Instantiate tools and fail if duplicate Tool.name values are detected."""
     unique_classes: List[type[Tool]] = []
     seen_class_ids: set[int] = set()
@@ -191,7 +207,8 @@ def _build_tool_registry(
         seen_class_ids.add(cls_id)
         unique_classes.append(cls)
 
-    tool_instances = [cls() for cls in unique_classes]
+    tool_instances: list[ToolLike] = []
+    tool_instances.extend(cls() for cls in unique_classes)
     if extra_tools:
         tool_instances.extend(extra_tools)
 
@@ -422,7 +439,7 @@ async def _dispatch_tool_call(tool_name: str, args: Dict[str, Any], deps: ToolDe
     if not tool:
         return {"error": f"unknown tool: {tool_name}"}
     try:
-        return cast(Dict[str, Any], await tool(deps, **args))
+        return await tool(deps, **args)
     except asyncio.CancelledError:
         logger.info("Tool cancelled: %s", tool_name)
         return {"error": "Tool cancelled"}
