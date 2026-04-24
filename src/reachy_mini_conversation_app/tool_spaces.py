@@ -265,7 +265,7 @@ def resolve_public_tool_space_sync(slug: str) -> ResolvedInstalledToolSpace:
         if previous_loop is not None and not previous_loop.is_closed():
             asyncio.set_event_loop(previous_loop)
         else:
-            asyncio.set_event_loop(asyncio.new_event_loop())
+            asyncio.set_event_loop(None)
 
 
 def format_space_tool_listing(space: ResolvedInstalledToolSpace) -> str:

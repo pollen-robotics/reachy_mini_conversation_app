@@ -353,7 +353,7 @@ class RemoteMcpToolClient:
 
         async with httpx.AsyncClient(
             headers=self.server.headers,
-            follow_redirects=True,
+            follow_redirects=False,
             timeout=client_timeout,
         ) as http_client:
             async with streamable_http_client(self.server.url, http_client=http_client) as transport:
