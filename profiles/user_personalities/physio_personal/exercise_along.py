@@ -15,9 +15,9 @@ class ExerciseAlong(Tool):
 
     name = "exercise_along"
     description = (
-        "Perform an energetic exercising animation: head moves up and down and "
-        "side to side while antennas pump in and out, as if the robot is exercising "
-        "along with the user. Use this while the user is doing their exercise."
+        "Call this tool when the user is actively performing a physiotherapy exercise. "
+        "This makes the robot move along with the user by nodding and bobbing its head "
+        "and pumping its antennas. ALWAYS call this tool when an exercise is in progress."
     )
     parameters_schema = {
         "type": "object",
