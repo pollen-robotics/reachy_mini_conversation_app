@@ -4,10 +4,9 @@ from __future__ import annotations
 import time
 import struct
 import logging
-from typing import Protocol
 from collections.abc import Callable, Sequence
 
-from reachy_mini.media.audio_control_utils import PARAMETERS, init_respeaker_usb
+from reachy_mini.media.audio_control_utils import PARAMETERS, ReSpeaker, init_respeaker_usb
 
 
 AudioControlValue = float | int
@@ -26,21 +25,11 @@ AUDIO_STARTUP_CONFIG: tuple[AudioStartupParameter, ...] = (
 )
 
 
-class ReSpeakerControl(Protocol):
-    """Minimal interface used to configure the XVF3800 audio processor."""
-
-    def write(self, name: str, data_list: Sequence[AudioControlValue]) -> None:
-        """Write an XVF3800 parameter."""
-
-    def read(self, name: str) -> object:
-        """Read an XVF3800 parameter."""
-
-
 def apply_audio_startup_config(
     robot: object,
     *,
     logger: logging.Logger | None = None,
-    respeaker_factory: Callable[[], ReSpeakerControl | None] = init_respeaker_usb,
+    respeaker_factory: Callable[[], ReSpeaker | None] = init_respeaker_usb,
     write_settle_seconds: float = WRITE_SETTLE_SECONDS,
 ) -> bool:
     """Apply the tuned XVF3800 audio configuration for the conversation app."""
@@ -92,14 +81,13 @@ def apply_audio_startup_config(
     return True
 
 
-def _respeaker_from_robot(robot: object) -> ReSpeakerControl | None:
+def _respeaker_from_robot(robot: object) -> ReSpeaker | None:
     media = getattr(robot, "media", None)
     audio = getattr(media, "audio", None)
-    respeaker = getattr(audio, "_respeaker", None)
-    return respeaker
+    return getattr(audio, "_respeaker", None)
 
 
-def _close_respeaker(respeaker: ReSpeakerControl, logger: logging.Logger) -> None:
+def _close_respeaker(respeaker: ReSpeaker, logger: logging.Logger) -> None:
     close = getattr(respeaker, "close", None)
     if not callable(close):
         return
@@ -119,7 +107,7 @@ def _format_values(values: Sequence[AudioControlValue] | None) -> str:
     return " ".join(str(value) for value in values)
 
 
-def _read_parameter_values(respeaker: ReSpeakerControl, name: str) -> tuple[AudioControlValue, ...] | None:
+def _read_parameter_values(respeaker: ReSpeaker, name: str) -> tuple[AudioControlValue, ...] | None:
     raw_values = respeaker.read(name)
     parameter = PARAMETERS.get(name)
     if raw_values is None or parameter is None:
