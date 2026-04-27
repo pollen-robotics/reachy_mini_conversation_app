@@ -96,6 +96,7 @@ def _estimate_pending_playback_seconds(robot: ReachyMini) -> float:
 
     return max(0.0, pending_ns / 1e9)
 
+
 class LocalStream:
     """LocalStream using Reachy Mini's recorder/player."""
 
