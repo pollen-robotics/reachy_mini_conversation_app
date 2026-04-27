@@ -65,12 +65,6 @@ except Exception:  # pragma: no cover - only loaded when settings_app is used
 
 logger = logging.getLogger(__name__)
 
-LOCAL_PLAYER_BACKEND = (
-    getattr(MediaBackend, "LOCAL", None)
-    or getattr(MediaBackend, "GSTREAMER", None)
-    or getattr(MediaBackend, "DEFAULT", None)
-)
-
 LEGACY_STARTUP_ENV_NAMES = (
     "REACHY_MINI_CUSTOM_PROFILE",
     "REACHY_MINI_VOICE_OVERRIDE",
@@ -632,12 +626,7 @@ class LocalStream:
         backend = getattr(self._robot.media, "backend", None)
         audio = getattr(self._robot.media, "audio", None)
         if audio is not None:
-            if (
-                LOCAL_PLAYER_BACKEND is not None
-                and backend == LOCAL_PLAYER_BACKEND
-                and hasattr(audio, "clear_player")
-                and callable(audio.clear_player)
-            ):
+            if backend == MediaBackend.LOCAL and hasattr(audio, "clear_player") and callable(audio.clear_player):
                 audio.clear_player()
             elif (
                 backend == MediaBackend.WEBRTC
