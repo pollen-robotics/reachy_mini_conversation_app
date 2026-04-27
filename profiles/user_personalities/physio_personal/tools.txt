@@ -8,3 +8,4 @@ stop_dance
 stop_emotion
 task_cancel
 task_status
+exercise_along 
