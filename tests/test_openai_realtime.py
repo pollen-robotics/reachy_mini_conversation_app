@@ -227,6 +227,99 @@ async def test_non_idle_tool_call_does_not_queue_progress_response(monkeypatch: 
 
 
 @pytest.mark.asyncio
+async def test_completed_user_transcript_resets_idle_state(monkeypatch: Any) -> None:
+    """A completed user turn should refresh activity and cancel stale idle intent."""
+    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
+    monkeypatch.setattr(rt_mod, "get_session_voice", lambda: "alloy")
+    monkeypatch.setattr(rt_mod, "get_tool_specs", lambda: [])
+
+    class FakeEvent:
+        def __init__(self, etype: str, **kwargs: Any) -> None:
+            self.type = etype
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+    class FakeSession:
+        async def update(self, **_kw: Any) -> None:
+            pass
+
+    class FakeInputAudioBuffer:
+        async def append(self, **_kw: Any) -> None:
+            pass
+
+    class FakeItem:
+        async def create(self, **_kw: Any) -> None:
+            pass
+
+    class FakeConversation:
+        item = FakeItem()
+
+    class FakeResponse:
+        async def create(self, **_kw: Any) -> None:
+            pass
+
+        async def cancel(self, **_kw: Any) -> None:
+            pass
+
+    class FakeConn:
+        session = FakeSession()
+        input_audio_buffer = FakeInputAudioBuffer()
+        conversation = FakeConversation()
+        response = FakeResponse()
+
+        def __init__(self) -> None:
+            self._events = iter(
+                [
+                    FakeEvent(
+                        "conversation.item.input_audio_transcription.completed",
+                        transcript="Can you check the weather?",
+                    )
+                ]
+            )
+
+        async def __aenter__(self) -> "FakeConn":
+            return self
+
+        async def __aexit__(self, *_args: Any) -> bool:
+            return False
+
+        async def close(self) -> None:
+            pass
+
+        def __aiter__(self) -> "FakeConn":
+            return self
+
+        async def __anext__(self) -> FakeEvent:
+            try:
+                return next(self._events)
+            except StopIteration:
+                raise StopAsyncIteration
+
+    class FakeRealtime:
+        def connect(self, **_kw: Any) -> FakeConn:
+            return FakeConn()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.realtime = FakeRealtime()
+
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = OpenaiRealtimeHandler(deps)
+    handler.client = FakeClient()
+    handler.is_idle_tool_call = True
+    handler.last_activity_time = 1.0
+    start_up = MagicMock()
+    shutdown = AsyncMock()
+    object.__setattr__(handler.tool_manager, "start_up", start_up)
+    object.__setattr__(handler.tool_manager, "shutdown", shutdown)
+
+    await handler._run_realtime_session()
+
+    assert handler.is_idle_tool_call is False
+    assert handler.last_activity_time > 1.0
+
+
+@pytest.mark.asyncio
 async def test_output_audio_done_schedules_head_wobbler_reset(monkeypatch: Any) -> None:
     """OpenAI speech completion should let the wobbler reset itself after queued audio."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")

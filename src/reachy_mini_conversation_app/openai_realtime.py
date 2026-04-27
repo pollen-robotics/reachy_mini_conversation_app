@@ -148,7 +148,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self._pending_responses: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._response_done_event: asyncio.Event = asyncio.Event()
         self._response_done_event.set()
+        self._response_output_done_event: asyncio.Event = asyncio.Event()
+        self._response_output_done_event.set()
         self._last_response_rejected: bool = False
+        self._response_has_output_audio = False
 
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
@@ -366,6 +369,11 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 except asyncio.TimeoutError:
                     logger.debug("Timed out waiting for previous response to finish; forcing ahead")
                     self._response_done_event.set()
+                try:
+                    await asyncio.wait_for(self._response_output_done_event.wait(), timeout=_RESPONSE_DONE_TIMEOUT)
+                except asyncio.TimeoutError:
+                    logger.debug("Timed out waiting for response.output_audio.done; forcing ahead")
+                    self._response_output_done_event.set()
 
                 if not self.connection:
                     break
@@ -393,6 +401,12 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         break
                     logger.debug("response.create was rejected; retrying (%d/%d)", attempts, max_retries)
                     continue
+
+                try:
+                    await asyncio.wait_for(self._response_output_done_event.wait(), timeout=_RESPONSE_DONE_TIMEOUT)
+                except asyncio.TimeoutError:
+                    logger.debug("Timed out waiting for response.output_audio.done; assuming response completed")
+                    self._response_output_done_event.set()
 
                 sent = True
 
@@ -423,6 +437,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             return
 
         try:
+            self.last_activity_time = time.monotonic()
             # TODO: refactor this since it's repeated here, in the camera branch below, and in send_idle_signal
             if isinstance(bg_tool.id, str):
                 await self.connection.conversation.item.create(
@@ -489,7 +504,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             if not bg_tool.is_idle_tool_call:
                 await self._safe_response_create(
                     response=RealtimeResponseCreateParamsParam(
-                        instructions="Use the tool result just returned and answer concisely in speech.",
+                        instructions=(
+                            "Use the tool result just returned and answer concisely in speech "
+                            "in English unless the user explicitly asked for another language."
+                        ),
                     ),
                 )
 
@@ -555,6 +573,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 async for event in self.connection:
                     logger.debug(f"OpenAI event: {event.type}")
                     if event.type == "input_audio_buffer.speech_started":
+                        self.is_idle_tool_call = False
+                        self.last_activity_time = time.monotonic()
                         if hasattr(self, "_clear_queue") and callable(self._clear_queue):
                             self._clear_queue()
                         if self.deps.head_wobbler is not None:
@@ -563,21 +583,28 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         logger.debug("User speech started")
 
                     if event.type == "input_audio_buffer.speech_stopped":
+                        self.last_activity_time = time.monotonic()
                         self.deps.movement_manager.set_listening(False)
                         logger.debug("User speech stopped - server will auto-commit with VAD")
 
                     if event.type == "response.output_audio.done":
+                        self._response_output_done_event.set()
                         if self.deps.head_wobbler is not None:
                             self.deps.head_wobbler.request_reset_after_current_audio()
                         logger.debug("response completed")
 
                     if event.type == "response.created":
+                        self.last_activity_time = time.monotonic()
                         self._response_done_event.clear()
+                        self._response_output_done_event.clear()
+                        self._response_has_output_audio = False
                         logger.debug("Response created (active)")
 
                     if event.type == "response.done":
                         # Doesn't mean the audio is done playing
                         self._response_done_event.set()
+                        if not self._response_has_output_audio:
+                            self._response_output_done_event.set()
                         logger.debug("Response done")
 
                         response = getattr(event, "response", None)
@@ -591,6 +618,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
                     if event.type == "conversation.item.input_audio_transcription.delta":
                         logger.debug(f"User partial transcript: {event.delta}")
+                        self.last_activity_time = time.monotonic()
 
                         item_id = event.item_id
                         delta = event.delta or ""
@@ -620,6 +648,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     # Handle completed transcription (user finished speaking)
                     if event.type == "conversation.item.input_audio_transcription.completed":
                         logger.debug(f"User transcript: {event.transcript}")
+                        self.is_idle_tool_call = False
+                        self.last_activity_time = time.monotonic()
 
                         # Cancel any pending partial emission
                         if self.partial_transcript_task and not self.partial_transcript_task.done():
@@ -640,6 +670,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
                     # Handle audio delta
                     if event.type == "response.output_audio.delta":
+                        self._response_has_output_audio = True
                         if self.gradio_mode and self.deps.head_wobbler is not None:
                             self.deps.head_wobbler.feed(event.delta)
                         self.last_activity_time = time.monotonic()
@@ -656,6 +687,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         tool_name = getattr(event, "name", None)
                         args_json_str = getattr(event, "arguments", None)
                         call_id: str = str(getattr(event, "call_id", uuid.uuid4()))
+                        self.last_activity_time = time.monotonic()
 
                         logger.info(
                             "Tool call received — tool_name=%r, call_id=%s, is_idle=%s, args=%s",
@@ -782,7 +814,14 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
         # Handle idle
         idle_duration = time.monotonic() - self.last_activity_time
-        if idle_duration > 15.0 and self.deps.movement_manager.is_idle():
+        if (
+            idle_duration > 15.0
+            and self.deps.movement_manager.is_idle()
+            and not self.tool_manager.get_running_tools()
+            and self._response_done_event.is_set()
+            and self._response_output_done_event.is_set()
+            and self._pending_responses.empty()
+        ):
             try:
                 await self.send_idle_signal(idle_duration)
             except Exception as e:
@@ -797,6 +836,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         """Shutdown the handler."""
         # Unblock the response sender worker so it can exit
         self._response_done_event.set()
+        self._response_output_done_event.set()
 
         # Stop background tool manager tasks (listener + cleanup)
         await self.tool_manager.shutdown()
