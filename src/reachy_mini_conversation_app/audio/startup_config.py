@@ -1,18 +1,13 @@
 """Startup configuration for the Reachy Mini audio processor."""
 
 from __future__ import annotations
-import time
-import struct
 import logging
-from collections.abc import Callable, Sequence
-
-from reachy_mini.media.audio_control_utils import PARAMETERS, ReSpeaker, init_respeaker_usb
+from collections.abc import Sequence
 
 
 AudioControlValue = float | int
 AudioStartupParameter = tuple[str, tuple[AudioControlValue, ...]]
 WRITE_SETTLE_SECONDS = 0.1
-VERIFY_TOLERANCE = 1e-3
 
 AUDIO_STARTUP_CONFIG: tuple[AudioStartupParameter, ...] = (
     ("PP_AGCMAXGAIN", (10.0,)),
@@ -29,133 +24,46 @@ def apply_audio_startup_config(
     robot: object,
     *,
     logger: logging.Logger | None = None,
-    respeaker_factory: Callable[[], ReSpeaker | None] = init_respeaker_usb,
+    verify: bool = True,
     write_settle_seconds: float = WRITE_SETTLE_SECONDS,
 ) -> bool:
     """Apply the tuned XVF3800 audio configuration for the conversation app."""
     log = logger or logging.getLogger(__name__)
-    respeaker = _respeaker_from_robot(robot)
-    should_close_respeaker = False
+    audio = _audio_from_robot(robot)
 
-    if respeaker is None:
-        log.debug("No existing ReSpeaker control handle on robot media; trying USB discovery.")
-        try:
-            respeaker = respeaker_factory()
-        except Exception as exc:
-            log.warning("Skipping Reachy audio startup config: ReSpeaker discovery failed: %s", exc)
-            return False
-        should_close_respeaker = respeaker is not None
-
-    if respeaker is None:
-        log.warning("Skipping Reachy audio startup config: ReSpeaker USB device not found.")
+    if audio is None:
+        log.warning("Skipping Reachy audio startup config: robot media audio is unavailable.")
         return False
 
-    failures: list[str] = []
-    try:
-        for name, values in AUDIO_STARTUP_CONFIG:
-            try:
-                respeaker.write(name, values)
-                if write_settle_seconds > 0:
-                    time.sleep(write_settle_seconds)
-                actual_values = _read_parameter_values(respeaker, name)
-                if not _values_match(actual_values, values):
-                    failures.append(f"{name}: expected {_format_values(values)}, got {_format_values(actual_values)}")
-                    log.warning(
-                        "Audio startup parameter verification failed for %s: expected %s, got %s",
-                        name,
-                        _format_values(values),
-                        _format_values(actual_values),
-                    )
-            except Exception as exc:
-                failures.append(f"{name}: {exc}")
-                log.warning("Failed to apply audio startup parameter %s=%s: %s", name, _format_values(values), exc)
-    finally:
-        if should_close_respeaker:
-            _close_respeaker(respeaker, log)
-
-    if failures:
-        log.warning("Reachy audio startup config completed with %d failed parameter(s).", len(failures))
+    apply_audio_config = getattr(audio, "apply_audio_config", None)
+    if not callable(apply_audio_config):
+        log.warning("Skipping Reachy audio startup config: SDK audio config API is unavailable.")
         return False
 
-    log.info("Applied and verified Reachy audio startup config: %s", _format_config(AUDIO_STARTUP_CONFIG))
-    return True
-
-
-def _respeaker_from_robot(robot: object) -> ReSpeaker | None:
-    media = getattr(robot, "media", None)
-    audio = getattr(media, "audio", None)
-    return getattr(audio, "_respeaker", None)
-
-
-def _close_respeaker(respeaker: ReSpeaker, logger: logging.Logger) -> None:
-    close = getattr(respeaker, "close", None)
-    if not callable(close):
-        return
     try:
-        close()
+        applied = bool(
+            apply_audio_config(
+                AUDIO_STARTUP_CONFIG,
+                verify=verify,
+                write_settle_seconds=write_settle_seconds,
+            )
+        )
     except Exception as exc:
-        logger.debug("Error closing temporary ReSpeaker control handle: %s", exc)
-
-
-def _format_config(config: tuple[AudioStartupParameter, ...]) -> str:
-    return ", ".join(f"{name}={_format_values(values)}" for name, values in config)
-
-
-def _format_values(values: Sequence[AudioControlValue] | None) -> str:
-    if values is None:
-        return "unreadable"
-    return " ".join(str(value) for value in values)
-
-
-def _read_parameter_values(respeaker: ReSpeaker, name: str) -> tuple[AudioControlValue, ...] | None:
-    raw_values = respeaker.read(name)
-    parameter = PARAMETERS.get(name)
-    if raw_values is None or parameter is None:
-        return None
-
-    value_count = int(parameter[2])
-    value_type = str(parameter[4])
-
-    if value_type in {"float", "radians"}:
-        if not isinstance(raw_values, Sequence):
-            return None
-        return tuple(float(value) for value in raw_values[:value_count])
-
-    if value_type in {"int32", "uint32"}:
-        return _decode_int32_values(raw_values, value_count, signed=value_type == "int32")
-
-    if value_type == "uint8":
-        if not isinstance(raw_values, Sequence):
-            return None
-        offset = 1 if len(raw_values) == value_count + 1 else 0
-        return tuple(int(value) for value in raw_values[offset : offset + value_count])
-
-    return None
-
-
-def _decode_int32_values(raw_values: object, value_count: int, *, signed: bool) -> tuple[int, ...] | None:
-    if not isinstance(raw_values, Sequence):
-        return None
-
-    if len(raw_values) == value_count * 4 + 1:
-        payload = bytes(int(value) & 0xFF for value in raw_values[1:])
-        format_char = "i" if signed else "I"
-        return tuple(int(value) for value in struct.unpack("<" + format_char * value_count, payload))
-
-    if len(raw_values) >= value_count:
-        return tuple(int(value) for value in raw_values[:value_count])
-
-    return None
-
-
-def _values_match(
-    actual_values: Sequence[AudioControlValue] | None,
-    expected_values: Sequence[AudioControlValue],
-) -> bool:
-    if actual_values is None or len(actual_values) != len(expected_values):
+        log.warning("Skipping Reachy audio startup config: SDK audio config failed: %s", exc)
         return False
 
-    return all(
-        abs(float(actual) - float(expected)) <= VERIFY_TOLERANCE
-        for actual, expected in zip(actual_values, expected_values)
-    )
+    if applied:
+        log.info("Applied Reachy audio startup config: %s", _format_config(AUDIO_STARTUP_CONFIG))
+    else:
+        log.warning("Reachy audio startup config was not applied.")
+
+    return applied
+
+
+def _audio_from_robot(robot: object) -> object | None:
+    media = getattr(robot, "media", None)
+    return getattr(media, "audio", None)
+
+
+def _format_config(config: Sequence[AudioStartupParameter]) -> str:
+    return ", ".join(f"{name}={' '.join(str(value) for value in values)}" for name, values in config)

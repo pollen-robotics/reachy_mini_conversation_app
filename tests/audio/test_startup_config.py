@@ -2,108 +2,94 @@
 
 from __future__ import annotations
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 from reachy_mini_conversation_app.audio.startup_config import (
-    PARAMETERS,
     AUDIO_STARTUP_CONFIG,
+    WRITE_SETTLE_SECONDS,
     apply_audio_startup_config,
 )
 
 
-class FakeReSpeaker:
-    """Fake XVF3800 control surface."""
+class FakeAudio:
+    """Fake SDK audio wrapper."""
 
-    def __init__(self, *, fail_on: str | None = None) -> None:
-        """Initialize the fake control surface."""
-        self.fail_on = fail_on
-        self.closed = False
-        self.writes: list[tuple[str, tuple[float | int, ...]]] = []
-        self.values: dict[str, tuple[float | int, ...]] = {}
+    def __init__(self, *, result: bool = True, error: Exception | None = None) -> None:
+        """Initialize the fake audio wrapper."""
+        self.result = result
+        self.error = error
+        self.calls: list[tuple[object, bool, float]] = []
 
-    def write(self, name: str, data_list: tuple[float | int, ...]) -> None:
-        """Record writes and optionally fail one parameter."""
-        if name == self.fail_on:
-            raise RuntimeError("write failed")
-        values = tuple(data_list)
-        self.writes.append((name, values))
-        self.values[name] = values
-
-    def read(self, name: str) -> tuple[float | int, ...] | list[int] | None:
-        """Return the last written value in the SDK's readback shape."""
-        values = self.values.get(name)
-        if values is None:
-            return None
-        if PARAMETERS[name][4] == "int32":
-            int_value = int(values[0])
-            return [0, *int_value.to_bytes(4, byteorder="little", signed=True)]
-        return values
-
-    def close(self) -> None:
-        """Record that the temporary control handle was closed."""
-        self.closed = True
+    def apply_audio_config(
+        self,
+        config: object,
+        *,
+        verify: bool = True,
+        write_settle_seconds: float = WRITE_SETTLE_SECONDS,
+    ) -> bool:
+        """Record SDK audio config calls."""
+        if self.error is not None:
+            raise self.error
+        self.calls.append((config, verify, write_settle_seconds))
+        return self.result
 
 
-def test_apply_audio_startup_config_uses_existing_robot_respeaker() -> None:
-    """Existing media ReSpeaker handle should be reused instead of reopening USB."""
-    respeaker = FakeReSpeaker()
-    robot = SimpleNamespace(media=SimpleNamespace(audio=SimpleNamespace(_respeaker=respeaker)))
-    factory = MagicMock()
+def test_apply_audio_startup_config_uses_sdk_audio_config_api() -> None:
+    """Startup config should delegate writes and verification to the SDK audio API."""
+    audio = FakeAudio()
+    robot = SimpleNamespace(media=SimpleNamespace(audio=audio))
 
-    applied = apply_audio_startup_config(robot, respeaker_factory=factory)
+    applied = apply_audio_startup_config(robot)
 
     assert applied is True
-    assert respeaker.writes == list(AUDIO_STARTUP_CONFIG)
-    assert respeaker.closed is False
-    factory.assert_not_called()
+    assert audio.calls == [(AUDIO_STARTUP_CONFIG, True, WRITE_SETTLE_SECONDS)]
 
 
-def test_apply_audio_startup_config_falls_back_to_usb_discovery() -> None:
-    """USB discovery is used when the robot media object does not expose a ReSpeaker."""
-    respeaker = FakeReSpeaker()
-    robot = SimpleNamespace(media=SimpleNamespace(audio=SimpleNamespace(_respeaker=None)))
+def test_apply_audio_startup_config_forwards_sdk_options() -> None:
+    """SDK verification options should stay configurable for tests and callers."""
+    audio = FakeAudio()
+    robot = SimpleNamespace(media=SimpleNamespace(audio=audio))
 
-    applied = apply_audio_startup_config(robot, respeaker_factory=lambda: respeaker)
+    applied = apply_audio_startup_config(robot, verify=False, write_settle_seconds=0)
 
     assert applied is True
-    assert respeaker.writes == list(AUDIO_STARTUP_CONFIG)
-    assert respeaker.closed is True
+    assert audio.calls == [(AUDIO_STARTUP_CONFIG, False, 0)]
 
 
-def test_apply_audio_startup_config_returns_false_without_device() -> None:
-    """Startup should continue when the audio control device is unavailable."""
+def test_apply_audio_startup_config_returns_false_without_audio() -> None:
+    """Startup should continue when the SDK audio object is unavailable."""
     robot = SimpleNamespace(media=SimpleNamespace(audio=None))
-
-    applied = apply_audio_startup_config(robot, respeaker_factory=lambda: None)
-
-    assert applied is False
-
-
-def test_apply_audio_startup_config_continues_after_write_failure() -> None:
-    """A single failed parameter should not prevent later startup writes."""
-    respeaker = FakeReSpeaker(fail_on="PP_MIN_NS")
-    robot = SimpleNamespace(media=SimpleNamespace(audio=SimpleNamespace(_respeaker=respeaker)))
 
     applied = apply_audio_startup_config(robot)
 
     assert applied is False
-    assert ("PP_MIN_NS", (0.8,)) not in respeaker.writes
-    assert respeaker.writes == [item for item in AUDIO_STARTUP_CONFIG if item[0] != "PP_MIN_NS"]
 
 
-def test_apply_audio_startup_config_returns_false_when_readback_does_not_match() -> None:
-    """A write that does not stick should be reported as a failed application."""
+def test_apply_audio_startup_config_returns_false_without_sdk_api() -> None:
+    """Startup should continue when the installed SDK does not expose audio config helpers."""
+    robot = SimpleNamespace(media=SimpleNamespace(audio=object()))
 
-    class NonPersistingReSpeaker(FakeReSpeaker):
-        def read(self, name: str) -> tuple[float | int, ...] | list[int] | None:
-            if name == "PP_MGSCALE":
-                return (1000.0, 1.0, 1.0)
-            return super().read(name)
-
-    respeaker = NonPersistingReSpeaker()
-    robot = SimpleNamespace(media=SimpleNamespace(audio=SimpleNamespace(_respeaker=respeaker)))
-
-    applied = apply_audio_startup_config(robot, write_settle_seconds=0)
+    applied = apply_audio_startup_config(robot)
 
     assert applied is False
-    assert ("PP_MGSCALE", (4.0, 1.0, 1.0)) in respeaker.writes
+
+
+def test_apply_audio_startup_config_returns_false_when_sdk_returns_false() -> None:
+    """SDK application failures should be reported without raising."""
+    audio = FakeAudio(result=False)
+    robot = SimpleNamespace(media=SimpleNamespace(audio=audio))
+
+    applied = apply_audio_startup_config(robot)
+
+    assert applied is False
+    assert audio.calls == [(AUDIO_STARTUP_CONFIG, True, WRITE_SETTLE_SECONDS)]
+
+
+def test_apply_audio_startup_config_returns_false_when_sdk_raises() -> None:
+    """Unexpected SDK audio config errors should not prevent app startup."""
+    audio = FakeAudio(error=RuntimeError("audio board unavailable"))
+    robot = SimpleNamespace(media=SimpleNamespace(audio=audio))
+
+    applied = apply_audio_startup_config(robot)
+
+    assert applied is False
+    assert audio.calls == []
