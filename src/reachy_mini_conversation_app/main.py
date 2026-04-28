@@ -226,6 +226,18 @@ def run(
     if camera_worker:
         camera_worker.start()
 
+    discord_inbound = None
+    if (
+        config.DISCORD_INBOUND_ENABLED
+        and config.DISCORD_BOT_TOKEN
+        and config.DISCORD_USER_ID
+        and not is_gemini_model()
+    ):
+        from reachy_mini_conversation_app.discord_inbound import DiscordInboundWorker
+
+        discord_inbound = DiscordInboundWorker(handler)  # type: ignore[arg-type]
+        discord_inbound.start()
+
     def poll_stop_event() -> None:
         """Poll the stop event to allow graceful shutdown."""
         if app_stop_event is not None:
@@ -249,6 +261,8 @@ def run(
         head_wobbler.stop()
         if camera_worker:
             camera_worker.stop()
+        if discord_inbound is not None:
+            discord_inbound.stop()
 
         # Ensure media is explicitly closed before disconnecting
         try:

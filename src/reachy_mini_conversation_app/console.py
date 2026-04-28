@@ -315,6 +315,11 @@ class LocalStream:
             backend: str
             api_key: Optional[str] = None
 
+        class DiscordConfigPayload(BaseModel):
+            webhook_url: Optional[str] = None
+            bot_token: Optional[str] = None
+            user_id: Optional[str] = None
+
         def _status_payload() -> dict[str, object]:
             backend_provider = get_backend_choice()
             active_backend = self._active_backend()
@@ -423,6 +428,36 @@ class LocalStream:
             except Exception as e:
                 logger.warning(f"API key validation failed: {e}")
                 return JSONResponse({"valid": False, "error": "validation_error"}, status_code=500)
+
+        def _discord_status() -> dict[str, bool]:
+            return {
+                "has_webhook_url": bool((os.getenv("DISCORD_WEBHOOK_URL") or "").strip()),
+                "has_bot_token": bool((os.getenv("DISCORD_BOT_TOKEN") or "").strip()),
+                "has_user_id": bool((os.getenv("DISCORD_USER_ID") or "").strip()),
+            }
+
+        # GET /discord_config -> presence flags for the Discord tool credentials
+        @self._settings_app.get("/discord_config")
+        def _get_discord_config() -> JSONResponse:
+            return JSONResponse(_discord_status())
+
+        # POST /discord_config -> persist Discord tool credentials (empty/missing = unchanged)
+        @self._settings_app.post("/discord_config")
+        def _set_discord_config(payload: DiscordConfigPayload) -> JSONResponse:
+            updates: dict[str, str] = {}
+            for env_name, raw in (
+                ("DISCORD_WEBHOOK_URL", payload.webhook_url),
+                ("DISCORD_BOT_TOKEN", payload.bot_token),
+                ("DISCORD_USER_ID", payload.user_id),
+            ):
+                if raw is None:
+                    continue
+                value = raw.strip()
+                if value:
+                    updates[env_name] = value
+            if updates:
+                self._persist_env_values(updates)
+            return JSONResponse({"ok": True, **_discord_status()})
 
         self._settings_initialized = True
 

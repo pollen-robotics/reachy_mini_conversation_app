@@ -91,7 +91,7 @@ def available_tools_for(selected: str) -> List[str]:
     shared: List[str] = []
     try:
         for py in _tools_dir().glob("*.py"):
-            if py.stem in {"__init__", "core_tools"}:
+            if py.stem == "core_tools" or py.stem.startswith("_"):
                 continue
             shared.append(py.stem)
     except Exception:

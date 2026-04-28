@@ -206,6 +206,17 @@ reachy-mini-conversation-app --gradio
 | `play_emotion` | Play a recorded emotion clip via Hugging Face datasets. | Core install only. Uses the default open emotions dataset: [`pollen-robotics/reachy-mini-emotions-library`](https://huggingface.co/datasets/pollen-robotics/reachy-mini-emotions-library). |
 | `stop_emotion` | Clear queued emotions. | Core install only. |
 | `do_nothing` | Explicitly remain idle. | Core install only. |
+| `send_discord` | Send a message (and optionally the current camera frame) to a Discord channel via a webhook. | Requires `DISCORD_WEBHOOK_URL` in `.env`. |
+| `send_discord_dm` | DM the configured user (and optionally the current camera frame) via a Discord bot. | Requires `DISCORD_BOT_TOKEN` and `DISCORD_USER_ID` in `.env`; bot must share a server with the user. |
+
+### Discord inbound (optional)
+
+When `DISCORD_INBOUND_ENABLED=true` (and the bot is configured), the robot polls
+the configured user's DM and forwards text and image attachments directly into
+the live OpenAI Realtime voice conversation — send a message or a photo from
+your phone and the robot replies out loud. Other attachment types (PDFs,
+audio, video) are ignored with a "text and images only" reply. Polling
+interval is `DISCORD_INBOUND_POLL_SECONDS` (default 10 s).
 
 ## Advanced features
 

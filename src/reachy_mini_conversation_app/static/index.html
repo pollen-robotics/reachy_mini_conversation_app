@@ -175,6 +175,35 @@
         </div>
         <p id="personality-status" class="status" role="status" aria-live="polite" aria-atomic="true"></p>
       </div>
+
+      <div id="discord-panel" class="panel hidden">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Optional tools</p>
+            <h2>Discord integration</h2>
+          </div>
+          <span id="discord-chip" class="chip">Optional</span>
+        </div>
+        <p class="muted">
+          Fill these in to enable the <code>send_discord</code> tool (post to a channel via webhook) and the <code>send_discord_dm</code> tool (DM you via a bot). Values are saved to your instance <code>.env</code>. Leave blank to disable.
+        </p>
+        <div class="row">
+          <label for="discord-webhook-url">Webhook URL — channel posts</label>
+          <input id="discord-webhook-url" type="password" placeholder="https://discord.com/api/webhooks/..." autocomplete="off" />
+        </div>
+        <div class="row">
+          <label for="discord-bot-token">Bot token — DMs</label>
+          <input id="discord-bot-token" type="password" placeholder="Bot token" autocomplete="off" />
+        </div>
+        <div class="row">
+          <label for="discord-user-id">Your Discord user ID — DMs</label>
+          <input id="discord-user-id" type="text" placeholder="e.g. 123456789012345678" autocomplete="off" />
+        </div>
+        <div class="actions">
+          <button id="save-discord-btn">Save Discord config</button>
+          <p id="discord-status" class="status" role="status" aria-live="polite" aria-atomic="true"></p>
+        </div>
+      </div>
     </div>
 
     <script src="/static/main.js"></script>

@@ -134,6 +134,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
         # Internal lifecycle flags
         self._connected_event: asyncio.Event = asyncio.Event()
+        self._realtime_loop: asyncio.AbstractEventLoop | None = None
 
         # Background tool manager
         self.tool_manager = BackgroundToolManager()
@@ -338,6 +339,45 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         """
         await self._pending_responses.put(kwargs)
 
+    async def inject_user_content(
+        self,
+        parts: list[dict[str, Any]],
+        *,
+        request_response: bool = True,
+        wait_for_session_s: float = 10.0,
+    ) -> bool:
+        """Append a user-authored conversation item (text / image parts) to the live session.
+
+        Waits up to ``wait_for_session_s`` seconds for the realtime session to be
+        connected. Returns True if the item was sent, False if the session wasn't
+        available or the send failed. Safe to call from the same event loop as the
+        handler. For cross-thread callers, schedule via
+        ``asyncio.run_coroutine_threadsafe(handler.inject_user_content(...), handler._loop)``.
+        """
+        if not parts:
+            return False
+        try:
+            await asyncio.wait_for(self._connected_event.wait(), timeout=wait_for_session_s)
+        except asyncio.TimeoutError:
+            logger.warning("inject_user_content: no realtime session within %.1fs", wait_for_session_s)
+            return False
+        if self.connection is None:
+            return False
+        try:
+            await self.connection.conversation.item.create(
+                item={  # type: ignore[misc,arg-type]
+                    "type": "message",
+                    "role": "user",
+                    "content": parts,
+                },
+            )
+        except Exception as e:
+            logger.warning("inject_user_content: item.create failed: %s", e)
+            return False
+        if request_response:
+            await self._safe_response_create()
+        return True
+
     async def _response_sender_loop(self) -> None:
         """Dedicated worker that sends ``response.create()`` calls serially.
 
@@ -499,6 +539,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
     async def _run_realtime_session(self) -> None:
         """Establish and manage a single realtime session."""
+        self._realtime_loop = asyncio.get_running_loop()
         async with self.client.realtime.connect(model=config.MODEL_NAME) as conn:
             try:
                 session_config = RealtimeSessionCreateRequestParam(

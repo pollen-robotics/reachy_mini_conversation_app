@@ -127,6 +127,29 @@ async function saveBackendConfig(backend, key = "") {
   return await resp.json();
 }
 
+async function getDiscordConfig() {
+  try {
+    const resp = await fetchWithTimeout("/discord_config", {}, 3000);
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch (e) {
+    return null;
+  }
+}
+
+async function saveDiscordConfig(payload) {
+  const resp = await fetch("/discord_config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(data.error || "save_failed");
+  }
+  return await resp.json();
+}
+
 // ---------- Personalities API ----------
 async function loadPersonality(name) {
   const url = new URL("/personalities/load", window.location.origin);
@@ -283,6 +306,15 @@ async function init() {
   const pApplyVoice = document.getElementById("apply-voice");
   const pAvail = document.getElementById("tools-available");
 
+  // Discord elements
+  const discordPanel = document.getElementById("discord-panel");
+  const discordChip = document.getElementById("discord-chip");
+  const discordWebhookInput = document.getElementById("discord-webhook-url");
+  const discordBotTokenInput = document.getElementById("discord-bot-token");
+  const discordUserIdInput = document.getElementById("discord-user-id");
+  const saveDiscordBtn = document.getElementById("save-discord-btn");
+  const discordStatus = document.getElementById("discord-status");
+
   const AUTO_WITH = {
     dance: ["stop_dance"],
     play_emotion: ["stop_emotion"],
@@ -354,6 +386,7 @@ async function init() {
   show(formPanel, false);
   show(configuredPanel, false);
   show(personalityPanel, false);
+  show(discordPanel, false);
 
   const st = (await waitForStatus()) || {
     active_backend: OPENAI_BACKEND,
@@ -580,6 +613,52 @@ async function init() {
       setStatusMessage(pStatus, "Voices unavailable. The backend default voice will be used.", "warn");
     }
     show(personalityPanel, true);
+
+    // Discord config panel
+    function applyDiscordStatus(status) {
+      if (!status) {
+        discordChip.textContent = "Optional";
+        discordChip.classList.remove("chip-ok");
+        return;
+      }
+      const webhookSet = !!status.has_webhook_url;
+      const dmSet = !!status.has_bot_token && !!status.has_user_id;
+      if (webhookSet && dmSet) {
+        discordChip.textContent = "Configured";
+        discordChip.classList.add("chip-ok");
+      } else if (webhookSet || dmSet) {
+        discordChip.textContent = "Partially configured";
+        discordChip.classList.remove("chip-ok");
+      } else {
+        discordChip.textContent = "Optional";
+        discordChip.classList.remove("chip-ok");
+      }
+    }
+    applyDiscordStatus(await getDiscordConfig());
+    show(discordPanel, true);
+
+    saveDiscordBtn.addEventListener("click", async () => {
+      const payload = {
+        webhook_url: discordWebhookInput.value,
+        bot_token: discordBotTokenInput.value,
+        user_id: discordUserIdInput.value,
+      };
+      if (!payload.webhook_url.trim() && !payload.bot_token.trim() && !payload.user_id.trim()) {
+        setStatusMessage(discordStatus, "Enter at least one value to save.", "warn");
+        return;
+      }
+      setStatusMessage(discordStatus, "Saving Discord config...");
+      try {
+        const resp = await saveDiscordConfig(payload);
+        applyDiscordStatus(resp);
+        discordWebhookInput.value = "";
+        discordBotTokenInput.value = "";
+        discordUserIdInput.value = "";
+        setStatusMessage(discordStatus, "Saved. Restart Reachy Mini Conversation to enable the tools.", "ok");
+      } catch (e) {
+        setStatusMessage(discordStatus, "Failed to save Discord config. Please try again.", "error");
+      }
+    });
 
     pApplyVoice.addEventListener("click", async () => {
       const voice = pVoice.value;
