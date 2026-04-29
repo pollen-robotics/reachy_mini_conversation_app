@@ -1,3 +1,4 @@
+import random
 import logging
 from typing import Any, Dict
 
@@ -27,6 +28,9 @@ def get_available_emotions_and_descriptions() -> str:
 
     try:
         emotion_names = RECORDED_MOVES.list_moves()
+        if not emotion_names:
+            return "No emotions currently available"
+
         output = "Available emotions:\n"
         for name in emotion_names:
             description = RECORDED_MOVES.get(name).description
@@ -46,13 +50,14 @@ class PlayEmotion(Tool):
         "properties": {
             "emotion": {
                 "type": "string",
-                "description": f"""Name of the emotion to play.
-                                    Here is a list of the available emotions:
+                "enum": list(RECORDED_MOVES.list_moves()) if EMOTION_AVAILABLE else [],
+                "description": f"""Name of the emotion to play; omit for random.
+                                    Here is a list of the available emotions, you MUST only choose from these: \n
                                     {get_available_emotions_and_descriptions()}
                                     """,
             },
         },
-        "required": ["emotion"],
+        "required": [],
     }
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
@@ -61,14 +66,18 @@ class PlayEmotion(Tool):
             return {"error": "Emotion system not available"}
 
         emotion_name = kwargs.get("emotion")
-        if not emotion_name:
-            return {"error": "Emotion name is required"}
 
         logger.info("Tool call: play_emotion emotion=%s", emotion_name)
 
         # Check if emotion exists
         try:
             emotion_names = RECORDED_MOVES.list_moves()
+            if not emotion_names:
+                return {"error": "No emotions currently available"}
+
+            if not emotion_name:
+                emotion_name = random.choice(emotion_names)
+
             if emotion_name not in emotion_names:
                 return {"error": f"Unknown emotion '{emotion_name}'. Available: {emotion_names}"}
 

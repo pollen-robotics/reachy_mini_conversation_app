@@ -55,7 +55,11 @@ def run(
     """Run the Reachy Mini conversation app."""
     # Putting these dependencies here makes the dashboard faster to load when the conversation app is installed
     from reachy_mini_conversation_app.moves import MovementManager
-    from reachy_mini_conversation_app.config import config, is_gemini_model, refresh_runtime_config_from_env
+    from reachy_mini_conversation_app.config import (
+        config,
+        is_gemini_model,
+        refresh_runtime_config_from_env,
+    )
     from reachy_mini_conversation_app.startup_settings import (
         StartupSettings,
         load_startup_settings_into_runtime,

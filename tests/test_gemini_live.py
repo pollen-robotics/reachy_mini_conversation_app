@@ -10,6 +10,7 @@ import pytest
 from fastrtc import AdditionalOutputs
 
 import reachy_mini_conversation_app.gemini_live as gemini_mod
+import reachy_mini_conversation_app.tools.core_tools as ct_mod
 from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.tool_constants import ToolState
@@ -96,7 +97,7 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(monkey
     """Gemini turns should emit one transcript per role and let the wobbler reset after speech."""
     monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda: "test")
     monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
-    monkeypatch.setattr(gemini_mod, "get_tool_specs", lambda: [])
+    monkeypatch.setattr(gemini_mod, "get_active_tool_specs", lambda _: [])
 
     movement_manager = MagicMock()
     movement_manager.is_idle.return_value = False
@@ -278,3 +279,37 @@ def test_copy_preserves_current_voice_override() -> None:
     copied_handler = handler.copy()
 
     assert copied_handler.get_current_voice() == "Zephyr"
+
+
+def test_gemini_excludes_head_tracking_when_no_head_tracker(monkeypatch) -> None:
+    """head_tracking tool must not appear in Gemini session config when head_tracker is not active."""
+    monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda: "test")
+    monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
+
+    # mock ALL_TOOL_SPECS to include at least head_tracking and one other tool, to verify that only head_tracking is excluded, not all tools
+    monkeypatch.setattr(
+        ct_mod,
+        "ALL_TOOL_SPECS",
+        [
+            {"type": "function", "name": "head_tracking", "description": "head_tracking", "parameters": {}},
+            {"type": "function", "name": "fake_tool", "description": "fake_tool", "parameters": {}},
+        ],
+    )
+
+    # case 1: no camera at all, --no-camera flag passed
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock(), camera_worker=None)
+    handler = GeminiLiveHandler(deps)
+    live_config = handler._build_live_config()
+    tool_names = [fd.name for fd in live_config.tools[0].function_declarations] if live_config.tools else []
+    assert "head_tracking" not in tool_names, "case 1 failed: camera_worker=None"
+    assert "fake_tool" in tool_names, "case 1 failed: a non-head-tracking tool was unexpectedly excluded"
+
+    # case 2: camera is running but --head-tracker flag was not passed
+    camera_worker = MagicMock()
+    camera_worker.head_tracker = None
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock(), camera_worker=camera_worker)
+    handler = GeminiLiveHandler(deps)
+    live_config = handler._build_live_config()
+    tool_names = [fd.name for fd in live_config.tools[0].function_declarations] if live_config.tools else []
+    assert "head_tracking" not in tool_names, "case 2 failed: camera_worker.head_tracker=None"
+    assert "fake_tool" in tool_names, "case 2 failed: a non-head-tracking tool was unexpectedly excluded"

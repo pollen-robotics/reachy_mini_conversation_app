@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import reachy_mini_conversation_app.openai_realtime as rt_mod
+import reachy_mini_conversation_app.tools.core_tools as ct_mod
 import reachy_mini_conversation_app.tools.background_tool_manager as btm_mod
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler, _compute_response_cost
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
@@ -27,7 +28,7 @@ async def test_tool_completion_does_not_reset_head_wobbler(monkeypatch: Any) -> 
     """Tool completion should not interrupt ongoing speech wobble."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda: "alloy")
-    monkeypatch.setattr(rt_mod, "get_tool_specs", lambda: [])
+    monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
 
     async def _fake_dispatch(tool_name: str, args_json: str, deps: Any, **_kw: Any) -> dict[str, Any]:
         return {"image_description": "A person in front of a door.", "tool": tool_name}
@@ -133,7 +134,7 @@ async def test_non_idle_tool_call_does_not_queue_progress_response(monkeypatch: 
     """Tool-call startup should not enqueue a second speech response."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda: "alloy")
-    monkeypatch.setattr(rt_mod, "get_tool_specs", lambda: [])
+    monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
 
     class FakeEvent:
         def __init__(self, etype: str, **kwargs: Any) -> None:
@@ -324,7 +325,7 @@ async def test_output_audio_done_schedules_head_wobbler_reset(monkeypatch: Any) 
     """OpenAI speech completion should let the wobbler reset itself after queued audio."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda: "alloy")
-    monkeypatch.setattr(rt_mod, "get_tool_specs", lambda: [])
+    monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
 
     class FakeEvent:
         def __init__(self, etype: str, **kwargs: Any) -> None:
@@ -665,7 +666,7 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
     monkeypatch.setattr(rt_mod, "ConnectionClosedError", FakeCCE)
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda: "alloy")
-    monkeypatch.setattr(rt_mod, "get_tool_specs", lambda: [])
+    monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
 
     N_TOOL_RESULTS = 400
     REJECT_CALL_NUMBERS = {1, 3, 5, 10, 25, 50, 75, 100, 150, 200, 300, 399}
@@ -987,3 +988,104 @@ async def test_response_sender_loop_times_out_waiting_for_previous_response(
 
     timeout_logs = [r for r in caplog.records if "Timed out waiting for previous response" in r.getMessage()]
     assert len(timeout_logs) == 1, f"Expected 1 pre-condition timeout warning, got {len(timeout_logs)}"
+
+
+@pytest.mark.asyncio
+async def test_openai_excludes_head_tracking_when_no_head_tracker(monkeypatch: Any) -> None:
+    """head_tracking tool must not appear in OpenAI session config when head_tracker is not active."""
+    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
+    monkeypatch.setattr(rt_mod, "get_session_voice", lambda: "alloy")
+
+    # mock ALL_TOOL_SPECS to include at least head_tracking and one other tool, to verify that only head_tracking is excluded, not all tools
+    monkeypatch.setattr(
+        ct_mod,
+        "ALL_TOOL_SPECS",
+        [
+            {"type": "function", "name": "head_tracking", "description": "head_tracking", "parameters": {}},
+            {"type": "function", "name": "fake_tool", "description": "fake_tool", "parameters": {}},
+        ],
+    )
+
+    session_kwargs: dict = {}
+
+    class FakeSession:
+        async def update(self, **kwargs: Any) -> None:
+            session_kwargs["session"] = kwargs.get("session")
+
+    class FakeInputAudioBuffer:
+        async def append(self, **_kw: Any) -> None:
+            pass
+
+    class FakeItem:
+        async def create(self, **_kw: Any) -> None:
+            pass
+
+    class FakeConversation:
+        item = FakeItem()
+
+    class FakeResponse:
+        async def create(self, **_kw: Any) -> None:
+            pass
+
+        async def cancel(self, **_kw: Any) -> None:
+            pass
+
+    class FakeConn:
+        session = FakeSession()
+        input_audio_buffer = FakeInputAudioBuffer()
+        conversation = FakeConversation()
+        response = FakeResponse()
+
+        async def __aenter__(self) -> "FakeConn":
+            return self
+
+        async def __aexit__(self, *_: Any) -> bool:
+            return False
+
+        async def close(self) -> None:
+            pass
+
+        def __aiter__(self) -> "FakeConn":
+            return self
+
+        async def __anext__(self) -> Any:
+            raise StopAsyncIteration
+
+    class FakeRealtime:
+        def connect(self, **_kw: Any) -> FakeConn:
+            return FakeConn()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.realtime = FakeRealtime()
+
+    # case 1: no camera at all, --no-camera flag passed
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock(), camera_worker=None)
+    handler = OpenaiRealtimeHandler(deps)
+    handler.client = FakeClient()
+    object.__setattr__(handler.tool_manager, "start_up", MagicMock())
+    object.__setattr__(handler.tool_manager, "shutdown", AsyncMock())
+
+    await handler._run_realtime_session()
+
+    session_tools = session_kwargs.get("session", {}).get("tools", [])
+    tool_names = [t["name"] for t in session_tools]
+    assert "head_tracking" not in tool_names, "case 1 failed: camera_worker=None"
+    assert "fake_tool" in tool_names, "case 1 failed: a non-head-tracking tool was unexpectedly excluded"
+
+    # case 2: camera is running but --head-tracker flag was not passed
+    session_kwargs.clear()
+    camera_worker = MagicMock()
+    camera_worker.head_tracker = None
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock(), camera_worker=camera_worker)
+    handler = OpenaiRealtimeHandler(deps)
+    handler.client = FakeClient()
+    object.__setattr__(handler.tool_manager, "start_up", MagicMock())
+    object.__setattr__(handler.tool_manager, "shutdown", AsyncMock())
+
+    await handler._run_realtime_session()
+
+    session_tools = session_kwargs.get("session", {}).get("tools", [])
+    tool_names = [t["name"] for t in session_tools]
+    assert "head_tracking" not in tool_names, "case 2 failed: camera_worker.head_tracker=None"
+    assert "fake_tool" in tool_names, "case 2 failed: a non-head-tracking tool was unexpectedly excluded"

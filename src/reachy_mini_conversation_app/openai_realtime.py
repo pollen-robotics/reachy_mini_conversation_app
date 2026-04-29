@@ -33,7 +33,7 @@ from reachy_mini_conversation_app.config import AVAILABLE_VOICES, config
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
-    get_tool_specs,
+    get_active_tool_specs,
 )
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolCallRoutine,
@@ -518,6 +518,11 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
     async def _run_realtime_session(self) -> None:
         """Establish and manage a single realtime session."""
+        tool_specs = get_active_tool_specs(self.deps)
+        logger.info(
+            "Tools to be used in conversation: %s",
+            [tool["name"] for tool in tool_specs],
+        )
         async with self.client.realtime.connect(model=config.MODEL_NAME) as conn:
             try:
                 session_config = RealtimeSessionCreateRequestParam(
@@ -534,7 +539,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                             voice=self._voice_override or get_session_voice(),
                         ),
                     ),
-                    tools=get_tool_specs(),  # type: ignore[typeddict-item]
+                    tools=tool_specs,  # type: ignore[typeddict-item]
                     tool_choice="auto",
                 )
                 await conn.session.update(session=session_config)
