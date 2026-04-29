@@ -92,20 +92,18 @@ class _FakeLiveClient:
 
 
 @pytest.mark.asyncio
-async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(monkeypatch) -> None:
-    """Gemini turns should emit one transcript per role and let the wobbler reset after speech."""
+async def test_gemini_turn_buffers_transcripts(monkeypatch) -> None:
+    """Gemini turns should emit one transcript per role across both user and assistant audio."""
     monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda: "test")
     monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
     monkeypatch.setattr(gemini_mod, "get_tool_specs", lambda: [])
 
     movement_manager = MagicMock()
     movement_manager.is_idle.return_value = False
-    head_wobbler = MagicMock()
     robot = SimpleNamespace(media=SimpleNamespace(audio=None))
     deps = ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
-        head_wobbler=head_wobbler,
     )
     handler = GeminiLiveHandler(deps)
     object.__setattr__(handler.tool_manager, "start_up", MagicMock())
@@ -150,7 +148,7 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(monkey
 
     task = asyncio.create_task(handler._run_live_session())
     await _wait_for(
-        lambda: head_wobbler.request_reset_after_current_audio.called and handler.output_queue.qsize() >= 3
+        lambda: handler.output_queue.qsize() >= 3 and movement_manager.set_listening.call_count >= 2
     )
 
     handler._stop_event.set()
@@ -175,9 +173,6 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(monkey
     assert any(isinstance(output, tuple) for output in outputs), "audio output was not emitted"
     movement_manager.set_listening.assert_has_calls([call(True), call(False)])
     assert movement_manager.set_listening.call_args_list[-1] == call(False)
-    head_wobbler.feed.assert_not_called()
-    head_wobbler.request_reset_after_current_audio.assert_called_once()
-    head_wobbler.reset.assert_not_called()
 
 
 @pytest.mark.asyncio
