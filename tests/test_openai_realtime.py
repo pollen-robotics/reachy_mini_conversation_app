@@ -232,7 +232,7 @@ async def test_completed_user_transcript_resets_idle_state(monkeypatch: Any) -> 
     """A completed user turn should refresh activity and cancel stale idle intent."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda: "alloy")
-    monkeypatch.setattr(rt_mod, "get_tool_specs", lambda: [])
+    monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
 
     class FakeEvent:
         def __init__(self, etype: str, **kwargs: Any) -> None:
@@ -996,15 +996,17 @@ async def test_openai_excludes_head_tracking_when_no_head_tracker(monkeypatch: A
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda: "alloy")
 
-    # mock ALL_TOOL_SPECS to include at least head_tracking and one other tool, to verify that only head_tracking is excluded, not all tools
-    monkeypatch.setattr(
-        ct_mod,
-        "ALL_TOOL_SPECS",
-        [
-            {"type": "function", "name": "head_tracking", "description": "head_tracking", "parameters": {}},
-            {"type": "function", "name": "fake_tool", "description": "fake_tool", "parameters": {}},
-        ],
-    )
+    # Mock the spec source while preserving get_active_tool_specs filtering.
+    fake_tool_specs = [
+        {"type": "function", "name": "head_tracking", "description": "head_tracking", "parameters": {}},
+        {"type": "function", "name": "fake_tool", "description": "fake_tool", "parameters": {}},
+    ]
+
+    def fake_get_tool_specs(exclusion_list: list[str] | None = None) -> list[dict[str, object]]:
+        excluded = set(exclusion_list or [])
+        return [spec for spec in fake_tool_specs if spec["name"] not in excluded]
+
+    monkeypatch.setattr(ct_mod, "get_tool_specs", fake_get_tool_specs)
 
     session_kwargs: dict = {}
 
