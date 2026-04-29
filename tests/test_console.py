@@ -5,8 +5,6 @@ import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-import numpy as np
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 

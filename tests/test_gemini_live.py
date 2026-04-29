@@ -147,9 +147,7 @@ async def test_gemini_turn_buffers_transcripts(monkeypatch) -> None:
     handler.client = _FakeLiveClient(session)
 
     task = asyncio.create_task(handler._run_live_session())
-    await _wait_for(
-        lambda: handler.output_queue.qsize() >= 3 and movement_manager.set_listening.call_count >= 2
-    )
+    await _wait_for(lambda: handler.output_queue.qsize() >= 3 and movement_manager.set_listening.call_count >= 2)
 
     handler._stop_event.set()
     await asyncio.wait_for(task, timeout=1.0)
