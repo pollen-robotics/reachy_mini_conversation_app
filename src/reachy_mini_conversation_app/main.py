@@ -75,7 +75,6 @@ def run(
 
     from reachy_mini_conversation_app.console import LocalStream
     from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
-    from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
 
     if args.no_camera and args.head_tracker is not None:
         logger.warning("Head tracking disabled: --no-camera flag is set. Remove --no-camera to enable head tracking.")
@@ -130,14 +129,11 @@ def run(
         camera_worker=camera_worker,
     )
 
-    head_wobbler = HeadWobbler(set_speech_offsets=movement_manager.set_speech_offsets)
-
     deps = ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
         camera_worker=camera_worker,
         vision_processor=vision_processor,
-        head_wobbler=head_wobbler,
     )
     current_file_path = os.path.dirname(os.path.abspath(__file__))
     logger.debug(f"Current file absolute path: {current_file_path}")
@@ -222,7 +218,11 @@ def run(
 
     # Each async service → its own thread/loop
     movement_manager.start()
-    head_wobbler.start()
+    # Audio-reactive head motion is driven by the daemon's wobbler. The
+    # conversation app's audio is pushed via push_audio_sample, which goes
+    # through the same media pipeline that the daemon's wobbler tees off,
+    # so enabling here is enough — no per-app DSP needed.
+    robot.enable_wobbling()
     if camera_worker:
         camera_worker.start()
 
@@ -246,7 +246,10 @@ def run(
         logger.info("Keyboard interruption in main thread... closing server.")
     finally:
         movement_manager.stop()
-        head_wobbler.stop()
+        try:
+            robot.disable_wobbling()
+        except Exception as e:
+            logger.debug(f"Error disabling wobbling during shutdown: {e}")
         if camera_worker:
             camera_worker.stop()
 
