@@ -556,8 +556,6 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     if event.type == "input_audio_buffer.speech_started":
                         if hasattr(self, "_clear_queue") and callable(self._clear_queue):
                             self._clear_queue()
-                        if self.deps.head_wobbler is not None:
-                            self.deps.head_wobbler.reset()
                         self.deps.movement_manager.set_listening(True)
                         logger.debug("User speech started")
 
@@ -566,8 +564,6 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         logger.debug("User speech stopped - server will auto-commit with VAD")
 
                     if event.type == "response.output_audio.done":
-                        if self.deps.head_wobbler is not None:
-                            self.deps.head_wobbler.request_reset_after_current_audio()
                         logger.debug("response completed")
 
                     if event.type == "response.created":
@@ -639,8 +635,6 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
                     # Handle audio delta
                     if event.type == "response.output_audio.delta":
-                        if self.gradio_mode and self.deps.head_wobbler is not None:
-                            self.deps.head_wobbler.feed(event.delta)
                         self.last_activity_time = asyncio.get_event_loop().time()
                         logger.debug("last activity time updated to %s", self.last_activity_time)
                         await self.output_queue.put(

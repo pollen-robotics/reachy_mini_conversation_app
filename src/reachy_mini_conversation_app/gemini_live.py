@@ -221,8 +221,6 @@ class GeminiLiveHandler(AsyncStreamHandler):
         await self._flush_transcript_chunks("assistant", self._pending_assistant_transcript_chunks)
         if hasattr(self, "_clear_queue") and callable(self._clear_queue):
             self._clear_queue()
-        if self.deps.head_wobbler is not None:
-            self.deps.head_wobbler.reset()
         self._set_listening_state(True)
 
     async def _handle_turn_complete(self) -> None:
@@ -231,8 +229,6 @@ class GeminiLiveHandler(AsyncStreamHandler):
         await self._flush_transcript_chunks("user", self._pending_user_transcript_chunks)
         await self._flush_transcript_chunks("assistant", self._pending_assistant_transcript_chunks)
         self._set_listening_state(False)
-        if self.deps.head_wobbler is not None:
-            self.deps.head_wobbler.request_reset_after_current_audio()
 
     async def apply_personality(self, profile: str | None) -> str:
         """Apply a new personality (profile) at runtime.
@@ -596,11 +592,6 @@ class GeminiLiveHandler(AsyncStreamHandler):
 
                                             if len(audio_array) == 0:
                                                 continue
-
-                                            if self.gradio_mode and self.deps.head_wobbler is not None:
-                                                self.deps.head_wobbler.feed(
-                                                    base64.b64encode(audio_bytes).decode("utf-8")
-                                                )
 
                                             self.last_activity_time = asyncio.get_event_loop().time()
 
