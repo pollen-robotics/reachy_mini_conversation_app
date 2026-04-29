@@ -5,7 +5,7 @@ import importlib
 from types import ModuleType
 from pathlib import Path
 from argparse import Namespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -54,12 +54,23 @@ def _resolved_remote_space(client: AsyncMock) -> ResolvedInstalledToolSpace:
 
 
 @pytest.mark.asyncio
-async def test_initialize_tools_loads_installed_remote_tools_and_dispatches(
+async def test_initialize_tools_loads_enabled_installed_remote_tools_and_dispatches(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Installed public Space tools should join the registry and dispatch through the normal path."""
+    """Enabled public Space tools should join the registry and dispatch through the normal path."""
     monkeypatch.chdir(tmp_path)
+    external_profiles_root = tmp_path / "external_profiles"
+    profile_dir = external_profiles_root / "mcp_profile"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "instructions.txt").write_text("hello\n", encoding="utf-8")
+    (profile_dir / "tools.txt").write_text("alozowski_reachy_mini_search_tool__search_web\n", encoding="utf-8")
+
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "mcp_profile")
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", external_profiles_root)
+    monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
+    monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
+
     client = AsyncMock()
     client.call_tool.return_value = {
         "status": "ok",
@@ -202,20 +213,19 @@ def test_initialize_tools_fails_when_enabled_remote_tool_is_unavailable(
         core_tools_mod.initialize_tools()
 
 
-def test_initialize_tools_warns_when_installed_remote_tool_space_is_unused_and_unavailable(
+def test_initialize_tools_skips_unused_installed_remote_tool_space(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Unused installed Spaces should warn and be skipped when discovery fails."""
+    """Unused installed Spaces should not be resolved during profile tool loading."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "default")
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", config_mod.DEFAULT_PROFILES_DIRECTORY)
     monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
     monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
-    monkeypatch.setattr(
-        tool_spaces_mod, "resolve_public_tool_space_sync", lambda slug: (_ for _ in ()).throw(RuntimeError("boom"))
-    )
+    resolver = MagicMock(side_effect=RuntimeError("boom"))
+    monkeypatch.setattr(tool_spaces_mod, "resolve_public_tool_space_sync", resolver)
 
     write_installed_tool_spaces(
         None,
@@ -230,7 +240,8 @@ def test_initialize_tools_warns_when_installed_remote_tool_space_is_unused_and_u
     with caplog.at_level("WARNING"):
         core_tools_mod.initialize_tools()
 
-    assert any("unavailable but none of its tools are enabled" in record.message for record in caplog.records)
+    resolver.assert_not_called()
+    assert not any("unavailable" in record.message for record in caplog.records)
     assert "dance" in core_tools_mod.ALL_TOOLS
 
 

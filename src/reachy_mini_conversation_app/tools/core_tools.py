@@ -303,29 +303,39 @@ def _read_profile_tool_names() -> list[str]:
 
 
 def _resolve_remote_tools(tool_names: list[str], instance_path: str | Path | None) -> list[RemoteMcpTool]:
-    """Resolve installed public Space tools for the current runtime."""
+    """Resolve installed public Space tools enabled by the active profile."""
     from reachy_mini_conversation_app.tool_spaces import read_installed_tool_spaces, resolve_public_tool_space_sync
 
     remote_tools: list[RemoteMcpTool] = []
     for installed_space in read_installed_tool_spaces(instance_path).spaces:
-        enabled_space_tools = [name for name in tool_names if name.startswith(f"{installed_space.alias}__")]
-        try:
-            resolved_space = resolve_public_tool_space_sync(installed_space.slug)
-        except Exception as exc:
-            if enabled_space_tools:
-                raise RuntimeError(
-                    f"Enabled remote tools from '{installed_space.slug}' are unavailable: {', '.join(enabled_space_tools)}. "
-                    f"Details: {exc}"
-                ) from exc
-
-            logger.warning(
-                "Installed Space '%s' is unavailable but none of its tools are enabled in the active profile: %s",
+        enabled_space_tools = sorted(name for name in tool_names if name.startswith(f"{installed_space.alias}__"))
+        if not enabled_space_tools:
+            logger.debug(
+                "Installed Space '%s' has no enabled tools in the active profile; skipping discovery.",
                 installed_space.slug,
-                exc,
             )
             continue
 
+        try:
+            resolved_space = resolve_public_tool_space_sync(installed_space.slug)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Enabled remote tools from '{installed_space.slug}' are unavailable: {', '.join(enabled_space_tools)}. "
+                f"Details: {exc}"
+            ) from exc
+
+        enabled_tool_names = set(enabled_space_tools)
+        discovered_tool_names = {tool.local_name for tool in resolved_space.tools}
+        missing_tool_names = sorted(enabled_tool_names - discovered_tool_names)
+        if missing_tool_names:
+            raise RuntimeError(
+                f"Enabled remote tools from '{installed_space.slug}' are unavailable: {', '.join(missing_tool_names)}. "
+                "Details: the installed Space did not expose those tool IDs."
+            )
+
         for remote_tool in resolved_space.tools:
+            if remote_tool.local_name not in enabled_tool_names:
+                continue
             remote_tools.append(
                 RemoteMcpTool(
                     slug=resolved_space.slug,
@@ -415,10 +425,11 @@ def initialize_tools(instance_path: str | Path | None = None) -> None:
     _TOOLS_INITIALIZED = True
 
 
-def get_tool_specs(exclusion_list: list[str] = []) -> list[Dict[str, Any]]:
+def get_tool_specs(exclusion_list: list[str] | None = None) -> list[Dict[str, Any]]:
     """Get tool specs, optionally excluding some tools."""
     if not _TOOLS_INITIALIZED:
         initialize_tools()
+    exclusion_list = exclusion_list or []
     return [spec for spec in ALL_TOOL_SPECS if spec.get("name") not in exclusion_list]
 
 
