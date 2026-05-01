@@ -44,8 +44,8 @@ from reachy_mini_conversation_app.config import (
     refresh_runtime_config_from_env,
 )
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
-from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.audio.startup_config import apply_audio_startup_config
+from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
 
 
@@ -64,6 +64,12 @@ except Exception:  # pragma: no cover - only loaded when settings_app is used
 
 
 logger = logging.getLogger(__name__)
+
+LOCAL_PLAYER_BACKEND = (
+    getattr(MediaBackend, "LOCAL", None)
+    or getattr(MediaBackend, "GSTREAMER", None)
+    or getattr(MediaBackend, "DEFAULT", None)
+)
 
 LEGACY_STARTUP_ENV_NAMES = (
     "REACHY_MINI_CUSTOM_PROFILE",
@@ -626,7 +632,12 @@ class LocalStream:
         backend = getattr(self._robot.media, "backend", None)
         audio = getattr(self._robot.media, "audio", None)
         if audio is not None:
-            if backend == MediaBackend.LOCAL and hasattr(audio, "clear_player") and callable(audio.clear_player):
+            if (
+                LOCAL_PLAYER_BACKEND is not None
+                and backend == LOCAL_PLAYER_BACKEND
+                and hasattr(audio, "clear_player")
+                and callable(audio.clear_player)
+            ):
                 audio.clear_player()
             elif (
                 backend == MediaBackend.WEBRTC
