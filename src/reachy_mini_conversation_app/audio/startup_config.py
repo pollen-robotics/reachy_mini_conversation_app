@@ -29,7 +29,7 @@ def apply_audio_startup_config(
 ) -> bool:
     """Apply the tuned XVF3800 audio configuration for the conversation app."""
     log = logger or logging.getLogger(__name__)
-    audio = _audio_from_robot(robot)
+    audio = getattr(getattr(robot, "media", None), "audio", None)
 
     if audio is None:
         log.warning("Skipping Reachy audio startup config: robot media audio is unavailable.")
@@ -58,11 +58,6 @@ def apply_audio_startup_config(
         log.warning("Reachy audio startup config was not applied.")
 
     return applied
-
-
-def _audio_from_robot(robot: object) -> object | None:
-    media = getattr(robot, "media", None)
-    return getattr(media, "audio", None)
 
 
 def _format_config(config: Sequence[AudioStartupParameter]) -> str:
