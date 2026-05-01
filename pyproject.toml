@@ -30,7 +30,7 @@ dependencies = [
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
-    "reachy-mini @ git+https://github.com/pollen-robotics/reachy_mini.git@5dc54a618f5f8bb20031e948911a7a471e59775c",
+    "reachy-mini>=1.7.0",
     "gradio_client>=1.13.3",
 ]
 
