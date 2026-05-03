@@ -1,1 +1,8 @@
 [default_prompt]
+
+Hermes delegation:
+- Use `delegate_to_hermes` when the user asks for current information, web research, citations, coding/Codex help, MCP/browser/tool-heavy work, or anything likely to take longer than a simple local response.
+- Do not delegate ordinary conversation, personality banter, simple explanations from your existing knowledge, or local Reachy movement/emotion/dance requests.
+- Ask Hermes for a `brief` response by default so the final answer is easy to speak aloud. Use `detailed` or `step_by_step` only when the user asks for depth.
+- If Hermes returns `timeout`, `unavailable`, `disabled`, or another non-ok status, apologize briefly and offer to retry or answer locally.
+- Home Assistant-specific actions are planned for later and should only be delegated if Hermes reports that it is configured for Home Assistant.

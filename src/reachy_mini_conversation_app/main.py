@@ -44,7 +44,9 @@ def run(
     """Run the Reachy Mini conversation app."""
     # Putting these dependencies here makes the dashboard faster to load when the conversation app is installed
     from reachy_mini_conversation_app.moves import MovementManager
+    from reachy_mini_conversation_app.config import config
     from reachy_mini_conversation_app.console import LocalStream
+    from reachy_mini_conversation_app.hermes_client import HermesDelegationClient
     from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
     from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
     from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
@@ -53,10 +55,7 @@ def run(
     logger.info("Starting Reachy Mini Conversation App")
 
     if args.no_camera and args.head_tracker is not None:
-        logger.warning(
-            "Head tracking disabled: --no-camera flag is set. "
-            "Remove --no-camera to enable head tracking."
-        )
+        logger.warning("Head tracking disabled: --no-camera flag is set. Remove --no-camera to enable head tracking.")
 
     if robot is None:
         try:
@@ -68,25 +67,17 @@ def run(
             robot = ReachyMini(**robot_kwargs)
 
         except TimeoutError as e:
-            logger.error(
-                "Connection timeout: Failed to connect to Reachy Mini daemon. "
-                f"Details: {e}"
-            )
+            logger.error(f"Connection timeout: Failed to connect to Reachy Mini daemon. Details: {e}")
             log_connection_troubleshooting(logger, args.robot_name)
             sys.exit(1)
 
         except ConnectionError as e:
-            logger.error(
-                "Connection failed: Unable to establish connection to Reachy Mini. "
-                f"Details: {e}"
-            )
+            logger.error(f"Connection failed: Unable to establish connection to Reachy Mini. Details: {e}")
             log_connection_troubleshooting(logger, args.robot_name)
             sys.exit(1)
 
         except Exception as e:
-            logger.error(
-                f"Unexpected error during robot initialization: {type(e).__name__}: {e}"
-            )
+            logger.error(f"Unexpected error during robot initialization: {type(e).__name__}: {e}")
             logger.error("Please check your configuration and try again.")
             sys.exit(1)
 
@@ -114,12 +105,31 @@ def run(
 
     head_wobbler = HeadWobbler(set_speech_offsets=movement_manager.set_speech_offsets)
 
+    hermes_client: HermesDelegationClient | None = None
+    hermes_settings = config.HERMES_DELEGATION
+    if hermes_settings.enabled:
+        if hermes_settings.base_url and hermes_settings.api_token:
+            hermes_client = HermesDelegationClient(
+                base_url=hermes_settings.base_url,
+                api_token=hermes_settings.api_token,
+                timeout_seconds=hermes_settings.timeout_seconds,
+                model=hermes_settings.model,
+                session_name=hermes_settings.session_name,
+            )
+            logger.info("Hermes delegation enabled: %s", hermes_settings.base_url)
+        else:
+            logger.warning(
+                "Hermes delegation is enabled but HERMES_DELEGATION_BASE_URL/HERMES_BASE_URL "
+                "or HERMES_DELEGATION_API_TOKEN/HERMES_API_TOKEN is missing."
+            )
+
     deps = ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
         camera_worker=camera_worker,
         vision_manager=vision_manager,
         head_wobbler=head_wobbler,
+        hermes_client=hermes_client,
     )
     current_file_path = os.path.dirname(os.path.abspath(__file__))
     logger.debug(f"Current file absolute path: {current_file_path}")

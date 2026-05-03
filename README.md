@@ -128,6 +128,11 @@ Some wheels (like PyTorch) are large and require compatible CUDA or CPU buildsâ€
 | `HF_HOME` | Cache directory for local Hugging Face downloads (only used with `--local-vision` flag, defaults to `./cache`). |
 | `HF_TOKEN` | Optional token for Hugging Face access (for gated/private assets). |
 | `LOCAL_VISION_MODEL` | Hugging Face model path for local vision processing (only used with `--local-vision` flag, defaults to `HuggingFaceTB/SmolVLM2-2.2B-Instruct`). |
+| `HERMES_DELEGATION_ENABLED` | Optional. Set to `1` to expose `delegate_to_hermes` with a configured Hermes API client. Defaults to disabled. |
+| `HERMES_DELEGATION_BASE_URL` / `HERMES_BASE_URL` | Optional. Hermes API Server base URL, for example a Tailscale-only `http://<hermes-tailscale-ip>:8080`. |
+| `HERMES_DELEGATION_API_TOKEN` / `HERMES_API_TOKEN` | Optional secret. Bearer token matching Hermes `API_SERVER_KEY`. Do not commit real values. |
+| `HERMES_DELEGATION_TIMEOUT_SECONDS` / `HERMES_TIMEOUT_SECONDS` | Optional. Interactive delegation timeout, default `45`. |
+| `HERMES_DELEGATION_MODEL` / `HERMES_MODEL_NAME` | Optional. Hermes API model label, default `hermes-agent`. |
 
 ## Running the app
 

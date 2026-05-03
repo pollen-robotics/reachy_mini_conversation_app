@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 from pathlib import Path
+from dataclasses import dataclass
 
 from dotenv import find_dotenv, load_dotenv
 
@@ -34,6 +35,22 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return default
 
 
+def _env_float(name: str, default: float) -> float:
+    """Parse a positive float environment value."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("Invalid float value for %s=%r, using default=%s", name, raw, default)
+        return default
+    if value <= 0:
+        logger.warning("Non-positive float value for %s=%r, using default=%s", name, raw, default)
+        return default
+    return value
+
+
 def _collect_profile_names(profiles_root: Path) -> set[str]:
     """Return profile folder names from a profiles root directory."""
     if not profiles_root.exists() or not profiles_root.is_dir():
@@ -46,11 +63,7 @@ def _collect_tool_module_names(tools_root: Path) -> set[str]:
     if not tools_root.exists() or not tools_root.is_dir():
         return set()
     ignored = {"__init__", "core_tools"}
-    return {
-        p.stem
-        for p in tools_root.glob("*.py")
-        if p.is_file() and p.stem not in ignored
-    }
+    return {p.stem for p in tools_root.glob("*.py") if p.is_file() and p.stem not in ignored}
 
 
 def _raise_on_name_collisions(
@@ -71,6 +84,18 @@ def _raise_on_name_collisions(
         f"External {label} root: {external_root}. Built-in {label} root: {internal_root}. "
         f"Please rename the conflicting external {label}(s) to continue."
     )
+
+
+@dataclass(frozen=True)
+class HermesDelegationConfig:
+    """Settings for delegating conversation tasks to Hermes."""
+
+    enabled: bool
+    base_url: str
+    api_token: str
+    timeout_seconds: float
+    model: str
+    session_name: str
 
 
 # Validate LOCKED_PROFILE at startup
@@ -124,6 +149,15 @@ class Config:
     AUTOLOAD_EXTERNAL_TOOLS = _env_flag("AUTOLOAD_EXTERNAL_TOOLS", default=False)
     REACHY_MINI_CUSTOM_PROFILE = LOCKED_PROFILE or os.getenv("REACHY_MINI_CUSTOM_PROFILE")
 
+    HERMES_DELEGATION = HermesDelegationConfig(
+        enabled=_env_flag("HERMES_DELEGATION_ENABLED", default=False),
+        base_url=os.getenv("HERMES_DELEGATION_BASE_URL") or os.getenv("HERMES_BASE_URL", ""),
+        api_token=os.getenv("HERMES_DELEGATION_API_TOKEN") or os.getenv("HERMES_API_TOKEN", ""),
+        timeout_seconds=_env_float("HERMES_DELEGATION_TIMEOUT_SECONDS", _env_float("HERMES_TIMEOUT_SECONDS", 45.0)),
+        model=os.getenv("HERMES_DELEGATION_MODEL") or os.getenv("HERMES_MODEL_NAME", "hermes-agent"),
+        session_name=os.getenv("HERMES_DELEGATION_SESSION_NAME", "reachy-mini"),
+    )
+
     logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")
 
     def __init__(self) -> None:
@@ -172,8 +206,7 @@ class Config:
             )
         else:
             logger.info(
-                "'REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY' is not set. "
-                "Using built-in profiles from %s.",
+                "'REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY' is not set. Using built-in profiles from %s.",
                 DEFAULT_PROFILES_DIRECTORY,
             )
 
@@ -184,10 +217,7 @@ class Config:
                 self.TOOLS_DIRECTORY,
             )
         else:
-            logger.info(
-                "'REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY' is not set. "
-                "Using built-in shared tools only."
-            )
+            logger.info("'REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY' is not set. Using built-in shared tools only.")
 
 
 config = Config()

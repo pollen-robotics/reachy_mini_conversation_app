@@ -43,7 +43,6 @@ ALL_TOOL_SPECS: List[Dict[str, Any]] = []
 _TOOLS_INITIALIZED = False
 
 
-
 def get_concrete_subclasses(base: type[Tool]) -> List[type[Tool]]:
     """Recursively find all concrete (non-abstract) subclasses of a base class."""
     result: List[type[Tool]] = []
@@ -66,6 +65,7 @@ class ToolDependencies:
     vision_manager: Any | None = None
     head_wobbler: Any | None = None  # HeadWobbler for audio-reactive motion
     motion_duration_s: float = 1.0
+    hermes_client: Any | None = None
 
 
 # Tool base class
@@ -265,7 +265,6 @@ def _load_profile_tools() -> None:
                 logger.error(f"  Module path: {shared_module_path}")
 
 
-
 def _initialize_tools() -> None:
     """Populate registry once, even if module is imported repeatedly."""
     global ALL_TOOLS, ALL_TOOL_SPECS, _TOOLS_INITIALIZED
@@ -323,7 +322,9 @@ async def dispatch_tool_call(tool_name: str, args_json: str, deps: ToolDependenc
     return await _dispatch_tool_call(tool_name, _safe_load_obj(args_json), deps)
 
 
-async def dispatch_tool_call_with_manager(tool_name: str, args_json: str, deps: ToolDependencies, tool_manager: "BackgroundToolManager") -> Dict[str, Any]:
+async def dispatch_tool_call_with_manager(
+    tool_name: str, args_json: str, deps: ToolDependencies, tool_manager: "BackgroundToolManager"
+) -> Dict[str, Any]:
     """Dispatch a tool call, injecting a BackgroundToolManager into the args."""
     args = _safe_load_obj(args_json)
     args["tool_manager"] = tool_manager
