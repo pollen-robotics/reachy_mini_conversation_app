@@ -4186,7 +4186,7 @@ wheels = [
 
 [[package]]
 name = "reachy-mini"
-version = "1.7.0"
+version = "1.7.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -4222,14 +4222,14 @@ dependencies = [
     { name = "websockets" },
     { name = "zeroconf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e0/6e/fd11c02787149d6e237f290bb23f8d281f380ba5c0631add0499bc47cc44/reachy_mini-1.7.0.tar.gz", hash = "sha256:42a5424cce1889d4d14cf14b004e23dbcb97d8d8679917d091ed2965bbf29448", size = 24720565, upload-time = "2026-04-22T12:10:39.57Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/05/fb/7df6fff733cf6bb63b702bb1eb8252cdf27e8b0ac1ee21e408aea78154c9/reachy_mini-1.7.1.tar.gz", hash = "sha256:39fc3c9a94145c53a217265a4702a615690e7791b1bd18aa66f229f33ab122ac", size = 24722394, upload-time = "2026-05-04T12:59:31.135Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a0/22/b624ad9fe332c9c6544bc60d9a1a76a5f239d364f75d568f9ed73f1b5e0c/reachy_mini-1.7.0-py3-none-any.whl", hash = "sha256:4f19ce9f7d4f4469768f9521eede6e22a35627a68719be73aa1b4a967e584ebe", size = 24818271, upload-time = "2026-04-22T12:10:36.622Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/a7/6b969c2953fb9bcf196e9c19f30c70246b8bc6e7bf130747ac09885bb70d/reachy_mini-1.7.1-py3-none-any.whl", hash = "sha256:84657726f0a84b8cc146a0223516a4973173fb71b18f10f23c8fd6e48974cbc2", size = 24820126, upload-time = "2026-05-04T12:59:28.268Z" },
 ]
 
 [[package]]
 name = "reachy-mini-conversation-app"
-version = "0.5.0"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiortc" },
@@ -4304,7 +4304,7 @@ requires-dist = [
     { name = "opencv-python", marker = "extra == 'all-vision'", specifier = ">=4.13.0.92" },
     { name = "opencv-python", marker = "extra == 'yolo-vision'", specifier = ">=4.13.0.92" },
     { name = "python-dotenv" },
-    { name = "reachy-mini", specifier = ">=1.7.0" },
+    { name = "reachy-mini", specifier = ">=1.7.1" },
     { name = "reachy-mini-dances-library" },
     { name = "reachy-mini-toolbox" },
     { name = "supervision", marker = "extra == 'all-vision'" },
