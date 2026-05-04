@@ -731,7 +731,7 @@ class GeminiLiveHandler(ConversationHandler):
         timestamp_msg = (
             f"[Idle time update: {self.format_timestamp()} - No activity for {idle_duration:.1f}s] "
             "You've been idle for a while. Feel free to get creative - dance, show an emotion, "
-            "look around, do nothing, or just be yourself!"
+            "look around, call idle_do_nothing to stay still and silent, or just be yourself!"
         )
         if not self.session:
             logger.debug("No session, cannot send idle signal")

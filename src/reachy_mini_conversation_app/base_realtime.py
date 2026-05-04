@@ -998,7 +998,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         """Send an idle signal to the realtime server."""
         logger.debug("Sending idle signal")
         self.is_idle_tool_call = True
-        timestamp_msg = f"[Idle time update: {self.format_timestamp()} - No activity for {idle_duration:.1f}s] You've been idle for a while. Feel free to get creative - dance, show an emotion, look around, do nothing, or just be yourself!"
+        timestamp_msg = f"[Idle time update: {self.format_timestamp()} - No activity for {idle_duration:.1f}s] You've been idle for a while. Feel free to get creative - dance, show an emotion, look around, call idle_do_nothing to stay still and silent, or just be yourself!"
         if not self.connection:
             logger.debug("No connection, cannot send idle signal")
             return
@@ -1011,7 +1011,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         )
         await self._safe_response_create(
             response=RealtimeResponseCreateParamsParam(
-                instructions="You MUST respond with function calls only - no speech or text. Choose appropriate actions for idle behavior.",
+                instructions="You MUST respond with function calls only - no speech or text. Choose appropriate actions for idle behavior. Use idle_do_nothing only if you intentionally want no movement or sound during this idle turn.",
                 tool_choice="required",
             ),
         )
