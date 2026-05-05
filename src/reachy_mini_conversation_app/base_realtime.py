@@ -177,17 +177,35 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
     def _normalize_startup_voice(self, voice: str | None) -> str | None:
         """Return a valid persisted startup voice for this backend, or None."""
+        return self._resolve_backend_voice(voice, source="persisted startup voice")
+
+    def _resolve_backend_voice(
+        self,
+        voice: str | None,
+        *,
+        source: str,
+        fallback: str | None = None,
+    ) -> str | None:
+        """Return a backend-supported voice, optionally falling back when unsupported."""
         available_voices = get_available_voices_for_backend(self.BACKEND_PROVIDER)
-        if voice in available_voices:
-            return voice
+        voice_value = (voice or "").strip()
+        if not voice_value:
+            return fallback
+
+        voice_by_lowercase = {candidate.lower(): candidate for candidate in available_voices}
+        normalized_voice = voice_by_lowercase.get(voice_value.lower())
+        if normalized_voice is not None:
+            return normalized_voice
+
         if voice:
             logger.warning(
-                "Ignoring persisted startup voice %r for backend=%r; expected one of %s",
+                "Ignoring unsupported %s %r for backend=%r; expected one of %s",
+                source,
                 voice,
                 self.BACKEND_PROVIDER,
                 available_voices,
             )
-        return None
+        return fallback
 
     def _response_done_timeout(self) -> float:
         """Return the response completion timeout."""
@@ -233,11 +251,13 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
     async def change_voice(self, voice: str) -> str:
         """Change only the voice and restart the session."""
-        self._voice_override = voice
+        default_voice = get_default_voice_for_backend(self.BACKEND_PROVIDER)
+        resolved_voice = self._resolve_backend_voice(voice, source="requested voice", fallback=default_voice)
+        self._voice_override = resolved_voice
         if getattr(self, "client", None) is not None:
             try:
                 await self._restart_session()
-                return f"Voice changed to {voice}."
+                return f"Voice changed to {resolved_voice}."
             except Exception as e:
                 logger.warning("Failed to restart session for voice change: %s", e)
                 return "Voice change failed. Will take effect on next connection."
@@ -246,7 +266,8 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
     def get_current_voice(self) -> str:
         """Return the voice currently selected for this handler."""
         default_voice = get_default_voice_for_backend(self.BACKEND_PROVIDER)
-        return self._voice_override or self._get_session_voice(default=default_voice)
+        voice = self._voice_override or self._get_session_voice(default=default_voice)
+        return self._resolve_backend_voice(voice, source="session voice", fallback=default_voice) or default_voice
 
     async def apply_personality(self, profile: str | None) -> str:
         """Apply a new personality (profile) at runtime if possible.

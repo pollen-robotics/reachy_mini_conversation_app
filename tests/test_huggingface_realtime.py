@@ -270,6 +270,28 @@ def test_handler_uses_hf_startup_voice_at_startup(monkeypatch: Any) -> None:
     assert handler.get_current_voice() == "Aiden"
 
 
+def test_handler_ignores_unsupported_hf_profile_voice(monkeypatch: Any) -> None:
+    """OpenAI/Gemini profile voices should not be sent to the Hugging Face backend."""
+    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
+    monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "cedar")
+
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+
+    assert handler.get_current_voice() == HF_DEFAULT_VOICE
+    session = handler._get_session_config([])
+    assert session["audio"]["output"]["voice"] == HF_DEFAULT_VOICE
+
+
+def test_handler_normalizes_hf_voice_case(monkeypatch: Any) -> None:
+    """Lowercase Hugging Face speaker names should resolve to the curated UI value."""
+    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
+    monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "serena")
+
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+
+    assert handler.get_current_voice() == "Serena"
+
+
 @pytest.mark.asyncio
 async def test_start_up_hf_gradio_does_not_wait_for_api_key(monkeypatch: Any) -> None:
     """Hugging Face backend should not wait for gradio key input."""
