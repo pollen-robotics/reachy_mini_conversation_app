@@ -381,6 +381,7 @@ button.ghost:hover { border-color: rgba(94, 240, 193, 0.4); }
   align-items: center;
   margin-top: 12px;
 }
+.row > * { min-width: 0; }
 .row > label { margin: 0; }
 .row > button { margin: 0; }
 
@@ -457,13 +458,30 @@ button.ghost:hover { border-color: rgba(94, 240, 193, 0.4); }
   margin: 0; font-size: 13px; color: var(--text);
 }
 
+@media (max-width: 900px) {
+  #personality-panel .row-top,
+  #personality-panel .row-voice {
+    grid-template-columns: 1fr;
+  }
+
+  #personality-panel .row-top button,
+  #personality-panel .row-voice button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .section-heading {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 @media (max-width: 760px) {
   .hero h1 { font-size: 26px; }
   .privacy-notice { padding: 10px 12px; }
   .backend-choice-grid { grid-template-columns: 1fr; }
   .hf-config-grid { grid-template-columns: 1fr; }
   .row { grid-template-columns: 1fr; }
-  #personality-panel .row:first-of-type { grid-template-columns: 1fr; }
   button { width: 100%; justify-content: center; }
   .actions { flex-direction: column; align-items: flex-start; }
 }
