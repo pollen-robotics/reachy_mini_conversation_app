@@ -45,7 +45,7 @@ DEFAULT_PROFILES_DIRECTORY = _resolve_default_profiles_directory()
 
 # Full list of voices supported by the OpenAI Realtime / TTS API.
 # Source: https://developers.openai.com/api/docs/guides/text-to-speech/#voice-options
-# "marin" and "cedar" are recommended for gpt-realtime.
+# "marin" and "cedar" are recommended for gpt-realtime-2.
 AVAILABLE_VOICES: list[str] = [
     "alloy",
     "ash",
@@ -113,7 +113,7 @@ class HFBackendDefaults:
 
 HF_DEFAULTS = HFBackendDefaults()
 DEFAULT_MODEL_NAME_BY_BACKEND = {
-    OPENAI_BACKEND: "gpt-realtime",
+    OPENAI_BACKEND: "gpt-realtime-2",
     GEMINI_BACKEND: "gemini-3.1-flash-live-preview",
     HF_BACKEND: HF_DEFAULTS.model_name,
 }
