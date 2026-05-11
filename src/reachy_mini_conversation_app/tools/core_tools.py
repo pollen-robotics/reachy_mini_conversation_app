@@ -281,6 +281,14 @@ def get_tool_specs(exclusion_list: list[str] = []) -> list[Dict[str, Any]]:
     return [spec for spec in ALL_TOOL_SPECS if spec.get("name") not in exclusion_list]
 
 
+def get_active_tool_specs(deps: ToolDependencies) -> list[Dict[str, Any]]:
+    """Get tool specs filtered by what the current session deps support."""
+    exclusion_list: list[str] = []
+    if not (deps.camera_worker and deps.camera_worker.head_tracker):
+        exclusion_list.append("head_tracking")
+    return get_tool_specs(exclusion_list)
+
+
 # Dispatcher
 def _safe_load_obj(args_json: str) -> Dict[str, Any]:
     try:

@@ -1,13 +1,16 @@
+from __future__ import annotations
 import os
 import time
 import logging
+from typing import Any, Protocol, cast
 from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 import torch
 from PIL import Image
 from numpy.typing import NDArray
-from transformers import AutoProcessor, ProcessorMixin, AutoModelForImageTextToText
+from transformers import AutoProcessor, AutoModelForImageTextToText
 from huggingface_hub import snapshot_download
 
 from reachy_mini_conversation_app.config import config
@@ -21,6 +24,48 @@ LOCAL_VISION_RESPONSE_INSTRUCTIONS = (
     "If the answer is not clearly visible, say exactly: I can't tell from this image. "
     "Keep the answer short and factual."
 )
+
+
+class _VisionInputs(Mapping[str, object]):
+    """Tokenized processor inputs that can be moved to the inference device."""
+
+    def to(self, device: str) -> _VisionInputs:
+        """Move inputs to the selected inference device."""
+        raise NotImplementedError
+
+
+class _VisionTokenizer(Protocol):
+    """Tokenizer attributes used by generation."""
+
+    eos_token_id: int | None
+
+
+class _VisionProcessor(Protocol):
+    """Small interface required from the Hugging Face image-text processor."""
+
+    tokenizer: _VisionTokenizer
+
+    def apply_chat_template(
+        self,
+        conversation: object,
+        *,
+        add_generation_prompt: bool,
+        tokenize: bool,
+        return_dict: bool,
+        return_tensors: str,
+    ) -> _VisionInputs: ...
+
+    def batch_decode(self, sequences: object, *, skip_special_tokens: bool) -> list[str]: ...
+
+
+class _VisionModel(Protocol):
+    """Small interface required from the Hugging Face image-text model."""
+
+    def to(self, device: str) -> _VisionModel: ...
+
+    def eval(self) -> object: ...
+
+    def generate(self, **kwargs: object) -> Any: ...
 
 
 @dataclass
@@ -41,8 +86,8 @@ class VisionProcessor:
         """Initialize the vision processor."""
         self.vision_config = vision_config or VisionConfig()
         self.device = self._determine_device()
-        self.processor: ProcessorMixin | None = None
-        self.model: torch.nn.Module | None = None
+        self.processor: _VisionProcessor | None = None
+        self.model: _VisionModel | None = None
         self._initialized = False
 
     def _determine_device(self) -> str:
@@ -62,15 +107,21 @@ class VisionProcessor:
     def initialize(self) -> None:
         """Load model and processor onto the selected device."""
         logger.info("Loading SmolVLM2 model on %s (HF_HOME=%s)", self.device, config.HF_HOME)
-        processor: ProcessorMixin = AutoProcessor.from_pretrained(self.vision_config.model_path)  # type: ignore[no-untyped-call]
+        processor = cast(
+            _VisionProcessor,
+            AutoProcessor.from_pretrained(self.vision_config.model_path),  # type: ignore[no-untyped-call]
+        )
 
         model_kwargs: dict[str, object] = {
             "dtype": torch.bfloat16 if self.device == "cuda" else torch.float32,
         }
 
-        model: torch.nn.Module = AutoModelForImageTextToText.from_pretrained(
-            self.vision_config.model_path,
-            **model_kwargs,
+        model = cast(
+            _VisionModel,
+            AutoModelForImageTextToText.from_pretrained(
+                self.vision_config.model_path,
+                **model_kwargs,
+            ),
         )
         model = model.to(self.device)
 
@@ -112,25 +163,21 @@ class VisionProcessor:
         for attempt in range(self.vision_config.max_retries):
             try:
                 inputs = processor.apply_chat_template(
-                    messages,  # type: ignore[arg-type]
+                    messages,
                     add_generation_prompt=True,
                     tokenize=True,
                     return_dict=True,
                     return_tensors="pt",
                 )
-                inputs = inputs.to(self.device)  # type: ignore[attr-defined]
-                prompt_len = None
-                input_ids = inputs.get("input_ids")
-                input_shape = getattr(input_ids, "shape", None)
-                if input_shape:
-                    prompt_len = int(input_shape[-1])
+                inputs = inputs.to(self.device)
+                prompt_len = _last_shape_dim(inputs.get("input_ids"))
 
                 with torch.inference_mode():
-                    generated_ids = model.generate(  # type: ignore[operator]
+                    generated_ids = model.generate(
                         **inputs,
                         do_sample=False,
                         max_new_tokens=self.vision_config.max_new_tokens,
-                        pad_token_id=processor.tokenizer.eos_token_id,  # type: ignore[attr-defined]
+                        pad_token_id=processor.tokenizer.eos_token_id,
                     )
 
                 # Decode only the newly generated tokens, skipping the prompt
@@ -140,7 +187,7 @@ class VisionProcessor:
                     new_token_ids = generated_ids[:, prompt_len:]
                 else:
                     new_token_ids = [token_ids[prompt_len:] for token_ids in generated_ids]
-                response = processor.batch_decode(  # type: ignore[no-untyped-call]
+                response = processor.batch_decode(
                     new_token_ids,
                     skip_special_tokens=True,
                 )[0]
@@ -165,6 +212,14 @@ class VisionProcessor:
                     return f"Vision processing error after {self.vision_config.max_retries} attempts"
 
         return f"Vision processing error after {self.vision_config.max_retries} attempts"
+
+
+def _last_shape_dim(value: object) -> int | None:
+    """Return the last dimension from tensor-like objects that expose a shape."""
+    shape = getattr(value, "shape", None)
+    if not isinstance(shape, Sequence) or not shape:
+        return None
+    return int(shape[-1])
 
 
 def initialize_vision_processor() -> VisionProcessor:

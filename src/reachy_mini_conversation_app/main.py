@@ -46,7 +46,17 @@ def run(
     """Run the Reachy Mini conversation app."""
     # Putting these dependencies here makes the dashboard faster to load when the conversation app is installed
     from reachy_mini_conversation_app.moves import MovementManager
-    from reachy_mini_conversation_app.config import config, is_gemini_model, refresh_runtime_config_from_env
+    from reachy_mini_conversation_app.config import (
+        HF_BACKEND,
+        GEMINI_BACKEND,
+        OPENAI_BACKEND,
+        HF_LOCAL_CONNECTION_MODE,
+        config,
+        is_gemini_model,
+        get_backend_label,
+        get_hf_connection_selection,
+        refresh_runtime_config_from_env,
+    )
     from reachy_mini_conversation_app.startup_settings import (
         StartupSettings,
         load_startup_settings_into_runtime,
@@ -72,6 +82,21 @@ def run(
             startup_settings = load_startup_settings_into_runtime(instance_path)
         except Exception as e:
             logger.warning("Failed to load startup settings: %s", e)
+
+    if config.BACKEND_PROVIDER == HF_BACKEND:
+        logger.info(
+            "Configured backend provider: %s (%s), connection mode: %s",
+            config.BACKEND_PROVIDER,
+            get_backend_label(config.BACKEND_PROVIDER),
+            get_hf_connection_selection().mode,
+        )
+    else:
+        logger.info(
+            "Configured backend provider: %s (%s), model: %s",
+            config.BACKEND_PROVIDER,
+            get_backend_label(config.BACKEND_PROVIDER),
+            config.MODEL_NAME,
+        )
 
     from reachy_mini_conversation_app.console import LocalStream
     from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
@@ -150,17 +175,43 @@ def run(
     if is_gemini_model():
         from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
 
-        logger.info("Using Gemini Live handler for model: %s", config.MODEL_NAME)
+        logger.info(
+            "Using %s via GeminiLiveHandler",
+            get_backend_label(config.BACKEND_PROVIDER),
+        )
         handler = GeminiLiveHandler(
             deps,
             gradio_mode=args.gradio,
             instance_path=instance_path,
             startup_voice=startup_settings.voice,
         )
+    elif config.BACKEND_PROVIDER == HF_BACKEND:
+        from reachy_mini_conversation_app.huggingface_realtime import HuggingFaceRealtimeHandler
+
+        hf_connection_selection = get_hf_connection_selection()
+        transport_label = (
+            "Hugging Face direct websocket"
+            if hf_connection_selection.mode == HF_LOCAL_CONNECTION_MODE and hf_connection_selection.has_target
+            else "Hugging Face session proxy"
+        )
+        logger.info(
+            "Using %s via Hugging Face realtime handler (%s)",
+            get_backend_label(config.BACKEND_PROVIDER),
+            transport_label,
+        )
+        handler = HuggingFaceRealtimeHandler(
+            deps,
+            gradio_mode=args.gradio,
+            instance_path=instance_path,
+            startup_voice=startup_settings.voice,
+        )  # type: ignore[assignment]
     else:
         from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 
-        logger.info("Using OpenAI Realtime handler for model: %s", config.MODEL_NAME)
+        logger.info(
+            "Using %s via OpenAI realtime handler (OpenAI Realtime API)",
+            get_backend_label(config.BACKEND_PROVIDER),
+        )
         handler = OpenaiRealtimeHandler(
             deps,
             gradio_mode=args.gradio,
@@ -171,29 +222,28 @@ def run(
     stream_manager: gr.Blocks | LocalStream | None = None
 
     if args.gradio:
-        uses_gemini_backend = is_gemini_model()
-        api_key_textbox = gr.Textbox(
-            label="GEMINI_API_KEY" if uses_gemini_backend else "OPENAI API Key",
-            type="password",
-            value=(os.getenv("GEMINI_API_KEY") if uses_gemini_backend else os.getenv("OPENAI_API_KEY"))
-            if not get_space()
-            else "",
-        )
-
         from reachy_mini_conversation_app.gradio_personality import PersonalityUI
 
         personality_ui = PersonalityUI()
         personality_ui.create_components()
+        additional_inputs: list[Any] = [chatbot, *personality_ui.additional_inputs_ordered()]
+
+        if config.BACKEND_PROVIDER in {OPENAI_BACKEND, GEMINI_BACKEND}:
+            uses_gemini_backend = is_gemini_model()
+            api_key_textbox = gr.Textbox(
+                label="GEMINI_API_KEY" if uses_gemini_backend else "OPENAI API Key",
+                type="password",
+                value=(os.getenv("GEMINI_API_KEY") if uses_gemini_backend else os.getenv("OPENAI_API_KEY"))
+                if not get_space()
+                else "",
+            )
+            additional_inputs.insert(1, api_key_textbox)
 
         stream = Stream(
             handler=handler,
             mode="send-receive",
             modality="audio",
-            additional_inputs=[
-                chatbot,
-                api_key_textbox,
-                *personality_ui.additional_inputs_ordered(),
-            ],
+            additional_inputs=additional_inputs,
             additional_outputs=[chatbot],
             additional_outputs_handler=update_chatbot,
             ui_args={"title": "Talk with Reachy Mini"},

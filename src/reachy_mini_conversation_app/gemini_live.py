@@ -20,7 +20,7 @@ from datetime import datetime
 import numpy as np
 import gradio as gr
 from google import genai
-from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item, audio_to_int16
+from fastrtc import AdditionalOutputs, wait_for_item, audio_to_int16
 from google.genai import types
 from numpy.typing import NDArray
 from scipy.signal import resample
@@ -34,8 +34,9 @@ from reachy_mini_conversation_app.config import (
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
-    get_tool_specs,
+    get_active_tool_specs,
 )
+from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.camera_frame_encoding import encode_bgr_frame_as_jpeg
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolCallRoutine,
@@ -137,7 +138,7 @@ def _resolve_gemini_startup_voice(voice: str | None) -> str | None:
     return resolved
 
 
-class GeminiLiveHandler(AsyncStreamHandler):
+class GeminiLiveHandler(ConversationHandler):
     """Gemini Live API handler for fastrtc Stream."""
 
     def __init__(
@@ -363,7 +364,11 @@ class GeminiLiveHandler(AsyncStreamHandler):
         voice = _resolve_gemini_voice(self._voice_override or get_session_voice())
 
         # Convert OpenAI-style tool specs to Gemini function declarations
-        tool_specs = get_tool_specs()
+        tool_specs = get_active_tool_specs(self.deps)
+        logger.info(
+            "Tools to be used in conversation: %s",
+            [tool["name"] for tool in tool_specs],
+        )
         function_declarations = _openai_tool_specs_to_gemini(tool_specs)
 
         tools_config: List[Dict[str, Any]] = []
@@ -717,7 +722,7 @@ class GeminiLiveHandler(AsyncStreamHandler):
         timestamp_msg = (
             f"[Idle time update: {self.format_timestamp()} - No activity for {idle_duration:.1f}s] "
             "You've been idle for a while. Feel free to get creative - dance, show an emotion, "
-            "look around, do nothing, or just be yourself!"
+            "look around, call idle_do_nothing to stay still and silent, or just be yourself!"
         )
         if not self.session:
             logger.debug("No session, cannot send idle signal")

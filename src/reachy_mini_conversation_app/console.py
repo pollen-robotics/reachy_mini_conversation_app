@@ -24,23 +24,29 @@ from scipy.signal import resample
 from reachy_mini import ReachyMini
 from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.config import (
+    HF_BACKEND,
     GEMINI_BACKEND,
     LOCKED_PROFILE,
     OPENAI_BACKEND,
+    HF_REALTIME_WS_URL_ENV,
+    HF_LOCAL_CONNECTION_MODE,
+    HF_DEPLOYED_CONNECTION_MODE,
+    HF_REALTIME_CONNECTION_MODE_ENV,
     config,
     get_backend_choice,
+    get_hf_session_url,
+    get_hf_direct_ws_url,
+    build_hf_direct_ws_url,
+    has_hf_realtime_target,
+    parse_hf_direct_target,
     get_model_name_for_backend,
+    get_hf_connection_selection,
     refresh_runtime_config_from_env,
 )
-from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
+from reachy_mini_conversation_app.audio.startup_config import apply_audio_startup_config
+from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
-
-
-try:
-    from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
-except ImportError:
-    GeminiLiveHandler = None  # type: ignore[misc,assignment]
 
 
 try:
@@ -59,6 +65,12 @@ except Exception:  # pragma: no cover - only loaded when settings_app is used
 
 logger = logging.getLogger(__name__)
 
+LOCAL_PLAYER_BACKEND = (
+    getattr(MediaBackend, "LOCAL", None)
+    or getattr(MediaBackend, "GSTREAMER", None)
+    or getattr(MediaBackend, "DEFAULT", None)
+)
+
 LEGACY_STARTUP_ENV_NAMES = (
     "REACHY_MINI_CUSTOM_PROFILE",
     "REACHY_MINI_VOICE_OVERRIDE",
@@ -70,13 +82,13 @@ class LocalStream:
 
     def __init__(
         self,
-        handler: "OpenaiRealtimeHandler | GeminiLiveHandler",
+        handler: ConversationHandler,
         robot: ReachyMini,
         *,
         settings_app: Optional[FastAPI] = None,
         instance_path: Optional[str] = None,
     ):
-        """Initialize the stream with an OpenAI realtime handler and pipelines.
+        """Initialize the stream with a realtime handler and pipelines.
 
         - ``settings_app``: the Reachy Mini Apps FastAPI to attach settings endpoints.
         - ``instance_path``: directory where per-instance ``.env`` should be stored.
@@ -91,6 +103,7 @@ class LocalStream:
         self._instance_path: Optional[str] = instance_path
         self._settings_initialized = False
         self._asyncio_loop = None
+        self._active_backend_name = get_backend_choice()
 
     # ---- Settings UI ----
     def _read_env_lines(self, env_path: Path) -> list[str]:
@@ -129,8 +142,7 @@ class LocalStream:
 
     def _active_backend(self) -> str:
         """Return the backend family of the currently running handler."""
-        handler_name = type(self.handler).__name__.lower()
-        return GEMINI_BACKEND if "gemini" in handler_name else OPENAI_BACKEND
+        return self._active_backend_name
 
     @staticmethod
     def _has_key(value: Optional[str]) -> bool:
@@ -141,7 +153,18 @@ class LocalStream:
         """Return whether the requested backend has its required credential."""
         if backend == GEMINI_BACKEND:
             return self._has_key(config.GEMINI_API_KEY)
+        if backend == HF_BACKEND:
+            return has_hf_realtime_target()
         return self._has_key(config.OPENAI_API_KEY)
+
+    @staticmethod
+    def _requirement_name(backend: str) -> str:
+        """Return the env var users need for a backend, if any."""
+        if backend == GEMINI_BACKEND:
+            return "GEMINI_API_KEY"
+        if backend == HF_BACKEND:
+            return HF_REALTIME_WS_URL_ENV
+        return "OPENAI_API_KEY"
 
     def _persist_env_value(self, env_name: str, value: str) -> None:
         """Persist a non-empty environment value in memory and in the instance `.env`."""
@@ -218,6 +241,20 @@ class LocalStream:
         except Exception as e:
             logger.warning("Failed to remove %s: %s", ", ".join(normalized_names), e)
 
+    def _persist_hf_direct_connection(self, host: str, port: int) -> None:
+        """Persist a direct Hugging Face websocket target."""
+        self._persist_env_values(
+            {
+                HF_REALTIME_CONNECTION_MODE_ENV: HF_LOCAL_CONNECTION_MODE,
+                HF_REALTIME_WS_URL_ENV: build_hf_direct_ws_url(host, port),
+            }
+        )
+
+    def _persist_hf_allocator_connection(self) -> None:
+        """Persist the deployed Hugging Face allocator mode."""
+        self._persist_env_value(HF_REALTIME_CONNECTION_MODE_ENV, HF_DEPLOYED_CONNECTION_MODE)
+        self._remove_persisted_env_values(("HF_REALTIME_SESSION_URL",))
+
     def _persist_api_key(self, key: str) -> None:
         """Persist OPENAI_API_KEY to environment and instance `.env`."""
         self._persist_env_value("OPENAI_API_KEY", key)
@@ -231,6 +268,16 @@ class LocalStream:
         current_backend = get_backend_choice()
         current_model_name = (os.getenv("MODEL_NAME") or "").strip()
         updates = {"BACKEND_PROVIDER": backend}
+        if backend == HF_BACKEND:
+            self._persist_env_values(updates)
+            try:
+                os.environ.pop("MODEL_NAME", None)
+            except Exception:
+                pass
+            self._remove_persisted_env_values(("MODEL_NAME",))
+            refresh_runtime_config_from_env()
+            return
+
         if current_model_name and current_model_name != get_model_name_for_backend(current_backend):
             updates["MODEL_NAME"] = current_model_name
         else:
@@ -294,14 +341,26 @@ class LocalStream:
         class BackendPayload(BaseModel):
             backend: str
             api_key: Optional[str] = None
+            hf_mode: Optional[str] = None
+            hf_host: Optional[str] = None
+            hf_port: Optional[int] = None
 
         def _status_payload() -> dict[str, object]:
             backend_provider = get_backend_choice()
             active_backend = self._active_backend()
             has_openai_key = self._has_required_key(OPENAI_BACKEND)
             has_gemini_key = self._has_required_key(GEMINI_BACKEND)
+            hf_session_url = get_hf_session_url()
+            hf_ws_url = get_hf_direct_ws_url()
+            hf_direct_host, hf_direct_port = parse_hf_direct_target(hf_ws_url)
+            has_hf_session_url = bool(hf_session_url)
+            has_hf_ws_url = bool(hf_ws_url)
+            hf_connection_selection = get_hf_connection_selection()
+            hf_connection_mode = hf_connection_selection.mode
+            has_hf_connection = hf_connection_selection.has_target
             can_proceed_with_openai = has_openai_key
             can_proceed_with_gemini = has_gemini_key
+            can_proceed_with_hf = has_hf_connection
             can_proceed = self._has_required_key(active_backend)
             requires_restart = backend_provider != active_backend
             return {
@@ -310,9 +369,16 @@ class LocalStream:
                 "has_key": can_proceed,
                 "has_openai_key": has_openai_key,
                 "has_gemini_key": has_gemini_key,
+                "has_hf_session_url": has_hf_session_url,
+                "has_hf_ws_url": has_hf_ws_url,
+                "has_hf_connection": has_hf_connection,
+                "hf_connection_mode": hf_connection_mode,
+                "hf_direct_host": hf_direct_host,
+                "hf_direct_port": hf_direct_port,
                 "can_proceed": can_proceed,
                 "can_proceed_with_openai": can_proceed_with_openai,
                 "can_proceed_with_gemini": can_proceed_with_gemini,
+                "can_proceed_with_hf": can_proceed_with_hf,
                 "requires_restart": requires_restart,
             }
 
@@ -353,7 +419,7 @@ class LocalStream:
         @self._settings_app.post("/backend_config")
         def _set_backend(payload: BackendPayload) -> JSONResponse:
             backend = payload.backend.strip().lower()
-            if backend not in {OPENAI_BACKEND, GEMINI_BACKEND}:
+            if backend not in {OPENAI_BACKEND, GEMINI_BACKEND, HF_BACKEND}:
                 return JSONResponse({"ok": False, "error": "invalid_backend"}, status_code=400)
 
             api_key = (payload.api_key or "").strip()
@@ -364,6 +430,28 @@ class LocalStream:
                 self._persist_api_key(api_key)
             if backend == GEMINI_BACKEND and api_key:
                 self._persist_gemini_api_key(api_key)
+            if backend == HF_BACKEND:
+                hf_selection = get_hf_connection_selection()
+                hf_mode = (payload.hf_mode or hf_selection.mode).strip().lower()
+                if hf_mode == HF_LOCAL_CONNECTION_MODE:
+                    existing_host, existing_port = parse_hf_direct_target(hf_selection.direct_ws_url)
+                    host = (payload.hf_host or "").strip() or existing_host or ""
+                    if not host:
+                        return JSONResponse({"ok": False, "error": "empty_hf_host"}, status_code=400)
+                    if "://" in host or "/" in host or "?" in host or "#" in host:
+                        return JSONResponse({"ok": False, "error": "invalid_hf_host"}, status_code=400)
+
+                    port = payload.hf_port if payload.hf_port is not None else existing_port or 8765
+                    if port < 1 or port > 65535:
+                        return JSONResponse({"ok": False, "error": "invalid_hf_port"}, status_code=400)
+
+                    self._persist_hf_direct_connection(host, port)
+                elif hf_mode == HF_DEPLOYED_CONNECTION_MODE:
+                    if not bool(get_hf_session_url()):
+                        return JSONResponse({"ok": False, "error": "missing_hf_session_url"}, status_code=400)
+                    self._persist_hf_allocator_connection()
+                else:
+                    return JSONResponse({"ok": False, "error": "invalid_hf_mode"}, status_code=400)
 
             self._persist_backend_choice(backend)
             payload_data = _status_payload()
@@ -429,29 +517,20 @@ class LocalStream:
 
         active_backend = self._active_backend()
 
-        # If key is still missing, try to download one from HuggingFace (OpenAI only)
-        if active_backend == OPENAI_BACKEND and not self._has_required_key(active_backend):
-            logger.info("OPENAI_API_KEY not set, attempting to download from HuggingFace...")
-            try:
-                from gradio_client import Client
-
-                client = Client("HuggingFaceM4/gradium_setup", verbose=False)
-                key, _ = client.predict(api_name="/claim_b_key")
-                if key and key.strip():
-                    logger.info("Successfully downloaded API key from HuggingFace")
-                    # Persist it immediately
-                    self._persist_api_key(key)
-            except Exception as e:
-                logger.warning(f"Failed to download API key from HuggingFace: {e}")
-
         # Always expose settings UI if a settings app is available
-        # (do this AFTER loading/downloading the key so status endpoint sees the right value)
+        # (do this AFTER loading the instance .env so status endpoint sees the right value)
         self._init_settings_ui_if_needed()
 
         # If key is still missing -> wait until provided via the settings UI
         if not self._has_required_key(active_backend):
-            key_name = "GEMINI_API_KEY" if active_backend == GEMINI_BACKEND else "OPENAI_API_KEY"
-            logger.warning("%s not found. Open the app settings page to enter it.", key_name)
+            requirement_name = self._requirement_name(active_backend)
+            if active_backend == HF_BACKEND:
+                logger.error(
+                    "%s not found. Set it in the app .env before starting the Hugging Face backend.", requirement_name
+                )
+                return
+            else:
+                logger.warning("%s not found. Open the app settings page to enter it.", requirement_name)
             # Poll until the key becomes available (set via the settings UI)
             try:
                 while not self._has_required_key(active_backend):
@@ -464,6 +543,7 @@ class LocalStream:
         self._robot.media.start_recording()
         self._robot.media.start_playing()
         time.sleep(1)  # give some time to the pipelines to start
+        apply_audio_startup_config(self._robot, logger=logger)
 
         async def runner() -> None:
             # Capture loop for cross-thread personality actions
@@ -532,7 +612,12 @@ class LocalStream:
         backend = getattr(self._robot.media, "backend", None)
         audio = getattr(self._robot.media, "audio", None)
         if audio is not None:
-            if backend == MediaBackend.LOCAL and hasattr(audio, "clear_player") and callable(audio.clear_player):
+            if (
+                LOCAL_PLAYER_BACKEND is not None
+                and backend == LOCAL_PLAYER_BACKEND
+                and hasattr(audio, "clear_player")
+                and callable(audio.clear_player)
+            ):
                 audio.clear_player()
             elif (
                 backend == MediaBackend.WEBRTC

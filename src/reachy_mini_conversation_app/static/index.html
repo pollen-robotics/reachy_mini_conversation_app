@@ -16,13 +16,13 @@
       <header class="hero">
         <div class="pill">Headless control</div>
         <h1>Reachy Mini Conversation</h1>
-        <p class="subtitle">Choose a realtime backend, add a Gemini token if needed, and tweak personalities without the full UI.</p>
+        <p class="subtitle">Choose a realtime backend, add credentials only when needed, and tweak personalities without the full UI.</p>
       </header>
 
       <aside class="privacy-notice" role="note" aria-label="Privacy notice">
         <p>
           <strong>Privacy notice:</strong>
-          Speech and camera data are sent to your selected realtime backend for inference. See OpenAI's
+          Speech and camera data are sent to your selected realtime backend for inference. Hugging Face won't store any speech or images sent to our server. See OpenAI's
           <a href="https://platform.openai.com/docs/guides/your-data" target="_blank" rel="noopener">
             data usage policy
           </a>
@@ -37,11 +37,13 @@
           <summary>Learn more</summary>
 
           <p>
-            In privacy-sensitive environments, use <code>--local-vision</code> to process images on-device. See the
+            In privacy-sensitive environments, use your own local version of
+            <a href="https://github.com/huggingface/speech-to-speech" target="_blank" rel="noopener">speech-to-speech</a>,
+            or combine any backend with <code>--local-vision</code> to process images on-device. See the
             <a href="https://github.com/pollen-robotics/reachy_mini_conversation_app/blob/main/README.md" target="_blank" rel="noopener">
               project README
             </a>
-            for full setup instructions. An open-source approach is in the works – stay tuned for its release.
+            for full setup instructions.
           </p>
         </details>
       </aside>
@@ -55,17 +57,24 @@
           <span id="backend-chip" class="chip">Required</span>
         </div>
         <p id="backend-note" class="muted backend-note">
-          OpenAI Realtime uses the distributed OpenAI key. Gemini Live needs your own <code>GEMINI_API_KEY</code>.
+          OpenAI Realtime needs your own <code>OPENAI_API_KEY</code>. Gemini Live needs your own <code>GEMINI_API_KEY</code>. Hugging Face uses either the built-in server or a direct realtime websocket endpoint.
         </p>
         <p class="muted backend-note">
           Backend changes are saved here, then applied after you restart Reachy Mini Conversation from the dashboard or desktop app.
         </p>
         <div class="backend-choice-grid" role="radiogroup" aria-label="Conversation backend">
+          <label class="backend-choice" data-backend-card="huggingface">
+            <input type="radio" name="backend" value="huggingface" />
+            <span class="backend-choice-body">
+              <span class="backend-choice-title">Hugging Face</span>
+              <span class="backend-choice-copy">Use the built-in Hugging Face server or your own local endpoint.</span>
+            </span>
+          </label>
           <label class="backend-choice is-selected" data-backend-card="openai">
             <input type="radio" name="backend" value="openai" checked />
             <span class="backend-choice-body">
               <span class="backend-choice-title">OpenAI Realtime</span>
-              <span class="backend-choice-copy">Start quickly with the bundled OpenAI access.</span>
+              <span class="backend-choice-copy">Bring your own <code>OPENAI_API_KEY</code> to use OpenAI Realtime.</span>
             </span>
           </label>
           <label class="backend-choice" data-backend-card="gemini">
@@ -103,8 +112,43 @@
           <span class="chip">Required</span>
         </div>
         <p id="form-copy" class="muted">Paste your API key once and we will store it locally for the headless conversation loop.</p>
-        <label id="api-key-label" for="api-key">OpenAI API Key</label>
-        <input id="api-key" type="password" placeholder="sk-..." autocomplete="off" />
+        <div id="api-key-fields">
+          <label id="api-key-label" for="api-key">OpenAI API Key</label>
+          <input id="api-key" type="password" placeholder="sk-..." autocomplete="off" />
+        </div>
+        <div id="hf-fields" class="hidden">
+          <label for="hf-mode">Connection mode</label>
+          <select id="hf-mode">
+            <option value="local">Local</option>
+            <option value="deployed">Hugging Face server</option>
+          </select>
+
+          <div id="hf-direct-fields" class="hf-config-grid">
+            <p class="muted hf-help hf-local-note">
+              Use your own Hugging Face backend powered by
+              <a href="https://github.com/huggingface/speech-to-speech" target="_blank" rel="noopener">speech-to-speech</a>.
+              Run it either on the same machine, locally on your network, or hosted on Hugging Face.
+            </p>
+            <div class="hf-field">
+              <label for="hf-host-preset">Host</label>
+              <select id="hf-host-preset">
+                <option value="localhost">localhost</option>
+                <option value="custom">Custom IP or hostname</option>
+              </select>
+            </div>
+            <div class="hf-field">
+              <label for="hf-port">Port</label>
+              <input id="hf-port" type="text" inputmode="numeric" value="8765" placeholder="8765" autocomplete="off" />
+            </div>
+          </div>
+
+          <div id="hf-host-custom-wrap" class="hidden">
+            <label for="hf-host-custom">Custom host or IP</label>
+            <input id="hf-host-custom" type="text" placeholder="192.168.1.20" autocomplete="off" />
+          </div>
+
+          <p id="hf-preview" class="status"></p>
+        </div>
         <div class="actions">
           <button id="save-btn">Save key</button>
           <p id="status" class="status" role="status" aria-live="polite" aria-atomic="true"></p>
