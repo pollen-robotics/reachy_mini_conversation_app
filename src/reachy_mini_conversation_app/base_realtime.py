@@ -705,8 +705,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         self._turn_first_audio_at = None
                         if hasattr(self, "_clear_queue") and callable(self._clear_queue):
                             self._clear_queue()
-                        if self.deps.head_wobbler is not None:
-                            self.deps.head_wobbler.reset()
                         self.deps.movement_manager.set_listening(True)
                         logger.debug("User speech started")
 
@@ -716,8 +714,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         logger.debug("User speech stopped - server will auto-commit with VAD")
 
                     if event.type == "response.output_audio.done":
-                        if self.deps.head_wobbler is not None:
-                            self.deps.head_wobbler.request_reset_after_current_audio()
                         logger.debug("response completed")
 
                     if event.type == "response.created":
@@ -810,8 +806,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                     if event.type == "response.output_audio.delta":
                         decoded_pcm_bytes = base64.b64decode(event.delta)
                         decoded_pcm = np.frombuffer(decoded_pcm_bytes, dtype=np.int16).reshape(1, -1)
-                        if self.gradio_mode and self.deps.head_wobbler is not None:
-                            self.deps.head_wobbler.feed_pcm(decoded_pcm, self.output_sample_rate)
                         self._mark_activity("assistant_audio_delta")
                         if self._turn_user_done_at is not None and self._turn_first_audio_at is None:
                             self._turn_first_audio_at = time.perf_counter()

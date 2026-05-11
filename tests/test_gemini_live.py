@@ -152,7 +152,7 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
 
     task = asyncio.create_task(handler._run_live_session())
     await _wait_for(
-        lambda: head_wobbler.request_reset_after_current_audio.called and handler.output_queue.qsize() >= 3
+        lambda: handler.output_queue.qsize() >= 3
     )
 
     handler._stop_event.set()

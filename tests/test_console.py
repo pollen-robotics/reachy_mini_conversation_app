@@ -4,14 +4,11 @@ import sys
 import asyncio
 import threading
 from types import SimpleNamespace
-from typing import Any
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-import numpy as np
 import pytest
 from fastapi import FastAPI
-from numpy.typing import NDArray
 from fastapi.testclient import TestClient
 
 from reachy_mini.media.media_manager import MediaBackend
