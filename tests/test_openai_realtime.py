@@ -349,7 +349,6 @@ async def test_completed_user_transcript_resets_idle_state(monkeypatch: Any) -> 
 @pytest.mark.asyncio
 async def test_output_audio_done_schedules_head_wobbler_reset(monkeypatch: Any) -> None:
     """OpenAI speech completion should let the wobbler reset itself after queued audio."""
-
     audio_delta = base64.b64encode(b"\x00\x00\x10\x00").decode("ascii")
     head_wobbler = MagicMock()
 
@@ -806,6 +805,8 @@ async def test_response_sender_retries_when_active_response_error_uses_type_only
                         error=FakeError("Cannot create response while another response is in progress."),
                     )
                 )
+                # Simulate the active response finishing so the retry can proceed
+                event_queue.put_nowait(FakeEvent("response.done", response=MagicMock()))
             else:
                 event_queue.put_nowait(FakeEvent("response.created"))
                 event_queue.put_nowait(FakeEvent("response.done", response=MagicMock()))
