@@ -8,6 +8,7 @@ from typing import Any, List, Tuple
 from collections.abc import Callable
 
 import numpy as np
+from numpy.typing import NDArray
 
 from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
 
@@ -18,7 +19,11 @@ def _make_audio_chunk(duration_s: float = 0.3, frequency_hz: float = 220.0) -> s
     return base64.b64encode(pcm.tobytes()).decode("ascii")
 
 
-def _make_pcm(duration_s: float = 0.3, frequency_hz: float = 220.0, sample_rate: int = 24000) -> np.ndarray:
+def _make_pcm(
+    duration_s: float = 0.3,
+    frequency_hz: float = 220.0,
+    sample_rate: int = 24000,
+) -> NDArray[np.int16]:
     """Generate a mono PCM16 sine wave at the requested sample rate."""
     sample_count = int(sample_rate * duration_s)
     t = np.linspace(0, duration_s, sample_count, endpoint=False)

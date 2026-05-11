@@ -3,6 +3,7 @@
 import base64
 import asyncio
 from types import SimpleNamespace
+from typing import Any, Callable, AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, call
 
 import numpy as np
@@ -17,7 +18,7 @@ from reachy_mini_conversation_app.tools.tool_constants import ToolState
 from reachy_mini_conversation_app.tools.background_tool_manager import ToolNotification
 
 
-def _server_content(**kwargs):
+def _server_content(**kwargs: Any) -> SimpleNamespace:
     defaults = {
         "model_turn": None,
         "turn_complete": None,
@@ -34,11 +35,11 @@ def _server_content(**kwargs):
     return SimpleNamespace(**defaults)
 
 
-def _response(server_content=None, tool_call=None):
+def _response(server_content: Any = None, tool_call: Any = None) -> SimpleNamespace:
     return SimpleNamespace(server_content=server_content, tool_call=tool_call)
 
 
-async def _wait_for(predicate, timeout: float = 1.0) -> None:
+async def _wait_for(predicate: Callable[[], bool], timeout: float = 1.0) -> None:
     deadline = asyncio.get_running_loop().time() + timeout
     while asyncio.get_running_loop().time() < deadline:
         if predicate():
@@ -48,24 +49,24 @@ async def _wait_for(predicate, timeout: float = 1.0) -> None:
 
 
 class _FakeSession:
-    def __init__(self, batches, stop_event: asyncio.Event):
+    def __init__(self, batches: list[list[SimpleNamespace]], stop_event: asyncio.Event) -> None:
         self._batches = list(batches)
         self._stop_event = stop_event
-        self.realtime_inputs = []
-        self.tool_responses = []
+        self.realtime_inputs: list[dict[str, Any]] = []
+        self.tool_responses: list[dict[str, Any]] = []
 
     async def close(self) -> None:
         self._stop_event.set()
 
-    async def send_realtime_input(self, **kwargs) -> None:
+    async def send_realtime_input(self, **kwargs: Any) -> None:
         self.realtime_inputs.append(kwargs)
         return None
 
-    async def send_tool_response(self, **kwargs) -> None:
+    async def send_tool_response(self, **kwargs: Any) -> None:
         self.tool_responses.append(kwargs)
         return None
 
-    async def receive(self):
+    async def receive(self) -> AsyncIterator[SimpleNamespace]:
         if self._batches:
             for response in self._batches.pop(0):
                 yield response
@@ -83,17 +84,19 @@ class _FakeConnectContext:
     async def __aenter__(self) -> _FakeSession:
         return self._session
 
-    async def __aexit__(self, *_args) -> bool:
+    async def __aexit__(self, *_args: object) -> bool:
         return False
 
 
 class _FakeLiveClient:
-    def __init__(self, session: _FakeSession):
+    def __init__(self, session: _FakeSession) -> None:
         self.aio = SimpleNamespace(live=SimpleNamespace(connect=lambda **_kwargs: _FakeConnectContext(session)))
 
 
 @pytest.mark.asyncio
-async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(monkeypatch) -> None:
+async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Gemini turns should emit one transcript per role and let the wobbler reset after speech."""
     monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda: "test")
     monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
@@ -109,8 +112,8 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(monkey
         head_wobbler=head_wobbler,
     )
     handler = GeminiLiveHandler(deps)
-    object.__setattr__(handler.tool_manager, "start_up", MagicMock())
-    object.__setattr__(handler.tool_manager, "shutdown", AsyncMock())
+    monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
+    monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
 
     audio_bytes = b"\x00\x00\x10\x00" * 256
     session = _FakeSession(

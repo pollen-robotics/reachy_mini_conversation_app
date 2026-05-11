@@ -1,5 +1,9 @@
 const OPENAI_BACKEND = "openai";
 const GEMINI_BACKEND = "gemini";
+const HF_BACKEND = "huggingface";
+const DEFAULT_BACKEND = HF_BACKEND;
+const HF_DEFAULT_HOST = "localhost";
+const HF_DEFAULT_PORT = 8765;
 const BACKEND_META = {
   [OPENAI_BACKEND]: {
     label: "OpenAI Realtime",
@@ -9,10 +13,10 @@ const BACKEND_META = {
     saveButton: "Save key",
     changeButton: "Change OpenAI key",
     readyTitle: "OpenAI Realtime ready",
-    readyCopy: "OpenAI Realtime is configured. You can jump straight to personalities.",
-    formCopy: "OpenAI Realtime uses the distributed key when available. Paste your own key if you want an override or need a fallback.",
-    requiredCredentialsCopy: "OpenAI Realtime usually uses the distributed key. If it is unavailable here, paste your own OpenAI key to continue.",
-    note: "OpenAI Realtime uses the distributed OpenAI key. You can still paste your own key if you want to override it.",
+    readyCopy: "OpenAI Realtime is configured. Your saved OpenAI key is ready to use.",
+    formCopy: "Paste your OPENAI_API_KEY once and we will store it locally for the headless conversation loop.",
+    requiredCredentialsCopy: "OpenAI Realtime requires your own OPENAI_API_KEY before you can switch.",
+    note: "OpenAI Realtime requires your own OPENAI_API_KEY.",
   },
   [GEMINI_BACKEND]: {
     label: "Gemini Live",
@@ -25,12 +29,27 @@ const BACKEND_META = {
     readyCopy: "Gemini Live is configured. Your saved Gemini token is ready to use.",
     formCopy: "Paste your GEMINI_API_KEY once and we will store it locally for the headless conversation loop.",
     requiredCredentialsCopy: "Gemini Live requires your own GEMINI_API_KEY before you can switch.",
-    note: "OpenAI Realtime uses the distributed OpenAI key. Gemini Live needs your own GEMINI_API_KEY.",
+    note: "OpenAI Realtime requires OPENAI_API_KEY. Gemini Live needs GEMINI_API_KEY.",
+  },
+  [HF_BACKEND]: {
+    label: "Hugging Face",
+    formTitle: "Configure Hugging Face",
+    inputLabel: "",
+    placeholder: "",
+    saveButton: "Save connection",
+    changeButton: "Edit connection",
+    readyTitle: "Hugging Face ready",
+    readyCopy: "Hugging Face is configured. You can jump straight to personalities.",
+    formCopy: "Choose where Reachy should connect for Hugging Face.",
+    requiredCredentialsCopy: "Set up the Hugging Face connection details before switching.",
+    note: "Hugging Face can use the built-in server or your own local realtime websocket.",
   },
 };
 
 function backendHasCredentials(status, backend) {
-  return backend === GEMINI_BACKEND ? !!status.has_gemini_key : !!status.has_openai_key;
+  if (backend === GEMINI_BACKEND) return !!status.has_gemini_key;
+  if (backend === HF_BACKEND) return !!(status.has_hf_connection ?? (status.has_hf_session_url || status.has_hf_ws_url));
+  return !!status.has_openai_key;
 }
 
 function backendCanProceed(status, backend) {
@@ -39,17 +58,24 @@ function backendCanProceed(status, backend) {
       ? !!status.can_proceed_with_gemini
       : backendHasCredentials(status, backend);
   }
+  if (backend === HF_BACKEND) {
+    return status.can_proceed_with_hf !== undefined
+      ? !!status.can_proceed_with_hf
+      : backendHasCredentials(status, backend);
+  }
   return status.can_proceed_with_openai !== undefined
     ? !!status.can_proceed_with_openai
     : backendHasCredentials(status, backend);
 }
 
 function backendMeta(backend) {
-  return BACKEND_META[backend] || BACKEND_META[OPENAI_BACKEND];
+  return BACKEND_META[backend] || BACKEND_META[DEFAULT_BACKEND];
 }
 
 function formatBackendNote(text) {
-  return text.replace("GEMINI_API_KEY", "<code>GEMINI_API_KEY</code>");
+  return text
+    .replace("GEMINI_API_KEY", "<code>GEMINI_API_KEY</code>")
+    .replace("HF_REALTIME_WS_URL", "<code>HF_REALTIME_WS_URL</code>");
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -113,8 +139,13 @@ async function validateKey(key) {
   return data;
 }
 
-async function saveBackendConfig(backend, key = "") {
+async function saveBackendConfig(backend, { key = "", hfMode = "", hfHost = "", hfPort = null } = {}) {
   const body = { backend, api_key: key };
+  if (backend === HF_BACKEND) {
+    if (hfMode) body.hf_mode = hfMode;
+    if (hfHost) body.hf_host = hfHost;
+    if (hfPort !== null && hfPort !== undefined) body.hf_port = hfPort;
+  }
   const resp = await fetch("/backend_config", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -246,6 +277,22 @@ function setStatusMessage(el, text, tone = "") {
   el.setAttribute("aria-atomic", "true");
 }
 
+function describeHFConfiguration(status) {
+  if (status.hf_connection_mode === "local") {
+    const host = status.hf_direct_host || HF_DEFAULT_HOST;
+    const port = status.hf_direct_port || HF_DEFAULT_PORT;
+    return `Hugging Face will connect directly to ${host}:${port}.`;
+  }
+  if (status.has_hf_session_url) {
+    return "Hugging Face will use the built-in server.";
+  }
+  return "Choose the Hugging Face server or a local realtime endpoint.";
+}
+
+function isLocalHFHost(host) {
+  return !host || host === "localhost" || host === "127.0.0.1";
+}
+
 async function init() {
   const loading = document.getElementById("loading");
   show(loading, true);
@@ -263,10 +310,19 @@ async function init() {
   const personalityPanel = document.getElementById("personality-panel");
   const formTitle = document.getElementById("form-title");
   const formCopy = document.getElementById("form-copy");
+  const apiKeyFields = document.getElementById("api-key-fields");
   const apiKeyLabel = document.getElementById("api-key-label");
   const saveBtn = document.getElementById("save-btn");
   const changeKeyBtn = document.getElementById("change-key-btn");
   const input = document.getElementById("api-key");
+  const hfFields = document.getElementById("hf-fields");
+  const hfMode = document.getElementById("hf-mode");
+  const hfDirectFields = document.getElementById("hf-direct-fields");
+  const hfHostPreset = document.getElementById("hf-host-preset");
+  const hfHostCustomWrap = document.getElementById("hf-host-custom-wrap");
+  const hfHostCustom = document.getElementById("hf-host-custom");
+  const hfPort = document.getElementById("hf-port");
+  const hfPreview = document.getElementById("hf-preview");
 
   // Personality elements
   const pSelect = document.getElementById("personality-select");
@@ -287,11 +343,51 @@ async function init() {
     dance: ["stop_dance"],
     play_emotion: ["stop_emotion"],
   };
-  let selectedBackend = OPENAI_BACKEND;
+  let selectedBackend = DEFAULT_BACKEND;
   let editingCredentials = false;
 
+  function resolveHFHost() {
+    return hfHostPreset.value === "custom" ? hfHostCustom.value.trim() : HF_DEFAULT_HOST;
+  }
+
+  function updateHFControls() {
+    const localMode = hfMode.value !== "deployed";
+    const customHost = hfHostPreset.value === "custom";
+    show(hfDirectFields, localMode);
+    show(hfHostCustomWrap, localMode && customHost);
+
+    if (!localMode) {
+      setStatusMessage(hfPreview, "Hugging Face will use the built-in server.");
+      return;
+    }
+
+    const host = resolveHFHost() || "<host>";
+    const port = (hfPort.value || String(HF_DEFAULT_PORT)).trim();
+    setStatusMessage(hfPreview, `Will save ws://${host}:${port}/v1/realtime`);
+  }
+
+  function populateHFFields(status) {
+    const mode = status.hf_connection_mode
+      || (status.has_hf_session_url ? "deployed" : "local");
+    const existingHost = status.hf_direct_host || HF_DEFAULT_HOST;
+    const existingPort = status.hf_direct_port || HF_DEFAULT_PORT;
+
+    hfMode.value = mode;
+    if (isLocalHFHost(existingHost)) {
+      hfHostPreset.value = "localhost";
+      hfHostCustom.value = "";
+    } else {
+      hfHostPreset.value = "custom";
+      hfHostCustom.value = existingHost;
+    }
+    hfPort.value = String(existingPort);
+    updateHFControls();
+  }
+
   function setSelectedBackend(backend) {
-    selectedBackend = backend === GEMINI_BACKEND ? GEMINI_BACKEND : OPENAI_BACKEND;
+    selectedBackend = [OPENAI_BACKEND, GEMINI_BACKEND, HF_BACKEND].includes(backend)
+      ? backend
+      : DEFAULT_BACKEND;
     backendInputs.forEach((radio) => {
       radio.checked = radio.value === selectedBackend;
     });
@@ -301,31 +397,42 @@ async function init() {
   }
 
   function renderCredentialPanels(status) {
-    const persistedBackend = status.backend_provider || OPENAI_BACKEND;
+    const persistedBackend = status.backend_provider || DEFAULT_BACKEND;
     const activeBackend = status.active_backend || persistedBackend;
     const requiresRestart = !!status.requires_restart;
     const meta = backendMeta(selectedBackend);
     const canProceedWithSelectedBackend = backendCanProceed(status, selectedBackend);
     const selectedMatchesPersisted = selectedBackend === persistedBackend;
     const selectedMatchesActive = selectedBackend === activeBackend;
+    const usesApiKeyForm = selectedBackend === OPENAI_BACKEND || selectedBackend === GEMINI_BACKEND;
+    const usesHFForm = selectedBackend === HF_BACKEND;
+    const supportsForm = usesApiKeyForm || usesHFForm;
 
     backendChip.textContent = selectedBackend === persistedBackend ? "Saved" : "Selected";
     backendNote.innerHTML = formatBackendNote(meta.note);
 
     configuredTitle.textContent = meta.readyTitle;
-    configuredCopy.textContent = meta.readyCopy;
+    configuredCopy.textContent = usesHFForm ? describeHFConfiguration(status) : meta.readyCopy;
     formTitle.textContent = meta.formTitle;
-    formCopy.textContent = canProceedWithSelectedBackend ? meta.formCopy : meta.requiredCredentialsCopy;
+    formCopy.textContent = usesHFForm
+      ? meta.formCopy
+      : canProceedWithSelectedBackend
+        ? meta.formCopy
+        : meta.requiredCredentialsCopy;
     apiKeyLabel.textContent = meta.inputLabel;
     input.placeholder = meta.placeholder;
     saveBtn.textContent = meta.saveButton;
     changeKeyBtn.textContent = meta.changeButton;
 
     show(configuredPanel, canProceedWithSelectedBackend && !editingCredentials);
-    show(formPanel, editingCredentials || !canProceedWithSelectedBackend);
+    show(formPanel, supportsForm && (editingCredentials || !canProceedWithSelectedBackend));
+    show(apiKeyFields, usesApiKeyForm);
+    show(hfFields, usesHFForm);
+    if (usesHFForm) updateHFControls();
+    show(changeKeyBtn, supportsForm && canProceedWithSelectedBackend && !editingCredentials);
     show(
       backendSaveBtn,
-      canProceedWithSelectedBackend && !selectedMatchesPersisted,
+      canProceedWithSelectedBackend && !selectedMatchesPersisted && !editingCredentials,
     );
     backendSaveBtn.textContent = `Use ${meta.label}`;
 
@@ -356,17 +463,25 @@ async function init() {
   show(personalityPanel, false);
 
   const st = (await waitForStatus()) || {
-    active_backend: OPENAI_BACKEND,
-    backend_provider: OPENAI_BACKEND,
+    active_backend: DEFAULT_BACKEND,
+    backend_provider: DEFAULT_BACKEND,
     has_key: false,
     has_openai_key: false,
     has_gemini_key: false,
-    can_proceed: false,
+    has_hf_session_url: true,
+    has_hf_ws_url: false,
+    has_hf_connection: true,
+    hf_connection_mode: "deployed",
+    hf_direct_host: HF_DEFAULT_HOST,
+    hf_direct_port: HF_DEFAULT_PORT,
+    can_proceed: true,
     can_proceed_with_openai: false,
     can_proceed_with_gemini: false,
+    can_proceed_with_hf: true,
     requires_restart: false,
   };
-  setSelectedBackend(st.backend_provider || OPENAI_BACKEND);
+  populateHFFields(st);
+  setSelectedBackend(st.backend_provider || DEFAULT_BACKEND);
   statusEl.textContent = "";
   renderCredentialPanels(st);
 
@@ -381,6 +496,23 @@ async function init() {
   // Remove error styling when user starts typing
   input.addEventListener("input", () => {
     input.classList.remove("error");
+  });
+  hfHostCustom.addEventListener("input", () => {
+    hfHostCustom.classList.remove("error");
+    updateHFControls();
+  });
+  hfPort.addEventListener("input", () => {
+    hfPort.classList.remove("error");
+    updateHFControls();
+  });
+  hfMode.addEventListener("change", () => {
+    hfHostCustom.classList.remove("error");
+    hfPort.classList.remove("error");
+    updateHFControls();
+  });
+  hfHostPreset.addEventListener("change", () => {
+    hfHostCustom.classList.remove("error");
+    updateHFControls();
   });
 
   backendInputs.forEach((radio) => {
@@ -404,6 +536,59 @@ async function init() {
   });
 
   saveBtn.addEventListener("click", async () => {
+    if (selectedBackend === HF_BACKEND) {
+      const localMode = hfMode.value !== "deployed";
+      setStatusMessage(statusEl, "Saving connection...");
+      hfHostCustom.classList.remove("error");
+      hfPort.classList.remove("error");
+
+      try {
+        if (localMode) {
+          const host = resolveHFHost();
+          const port = Number.parseInt((hfPort.value || "").trim(), 10);
+          if (!host) {
+            hfHostCustom.classList.add("error");
+            setStatusMessage(statusEl, "Enter a valid host or IP address.", "warn");
+            return;
+          }
+          if (!Number.isInteger(port) || port < 1 || port > 65535) {
+            hfPort.classList.add("error");
+            setStatusMessage(statusEl, "Enter a valid port between 1 and 65535.", "warn");
+            return;
+          }
+
+          await saveBackendConfig(selectedBackend, {
+            hfMode: "local",
+            hfHost: host,
+            hfPort: port,
+          });
+        } else {
+          await saveBackendConfig(selectedBackend, {
+            hfMode: "deployed",
+          });
+        }
+        setStatusMessage(statusEl, "Saved. Reloading…", "ok");
+        window.location.reload();
+      } catch (e) {
+        if (e.message === "missing_hf_session_url") {
+          setStatusMessage(
+            statusEl,
+            "The built-in Hugging Face server URL is unavailable. Restart the app and try again.",
+            "error",
+          );
+        } else if (e.message === "empty_hf_host" || e.message === "invalid_hf_host") {
+          hfHostCustom.classList.add("error");
+          setStatusMessage(statusEl, "Enter a valid host or IP address.", "error");
+        } else if (e.message === "invalid_hf_port") {
+          hfPort.classList.add("error");
+          setStatusMessage(statusEl, "Enter a valid port between 1 and 65535.", "error");
+        } else {
+          setStatusMessage(statusEl, "Failed to save the Hugging Face connection.", "error");
+        }
+      }
+      return;
+    }
+
     const key = input.value.trim();
     if (!key) {
       setStatusMessage(statusEl, "Please enter a valid key.", "warn");
@@ -424,7 +609,7 @@ async function init() {
       } else {
         setStatusMessage(statusEl, "Saving Gemini token...", "ok");
       }
-      await saveBackendConfig(selectedBackend, key);
+      await saveBackendConfig(selectedBackend, { key });
       setStatusMessage(statusEl, "Saved. Reloading…", "ok");
       window.location.reload();
     } catch (e) {
@@ -443,7 +628,7 @@ async function init() {
     }
   });
 
-  if (!(st.can_proceed ?? backendCanProceed(st, st.backend_provider || OPENAI_BACKEND)) || st.requires_restart) {
+  if (!(st.can_proceed ?? backendCanProceed(st, st.backend_provider || DEFAULT_BACKEND)) || st.requires_restart) {
     show(loading, false);
     return;
   }

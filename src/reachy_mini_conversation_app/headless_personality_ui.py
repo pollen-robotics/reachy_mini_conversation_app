@@ -9,7 +9,7 @@ callable to avoid cross-thread issues.
 from __future__ import annotations
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import Any, Callable, Optional
 
 from fastapi import Query, FastAPI, Request
 
@@ -19,11 +19,7 @@ from .config import (
     get_default_voice_for_backend,
     get_available_voices_for_backend,
 )
-from .openai_realtime import OpenaiRealtimeHandler
-
-
-if TYPE_CHECKING:
-    from .gemini_live import GeminiLiveHandler
+from .conversation_handler import ConversationHandler
 from .headless_personality import (
     DEFAULT_OPTION,
     _sanitize_name,
@@ -41,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 def mount_personality_routes(
     app: FastAPI,
-    handler: OpenaiRealtimeHandler | GeminiLiveHandler,
+    handler: ConversationHandler,
     get_loop: Callable[[], asyncio.AbstractEventLoop | None],
     *,
     persist_personality: Callable[[Optional[str], Optional[str]], None] | None = None,

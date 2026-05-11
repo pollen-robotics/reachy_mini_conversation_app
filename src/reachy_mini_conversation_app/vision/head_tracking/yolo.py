@@ -1,5 +1,7 @@
 from __future__ import annotations
 import logging
+from typing import Protocol, cast
+from collections.abc import Sequence
 
 import numpy as np
 from numpy.typing import NDArray
@@ -9,7 +11,7 @@ from reachy_mini_conversation_app.vision.head_tracking import HeadTrackerResult
 
 try:
     from supervision import Detections
-    from ultralytics import YOLO  # type: ignore
+    from ultralytics import YOLO  # type: ignore[attr-defined]
 except ImportError as e:
     raise ImportError(
         "To use YOLO head tracker, please install the extra dependencies: pip install '.[yolo_vision]'",
@@ -18,6 +20,14 @@ from huggingface_hub import hf_hub_download
 
 
 logger = logging.getLogger(__name__)
+
+
+class _YoloModel(Protocol):
+    """Minimal YOLO model interface used by the head tracker."""
+
+    def __call__(self, source: NDArray[np.uint8], **kwargs: object) -> Sequence[object]: ...
+
+    def to(self, device: str) -> _YoloModel: ...
 
 
 class YoloHeadTracker:
@@ -35,7 +45,7 @@ class YoloHeadTracker:
 
         try:
             model_path = hf_hub_download(repo_id=model_repo, filename=model_filename)
-            self.model = YOLO(model_path).to(device)
+            self.model = cast(_YoloModel, YOLO(model_path).to(device))
             logger.info("YOLO face detection model loaded from %s", model_repo)
         except Exception as e:
             logger.error("Failed to load YOLO model: %s", e)
