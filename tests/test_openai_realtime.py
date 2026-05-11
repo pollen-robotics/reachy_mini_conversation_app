@@ -854,7 +854,12 @@ async def test_response_sender_retries_when_active_response_error_uses_type_only
     session_task = asyncio.create_task(handler._run_realtime_session())
     await asyncio.sleep(0)
     await handler._safe_response_create(instructions="req")
-    await asyncio.sleep(0.1)
+
+    # Wait until the retry actually fires the second create() call
+    deadline = asyncio.get_event_loop().time() + 5.0
+    while fake_response_api.call_count < 2 and asyncio.get_event_loop().time() < deadline:
+        await asyncio.sleep(0.02)
+
     await event_queue.put(None)
     await asyncio.wait_for(session_task, timeout=2.0)
 
