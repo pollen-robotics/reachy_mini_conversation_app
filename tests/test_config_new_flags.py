@@ -92,3 +92,14 @@ def test_audio_capture_path_invalid_falls_back_to_platform_default(monkeypatch):
     monkeypatch.setattr(sys, "platform", "linux")
     cfg = _reload_config(monkeypatch, {"REACHY_MINI_AUDIO_CAPTURE_PATH": "bogus"})
     assert cfg.AUDIO_CAPTURE_PATH == "alsa_rw"
+
+
+def test_llama_cpp_default_url_is_port_8080(monkeypatch):
+    import robot_comic.config as cfg_mod
+
+    assert cfg_mod.LLAMA_CPP_DEFAULT_URL == "http://astralplane.lan:8080"
+
+
+def test_llama_cpp_url_env_override(monkeypatch):
+    cfg = _reload_config(monkeypatch, {"LLAMA_CPP_URL": "http://myhost.lan:9999"})
+    assert cfg.LLAMA_CPP_URL == "http://myhost.lan:9999"

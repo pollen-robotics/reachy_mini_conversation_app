@@ -80,7 +80,7 @@ async def extract_punchline_via_llm(
     assistant_text: str,
     http_client: "httpx.AsyncClient",
     *,
-    llama_url: str = "http://astralplane.lan:11434",
+    llama_url: str = "http://astralplane.lan:8080",
 ) -> dict[str, Any] | None:
     """Ask llama-server to extract the punchline and topic from *assistant_text*.
 
