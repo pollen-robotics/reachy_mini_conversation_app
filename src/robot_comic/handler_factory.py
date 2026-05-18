@@ -541,7 +541,14 @@ def _build_stt_adapter(
     if input_backend == AUDIO_INPUT_FASTER_WHISPER:
         from robot_comic.adapters import FasterWhisperSTTAdapter
 
-        return FasterWhisperSTTAdapter(should_drop_frame=should_drop_frame)
+        return FasterWhisperSTTAdapter(
+            should_drop_frame=should_drop_frame,
+            model_name=config.FASTER_WHISPER_MODEL,
+            compute_type=config.FASTER_WHISPER_COMPUTE_TYPE,
+            vad_aggressiveness=config.FASTER_WHISPER_VAD_AGGRESSIVENESS,
+            no_speech_threshold=config.FASTER_WHISPER_NO_SPEECH_THRESHOLD,
+            max_buffer_sec=config.FASTER_WHISPER_MAX_BUFFER_SEC,
+        )
     raise NotImplementedError(
         f"No STT adapter implementation exists for {AUDIO_INPUT_BACKEND_ENV}={input_backend!r}. "
         f"Expected one of: {sorted(_LOCAL_STT_INPUT_BACKENDS)}."

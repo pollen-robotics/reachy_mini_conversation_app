@@ -444,6 +444,34 @@ LOCAL_STT_DEFAULT_MODEL = "tiny_streaming"
 LOCAL_STT_MODEL_CHOICES = ("tiny_streaming", "small_streaming")
 LOCAL_STT_DEFAULT_UPDATE_INTERVAL = 0.35
 
+# ---------------------------------------------------------------------------
+# Faster-whisper STT tuning knobs (issue #429).
+#
+# Defaults reflect the issue's recommended chassis settings after the
+# 2026-05-16 hardware validation:
+#
+# - ``base.en`` instead of ``tiny.en`` — ~150 MB vs 75 MB, slightly slower
+#   per inference but significantly fewer hallucinations on short/empty audio.
+# - VAD aggressiveness 3 (most aggressive) — filters more ambient noise in the
+#   chassis's noisy enclosure than the previous mode-2 default.
+# - ``no_speech_prob`` filter at 0.6 — drops faster-whisper segments that the
+#   decoder itself rated as likely-silence, killing most hallucinations at
+#   the source before they reach the orchestrator.
+# - 10s max-buffer ceiling — forces a transcribe + gate reset when webrtcvad
+#   fails to fire end-of-speech under continuous ambient noise (observed
+#   62s pathological buffer on 2026-05-16).
+# ---------------------------------------------------------------------------
+FASTER_WHISPER_MODEL_ENV = "REACHY_MINI_FASTER_WHISPER_MODEL"
+FASTER_WHISPER_DEFAULT_MODEL = "base.en"
+FASTER_WHISPER_COMPUTE_TYPE_ENV = "REACHY_MINI_FASTER_WHISPER_COMPUTE_TYPE"
+FASTER_WHISPER_DEFAULT_COMPUTE_TYPE = "int8"
+FASTER_WHISPER_VAD_AGGRESSIVENESS_ENV = "REACHY_MINI_FASTER_WHISPER_VAD_AGGRESSIVENESS"
+FASTER_WHISPER_DEFAULT_VAD_AGGRESSIVENESS = 3
+FASTER_WHISPER_NO_SPEECH_THRESHOLD_ENV = "REACHY_MINI_FASTER_WHISPER_NO_SPEECH_THRESHOLD"
+FASTER_WHISPER_DEFAULT_NO_SPEECH_THRESHOLD = 0.6
+FASTER_WHISPER_MAX_BUFFER_SEC_ENV = "REACHY_MINI_FASTER_WHISPER_MAX_BUFFER_SEC"
+FASTER_WHISPER_DEFAULT_MAX_BUFFER_SEC = 10.0
+
 # Cap how many user turns are kept in handler-managed conversation history.
 # 0 disables trimming; live realtime backends (OpenAI/HF/Gemini Live) manage
 # history server-side and ignore this. See history_trim.py.
@@ -549,6 +577,22 @@ def _env_float_clamped(name: str, default: float, lo: float, hi: float) -> float
     clamped = max(lo, min(hi, value))
     if clamped != value:
         logger.warning("%s=%.2f clamped to %.2f", name, value, clamped)
+    return clamped
+
+
+def _env_int_clamped(name: str, default: int, lo: int, hi: int) -> int:
+    """Parse an int env var, clamping to [lo, hi]."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        logger.warning("Invalid int for %s=%r, using default=%d", name, raw, default)
+        return default
+    clamped = max(lo, min(hi, value))
+    if clamped != value:
+        logger.warning("%s=%d clamped to %d", name, value, clamped)
     return clamped
 
 
@@ -970,6 +1014,26 @@ class Config:
     MOVEMENT_SPEED_FACTOR = _env_float_clamped("MOVEMENT_SPEED_FACTOR", default=0.3, lo=0.1, hi=2.0)
     IDLE_ANIMATION_ENABLED = _env_flag("IDLE_ANIMATION_ENABLED", default=False)
     MOONSHINE_HEARTBEAT = _env_flag("MOONSHINE_HEARTBEAT", default=False)
+    FASTER_WHISPER_MODEL = os.getenv(FASTER_WHISPER_MODEL_ENV, FASTER_WHISPER_DEFAULT_MODEL)
+    FASTER_WHISPER_COMPUTE_TYPE = os.getenv(FASTER_WHISPER_COMPUTE_TYPE_ENV, FASTER_WHISPER_DEFAULT_COMPUTE_TYPE)
+    FASTER_WHISPER_VAD_AGGRESSIVENESS = _env_int_clamped(
+        FASTER_WHISPER_VAD_AGGRESSIVENESS_ENV,
+        default=FASTER_WHISPER_DEFAULT_VAD_AGGRESSIVENESS,
+        lo=0,
+        hi=3,
+    )
+    FASTER_WHISPER_NO_SPEECH_THRESHOLD = _env_float_clamped(
+        FASTER_WHISPER_NO_SPEECH_THRESHOLD_ENV,
+        default=FASTER_WHISPER_DEFAULT_NO_SPEECH_THRESHOLD,
+        lo=0.0,
+        hi=1.0,
+    )
+    FASTER_WHISPER_MAX_BUFFER_SEC = _env_float_clamped(
+        FASTER_WHISPER_MAX_BUFFER_SEC_ENV,
+        default=FASTER_WHISPER_DEFAULT_MAX_BUFFER_SEC,
+        lo=1.0,
+        hi=60.0,
+    )
     AUDIO_CAPTURE_PATH = _resolve_audio_capture_path()
     # OTel instrumentation mode: unset=disabled, "trace"=console only, "remote"=console+OTLP
     ROBOT_INSTRUMENTATION = os.getenv("ROBOT_INSTRUMENTATION", "")
@@ -1238,6 +1302,28 @@ def refresh_runtime_config_from_env() -> None:
     config.MOVEMENT_SPEED_FACTOR = _env_float_clamped("MOVEMENT_SPEED_FACTOR", default=0.3, lo=0.1, hi=2.0)
     config.IDLE_ANIMATION_ENABLED = _env_flag("IDLE_ANIMATION_ENABLED", default=False)
     config.MOONSHINE_HEARTBEAT = _env_flag("MOONSHINE_HEARTBEAT", default=False)
+    config.FASTER_WHISPER_MODEL = os.getenv(FASTER_WHISPER_MODEL_ENV, FASTER_WHISPER_DEFAULT_MODEL)
+    config.FASTER_WHISPER_COMPUTE_TYPE = os.getenv(
+        FASTER_WHISPER_COMPUTE_TYPE_ENV, FASTER_WHISPER_DEFAULT_COMPUTE_TYPE
+    )
+    config.FASTER_WHISPER_VAD_AGGRESSIVENESS = _env_int_clamped(
+        FASTER_WHISPER_VAD_AGGRESSIVENESS_ENV,
+        default=FASTER_WHISPER_DEFAULT_VAD_AGGRESSIVENESS,
+        lo=0,
+        hi=3,
+    )
+    config.FASTER_WHISPER_NO_SPEECH_THRESHOLD = _env_float_clamped(
+        FASTER_WHISPER_NO_SPEECH_THRESHOLD_ENV,
+        default=FASTER_WHISPER_DEFAULT_NO_SPEECH_THRESHOLD,
+        lo=0.0,
+        hi=1.0,
+    )
+    config.FASTER_WHISPER_MAX_BUFFER_SEC = _env_float_clamped(
+        FASTER_WHISPER_MAX_BUFFER_SEC_ENV,
+        default=FASTER_WHISPER_DEFAULT_MAX_BUFFER_SEC,
+        lo=1.0,
+        hi=60.0,
+    )
     config.AUDIO_CAPTURE_PATH = _resolve_audio_capture_path()
     config.CHATTERBOX_URL = os.getenv(CHATTERBOX_URL_ENV, CHATTERBOX_DEFAULT_URL)
     config.CHATTERBOX_VOICE = os.getenv(CHATTERBOX_VOICE_ENV, CHATTERBOX_DEFAULT_VOICE)

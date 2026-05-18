@@ -110,13 +110,14 @@ _VAD_CHUNK_SAMPLES = _VAD_SAMPLE_RATE * _VAD_FRAME_MS // 1000  # 480
 # ---------------------------------------------------------------------------
 # Env-configurable VAD knobs
 # ---------------------------------------------------------------------------
-# Aggressiveness mode 0-3 (webrtcvad contract). Lower values are less
-# aggressive at filtering non-speech; higher values reject more non-speech
-# but risk clipping real speech. Default changed from 2 → 1 to reduce
-# spurious VAD triggers from chassis-mic echo that drove the self-echo
-# cascade (#460 root-cause follow-up). Override via env:
+# Aggressiveness mode 0-3 (webrtcvad contract). Higher values are more
+# aggressive at filtering non-speech. Default is 3 (most aggressive) after
+# the 2026-05-16 hardware validation (issue #429): at mode 2 ambient
+# enclosure noise occasionally kept the VAD pinned to "speech" so
+# end-of-speech never fired (62s pathological buffer observed).
+# Override via env:
 #   REACHY_MINI_FASTER_WHISPER_VAD_AGGRESSIVENESS=0..3
-_VAD_AGGRESSIVENESS_DEFAULT = 1
+_VAD_AGGRESSIVENESS_DEFAULT = 3
 _VAD_AGGRESSIVENESS_ENV = int(
     os.getenv("REACHY_MINI_FASTER_WHISPER_VAD_AGGRESSIVENESS", str(_VAD_AGGRESSIVENESS_DEFAULT))
 )
@@ -153,6 +154,25 @@ if not (5 <= _VAD_END_SILENCE_FRAMES_ENV <= 100):
     )
     _VAD_END_SILENCE_FRAMES_ENV = _VAD_END_SILENCE_FRAMES_DEFAULT
 _VAD_END_SILENCE_FRAMES = _VAD_END_SILENCE_FRAMES_ENV
+
+# Default faster-whisper model. base.en is the chassis default after
+# the 2026-05-16 hardware validation (issue #429); tiny.en confidently
+# hallucinated full sentences ("I think he's very young.") on 1-word
+# utterances and noise spikes. base.en is ~150 MB vs tiny.en's ~75 MB
+# and slightly slower per inference but markedly more accurate.
+_MODEL_NAME_DEFAULT = "base.en"
+# Drop faster-whisper segments whose decoder-reported no_speech_prob
+# exceeds this threshold. The whisper decoder rates each segment 0.0–1.0
+# by how likely it thought the segment contained no speech; filtering
+# at the adapter kills hallucinations at the source before they reach
+# the orchestrator. Issue #429.
+_NO_SPEECH_THRESHOLD_DEFAULT = 0.6
+# Maximum seconds of buffered audio before `_process_vad_chunk` force-
+# flushes the utterance regardless of webrtcvad's end-of-speech state.
+# Backstop for the pathological case where continuous ambient noise
+# keeps the VAD in-utterance indefinitely (62s observation on
+# 2026-05-16). Issue #429.
+_MAX_BUFFER_SEC_DEFAULT = 10.0
 
 
 class FasterWhisperSTTDependencyError(RuntimeError):
@@ -239,10 +259,13 @@ class FasterWhisperSTTAdapter:
         self,
         *,
         should_drop_frame: Callable[[], bool] | None = None,
-        model_name: str = "tiny.en",
+        model_name: str = _MODEL_NAME_DEFAULT,
         compute_type: str = "int8",
+        vad_aggressiveness: int = _VAD_AGGRESSIVENESS,
+        no_speech_threshold: float = _NO_SPEECH_THRESHOLD_DEFAULT,
+        max_buffer_sec: float = _MAX_BUFFER_SEC_DEFAULT,
     ) -> None:
-        """Capture echo-guard + model overrides; defer all model loads to ``start()``.
+        """Capture echo-guard + tuning knobs; defer all model loads to ``start()``.
 
         ``should_drop_frame`` — when provided, called before every
         ``feed_audio`` frame is processed. Truthy return drops the frame.
@@ -251,13 +274,25 @@ class FasterWhisperSTTAdapter:
         ``host._speaking_until``).
 
         ``model_name`` / ``compute_type`` — passed straight through to
-        :class:`faster_whisper.WhisperModel`. Defaults match the memo's
-        recommendation (``tiny.en`` int8 quantised — ~75 MB, ~1-2s cold
-        load on Pi 5).
+        :class:`faster_whisper.WhisperModel`. Defaults are the chassis
+        recommendation (``base.en`` + int8 quantised).
+
+        ``vad_aggressiveness`` (0-3) — webrtcvad mode; higher = stricter
+        speech filtering. Default is 3 (chassis enclosure is noisy).
+
+        ``no_speech_threshold`` (0.0-1.0) — drop faster-whisper segments
+        whose decoder-reported ``no_speech_prob`` exceeds this value.
+
+        ``max_buffer_sec`` — force a transcribe + gate reset when the
+        utterance buffer reaches this many seconds without a VAD end
+        event. Backstop for VAD-pinned-to-speech in continuous noise.
         """
         self._should_drop_frame = should_drop_frame
         self._model_name = model_name
         self._compute_type = compute_type
+        self._vad_aggressiveness = vad_aggressiveness
+        self._no_speech_threshold = no_speech_threshold
+        self._max_buffer_samples = max(0, int(max_buffer_sec * _VAD_SAMPLE_RATE))
 
         self._on_completed: TranscriptCallback | None = None
         self._on_speech_started: SpeechStartedCallback | None = None
@@ -270,6 +305,7 @@ class FasterWhisperSTTAdapter:
         self._chunk_remainder: NDArray[np.int16] = np.zeros(0, dtype=np.int16)
         # Audio accumulated between VAD start and end events (int16 @ 16 kHz).
         self._utterance_buffer: list[NDArray[np.int16]] = []
+        self._utterance_buffer_samples: int = 0
         self._in_utterance: bool = False
 
     async def start(
@@ -333,7 +369,7 @@ class FasterWhisperSTTAdapter:
             device="cpu",
             compute_type=self._compute_type,
         )
-        vad = webrtcvad.Vad(_VAD_AGGRESSIVENESS)
+        vad = webrtcvad.Vad(self._vad_aggressiveness)
         self._vad_gate = _WebRTCVadGate(vad)
 
     async def feed_audio(self, frame: AudioFrame) -> None:
@@ -362,7 +398,13 @@ class FasterWhisperSTTAdapter:
             await self._process_vad_chunk(chunk)
 
     async def _process_vad_chunk(self, chunk: NDArray[np.int16]) -> None:
-        """Push one VAD-frame-sized chunk through webrtcvad; dispatch on start/end."""
+        """Push one VAD-frame-sized chunk through webrtcvad; dispatch on start/end.
+
+        After the normal start/append/end handling, applies the
+        ``max_buffer_sec`` backstop (issue #429): if the buffer reaches
+        the ceiling without an end event, force-flush and reset the gate
+        so the next utterance starts cleanly.
+        """
         gate = self._vad_gate
         if gate is None:  # pragma: no cover — guarded by feed_audio
             return
@@ -382,18 +424,39 @@ class FasterWhisperSTTAdapter:
             # Restart the buffer with this chunk (speech began here, so
             # include the leading audio in the transcription buffer).
             self._utterance_buffer = [chunk]
+            self._utterance_buffer_samples = int(chunk.size)
             await self._fire_speech_started()
             return
 
         if self._in_utterance:
             self._utterance_buffer.append(chunk)
+            self._utterance_buffer_samples += int(chunk.size)
 
         if event == "end":
             # The "end" event lands after the trailing silence so the
             # buffer already contains the closing samples. Flush.
             buffer = self._utterance_buffer
             self._utterance_buffer = []
+            self._utterance_buffer_samples = 0
             self._in_utterance = False
+            await self._transcribe_and_dispatch(buffer)
+            return
+
+        if (
+            self._in_utterance
+            and self._max_buffer_samples > 0
+            and self._utterance_buffer_samples >= self._max_buffer_samples
+        ):
+            logger.warning(
+                "FasterWhisperSTTAdapter force-flushing %d samples (>= %d-sample ceiling) without VAD end-of-speech",
+                self._utterance_buffer_samples,
+                self._max_buffer_samples,
+            )
+            buffer = self._utterance_buffer
+            self._utterance_buffer = []
+            self._utterance_buffer_samples = 0
+            self._in_utterance = False
+            gate.reset()
             await self._transcribe_and_dispatch(buffer)
 
     async def _fire_speech_started(self) -> None:
@@ -432,7 +495,13 @@ class FasterWhisperSTTAdapter:
             logger.exception("FasterWhisperSTTAdapter on_completed callback raised")
 
     def _transcribe_sync(self, audio: NDArray[np.float32]) -> str:
-        """Run a synchronous transcribe call; invoked from the to_thread worker."""
+        """Run a synchronous transcribe call; invoked from the to_thread worker.
+
+        Filters segments whose ``no_speech_prob`` exceeds
+        ``self._no_speech_threshold`` to suppress decoder hallucinations on
+        short or noise-only audio (issue #429). Segments missing the field
+        (e.g. test stubs) are treated as speech.
+        """
         assert self._model is not None, "_transcribe_sync called before start()"
         # faster-whisper's transcribe returns ``(segments_iter, info)``.
         # segments_iter is a generator — iterating it triggers the actual
@@ -440,10 +509,31 @@ class FasterWhisperSTTAdapter:
         # what an operator would expect to see as the final transcript.
         segments, _info = self._model.transcribe(audio, language="en")
         parts: list[str] = []
+        dropped = 0
         for segment in segments:
             text = getattr(segment, "text", "")
-            if isinstance(text, str) and text:
-                parts.append(text.strip())
+            if not (isinstance(text, str) and text):
+                continue
+            no_speech_raw = getattr(segment, "no_speech_prob", None)
+            try:
+                no_speech = float(no_speech_raw) if no_speech_raw is not None else 0.0
+            except (TypeError, ValueError):
+                no_speech = 0.0
+            if no_speech > self._no_speech_threshold:
+                dropped += 1
+                logger.debug(
+                    "FasterWhisperSTTAdapter dropped segment no_speech_prob=%.3f > %.3f: %r",
+                    no_speech,
+                    self._no_speech_threshold,
+                    text[:60],
+                )
+                continue
+            parts.append(text.strip())
+        if dropped and not parts:
+            logger.debug(
+                "FasterWhisperSTTAdapter dropped %d segment(s) on no_speech_prob; no usable text remained",
+                dropped,
+            )
         return " ".join(parts).strip()
 
     async def stop(self) -> None:
@@ -455,6 +545,7 @@ class FasterWhisperSTTAdapter:
         self._on_completed = None
         self._on_speech_started = None
         self._utterance_buffer = []
+        self._utterance_buffer_samples = 0
         self._chunk_remainder = np.zeros(0, dtype=np.int16)
         self._in_utterance = False
 

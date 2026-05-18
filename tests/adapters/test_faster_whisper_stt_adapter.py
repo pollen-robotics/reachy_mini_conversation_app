@@ -35,8 +35,10 @@ _END_SILENCE_FRAMES = 25  # matches new default _VAD_END_SILENCE_FRAMES_DEFAULT
 
 
 class _StubSegment:
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str, no_speech_prob: float | None = None) -> None:
         self.text = text
+        if no_speech_prob is not None:
+            self.no_speech_prob = no_speech_prob
 
 
 class _StubWhisperModel:
@@ -59,8 +61,17 @@ class _StubWhisperModel:
     def transcribe(self, audio: np.ndarray, language: str = "en") -> tuple[Any, dict[str, Any]]:
         self.transcribe_calls.append(audio)
         text = self.queued_results.pop(0) if self.queued_results else ""
+        # Three ways to stage segments:
+        # - str: one segment, no no_speech_prob
+        # - list[str]: many segments, no no_speech_prob
+        # - list[tuple[str, float]]: many segments with explicit no_speech_prob
         if isinstance(text, list):
-            segments = [_StubSegment(t) for t in text]
+            segments: list[_StubSegment] = []
+            for item in text:
+                if isinstance(item, tuple):
+                    segments.append(_StubSegment(item[0], no_speech_prob=item[1]))
+                else:
+                    segments.append(_StubSegment(item))
         else:
             segments = [_StubSegment(text)] if text else []
         return iter(segments), {"language": language}
@@ -87,6 +98,22 @@ class _StubVad:
         if not self.script:
             return False
         return self.script.pop(0)
+
+
+def _make_speech_only_vad() -> Any:
+    """Stub VAD that always reports speech, never silence.
+
+    Used to drive the max-buffer-ceiling tests: an utterance starts after
+    the first 3 speech frames and then never ends because webrtcvad keeps
+    saying "speech". The adapter's backstop should force-flush.
+    """
+
+    class _AllSpeechVad(_StubVad):
+        def is_speech(self, frame: bytes, sample_rate: int) -> bool:
+            self.received_frames.append(frame)
+            return True
+
+    return _AllSpeechVad
 
 
 def _install_stubs(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
@@ -200,11 +227,14 @@ async def test_start_loads_model_and_vad(monkeypatch: pytest.MonkeyPatch) -> Non
     await adapter.start(_cb)
 
     assert holder["model"] is not None
-    assert holder["model"].model_name == "tiny.en"
+    # base.en is the chassis default after the 2026-05-16 hardware
+    # validation (issue #429) — tiny.en hallucinated on short audio.
+    assert holder["model"].model_name == "base.en"
     assert holder["model"].compute_type == "int8"
     assert holder["vad"] is not None
-    # Aggressiveness 1 — new conservative default (changed from 2).
-    assert holder["vad"].aggressiveness == 1
+    # Aggressiveness 3 — most aggressive, chassis default after 2026-05-16
+    # hardware validation (issue #429): ambient noise kept VAD pinned to speech.
+    assert holder["vad"].aggressiveness == 3
 
 
 @pytest.mark.asyncio
@@ -834,6 +864,243 @@ async def test_vad_is_speech_exception_is_treated_as_silence(
 
 
 # ---------------------------------------------------------------------------
+# Issue #429: vad_aggressiveness / no_speech_threshold / max_buffer_sec
+# ---------------------------------------------------------------------------
+
+
+def test_constructor_accepts_tuning_kwargs() -> None:
+    """Tuning knobs flow into adapter instance state."""
+    from robot_comic.adapters import FasterWhisperSTTAdapter
+
+    adapter = FasterWhisperSTTAdapter(
+        vad_aggressiveness=1,
+        no_speech_threshold=0.4,
+        max_buffer_sec=5.0,
+    )
+    assert adapter._vad_aggressiveness == 1
+    assert adapter._no_speech_threshold == 0.4
+    # 5.0s × 16kHz = 80000 samples.
+    assert adapter._max_buffer_samples == 80000
+
+
+@pytest.mark.asyncio
+async def test_start_passes_vad_aggressiveness_to_webrtcvad(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Constructor override flows all the way to the Vad() constructor."""
+    from robot_comic.adapters import FasterWhisperSTTAdapter
+
+    holder = _install_stubs(monkeypatch)
+    adapter = FasterWhisperSTTAdapter(vad_aggressiveness=0)
+
+    async def _cb(_t: str) -> None: ...
+
+    await adapter.start(_cb)
+    assert holder["vad"].aggressiveness == 0
+
+
+@pytest.mark.asyncio
+async def test_no_speech_prob_filter_drops_high_confidence_silence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Segment whose no_speech_prob exceeds the threshold is dropped before dispatch."""
+    from robot_comic.adapters import FasterWhisperSTTAdapter
+
+    holder = _install_stubs(monkeypatch)
+    adapter = FasterWhisperSTTAdapter(no_speech_threshold=0.6)
+    captured: list[str] = []
+
+    async def _on_completed(t: str) -> None:
+        captured.append(t)
+
+    await adapter.start(_on_completed)
+    total_frames = _START_FRAMES + _END_SILENCE_FRAMES
+    holder["vad"].script = _utterance_script()
+    # Single segment with no_speech_prob 0.9 (above 0.6 threshold) — drop.
+    holder["model"].queued_results = [[("I think he's very young.", 0.9)]]
+
+    await adapter.feed_audio(_silence_frame(num_samples=_VAD_CHUNK * total_frames))
+
+    assert captured == []
+    assert len(holder["model"].transcribe_calls) == 1  # we ran transcribe, just filtered the output
+
+
+@pytest.mark.asyncio
+async def test_no_speech_prob_filter_keeps_low_confidence_silence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Segment whose no_speech_prob is below the threshold is kept."""
+    from robot_comic.adapters import FasterWhisperSTTAdapter
+
+    holder = _install_stubs(monkeypatch)
+    adapter = FasterWhisperSTTAdapter(no_speech_threshold=0.6)
+    captured: list[str] = []
+
+    async def _on_completed(t: str) -> None:
+        captured.append(t)
+
+    await adapter.start(_on_completed)
+    total_frames = _START_FRAMES + _END_SILENCE_FRAMES
+    holder["vad"].script = _utterance_script()
+    holder["model"].queued_results = [[("hello robot", 0.1)]]
+
+    await adapter.feed_audio(_silence_frame(num_samples=_VAD_CHUNK * total_frames))
+
+    assert captured == ["hello robot"]
+
+
+@pytest.mark.asyncio
+async def test_no_speech_prob_filter_mixes_kept_and_dropped_segments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Multi-segment transcripts filter per-segment; surviving text joined."""
+    from robot_comic.adapters import FasterWhisperSTTAdapter
+
+    holder = _install_stubs(monkeypatch)
+    adapter = FasterWhisperSTTAdapter(no_speech_threshold=0.6)
+    captured: list[str] = []
+
+    async def _on_completed(t: str) -> None:
+        captured.append(t)
+
+    await adapter.start(_on_completed)
+    total_frames = _START_FRAMES + _END_SILENCE_FRAMES
+    holder["vad"].script = _utterance_script()
+    holder["model"].queued_results = [
+        [
+            ("hello", 0.2),
+            (" thanks for watching", 0.95),  # whisper-trained-data hallucination
+            (" robot", 0.3),
+        ]
+    ]
+
+    await adapter.feed_audio(_silence_frame(num_samples=_VAD_CHUNK * total_frames))
+
+    assert captured == ["hello robot"]
+
+
+@pytest.mark.asyncio
+async def test_no_speech_prob_filter_keeps_segments_without_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Segments that don't expose no_speech_prob are treated as speech (kept)."""
+    from robot_comic.adapters import FasterWhisperSTTAdapter
+
+    holder = _install_stubs(monkeypatch)
+    adapter = FasterWhisperSTTAdapter(no_speech_threshold=0.6)
+    captured: list[str] = []
+
+    async def _on_completed(t: str) -> None:
+        captured.append(t)
+
+    await adapter.start(_on_completed)
+    total_frames = _START_FRAMES + _END_SILENCE_FRAMES
+    holder["vad"].script = _utterance_script()
+    # Plain string → _StubSegment without no_speech_prob attribute.
+    holder["model"].queued_results = ["hello"]
+
+    await adapter.feed_audio(_silence_frame(num_samples=_VAD_CHUNK * total_frames))
+
+    assert captured == ["hello"]
+
+
+@pytest.mark.asyncio
+async def test_max_buffer_ceiling_force_flushes_without_end_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the VAD never fires end, the ceiling force-flushes a transcribe."""
+    from robot_comic.adapters import FasterWhisperSTTAdapter
+
+    holder = _install_stubs(monkeypatch)
+    # 0.1s × 16kHz = 1600 samples = ~3.33 VAD frames; we'll cross it fast.
+    adapter = FasterWhisperSTTAdapter(max_buffer_sec=0.1)
+    captured: list[str] = []
+
+    async def _on_completed(t: str) -> None:
+        captured.append(t)
+
+    await adapter.start(_on_completed)
+    # Always-speech VAD: utterance starts after _START_FRAMES, then never ends.
+    holder["vad"].script = [True] * 200
+    holder["model"].queued_results = ["forced flush"]
+
+    # Feed enough frames that the buffer crosses the 1600-sample ceiling.
+    # _START_FRAMES × 480 = 1440 (just under), so 4 speech frames triggers
+    # start + appends until ceiling. 10 frames is comfortably over.
+    await adapter.feed_audio(_silence_frame(num_samples=_VAD_CHUNK * 10))
+
+    assert captured == ["forced flush"]
+    assert len(holder["model"].transcribe_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_max_buffer_ceiling_resets_state_for_next_utterance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Immediately after a force-flush, in_utterance + buffer state must be clean.
+
+    Feed exactly enough always-speech frames to cross the ceiling once:
+    chunks 1-3 trigger start, chunks 4-6 grow the buffer past the 1600-
+    sample ceiling and force-flush. After chunk 6 the adapter must report
+    clean state. (Further chunks would re-trigger a fresh utterance start
+    through the reset gate.)
+    """
+    from robot_comic.adapters import FasterWhisperSTTAdapter
+
+    holder = _install_stubs(monkeypatch)
+    adapter = FasterWhisperSTTAdapter(max_buffer_sec=0.1)
+
+    async def _cb(_t: str) -> None: ...
+
+    await adapter.start(_cb)
+    holder["vad"].script = [True] * 200
+    holder["model"].queued_results = ["forced flush"]
+    # 6 chunks: 3 to start + 3 more grow buffer to 1920 samples (>1600 ceiling).
+    await adapter.feed_audio(_silence_frame(num_samples=_VAD_CHUNK * 6))
+
+    assert adapter._in_utterance is False
+    assert adapter._utterance_buffer == []
+    assert adapter._utterance_buffer_samples == 0
+
+
+@pytest.mark.asyncio
+async def test_max_buffer_ceiling_does_not_trigger_below_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A normal-length utterance under the ceiling flushes only on VAD end."""
+    from robot_comic.adapters import FasterWhisperSTTAdapter
+
+    holder = _install_stubs(monkeypatch)
+    # 10s default ceiling. Normal utterance is well under.
+    adapter = FasterWhisperSTTAdapter()
+    captured: list[str] = []
+
+    async def _on_completed(t: str) -> None:
+        captured.append(t)
+
+    await adapter.start(_on_completed)
+    total_frames = _START_FRAMES + _END_SILENCE_FRAMES
+    holder["vad"].script = _utterance_script()
+    holder["model"].queued_results = ["normal turn"]
+
+    await adapter.feed_audio(_silence_frame(num_samples=_VAD_CHUNK * total_frames))
+
+    # Exactly one transcribe — fired by VAD end, not by the ceiling.
+    assert captured == ["normal turn"]
+    assert len(holder["model"].transcribe_calls) == 1
+
+
+def test_make_speech_only_vad_helper_exists() -> None:
+    """Sanity: the helper module-level function is callable.
+
+    Defensive — keeps the helper from being dead-code-eliminated by a
+    refactor since the ceiling tests construct their own always-speech
+    VAD inline (simpler than wiring the helper through _install_stubs).
+    """
+    cls = _make_speech_only_vad()
+    instance = cls(aggressiveness=2)
+    assert instance.is_speech(b"\x00" * 960, 16000) is True
+
+
+# ---------------------------------------------------------------------------
 # Env-configurable VAD knobs (aggressiveness + end-silence-frames)
 # ---------------------------------------------------------------------------
 
@@ -878,7 +1145,7 @@ async def test_vad_aggressiveness_env_var_in_range(monkeypatch: pytest.MonkeyPat
 async def test_vad_aggressiveness_out_of_range_clamps_to_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Out-of-range aggressiveness (e.g. 5 or -1) falls back to default=1 and logs a warning."""
+    """Out-of-range aggressiveness (e.g. 5 or -1) falls back to default=3 and logs a warning."""
     import importlib
 
     import robot_comic.adapters.faster_whisper_stt_adapter as _mod
