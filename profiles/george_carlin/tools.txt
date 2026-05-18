@@ -1,6 +1,0 @@
-camera
-move_head
-play_emotion
-greet
-crowd_work
-language_dissect

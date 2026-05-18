@@ -1,4 +1,0 @@
-voice=george_carlin
-exaggeration=0.85
-cfg_weight=0.70
-temperature=0.55

@@ -100,7 +100,7 @@ def test_load_openers_skips_blank_and_comment_lines(tmp_profiles_dir: Path) -> N
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("persona", ["bill_hicks", "don_rickles", "default"])
+@pytest.mark.parametrize("persona", ["house_comedian", "default"])
 def test_bundled_persona_openers_files_exist(persona: str) -> None:
     """The personas mentioned in the issue body have openers shipped."""
     repo_root = Path(__file__).resolve().parents[1]

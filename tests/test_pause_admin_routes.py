@@ -220,7 +220,7 @@ def test_post_movement_speed_preserves_existing_profile_and_voice(tmp_path: Path
     """Updating the slider must not clobber a previously-saved profile/voice."""
     from robot_comic.startup_settings import read_startup_settings, write_startup_settings
 
-    write_startup_settings(tmp_path, profile="sorry_bro", voice="shimmer")
+    write_startup_settings(tmp_path, profile="house_comedian", voice="shimmer")
 
     class _MM:
         def __init__(self) -> None:
@@ -237,7 +237,7 @@ def test_post_movement_speed_preserves_existing_profile_and_voice(tmp_path: Path
     assert resp.status_code == 200
 
     settings = read_startup_settings(tmp_path)
-    assert settings.profile == "sorry_bro"
+    assert settings.profile == "house_comedian"
     assert settings.voice == "shimmer"
     assert settings.movement_speed == 1.2
 

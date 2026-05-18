@@ -32,7 +32,7 @@ from robot_comic.startup_screen import (
 @pytest.fixture()
 def fake_profiles(tmp_path: Path) -> Path:
     """Create a minimal fake profiles directory with several comedian profiles."""
-    for name in ["dave_chappelle", "don_rickles", "robin_williams", "default", "example"]:
+    for name in ["house_comedian_a", "house_comedian", "house_comedian_b", "default", "example"]:
         (tmp_path / name).mkdir()
     return tmp_path
 
@@ -46,7 +46,7 @@ def test_build_persona_list_returns_profiles_excluding_default_and_example(fake_
     personas = build_persona_list(fake_profiles)
     assert "default" not in personas
     assert "example" not in personas
-    assert set(personas) == {"dave_chappelle", "don_rickles", "robin_williams"}
+    assert set(personas) == {"house_comedian_a", "house_comedian", "house_comedian_b"}
 
 
 def test_build_persona_list_alphabetical_by_default(fake_profiles: Path) -> None:
@@ -55,22 +55,22 @@ def test_build_persona_list_alphabetical_by_default(fake_profiles: Path) -> None
 
 
 def test_build_persona_list_respects_persona_order(fake_profiles: Path) -> None:
-    personas = build_persona_list(fake_profiles, persona_order="robin_williams,don_rickles")
-    assert personas[0] == "robin_williams"
-    assert personas[1] == "don_rickles"
-    # dave_chappelle appended alphabetically at end
-    assert personas[2] == "dave_chappelle"
+    personas = build_persona_list(fake_profiles, persona_order="house_comedian_b,house_comedian")
+    assert personas[0] == "house_comedian_b"
+    assert personas[1] == "house_comedian"
+    # house_comedian_a appended alphabetically at end
+    assert personas[2] == "house_comedian_a"
 
 
 def test_build_persona_list_persona_order_skips_unknown_names(fake_profiles: Path) -> None:
-    personas = build_persona_list(fake_profiles, persona_order="nonexistent_comic,don_rickles")
+    personas = build_persona_list(fake_profiles, persona_order="nonexistent_comic,house_comedian")
     assert "nonexistent_comic" not in personas
-    assert "don_rickles" in personas
+    assert "house_comedian" in personas
 
 
 def test_build_persona_list_persona_order_no_duplicates(fake_profiles: Path) -> None:
-    personas = build_persona_list(fake_profiles, persona_order="don_rickles,don_rickles")
-    assert personas.count("don_rickles") == 1
+    personas = build_persona_list(fake_profiles, persona_order="house_comedian,house_comedian")
+    assert personas.count("house_comedian") == 1
 
 
 def test_build_persona_list_empty_when_profiles_dir_missing(tmp_path: Path) -> None:
@@ -89,7 +89,7 @@ def test_build_persona_list_empty_dir_returns_empty(tmp_path: Path) -> None:
 
 
 def test_humanise_name_underscore() -> None:
-    assert _humanise_name("dave_chappelle") == "Dave Chappelle"
+    assert _humanise_name("house_comedian_a") == "House Comedian A"
 
 
 def test_humanise_name_single_word() -> None:
@@ -97,21 +97,21 @@ def test_humanise_name_single_word() -> None:
 
 
 def test_build_listing_sentence_single() -> None:
-    s = _build_listing_sentence(["don_rickles"])
-    assert "Don Rickles" in s
+    s = _build_listing_sentence(["house_comedian"])
+    assert "House Comedian" in s
     assert "or" not in s
 
 
 def test_build_listing_sentence_two() -> None:
-    s = _build_listing_sentence(["don_rickles", "robin_williams"])
-    assert "Don Rickles or Robin Williams" in s
+    s = _build_listing_sentence(["house_comedian", "house_comedian_b"])
+    assert "House Comedian or House Comedian B" in s
 
 
 def test_build_listing_sentence_multiple() -> None:
-    s = _build_listing_sentence(["dave_chappelle", "don_rickles", "robin_williams"])
-    assert s.endswith("or Robin Williams.")
-    assert "Dave Chappelle" in s
-    assert "Don Rickles" in s
+    s = _build_listing_sentence(["house_comedian_a", "house_comedian", "house_comedian_b"])
+    assert s.endswith("or House Comedian B.")
+    assert "House Comedian A" in s
+    assert "House Comedian" in s
 
 
 def test_build_listing_sentence_empty() -> None:
@@ -252,8 +252,8 @@ def test_startup_screen_persona_order_env(monkeypatch) -> None:
     cfg_mod = importlib.import_module("robot_comic.config")
     original = cfg_mod.config
     try:
-        monkeypatch.setenv("REACHY_MINI_STARTUP_SCREEN_PERSONA_ORDER", "don_rickles,robin_williams")
+        monkeypatch.setenv("REACHY_MINI_STARTUP_SCREEN_PERSONA_ORDER", "house_comedian,house_comedian_b")
         importlib.reload(cfg_mod)
-        assert cfg_mod.config.STARTUP_SCREEN_PERSONA_ORDER == "don_rickles,robin_williams"
+        assert cfg_mod.config.STARTUP_SCREEN_PERSONA_ORDER == "house_comedian,house_comedian_b"
     finally:
         cfg_mod.config = original

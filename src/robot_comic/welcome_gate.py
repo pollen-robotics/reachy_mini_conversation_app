@@ -174,8 +174,8 @@ def _names_from_profile_dir(profile_dir: Path) -> list[str]:
 
     Priority order:
     1. ``wake_names.txt`` — explicit list, one name per non-empty line.
-    2. Directory stem split on underscores — e.g. "don_rickles" → ["rickles",
-       "don rickles"].  The last word alone is added first (most likely to be
+    2. Directory stem split on underscores — e.g. "house_comedian" → ["comedian",
+       "house comedian"].  The last word alone is added first (most likely to be
        said in isolation), followed by the full space-joined name.
     """
     # 1. Explicit wake_names.txt overrides everything.
@@ -210,7 +210,7 @@ def make_gate_for_profile(profile_dir: Path, threshold: int = 2) -> WelcomeGate:
     Parameters
     ----------
     profile_dir:
-        Path to the profile directory (e.g. ``profiles/don_rickles``).
+        Path to the profile directory (e.g. ``profiles/house_comedian``).
     threshold:
         Levenshtein threshold passed to :class:`WelcomeGate`.
 

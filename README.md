@@ -16,26 +16,17 @@ tags:
 
 ---
 
-> **DISCLAIMER — Non-Commercial Educational Fan Project**
-> This project is a transformative, fan-made simulation created for non-commercial research and
-> local development only. It is inspired by Don Rickles' publicly documented performance style
-> and is not affiliated with, endorsed by, or authorized by the Don Rickles estate, any talent
-> agency, or any production company. It does not reproduce verbatim material and generates no
-> revenue.
-
 ## Project Persona
 
-The comedian profile in this repository is a **Don Rickles-inspired AI simulation** built to
-test low-latency robotic social interaction in a comedic context.
+The comedian profile shipped in this repository is **The House Comedian** — a synthetic
+stand-up MC persona designed to test low-latency robotic social interaction in a comedic
+context. The persona is an original composite that does not reference or represent any
+real individual.
 
-- **This is a simulation, not impersonation.** The profile studies Rickles' publicly documented
-  performance patterns — crowd-work structure, roast escalation arcs, warm-undercurrent ethics —
-  as academic reference. It does not reproduce verbatim jokes or claim to be Don Rickles.
-- **"John Pickles" is the robot's own stage name.** When a synthesized voice clone is added
-  (Phase 2), the robot will perform under the name *John Pickles* — a fictional persona
-  inspired by mid-century insult-comic style, distinct from any real individual.
-- **Audio is AI-generated.** All voice output is synthetic. Any future voice clone will be
-  clearly labeled as a synthesized approximation, not a reproduction of Don Rickles' voice.
+Operator-specific persona content (including any real-comedian stylistic research) is
+kept separately in the operator's private persona library and loaded at runtime via the
+`REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY` environment variable.  See
+[docs/external_profiles.md](docs/external_profiles.md) for how to configure external profiles.
 
 ---
 
@@ -45,6 +36,7 @@ Conversational app for the Reachy Mini robot combining realtime voice backends, 
 
 ## Table of contents
 - [Project Persona](#project-persona)
+- [External Profiles](docs/external_profiles.md)
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Installation](#installation)
@@ -352,7 +344,7 @@ Note: The "Personality" panel updates the conversation instructions. Tool sets a
 
 To create a locked variant of the app that cannot switch profiles, edit `src/robot_comic/config.py` and set the `LOCKED_PROFILE` constant to the desired profile name:
 ```python
-LOCKED_PROFILE: str | None = "mars_rover"  # Lock to this profile
+LOCKED_PROFILE: str | None = "house_comedian"  # Lock to this profile
 ```
 When `LOCKED_PROFILE` is set, the app always uses that profile, ignoring saved startup settings, `REACHY_MINI_CUSTOM_PROFILE`, and the admin UI personality picker. The UI shows "(locked)" and disables all profile editing controls.
 This is useful for creating dedicated clones of the app with a fixed personality. Clone scripts can simply edit this constant to lock the variant.
@@ -432,8 +424,10 @@ Quick start:
 
 Apache 2.0 — base application code (original Pollen Robotics fork).
 
-The comedian corpus and profile content (`docs/rickles_corpus.md`, `profiles/don_rickles/`)
-are original analytical and creative works produced for this project. They are separately
-licensed under [Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)](https://creativecommons.org/licenses/by-nc/4.0/).
-You may share and adapt them for non-commercial purposes with attribution.
-Don Rickles' name and likeness remain the property of his estate.
+The `house_comedian` persona content in `profiles/house_comedian/` is an original
+synthetic work produced for this project. It is separately licensed under
+[Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)](https://creativecommons.org/licenses/by-nc/4.0/).
+You may share and adapt it for non-commercial purposes with attribution.
+
+Operator-specific persona content that references real individuals is kept in a private
+companion repository and is not distributed here.

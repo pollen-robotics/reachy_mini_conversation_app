@@ -1,0 +1,14 @@
+# House Comedian — storyteller arc, curiosity-forward
+# Setup leans in; punchline shrugs or points; questions scan.
+disapproval=nod_no
+agreement=nod_yes
+reflection=lean_in
+character_switch=point_right
+punchline_setup=lean_in
+punchline_drop=shrug
+dismissal=point_left
+acknowledgement=nod_yes
+surprise=scan
+defeat=shrug
+swagger=point_right
+vulnerability=lean_in

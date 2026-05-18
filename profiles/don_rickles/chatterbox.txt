@@ -1,4 +1,0 @@
-voice=don_rickles
-exaggeration=0.75
-cfg_weight=0.30
-temperature=0.6

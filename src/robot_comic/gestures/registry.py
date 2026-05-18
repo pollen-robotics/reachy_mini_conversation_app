@@ -47,7 +47,7 @@ def load_persona_beats(profile_dir: Path) -> Dict[str, str]:
     ----------
     profile_dir:
         Path to the persona's profile directory (e.g.
-        ``profiles/don_rickles``).
+        ``profiles/house_comedian``).
 
     Returns
     -------

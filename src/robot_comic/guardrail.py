@@ -4,9 +4,9 @@
 lightweight keyword/regex heuristic — no LLM call, no network, O(n) on the
 phrase list.
 
-Activation is persona-aware: only profiles listed in
-``GUARDRAIL_PROFILES`` (default: ``{"bill_hicks", "andrew_dice_clay",
-"richard_pryor"}``) activate the monitor.  The feature can be force-disabled
+Activation is persona-aware: only profiles listed in ``GUARDRAIL_PROFILES``
+activate the monitor.  By default the set is empty; external persona libraries
+can register profiles that opt in.  The feature can be force-disabled
 for any profile via the ``REACHY_MINI_GUARDRAIL_ENABLED`` environment variable.
 
 Optional LLM-scored mode
@@ -46,30 +46,17 @@ logger = logging.getLogger(__name__)
 
 # The note prepended (at runtime only) to the system prompt when the monitor
 # decides the persona should soften.  Not persisted anywhere.
-# Kept for backwards-compat — callers that imported SOFTEN_NOTE directly still
-# work (they receive the bill_hicks note).
-SOFTEN_NOTES: dict[str, str] = {
-    "bill_hicks": (
-        "NOTE: the user seems uncomfortable with the current intensity — "
-        "pivot to lighter, observational material for the next few turns."
-    ),
-    "andrew_dice_clay": (
-        "NOTE: the user seems uncomfortable — dial down the misogyny vector "
-        "and pivot to crowd banter for the next few turns."
-    ),
-    "richard_pryor": (
-        "NOTE: the user seems uncomfortable — pivot from the heavier "
-        "vulnerability toward observational humor for the next few turns."
-    ),
-}
+# Per-persona notes are registered by external persona libraries via
+# SOFTEN_NOTES.  The generic fallback is used for any persona not listed here.
+SOFTEN_NOTES: dict[str, str] = {}
 
 _SOFTEN_NOTE_GENERIC = (
     "NOTE: the user seems uncomfortable with the current intensity — "
     "ease back and pivot to lighter material for the next few turns."
 )
 
-# Backwards-compat alias (bill_hicks note).
-SOFTEN_NOTE: str = SOFTEN_NOTES["bill_hicks"]
+# Backwards-compat alias — returns the generic note.
+SOFTEN_NOTE: str = _SOFTEN_NOTE_GENERIC
 
 
 def get_soften_note(persona: str | None) -> str:
@@ -84,12 +71,10 @@ def get_soften_note(persona: str | None) -> str:
 # ---------------------------------------------------------------------------
 
 # Profiles that opt in to the guardrail by default.
-# - bill_hicks: confrontational Socratic pressure
-# - andrew_dice_clay: explicit misogynist/aggression register
-# - richard_pryor: vulnerability-heavy; lower-confidence inclusion but
-#   documented: Pryor's edge is more vulnerability than aggression, so the
-#   threshold may need future tuning against calibration data.
-GUARDRAIL_PROFILES: frozenset[str] = frozenset({"bill_hicks", "andrew_dice_clay", "richard_pryor"})
+# External persona libraries can register additional profiles here at import
+# time by adding to this frozenset (reassign with a union).  The built-in
+# house_comedian persona does not require the guardrail.
+GUARDRAIL_PROFILES: frozenset[str] = frozenset()
 
 # Number of consecutive discomfort turns required before ``should_soften``
 # fires.  Override via ``REACHY_MINI_GUARDRAIL_THRESHOLD``.
@@ -225,10 +210,10 @@ class EngagementMonitor:
 
     Typical lifecycle::
 
-        monitor = EngagementMonitor(profile="bill_hicks")
+        monitor = EngagementMonitor(profile="house_comedian")
         score, should_soften = monitor.analyze(user_text)
         if should_soften:
-            note = get_soften_note("bill_hicks")
+            note = get_soften_note("house_comedian")
             instructions = note + "\n\n" + base_instructions
 
     The monitor is a no-op (``score=0.0, should_soften=False``) when the

@@ -91,8 +91,8 @@ def build_persona_list(
 def _humanise_name(profile_name: str) -> str:
     """Convert a filesystem profile name to a display name.
 
-    ``dave_chappelle`` → ``Dave Chappelle``
-    ``robin_williams`` → ``Robin Williams``
+    ``house_comedian`` → ``House Comedian``
+    ``default`` → ``Default``
     """
     return " ".join(word.capitalize() for word in profile_name.replace("-", "_").split("_"))
 

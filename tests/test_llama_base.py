@@ -600,7 +600,7 @@ async def test_handler_applies_chatterbox_gain_from_config() -> None:
     with patch("robot_comic.chatterbox_tts.config") as mock_cfg:
         mock_cfg.CHATTERBOX_GAIN = 2.0
         mock_cfg.CHATTERBOX_AUTO_GAIN_ENABLED = False  # disable auto-gain so raw gain is testable
-        mock_cfg.CHATTERBOX_VOICE = "don_rickles"
+        mock_cfg.CHATTERBOX_VOICE = "tony"
         mock_cfg.CHATTERBOX_EXAGGERATION = 1.0
         mock_cfg.CHATTERBOX_CFG_WEIGHT = 0.5
         mock_cfg.CHATTERBOX_TEMPERATURE = 0.6

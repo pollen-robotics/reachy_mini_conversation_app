@@ -16,10 +16,10 @@ _PROFILE_PATH = Path(__file__).parents[2] / "src" / "robot_comic" / "tools" / "r
 
 
 def _load_roast_module():
-    spec = importlib.util.spec_from_file_location("don_rickles_roast", _PROFILE_PATH)
+    spec = importlib.util.spec_from_file_location("roast_test_module", _PROFILE_PATH)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
-    sys.modules["don_rickles_roast"] = mod
+    sys.modules["roast_test_module"] = mod
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     return mod
 

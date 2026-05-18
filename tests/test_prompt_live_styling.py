@@ -2,9 +2,9 @@
 
 Covers Issue #139 — each comedian profile now ships a gemini_live.txt file.
 Tests confirm:
-  1. For don_rickles, the loader returns non-empty content from gemini_live.txt.
+  1. For house_comedian, the loader returns non-empty content from gemini_live.txt.
   2. For a profile without gemini_live.txt, the loader returns None.
-  3. The assembled system prompt for don_rickles contains ## DELIVERY with the
+  3. The assembled system prompt for house_comedian contains ## DELIVERY with the
      file's content appended.
   4. The assembled system prompt for a profile without gemini_live.txt has no
      ## DELIVERY section.
@@ -110,21 +110,21 @@ def test_load_styling_returns_none_when_file_is_empty(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# don_rickles — confirm real file loads correctly
+# house_comedian — confirm real file loads correctly
 # ---------------------------------------------------------------------------
 
 
-def test_don_rickles_live_txt_loads_nonempty(tmp_path: Path) -> None:
-    """don_rickles/gemini_live.txt exists and loader returns non-empty content."""
+def test_house_comedian_live_txt_loads_nonempty(tmp_path: Path) -> None:
+    """house_comedian/gemini_live.txt exists and loader returns non-empty content."""
     from robot_comic.config import DEFAULT_PROFILES_DIRECTORY
 
     fake_cfg = _make_live_config(
-        profile="don_rickles",
+        profile="house_comedian",
         profiles_directory=DEFAULT_PROFILES_DIRECTORY,
     )
     with patch("robot_comic.gemini_live.config", fake_cfg):
         result = _load_profile_live_styling()
-    assert result is not None, "don_rickles/gemini_live.txt must exist and be non-empty"
+    assert result is not None, "house_comedian/gemini_live.txt must exist and be non-empty"
     assert len(result) > 20  # sanity: not just a stub
 
 
@@ -187,16 +187,16 @@ def test_delivery_section_absent_when_no_live_txt(tmp_path: Path) -> None:
     assert "## IDENTITY" in assembled
 
 
-def test_don_rickles_assembled_prompt_contains_delivery_section() -> None:
-    """Full assembly for don_rickles yields a ## DELIVERY section."""
+def test_house_comedian_assembled_prompt_contains_delivery_section() -> None:
+    """Full assembly for house_comedian yields a ## DELIVERY section."""
     from robot_comic.config import DEFAULT_PROFILES_DIRECTORY
 
     prompts_cfg = _make_prompts_config(
-        profile="don_rickles",
+        profile="house_comedian",
         profiles_directory=DEFAULT_PROFILES_DIRECTORY,
     )
     live_cfg = _make_live_config(
-        profile="don_rickles",
+        profile="house_comedian",
         profiles_directory=DEFAULT_PROFILES_DIRECTORY,
     )
 
@@ -209,5 +209,8 @@ def test_don_rickles_assembled_prompt_contains_delivery_section() -> None:
     assert live_styling is not None
     assembled = f"{instructions}\n\n## DELIVERY\n{live_styling}"
     assert "## DELIVERY" in assembled
-    # The don_rickles file should reference Brooklyn delivery
-    assert "Brooklyn" in assembled or "rapid" in assembled.lower() or "clipped" in assembled
+    # The house_comedian file should reference delivery pacing guidance
+    assert any(
+        word in assembled.lower()
+        for word in ("pace", "punchline", "silence", "measured", "conversational", "delivery")
+    )

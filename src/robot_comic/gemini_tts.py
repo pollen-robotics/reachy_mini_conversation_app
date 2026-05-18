@@ -73,7 +73,7 @@ DEFAULT_TTS_SYSTEM_INSTRUCTION = (
     "Never drawl or over-enunciate. Keep the energy sharp."
 )
 
-# Delivery tags emitted by profile prompts (see e.g. profiles/don_rickles/instructions.txt).
+# Delivery tags emitted by profile prompts (see e.g. profiles/house_comedian/instructions.txt).
 # Each tag maps to a human-readable phrase used in the system_instruction suffix —
 # the TTS model has more to work with than the raw tag name.
 _DELIVERY_TAG_PHRASES: dict[str, str] = {

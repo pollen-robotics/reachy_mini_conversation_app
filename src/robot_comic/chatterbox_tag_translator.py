@@ -12,7 +12,7 @@ Usage (Gemini pipeline — tags pass through unchanged):
     Don't use this module. Tags are passed directly to Gemini Live.
 
 Usage (local Chatterbox pipeline):
-    segments = translate(llm_output, persona="dave_chappelle", use_turbo=True)
+    segments = translate(llm_output, persona="house_comedian", use_turbo=True)
     for seg in segments:
         if seg.silence_ms:
             audio_chunks.append(make_silence(seg.silence_ms))
@@ -25,7 +25,7 @@ Usage (local Chatterbox pipeline):
 
     # Or just strip tags for a simpler single-call approach:
     clean_text = strip_gemini_tags(llm_output)
-    audio = chatterbox.generate(clean_text, **PERSONA_BASELINES["dave_chappelle"])
+    audio = chatterbox.generate(clean_text, **PERSONA_BASELINES["house_comedian"])
 """
 
 from __future__ import annotations
@@ -59,13 +59,7 @@ SILENCE_PADDING_MS = 400  # ms of silence to insert for [short pause]
 # Tune these against actual Chatterbox output with the cloned reference audio.
 
 PERSONA_BASELINES: dict[str, dict[str, float]] = {
-    "don_rickles": {"exaggeration": 1.00, "cfg_weight": 0.50},
-    "rodney_dangerfield": {"exaggeration": 0.90, "cfg_weight": 0.50},  # weary baseline
-    "andrew_dice_clay": {"exaggeration": 1.10, "cfg_weight": 0.50},  # swagger baseline
-    "robin_williams": {"exaggeration": 1.30, "cfg_weight": 0.45},  # manic baseline
-    "bill_hicks": {"exaggeration": 0.85, "cfg_weight": 0.55},  # dry baseline, spikes on aggression
-    "richard_pryor": {"exaggeration": 1.00, "cfg_weight": 0.50},  # conversational baseline
-    "dave_chappelle": {"exaggeration": 0.95, "cfg_weight": 0.50},  # loose but controlled
+    "house_comedian": {"exaggeration": 0.95, "cfg_weight": 0.50},  # measured, present baseline
 }
 
 _DEFAULT_BASELINE: dict[str, float] = {"exaggeration": 1.00, "cfg_weight": 0.50}
@@ -120,7 +114,7 @@ def translate(
 
     Args:
         text:      Raw LLM output containing Gemini delivery tags.
-        persona:   Profile directory name (e.g. "dave_chappelle"). Used to look
+        persona:   Profile directory name (e.g. "house_comedian"). Used to look
                    up per-persona baseline exaggeration/cfg_weight.
         use_turbo: If True, insert Chatterbox Turbo paralinguistic events where
                    appropriate (e.g. [chuckle] on [amusement] segments).

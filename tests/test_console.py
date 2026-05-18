@@ -675,12 +675,12 @@ def test_headless_personality_routes_persist_startup_with_voice_override() -> No
         mount_personality_routes(app, handler, lambda: loop, persist_personality=persist_personality)
 
         client = TestClient(app)
-        response = client.post("/personalities/apply?name=sorry_bro&persist=1")
+        response = client.post("/personalities/apply?name=house_comedian&persist=1")
 
         assert response.status_code == 200
         assert response.json()["ok"] is True
-        handler.apply_personality.assert_awaited_once_with("sorry_bro")
-        persist_personality.assert_called_once_with("sorry_bro", "shimmer")
+        handler.apply_personality.assert_awaited_once_with("house_comedian")
+        persist_personality.assert_called_once_with("house_comedian", "shimmer")
     finally:
         loop.call_soon_threadsafe(loop.stop)
         thread.join(timeout=1.0)
@@ -691,21 +691,19 @@ def test_local_stream_persist_personality_stores_voice_override(tmp_path) -> Non
     """Persisting startup settings should write both profile and voice override."""
     stream = LocalStream(MagicMock(), MagicMock(), instance_path=str(tmp_path))
 
-    stream._persist_personality("sorry_bro", "shimmer")
+    stream._persist_personality("house_comedian", "shimmer")
 
     settings_path = tmp_path / "startup_settings.json"
     assert settings_path.exists()
-    assert settings_path.read_text(encoding="utf-8") == '{\n  "profile": "sorry_bro",\n  "voice": "shimmer"\n}\n'
-    assert stream._read_persisted_personality() == "sorry_bro"
+    assert settings_path.read_text(encoding="utf-8") == '{\n  "profile": "house_comedian",\n  "voice": "shimmer"\n}\n'
+    assert stream._read_persisted_personality() == "house_comedian"
 
 
 def test_local_stream_persist_personality_clears_legacy_startup_env_overrides(tmp_path, monkeypatch) -> None:
     """Saving startup settings should remove legacy `.env` profile and voice overrides."""
     env_path = tmp_path / ".env"
     env_path.write_text(
-        "OPENAI_API_KEY=test-key\n"
-        "REACHY_MINI_CUSTOM_PROFILE=mad_scientist_assistant\n"
-        "REACHY_MINI_VOICE_OVERRIDE=shimmer\n",
+        "OPENAI_API_KEY=test-key\nREACHY_MINI_CUSTOM_PROFILE=house_comedian\nREACHY_MINI_VOICE_OVERRIDE=shimmer\n",
         encoding="utf-8",
     )
     stream = LocalStream(MagicMock(), MagicMock(), instance_path=str(tmp_path))

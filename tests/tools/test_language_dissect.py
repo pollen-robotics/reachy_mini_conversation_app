@@ -15,7 +15,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 _TOOL_PATH = Path(__file__).parents[2] / "src" / "robot_comic" / "tools" / "language_dissect.py"
-_EUPHEMISMS_PATH = Path(__file__).parents[2] / "profiles" / "george_carlin" / "euphemisms.json"
+_EUPHEMISMS_PATH = Path(__file__).parents[2] / "src" / "robot_comic" / "tools" / "euphemisms.json"
 
 
 def _load_language_dissect_module():

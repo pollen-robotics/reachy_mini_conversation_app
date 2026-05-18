@@ -20,7 +20,7 @@ Usage
     from robot_comic.chatterbox_voice_clone import load_voice_clone_ref
     from pathlib import Path
 
-    ref_path = load_voice_clone_ref(Path("profiles/don_rickles"))
+    ref_path = load_voice_clone_ref(Path("profiles/house_comedian"))
     if ref_path:
         # pass ref_path to the Chatterbox /tts endpoint as audio_prompt_path
         ...
@@ -51,7 +51,7 @@ def load_voice_clone_ref(profile_dir: Path) -> Path | None:
 
     Args:
         profile_dir: Directory for the active persona (e.g.
-            ``Path("profiles/don_rickles")``).  Need not be absolute — the
+            ``Path("profiles/house_comedian")``).  Need not be absolute — the
             path is resolved before the size check.
 
     """

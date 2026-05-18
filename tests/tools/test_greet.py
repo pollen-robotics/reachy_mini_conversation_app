@@ -17,10 +17,10 @@ _PROFILE_PATH = Path(__file__).parents[2] / "src" / "robot_comic" / "tools" / "g
 
 def _load_greet_module():
     """Load greet.py from its package path using importlib."""
-    spec = importlib.util.spec_from_file_location("don_rickles_greet", _PROFILE_PATH)
+    spec = importlib.util.spec_from_file_location("greet_test_module", _PROFILE_PATH)
     assert spec and spec.loader, f"Cannot load module from {_PROFILE_PATH}"
     mod = importlib.util.module_from_spec(spec)
-    sys.modules["don_rickles_greet"] = mod
+    sys.modules["greet_test_module"] = mod
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     return mod
 
@@ -74,8 +74,8 @@ async def test_scan_face_found_immediately(Greet):
     """Face detected on first frame — no sweep triggered."""
     deps = make_deps()
     with (
-        patch("don_rickles_greet.MP_AVAILABLE", True),
-        patch("don_rickles_greet._detect_face_with_scores", return_value=(True, [0.9])),
+        patch("greet_test_module.MP_AVAILABLE", True),
+        patch("greet_test_module._detect_face_with_scores", return_value=(True, [0.9])),
     ):
         result = await Greet()(deps, action="scan")
     assert result == {"face_detected": True}
@@ -91,9 +91,9 @@ async def test_scan_face_found_during_sweep(Greet):
     deps = make_deps()
     # Initial frame: no face. Second call (left sweep position): no face. Third call (up): face found.
     with (
-        patch("don_rickles_greet.MP_AVAILABLE", True),
+        patch("greet_test_module.MP_AVAILABLE", True),
         patch(
-            "don_rickles_greet._detect_face_with_scores",
+            "greet_test_module._detect_face_with_scores",
             side_effect=[(False, []), (False, []), (True, [0.9])],
         ),
         patch("asyncio.sleep"),
@@ -110,8 +110,8 @@ async def test_scan_no_face_after_full_sweep(Greet):
     """Full sweep completes with no face found — returns no_subject."""
     deps = make_deps()
     with (
-        patch("don_rickles_greet.MP_AVAILABLE", True),
-        patch("don_rickles_greet._detect_face_with_scores", return_value=(False, [])),
+        patch("greet_test_module.MP_AVAILABLE", True),
+        patch("greet_test_module._detect_face_with_scores", return_value=(False, [])),
         patch("asyncio.sleep"),
     ):
         result = await Greet()(deps, action="scan")
@@ -135,8 +135,8 @@ async def test_scan_sweep_disabled_returns_terminal_no_subject(Greet, monkeypatc
 
     deps = make_deps()
     with (
-        patch("don_rickles_greet.MP_AVAILABLE", True),
-        patch("don_rickles_greet._detect_face_with_scores", return_value=(False, [])),
+        patch("greet_test_module.MP_AVAILABLE", True),
+        patch("greet_test_module._detect_face_with_scores", return_value=(False, [])),
     ):
         result = await Greet()(deps, action="scan")
 
@@ -162,7 +162,7 @@ async def test_scan_sweep_disabled_returns_terminal_no_subject(Greet, monkeypatc
 async def test_scan_mediapipe_unavailable(Greet):
     """MediaPipe not installed — fail-open, assumes face present."""
     deps = make_deps()
-    with patch("don_rickles_greet.MP_AVAILABLE", False):
+    with patch("greet_test_module.MP_AVAILABLE", False):
         result = await Greet()(deps, action="scan")
     assert result["face_detected"] is True
     assert "note" in result

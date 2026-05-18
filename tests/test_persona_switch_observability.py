@@ -101,7 +101,7 @@ def test_persona_switch_span_emitted_on_apply_success() -> None:
         with patch("robot_comic.headless_personality_ui.telemetry.get_tracer", return_value=tracer):
             mount_personality_routes(app, handler, lambda: loop)
             client = TestClient(app)
-            resp = client.post("/personalities/apply?name=george_carlin")
+            resp = client.post("/personalities/apply?name=house_comedian_b")
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
     finally:
@@ -111,7 +111,7 @@ def test_persona_switch_span_emitted_on_apply_success() -> None:
     assert len(persona_spans) == 1, f"expected one persona.switch span, got {tracer.spans!r}"
     attrs = persona_spans[0]["attrs"]
     assert attrs["event.kind"] == "supporting"
-    assert attrs["to_persona"] == "george_carlin"
+    assert attrs["to_persona"] == "house_comedian_b"
     assert "from_persona" in attrs
     assert attrs["outcome"] == "success"
 
@@ -123,12 +123,12 @@ def test_persona_switch_span_marks_outcome_locked_when_profile_locked() -> None:
     tracer = _RecordingTracer()
 
     with (
-        patch("robot_comic.headless_personality_ui.LOCKED_PROFILE", "don_rickles"),
+        patch("robot_comic.headless_personality_ui.LOCKED_PROFILE", "house_comedian"),
         patch("robot_comic.headless_personality_ui.telemetry.get_tracer", return_value=tracer),
     ):
         mount_personality_routes(app, handler, lambda: None)
         client = TestClient(app)
-        resp = client.post("/personalities/apply?name=george_carlin")
+        resp = client.post("/personalities/apply?name=house_comedian_b")
 
     assert resp.status_code == 403
     persona_spans = [s for s in tracer.spans if s["name"] == "persona.switch"]
@@ -148,7 +148,7 @@ def test_persona_switch_span_marks_outcome_loop_unavailable() -> None:
     with patch("robot_comic.headless_personality_ui.telemetry.get_tracer", return_value=tracer):
         mount_personality_routes(app, handler, lambda: None)
         client = TestClient(app)
-        resp = client.post("/personalities/apply?name=george_carlin")
+        resp = client.post("/personalities/apply?name=house_comedian_b")
 
     assert resp.status_code == 503
     persona_spans = [s for s in tracer.spans if s["name"] == "persona.switch"]
@@ -173,8 +173,8 @@ def test_current_persona_returns_active_profile(monkeypatch: pytest.MonkeyPatch)
     """``telemetry.current_persona()`` echoes ``REACHY_MINI_CUSTOM_PROFILE`` when set."""
     from robot_comic.config import config as _config
 
-    monkeypatch.setattr(_config, "REACHY_MINI_CUSTOM_PROFILE", "don_rickles", raising=False)
-    assert telemetry.current_persona() == "don_rickles"
+    monkeypatch.setattr(_config, "REACHY_MINI_CUSTOM_PROFILE", "house_comedian", raising=False)
+    assert telemetry.current_persona() == "house_comedian"
 
 
 def test_span_attrs_to_keep_includes_persona_switch_keys() -> None:
@@ -199,9 +199,9 @@ def test_fetch_personas_powers_header_persona_indicator() -> None:
     from robot_comic.monitor import _fetch_personas
 
     body = {
-        "choices": ["(built-in default)", "don_rickles", "george_carlin"],
-        "current": "don_rickles",
-        "startup": "don_rickles",
+        "choices": ["(built-in default)", "house_comedian", "house_comedian_b"],
+        "current": "house_comedian",
+        "startup": "house_comedian",
         "locked": False,
     }
 
@@ -213,8 +213,8 @@ def test_fetch_personas_powers_header_persona_indicator() -> None:
     with patch("robot_comic.monitor.urlopen", return_value=mock_resp):
         choices, current = _fetch_personas("http://localhost:7860")
 
-    assert current == "don_rickles"
-    assert "don_rickles" in choices
+    assert current == "house_comedian"
+    assert "house_comedian" in choices
 
 
 def test_monitor_render_includes_persona_in_subtitle() -> None:
@@ -231,10 +231,10 @@ def test_monitor_render_includes_persona_in_subtitle() -> None:
 
     import robot_comic.monitor as monitor_mod
 
-    persona_text = Text("  persona: don_rickles", style="cyan")
+    persona_text = Text("  persona: house_comedian", style="cyan")
     base = Text("3 turns recorded", style="dim")
     base.append_text(persona_text)
-    assert "persona: don_rickles" in base.plain
+    assert "persona: house_comedian" in base.plain
     # Confirm the monitor module exposes the _fetch_personas helper used by
     # both the S-key overlay and the new header poll.
     assert callable(monitor_mod._fetch_personas)

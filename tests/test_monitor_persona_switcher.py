@@ -24,8 +24,8 @@ from robot_comic.monitor import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-_CHOICES = ["bill_hicks", "don_rickles", "george_carlin"]
-_CURRENT = "don_rickles"
+_CHOICES = ["house_comedian", "default", "house_comedian_b"]
+_CURRENT = "house_comedian"
 
 
 def _make_http_response(body: dict[str, Any], status: int = 200) -> MagicMock:
@@ -49,7 +49,7 @@ def test_switcher_select_and_confirm() -> None:
     assert sw.selected_idx == 1
     sw.handle_key("<enter>")
     assert sw.done
-    assert sw.apply_name == "don_rickles"
+    assert sw.apply_name == "default"
 
 
 def test_switcher_esc_cancels() -> None:
@@ -104,7 +104,7 @@ def test_switcher_digit_changes_selection() -> None:
     sw.handle_key("3")
     assert sw.selected_idx == 2
     sw.handle_key("<enter>")
-    assert sw.apply_name == "george_carlin"
+    assert sw.apply_name == "house_comedian_b"
 
 
 def test_switcher_full_sequence_s_3_enter() -> None:
@@ -115,7 +115,7 @@ def test_switcher_full_sequence_s_3_enter() -> None:
     for key in ["3", "<enter>"]:
         sw.handle_key(key)
     assert sw.done
-    assert sw.apply_name == "george_carlin"
+    assert sw.apply_name == "house_comedian_b"
 
 
 def test_switcher_full_sequence_s_esc_no_post() -> None:
@@ -146,7 +146,7 @@ def test_build_picker_panel_marks_active() -> None:
     combined = " ".join(texts)
     assert "▶" in combined
     assert "(active)" in combined
-    assert "don_rickles" in combined
+    assert "house_comedian" in combined
 
 
 def test_build_picker_panel_highlights_selected() -> None:
@@ -154,7 +154,7 @@ def test_build_picker_panel_highlights_selected() -> None:
     panel = _build_picker_panel(_CHOICES, _CURRENT, selected_idx=0)
     table = panel.renderable
     inner = getattr(table, "renderable", table)
-    # Row 0 (bill_hicks) should be selected — just verify the panel builds OK
+    # Row 0 (house_comedian) should be selected — just verify the panel builds OK
     # and the selected index is reflected somehow in the text.
     texts = []
     for col in inner.columns:
@@ -162,7 +162,7 @@ def test_build_picker_panel_highlights_selected() -> None:
             plain = cell.plain if hasattr(cell, "plain") else str(cell)
             texts.append(plain)
     combined = " ".join(texts)
-    assert "bill_hicks" in combined
+    assert "house_comedian" in combined
 
 
 def test_build_picker_panel_status_line_in_subtitle() -> None:
@@ -197,18 +197,18 @@ def test_fetch_personas_network_error() -> None:
 
 def test_apply_persona_success() -> None:
     """_apply_persona returns (True, ...) when the server responds {ok: true}."""
-    body = {"ok": True, "status": "applied", "startup": "george_carlin"}
+    body = {"ok": True, "status": "applied", "startup": "house_comedian_b"}
     with patch("robot_comic.monitor.urlopen", return_value=_make_http_response(body)):
-        ok, msg = _apply_persona("http://localhost:8000", "george_carlin")
+        ok, msg = _apply_persona("http://localhost:8000", "house_comedian_b")
     assert ok is True
-    assert "george_carlin" in msg
+    assert "house_comedian_b" in msg
 
 
 def test_apply_persona_server_error() -> None:
     """_apply_persona returns (False, ...) when the server returns ok=false."""
-    body = {"ok": False, "error": "profile_locked", "locked_to": "don_rickles"}
+    body = {"ok": False, "error": "profile_locked", "locked_to": "house_comedian"}
     with patch("robot_comic.monitor.urlopen", return_value=_make_http_response(body)):
-        ok, msg = _apply_persona("http://localhost:8000", "george_carlin")
+        ok, msg = _apply_persona("http://localhost:8000", "house_comedian_b")
     assert ok is False
     assert "profile_locked" in msg
 
@@ -216,7 +216,7 @@ def test_apply_persona_server_error() -> None:
 def test_apply_persona_network_error() -> None:
     """_apply_persona returns (False, ...) on connection failure."""
     with patch("robot_comic.monitor.urlopen", side_effect=OSError("refused")):
-        ok, msg = _apply_persona("http://localhost:8000", "george_carlin")
+        ok, msg = _apply_persona("http://localhost:8000", "house_comedian_b")
     assert ok is False
     assert msg  # some error message
 

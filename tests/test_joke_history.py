@@ -110,8 +110,8 @@ def test_add_with_topic(tmp_path: Path) -> None:
 
 def test_add_with_persona(tmp_path: Path) -> None:
     history = JokeHistory(tmp_path / "history.json")
-    history.add("Hockey puck!", topic="sports", persona="don_rickles")
-    assert history._entries[0]["persona"] == "don_rickles"
+    history.add("Hockey puck!", topic="sports", persona="house_comedian")
+    assert history._entries[0]["persona"] == "house_comedian"
 
 
 def test_add_truncates_beyond_max(tmp_path: Path) -> None:
@@ -289,14 +289,14 @@ def test_format_for_prompt_cross_persona(tmp_path: Path) -> None:
     """format_for_prompt must include entries from multiple personas."""
     path = tmp_path / "history.json"
     entries = [
-        _make_entry("Hockey puck!", topic="sports", persona="don_rickles", age_hours=1),
+        _make_entry("Hockey puck!", topic="sports", persona="house_comedian", age_hours=1),
         _make_entry("Why so serious?", topic="mood", persona="joker", age_hours=2),
         _make_entry("You're the best audience I've had all week!", persona="carlin", age_hours=3),
     ]
     path.write_text(json.dumps(entries), encoding="utf-8")
     history = JokeHistory(path)
     result = history.format_for_prompt()
-    assert "[don_rickles] Hockey puck!" in result
+    assert "[house_comedian] Hockey puck!" in result
     assert "[joker] Why so serious?" in result
     assert "You're the best audience" in result
 
@@ -304,11 +304,11 @@ def test_format_for_prompt_cross_persona(tmp_path: Path) -> None:
 def test_format_for_prompt_cross_persona_persona_prefix(tmp_path: Path) -> None:
     """Entries with a persona should be prefixed with [persona] in the output."""
     path = tmp_path / "history.json"
-    entries = [_make_entry("Nice tie!", persona="don_rickles", age_hours=0.1)]
+    entries = [_make_entry("Nice tie!", persona="house_comedian", age_hours=0.1)]
     path.write_text(json.dumps(entries), encoding="utf-8")
     history = JokeHistory(path)
     result = history.format_for_prompt()
-    assert "- [don_rickles] Nice tie!" in result
+    assert "- [house_comedian] Nice tie!" in result
 
 
 def test_format_for_prompt_no_persona_prefix_when_empty(tmp_path: Path) -> None:
@@ -326,7 +326,7 @@ def test_format_for_prompt_no_persona_prefix_when_empty(tmp_path: Path) -> None:
 def test_format_for_prompt_topic_suffix(tmp_path: Path) -> None:
     """Entries with a topic should include (topic: ...) suffix."""
     path = tmp_path / "history.json"
-    entries = [_make_entry("Hockey puck!", topic="sports", persona="don_rickles", age_hours=0.1)]
+    entries = [_make_entry("Hockey puck!", topic="sports", persona="house_comedian", age_hours=0.1)]
     path.write_text(json.dumps(entries), encoding="utf-8")
     history = JokeHistory(path)
     result = history.format_for_prompt()

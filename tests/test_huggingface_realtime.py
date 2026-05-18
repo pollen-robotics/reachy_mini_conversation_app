@@ -593,6 +593,7 @@ async def test_apply_personality_uses_selected_voice_for_lb_allocated_sessions(m
     monkeypatch.setattr(hf_mod, "get_session_instructions", lambda: "new instructions")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "Serena")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", "https://lb.example.test/session")
+    monkeypatch.setattr("robot_comic.config.set_custom_profile", lambda _profile: None)
 
     captured_update: dict[str, Any] = {}
 

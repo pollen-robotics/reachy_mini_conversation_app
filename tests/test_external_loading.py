@@ -81,15 +81,45 @@ def test_external_tools_can_be_loaded_without_external_profile(
 
 
 def test_builtin_profile_can_load_profile_local_tools(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Built-in profile-local tools should load from the packaged profiles root."""
-    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "example")
-    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", config_mod.DEFAULT_PROFILES_DIRECTORY)
+    """Profile-local .py tools should be discovered and loaded alongside built-in tools."""
+    profile_name = "local_tool_profile"
+    profiles_root = tmp_path / "profiles"
+    profile_dir = profiles_root / profile_name
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "instructions.txt").write_text("test\n", encoding="utf-8")
+    (profile_dir / "tools.txt").write_text("dance\nlocal_ping\n", encoding="utf-8")
+    (profile_dir / "local_ping.py").write_text(
+        "\n".join(
+            [
+                "from typing import Any, Dict",
+                "from robot_comic.tools.core_tools import Tool, ToolDependencies",
+                "",
+                "class LocalPingTool(Tool):",
+                '    name = "local_ping"',
+                '    description = "Profile-local ping tool"',
+                '    parameters_schema = {"type": "object", "properties": {}, "required": []}',
+                "",
+                "    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:",
+                '        return {"status": "ok"}',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", profile_name)
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", profiles_root)
     monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
     monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
+
+    # Clear any cached sweep_look module from previous test runs
+    sys.modules.pop("local_ping", None)
 
     core_tools_mod = _reload_core_tools()
     core_tools_mod.get_tool_specs()  # trigger lazy init
 
-    assert "sweep_look" in core_tools_mod.ALL_TOOLS
+    assert "local_ping" in core_tools_mod.ALL_TOOLS
+    assert "dance" in core_tools_mod.ALL_TOOLS

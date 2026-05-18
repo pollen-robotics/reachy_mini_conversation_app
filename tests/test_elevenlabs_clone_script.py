@@ -63,8 +63,8 @@ def _parse(argv: list[str]) -> argparse.Namespace:
 def _fake_ivc_args(max_bytes: int = script.DEFAULT_MAX_BYTES, write_override: bool = True) -> MagicMock:
     """Return a minimal Namespace-alike for create-ivc tests."""
     args = MagicMock()
-    args.profile = "don_rickles"
-    args.name = "Don Rickles"
+    args.profile = "house_comedian"
+    args.name = "House Comedian"
     args.description = None
     args.all_clips = True
     args.files = []
@@ -87,7 +87,7 @@ def _run_cmd_list(state_value, capsys) -> str:
         "voices": [
             {
                 "voice_id": "abc123",
-                "name": "Don Rickles",
+                "name": "House Comedian",
                 "category": "professional",
                 "fine_tuning": {"state": state_value},
             }
@@ -108,15 +108,15 @@ def _run_cmd_list(state_value, capsys) -> str:
 
 def test_parse_all_clips_flag():
     """--all-clips sets all_clips=True and captures profile/name."""
-    args = _parse(["create-ivc", "--profile", "don_rickles", "Don Rickles", "--all-clips"])
+    args = _parse(["create-ivc", "--profile", "house_comedian", "House Comedian", "--all-clips"])
     assert args.all_clips is True
-    assert args.profile == "don_rickles"
-    assert args.name == "Don Rickles"
+    assert args.profile == "house_comedian"
+    assert args.name == "House Comedian"
 
 
 def test_parse_explicit_files():
     """Positional file args are collected into args.files."""
-    args = _parse(["create-ivc", "--profile", "don_rickles", "Don Rickles", "clip_a.wav", "clip_b.wav"])
+    args = _parse(["create-ivc", "--profile", "house_comedian", "House Comedian", "clip_a.wav", "clip_b.wav"])
     assert args.all_clips is False
     assert args.files == ["clip_a.wav", "clip_b.wav"]
 
@@ -205,14 +205,14 @@ def test_write_local_config_updates_existing_voice_id(tmp_path):
     profile_dir = tmp_path / "profiles" / "testpersona"
     profile_dir.mkdir(parents=True)
     config = profile_dir / "elevenlabs.local.txt"
-    config.write_text("voice=Don Rickles\nvoice_id=old_id\n", encoding="utf-8")
+    config.write_text("voice=House Comedian\nvoice_id=old_id\n", encoding="utf-8")
 
     _run_write_local("testpersona", "new_id_xyz", tmp_path)
 
     content = config.read_text(encoding="utf-8")
     assert "voice_id=new_id_xyz" in content
     assert "old_id" not in content
-    assert "voice=Don Rickles" in content
+    assert "voice=House Comedian" in content
 
 
 def test_write_local_config_appends_when_missing(tmp_path):
@@ -220,13 +220,13 @@ def test_write_local_config_appends_when_missing(tmp_path):
     profile_dir = tmp_path / "profiles" / "testpersona"
     profile_dir.mkdir(parents=True)
     config = profile_dir / "elevenlabs.local.txt"
-    config.write_text("voice=Don Rickles\n", encoding="utf-8")
+    config.write_text("voice=House Comedian\n", encoding="utf-8")
 
     _run_write_local("testpersona", "brand_new_id", tmp_path)
 
     content = config.read_text(encoding="utf-8")
     assert "voice_id=brand_new_id" in content
-    assert "voice=Don Rickles" in content
+    assert "voice=House Comedian" in content
 
 
 def test_write_local_config_replaces_commented_voice_id(tmp_path):

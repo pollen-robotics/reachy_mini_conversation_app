@@ -167,7 +167,7 @@ async def test_apply_personality_clears_history() -> None:
     handler._conversation_history = [{"role": "user", "parts": [{"text": "hi"}]}]
 
     with patch("robot_comic.gemini_tts.set_custom_profile"):
-        await handler.apply_personality("don_rickles")
+        await handler.apply_personality("house_comedian")
 
     assert handler._conversation_history == []
 

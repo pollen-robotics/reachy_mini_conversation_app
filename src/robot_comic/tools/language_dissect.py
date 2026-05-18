@@ -1,13 +1,13 @@
-"""Language dissection tool — structural scaffold for George Carlin's euphemism breakdown pattern.
+"""Language dissection tool — breaks down euphemisms and hollow language patterns.
 
 The tool provides a heuristic analysis of a phrase without making any additional LLM calls.
 It looks the phrase up in the curated euphemisms dictionary and, for unknown phrases, falls
 back to a per-word decomposition via a bundled plain-English lexicon with suffix stripping.
 When both approaches yield poor coverage (< 60%), an optional LLM-assisted fallback can be
 enabled via REACHY_MINI_LANGUAGE_DISSECT_LLM_FALLBACK=1 — it calls llama-server with a
-strict-schema Carlin-style dissection prompt and caches successful results back into the
+strict-schema dissection prompt and caches successful results back into the
 lexicon for future hits.
-The result is a structured hook the Carlin persona can riff against.
+The result is a structured hook the comedian persona can riff against.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 # Resolve the bundled dictionary relative to this file so it works whether the
 # package is installed editable or as a wheel.
-_EUPHEMISMS_PATH = Path(__file__).parents[3] / "profiles" / "george_carlin" / "euphemisms.json"
+_EUPHEMISMS_PATH = Path(__file__).parent / "euphemisms.json"
 _LEXICON_PATH = Path(__file__).parent / "language_lexicon.json"
 
 # Common suffixes to strip when looking up a stem in the lexicon, ordered from

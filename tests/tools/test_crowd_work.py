@@ -11,15 +11,15 @@ from unittest.mock import MagicMock
 import pytest
 
 
-# Load CrowdWork from its package path (moved from profiles/don_rickles/ to tools/)
+# Load CrowdWork from its package path in the tools/ directory
 _PROFILE_PATH = Path(__file__).parents[2] / "src" / "robot_comic" / "tools" / "crowd_work.py"
 
 
 def _load_crowd_work():
-    spec = importlib.util.spec_from_file_location("don_rickles_crowd_work", _PROFILE_PATH)
+    spec = importlib.util.spec_from_file_location("crowd_work_test_module", _PROFILE_PATH)
     assert spec and spec.loader, f"Cannot load module from {_PROFILE_PATH}"
     mod = importlib.util.module_from_spec(spec)
-    sys.modules["don_rickles_crowd_work"] = mod
+    sys.modules["crowd_work_test_module"] = mod
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     return mod.CrowdWork
 

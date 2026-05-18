@@ -220,39 +220,39 @@ def test_names_from_profile_dir_single_word(tmp_path: Path) -> None:
 
 
 def test_names_from_profile_dir_multi_word(tmp_path: Path) -> None:
-    profile_dir = tmp_path / "don_rickles"
+    profile_dir = tmp_path / "house_comedian"
     profile_dir.mkdir()
     names = _names_from_profile_dir(profile_dir)
-    # Should include individual last-name and full name.
-    assert "rickles" in names
-    assert "don rickles" in names
+    # Should include the last word and the full humanised name.
+    assert "comedian" in names
+    assert "house comedian" in names
 
 
 def test_names_from_profile_dir_wake_names_file_overrides(tmp_path: Path) -> None:
-    profile_dir = tmp_path / "don_rickles"
+    profile_dir = tmp_path / "house_comedian"
     profile_dir.mkdir()
-    (profile_dir / "wake_names.txt").write_text("rickles\nmr. warmth\n", encoding="utf-8")
+    (profile_dir / "wake_names.txt").write_text("hey robot\ncomic\n", encoding="utf-8")
     names = _names_from_profile_dir(profile_dir)
-    assert names == ["rickles", "mr. warmth"]
+    assert names == ["hey robot", "comic"]
 
 
 def test_names_from_profile_dir_empty_wake_names_falls_back(tmp_path: Path) -> None:
-    profile_dir = tmp_path / "don_rickles"
+    profile_dir = tmp_path / "house_comedian"
     profile_dir.mkdir()
     # Empty file → fall back to stem derivation.
     (profile_dir / "wake_names.txt").write_text("\n  \n", encoding="utf-8")
     names = _names_from_profile_dir(profile_dir)
-    assert "rickles" in names
+    assert "comedian" in names
 
 
 def test_make_gate_for_profile(tmp_path: Path) -> None:
-    profile_dir = tmp_path / "don_rickles"
+    profile_dir = tmp_path / "house_comedian"
     profile_dir.mkdir()
     gate = make_gate_for_profile(profile_dir)
     assert isinstance(gate, WelcomeGate)
     assert gate.state is GateState.WAITING
-    # Gate should open for "rickles".
-    assert gate.consider("hey rickles") is True
+    # Gate should open for "comedian" (derived from profile dir name).
+    assert gate.consider("hey comedian") is True
 
 
 def test_make_gate_for_profile_with_wake_names_file(tmp_path: Path) -> None:
