@@ -1,6 +1,7 @@
 """Camera worker thread with frame buffering and optional head tracking."""
 
 from __future__ import annotations
+import os
 import time
 import logging
 import threading
@@ -17,6 +18,42 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+# How long (seconds) to wait between head-tracker inference calls when no face
+# has been seen recently.  At 25 Hz the tracker fires on every camera frame
+# even when the room is empty; dropping to 5 Hz (0.2 s) cuts idle MediaPipe
+# CPU substantially without affecting tracking responsiveness — the first
+# "face present" result immediately restores full-rate inference.
+# Override via REACHY_MINI_HEAD_TRACKER_IDLE_POLL_INTERVAL_S.
+_DEFAULT_HEAD_TRACKER_IDLE_POLL_INTERVAL_S = 0.2
+
+
+def _head_tracker_idle_poll_interval_s() -> float:
+    """Return the head-tracker inference interval when no face is visible.
+
+    When ``get_head_position`` returns None for the most recent frame the
+    worker switches to idle-rate polling so MediaPipe does not burn CPU
+    scanning an empty room at 25 Hz.  The first frame where a face is found
+    immediately resets the last-call timestamp so the next iteration runs at
+    full speed again.
+
+    ``REACHY_MINI_HEAD_TRACKER_IDLE_POLL_INTERVAL_S`` overrides the default.
+    Values below 0.04 s (one camera frame) are clamped upward — going faster
+    than the camera provides no benefit and risks busy-spinning.
+    """
+    raw = os.environ.get("REACHY_MINI_HEAD_TRACKER_IDLE_POLL_INTERVAL_S")
+    if raw is None or not raw.strip():
+        return _DEFAULT_HEAD_TRACKER_IDLE_POLL_INTERVAL_S
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning(
+            "Invalid REACHY_MINI_HEAD_TRACKER_IDLE_POLL_INTERVAL_S=%r; using default %.2f",
+            raw,
+            _DEFAULT_HEAD_TRACKER_IDLE_POLL_INTERVAL_S,
+        )
+        return _DEFAULT_HEAD_TRACKER_IDLE_POLL_INTERVAL_S
+    return max(0.04, value)
 
 
 class CameraWorker:
@@ -53,6 +90,14 @@ class CameraWorker:
         self.interpolation_duration = 1.0
 
         self.previous_head_tracking_state = self.is_head_tracking_enabled
+
+        # Idle-rate gating: track the last time we ran get_head_position so we
+        # can throttle inference to _head_tracker_idle_poll_interval_s() when
+        # no face has been seen.  None means "never called" → fire immediately.
+        self._last_tracker_call_time: float | None = None
+        # Track whether the previous tracker call found a face so we know
+        # whether to use idle-rate or full-rate for the next call.
+        self._last_tracker_found_face: bool = False
 
         # Rate-limiting state for the except handler: track last logged message,
         # when it was last logged, and how many times it was suppressed.
@@ -171,7 +216,28 @@ class CameraWorker:
                     self.previous_head_tracking_state = self.is_head_tracking_enabled
 
                     if self.is_head_tracking_enabled and self.head_tracker is not None:
-                        eye_center, _ = self.head_tracker.get_head_position(frame)
+                        # Idle-rate gate: when the previous call saw no face,
+                        # throttle inference to _head_tracker_idle_poll_interval_s()
+                        # so MediaPipe does not burn CPU scanning an empty room at
+                        # 25 Hz.  As soon as a face is found we reset
+                        # _last_tracker_call_time to None so the *next* iteration
+                        # fires immediately (i.e. no inter-frame gap while tracking
+                        # is active).  The interpolation-back-to-neutral path is
+                        # entirely independent of get_head_position — it runs from
+                        # last_face_detected_time and elapsed wall-clock time below,
+                        # so skipping the tracker call here does not break it.
+                        idle_interval = _head_tracker_idle_poll_interval_s()
+                        run_tracker = (
+                            self._last_tracker_found_face
+                            or self._last_tracker_call_time is None
+                            or (current_time - self._last_tracker_call_time) >= idle_interval
+                        )
+
+                        eye_center = None
+                        if run_tracker:
+                            self._last_tracker_call_time = current_time
+                            eye_center, _ = self.head_tracker.get_head_position(frame)
+                            self._last_tracker_found_face = eye_center is not None
 
                         if eye_center is not None:
                             self.last_face_detected_time = current_time
