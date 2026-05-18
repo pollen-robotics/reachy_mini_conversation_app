@@ -141,6 +141,23 @@ class TestLlamaXttsCombinations:
         assert tts._language == "fr"
         assert tts._timeout_s == 15.0
 
+    def test_xtts_adapter_has_speaking_until_setter_wired(
+        self, monkeypatch: pytest.MonkeyPatch, mock_deps: MagicMock
+    ) -> None:
+        """Echo-guard: the factory supplies a ``speaking_until_setter`` to XttsTTSAdapter.
+
+        The setter closure writes ``host._speaking_until`` so the STT
+        ``_should_drop_frame`` predicate is armed during xtts playback.
+        Regression guard for the gap identified post-#466 (self-echo barge-in
+        on the xtts path).
+        """
+        result = self._build(monkeypatch, mock_deps, AUDIO_INPUT_FASTER_WHISPER)
+        tts = result.pipeline.tts
+        assert isinstance(tts, XttsTTSAdapter)
+        assert tts._speaking_until_setter is not None, (
+            "XttsTTSAdapter must have a speaking_until_setter wired by the factory"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Gemini LLM + xtts TTS
@@ -220,6 +237,21 @@ class TestGeminiXttsCombinations:
         # The LLM adapter wraps the gemini host; verify via the adapter's handler.
         llm_adapter = result.pipeline.llm
         assert isinstance(llm_adapter._handler, GeminiTextChatterboxResponseHandler)
+
+    def test_xtts_adapter_has_speaking_until_setter_wired(
+        self, monkeypatch: pytest.MonkeyPatch, mock_deps: MagicMock
+    ) -> None:
+        """Echo-guard: the factory supplies a ``speaking_until_setter`` to XttsTTSAdapter.
+
+        Regression guard for the gap identified post-#466 (self-echo barge-in
+        on the gemini+xtts path).
+        """
+        result = self._build(monkeypatch, mock_deps, AUDIO_INPUT_FASTER_WHISPER)
+        tts = result.pipeline.tts
+        assert isinstance(tts, XttsTTSAdapter)
+        assert tts._speaking_until_setter is not None, (
+            "XttsTTSAdapter must have a speaking_until_setter wired by the factory"
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -16,6 +16,9 @@ Coverage:
 - ``shutdown`` closes the httpx client; safe to call twice.
 - HTTP error from ``POST /tts_stream`` propagates as a clean exception
   (no half-yielded frames).
+- Echo-guard: ``speaking_until_setter`` is called after each frame with a
+  monotonically-advancing deadline that exceeds wall-clock (covers the
+  duration of audio emitted so far plus the configured cooldown).
 """
 
 from __future__ import annotations
@@ -322,3 +325,129 @@ async def test_http_error_propagates_cleanly() -> None:
     with pytest.raises(httpx.HTTPStatusError):
         async for _ in adapter.synthesize("boom"):
             pass
+
+
+# ---------------------------------------------------------------------------
+# Echo-guard: speaking_until_setter wiring
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_speaking_until_setter_called_for_each_frame() -> None:
+    """``speaking_until_setter`` is invoked once per yielded frame.
+
+    The setter must be called at least once per audio frame so the STT
+    echo-guard (``_should_drop_frame``) sees a non-zero deadline while xtts
+    is streaming.  Three full frames → three setter calls.
+    """
+    # Three 2400-sample frames (= 3 × 4800 bytes of int16 PCM).
+    response = _FakeStreamResponse([_silent_pcm_bytes(7200)])
+    client = _FakeAsyncClient(stream_response=response)
+
+    setter_calls: list[float] = []
+    adapter = XttsTTSAdapter(
+        base_url="http://x:1",
+        default_speaker="rickles",
+        _client=client,
+        speaking_until_setter=setter_calls.append,
+    )
+
+    async for _ in adapter.synthesize("hello"):
+        pass
+
+    assert len(setter_calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_speaking_until_advances_monotonically() -> None:
+    """Each successive setter call must receive a value >= the previous one.
+
+    As more PCM bytes accumulate the derived playback-end deadline can only
+    grow (sample rate and cooldown are both positive constants).
+    """
+    response = _FakeStreamResponse([_silent_pcm_bytes(7200)])
+    client = _FakeAsyncClient(stream_response=response)
+
+    deadlines: list[float] = []
+    adapter = XttsTTSAdapter(
+        base_url="http://x:1",
+        default_speaker="rickles",
+        _client=client,
+        speaking_until_setter=deadlines.append,
+    )
+
+    async for _ in adapter.synthesize("hello"):
+        pass
+
+    assert len(deadlines) >= 2
+    for prev, curr in zip(deadlines, deadlines[1:]):
+        assert curr >= prev, f"deadline regressed: {prev} → {curr}"
+
+
+@pytest.mark.asyncio
+async def test_speaking_until_exceeds_wall_clock_on_first_frame() -> None:
+    """The first deadline must be strictly greater than the current time.
+
+    A single 2400-sample frame at 24 kHz represents 100 ms of audio plus
+    ``ECHO_COOLDOWN_MS`` (≥ 300 ms by default), so the derived deadline
+    should comfortably exceed ``time.perf_counter()`` at the moment of
+    the check.
+    """
+    import time as _time
+
+    # One full 2400-sample frame.
+    response = _FakeStreamResponse([_silent_pcm_bytes(2400)])
+    client = _FakeAsyncClient(stream_response=response)
+
+    received_deadlines: list[float] = []
+    adapter = XttsTTSAdapter(
+        base_url="http://x:1",
+        default_speaker="rickles",
+        _client=client,
+        speaking_until_setter=received_deadlines.append,
+    )
+
+    async for _ in adapter.synthesize("hi"):
+        pass
+
+    assert len(received_deadlines) == 1
+    now = _time.perf_counter()
+    # deadline must be in the future relative to now — audio duration + cooldown
+    assert received_deadlines[0] > now, f"deadline {received_deadlines[0]:.4f} should exceed wall-clock {now:.4f}"
+
+
+@pytest.mark.asyncio
+async def test_speaking_until_setter_called_for_trailing_partial_frame() -> None:
+    """The setter must also fire for the trailing sub-2400-sample remainder.
+
+    A server response that isn't a multiple of 2400 samples yields one full
+    frame + one short frame; the setter must be called for both.
+    """
+    # 2400 + 500 = 2900 samples → one full frame + one 500-sample remainder.
+    response = _FakeStreamResponse([_silent_pcm_bytes(2900)])
+    client = _FakeAsyncClient(stream_response=response)
+
+    setter_calls: list[float] = []
+    adapter = XttsTTSAdapter(
+        base_url="http://x:1",
+        default_speaker="rickles",
+        _client=client,
+        speaking_until_setter=setter_calls.append,
+    )
+
+    frames = [f async for f in adapter.synthesize("trailing")]
+
+    assert len(frames) == 2  # sanity: one full + one partial
+    assert len(setter_calls) == 2  # setter fired for each
+
+
+@pytest.mark.asyncio
+async def test_speaking_until_setter_not_called_when_none() -> None:
+    """When no ``speaking_until_setter`` is supplied synthesis works unchanged."""
+    response = _FakeStreamResponse([_silent_pcm_bytes(2400)])
+    client = _FakeAsyncClient(stream_response=response)
+    adapter = XttsTTSAdapter(base_url="http://x:1", default_speaker="rickles", _client=client)
+
+    # Should not raise and should still yield the frame.
+    frames = [f async for f in adapter.synthesize("no setter")]
+    assert len(frames) == 1

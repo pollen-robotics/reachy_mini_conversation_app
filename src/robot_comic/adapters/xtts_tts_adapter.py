@@ -33,6 +33,27 @@ the same shape as the elevenlabs path. The trailing remainder — server
 sends a count not divisible by 2400 — is yielded as a final short frame
 on stream end.
 
+## Echo-guard wiring
+
+When :meth:`synthesize` streams frames it derives the playback-end
+deadline after each frame using the same byte-count formula as
+:class:`ElevenLabsTTSResponseHandler._enqueue_audio_frame`:
+
+    playback_end = response_start_ts + total_bytes / (sample_rate * 2)
+    speaking_until = playback_end + cooldown_s
+
+The result is forwarded to the optional ``speaking_until_setter``
+callable passed in the constructor. Factory builders
+(:func:`handler_factory._build_composable_llama_xtts` /
+:func:`handler_factory._build_composable_gemini_xtts`) supply a closure
+that writes ``host._speaking_until``, giving the STT-side
+``_should_drop_frame`` predicate an up-to-date playback deadline and
+closing the self-echo barge-in gap identified post-#466.
+
+The adapter itself is still stateless between calls — the accumulators
+(``response_start_ts``, ``response_audio_bytes``) are local to each
+``synthesize`` invocation so concurrent calls cannot interfere.
+
 ## Known gaps
 
 - **No tag forwarding.** xtts-v2 has no native delivery cues (fast /
@@ -44,7 +65,8 @@ on stream end.
 - **No per-session state to reset.** Unlike legacy-handler-wrapping
   adapters which carry echo-guard accumulators (``_speaking_until`` etc.)
   on the wrapped handler, this adapter is stateless between calls —
-  :meth:`reset_per_session_state` is a clean no-op.
+  :meth:`reset_per_session_state` is a clean no-op. The factory resets
+  ``host._speaking_until`` directly when needed.
 - **Hardware E2E is gated on the service running.** Issue #436 builds
   the start/stop scripts. Until that lands the adapter is testable only
   via stubbed HTTP.
@@ -53,11 +75,12 @@ on stream end.
 from __future__ import annotations
 import time
 import logging
-from typing import Any, AsyncIterator
+from typing import Any, Callable, AsyncIterator
 
 import httpx
 import numpy as np
 
+from robot_comic.config import config
 from robot_comic.backends import AudioFrame
 
 
@@ -83,9 +106,19 @@ class XttsTTSAdapter:
         language: str = "en",
         timeout_s: float = 30.0,
         *,
+        speaking_until_setter: Callable[[float], None] | None = None,
         _client: Any | None = None,
     ) -> None:
         """Construct an adapter pointed at the LAN xtts service.
+
+        ``speaking_until_setter`` — when provided, :meth:`synthesize`
+        calls this with the derived playback-end deadline after each
+        yielded audio frame.  Factory builders pass a closure that writes
+        ``host._speaking_until`` so the STT-side ``_should_drop_frame``
+        predicate sees an up-to-date value during xtts playback.  The
+        deadline formula mirrors
+        :meth:`ElevenLabsTTSResponseHandler._enqueue_audio_frame`:
+        ``response_start_ts + total_bytes / (sample_rate * 2) + cooldown_s``.
 
         ``_client`` is a test seam: pass a stub satisfying the
         ``stream``/``get``/``aclose`` subset of :class:`httpx.AsyncClient`
@@ -96,6 +129,7 @@ class XttsTTSAdapter:
         self._language = language
         self._timeout_s = timeout_s
         self._current_voice = default_speaker
+        self._speaking_until_setter = speaking_until_setter
         self._client: Any | None = _client
 
     # ------------------------------------------------------------------ #
@@ -127,6 +161,29 @@ class XttsTTSAdapter:
         return None
 
     # ------------------------------------------------------------------ #
+    # Echo-guard helper                                                  #
+    # ------------------------------------------------------------------ #
+
+    def _push_speaking_until(self, response_start_ts: float, response_audio_bytes: int) -> None:
+        """Derive and forward the playback-end deadline to the setter.
+
+        Mirrors :meth:`ElevenLabsTTSResponseHandler._enqueue_audio_frame`:
+
+            playback_end = response_start_ts + total_bytes / (sample_rate * 2)
+            speaking_until = playback_end + cooldown_s
+
+        Called after adding each frame's byte count to ``response_audio_bytes``
+        so the deadline always covers at least the bytes emitted so far.
+        No-op when ``speaking_until_setter`` was not supplied.
+        """
+        if self._speaking_until_setter is None:
+            return
+        cooldown_s = config.ECHO_COOLDOWN_MS / 1000.0
+        bytes_per_second = _SAMPLE_RATE_HZ * _BYTES_PER_SAMPLE
+        playback_end = response_start_ts + response_audio_bytes / bytes_per_second
+        self._speaking_until_setter(playback_end + cooldown_s)
+
+    # ------------------------------------------------------------------ #
     # Synthesis                                                          #
     # ------------------------------------------------------------------ #
 
@@ -143,6 +200,12 @@ class XttsTTSAdapter:
         the orchestrator sees the same frame shape as other TTS
         backends. Yields any trailing partial-frame remainder on stream
         end.
+
+        After each yielded frame, if ``speaking_until_setter`` was
+        supplied to the constructor, calls it with the updated playback-
+        end deadline so the STT echo-guard stays armed throughout xtts
+        playback.  The formula mirrors
+        :meth:`ElevenLabsTTSResponseHandler._enqueue_audio_frame`.
         """
         if tags:
             logger.debug(
@@ -164,6 +227,13 @@ class XttsTTSAdapter:
         buffer = bytearray()
         marker_appended = False
 
+        # Echo-guard accumulators — local per-response so concurrent calls
+        # cannot interfere (the adapter itself is stateless between calls).
+        # response_start_ts: perf_counter() when the first frame was emitted.
+        # response_audio_bytes: cumulative int16 PCM bytes emitted this response.
+        response_start_ts: float = 0.0
+        response_audio_bytes: int = 0
+
         async with self._client.stream("POST", url, json=payload) as response:
             response.raise_for_status()
             async for chunk in response.aiter_bytes():
@@ -177,6 +247,11 @@ class XttsTTSAdapter:
                     if first_audio_marker is not None and not marker_appended:
                         first_audio_marker.append(time.monotonic())
                         marker_appended = True
+                    # Update echo-guard deadline — mirrors _enqueue_audio_frame.
+                    if response_audio_bytes == 0:
+                        response_start_ts = time.perf_counter()
+                    response_audio_bytes += _FRAME_BYTES
+                    self._push_speaking_until(response_start_ts, response_audio_bytes)
                     yield AudioFrame(samples=samples, sample_rate=_SAMPLE_RATE_HZ)
 
         # Flush any trailing remainder as a final short frame. Pad to an
@@ -188,6 +263,11 @@ class XttsTTSAdapter:
             if first_audio_marker is not None and not marker_appended:
                 first_audio_marker.append(time.monotonic())
                 marker_appended = True
+            # Update echo-guard deadline for the trailing partial frame.
+            if response_audio_bytes == 0:
+                response_start_ts = time.perf_counter()
+            response_audio_bytes += len(buffer)
+            self._push_speaking_until(response_start_ts, response_audio_bytes)
             yield AudioFrame(samples=samples, sample_rate=_SAMPLE_RATE_HZ)
 
     # ------------------------------------------------------------------ #

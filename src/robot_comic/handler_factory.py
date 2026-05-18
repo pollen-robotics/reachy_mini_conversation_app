@@ -969,15 +969,15 @@ def _build_composable_llama_xtts(
     handler's TTS methods are unused — :class:`XttsTTSAdapter` owns the
     TTS step end-to-end.
 
-    Echo-guard caveat: :class:`XttsTTSAdapter` does not write
-    ``_speaking_until`` (it is stateless between calls — see module
-    docstring "Known gaps"). The ``should_drop_frame`` closure's
-    ``getattr(host, "_speaking_until", 0.0)`` reads the value from the
-    LLM host, which is only updated by the legacy
-    ``_enqueue_audio_frame`` path — a path never exercised here because
-    TTS is handled by the native adapter. The echo-guard is therefore a
-    no-op for this triple, identical to the gemini_tts triple's
-    documented behaviour.
+    Echo-guard: :class:`XttsTTSAdapter` is supplied a
+    ``speaking_until_setter`` closure that writes ``host._speaking_until``
+    after each yielded audio frame.  The ``_should_drop_frame`` closure
+    reads ``host._speaking_until`` via :func:`getattr`, so the STT-side
+    barge-in guard is armed for the full duration of xtts playback — the
+    same lifecycle as every other composable triple (elevenlabs, chatterbox).
+    Previously this was a no-op because the native adapter had no path to
+    update ``_speaking_until``; fixed by wiring ``speaking_until_setter``
+    in this factory.
 
     Phase 5f STT selection: :func:`_build_stt_adapter` picks
     :class:`MoonshineSTTAdapter` or :class:`FasterWhisperSTTAdapter`
@@ -1000,10 +1000,8 @@ def _build_composable_llama_xtts(
         host = LlamaElevenLabsTTSResponseHandler(**handler_kwargs)
 
         def _should_drop_frame() -> bool:
-            # Echo-guard: no-op for this triple — XttsTTSAdapter does not
-            # write _speaking_until (stateless native adapter). The getattr
-            # default of 0.0 means the condition is always False. See
-            # docstring for full rationale.
+            # Echo-guard: reads host._speaking_until, which XttsTTSAdapter
+            # now updates via speaking_until_setter on every yielded frame.
             return _time.perf_counter() < getattr(host, "_speaking_until", 0.0)
 
         stt = _build_stt_adapter(input_backend, _should_drop_frame)
@@ -1013,6 +1011,7 @@ def _build_composable_llama_xtts(
             default_speaker=config.XTTS_DEFAULT_SPEAKER_KEY,
             language=config.XTTS_LANGUAGE,
             timeout_s=config.XTTS_TIMEOUT_S,
+            speaking_until_setter=lambda deadline: setattr(host, "_speaking_until", deadline),
         )
         pipeline = ComposablePipeline(
             stt,
@@ -1050,9 +1049,10 @@ def _build_composable_gemini_xtts(
     TTS output. Its chatterbox TTS methods are unused; :class:`XttsTTSAdapter`
     owns TTS end-to-end.
 
-    Echo-guard caveat: identical to :func:`_build_composable_llama_xtts` —
-    the echo-guard ``should_drop_frame`` closure is a no-op because
-    :class:`XttsTTSAdapter` does not write ``_speaking_until``.
+    Echo-guard: same ``speaking_until_setter`` wiring as
+    :func:`_build_composable_llama_xtts` — the setter writes
+    ``host._speaking_until`` after each xtts audio frame so the STT
+    barge-in guard is armed for the full duration of playback.
 
     Phase 5f STT selection: :func:`_build_stt_adapter` picks
     :class:`MoonshineSTTAdapter` or :class:`FasterWhisperSTTAdapter`
@@ -1074,9 +1074,8 @@ def _build_composable_gemini_xtts(
         host = GeminiTextChatterboxResponseHandler(**handler_kwargs)
 
         def _should_drop_frame() -> bool:
-            # Echo-guard: no-op for this triple — XttsTTSAdapter does not
-            # write _speaking_until. See _build_composable_llama_xtts
-            # docstring for the full rationale.
+            # Echo-guard: reads host._speaking_until, which XttsTTSAdapter
+            # now updates via speaking_until_setter on every yielded frame.
             return _time.perf_counter() < getattr(host, "_speaking_until", 0.0)
 
         stt = _build_stt_adapter(input_backend, _should_drop_frame)
@@ -1086,6 +1085,7 @@ def _build_composable_gemini_xtts(
             default_speaker=config.XTTS_DEFAULT_SPEAKER_KEY,
             language=config.XTTS_LANGUAGE,
             timeout_s=config.XTTS_TIMEOUT_S,
+            speaking_until_setter=lambda deadline: setattr(host, "_speaking_until", deadline),
         )
         pipeline = ComposablePipeline(
             stt,
