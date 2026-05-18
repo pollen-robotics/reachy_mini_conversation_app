@@ -53,6 +53,7 @@ class is only for composable-mode pipelines.
 """
 
 from __future__ import annotations
+import os
 import re
 import time
 import uuid
@@ -63,6 +64,7 @@ import collections
 from typing import TYPE_CHECKING, Any, Callable, Awaitable
 from difflib import SequenceMatcher
 
+import httpx
 from opentelemetry import trace
 from opentelemetry import context as otel_context
 
@@ -135,6 +137,81 @@ MIN_TRANSCRIPT_CHARS = 8
 # ``docs/superpowers/specs/2026-05-16-phase-5f-3-echo-content-similarity-filter.md``.
 ECHO_HISTORY_MAXLEN = 5
 ECHO_SIMILARITY_THRESHOLD = 0.65
+
+
+# TTS-down cascade suppression (this PR).
+#
+# When the TTS service is unreachable, every ambient-noise VAD trigger fires
+# a full STT → LLM → TTS round-trip that ultimately times out — burning
+# CPU and keeping the cascade alive. Hardware finding 2026-05-18: xtts at
+# astralplane.lan:8020 was firewall-blocked from ricci; 43 interrupted turns
+# in 32 minutes, all hallucinating on ambient mic input, none producing audio.
+#
+# Fix: after a TTS call raises a "service down" error class
+# (``httpx.ConnectTimeout``, ``httpx.ConnectError``, ``httpx.ReadTimeout``,
+# ``OSError``), suppress new STT-triggered turns for
+# ``REACHY_MINI_TTS_DOWN_COOLDOWN_S`` seconds. The first successful TTS call
+# clears the cooldown, so recovery is automatic with no reconnect probe.
+#
+# The gate sits at ``_on_transcript_completed`` entry — before LLM, before
+# STT telemetry — so suppressed turns cost nothing except one log line.
+# The warning fires ONCE when cooldown is entered; subsequent drops are
+# silent (DEBUG) so the journal doesn't flood during an outage.
+_TTS_DOWN_COOLDOWN_ENV = "REACHY_MINI_TTS_DOWN_COOLDOWN_S"
+_TTS_DOWN_COOLDOWN_DEFAULT = 45.0
+_TTS_DOWN_COOLDOWN_MIN = 5.0
+_TTS_DOWN_COOLDOWN_MAX = 600.0
+
+# Exception types that indicate the TTS *service* is unreachable (vs a
+# transient inference error that may self-heal within the same call).
+# ``OSError`` covers socket-level failures (e.g. no route to host, ECONNREFUSED)
+# that httpx can raise before building an HTTP response.
+_TTS_DOWN_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    httpx.ConnectTimeout,
+    httpx.ConnectError,
+    httpx.ReadTimeout,
+    OSError,
+)
+
+
+def _tts_down_cooldown_s() -> float:
+    """Read and clamp ``REACHY_MINI_TTS_DOWN_COOLDOWN_S``.
+
+    Reads the env var once at call time (not at import time) so tests can
+    override it via ``monkeypatch.setenv`` without module-reload gymnastics.
+    Out-of-range values clamp with a warning so a misconfigured deployment
+    doesn't silently break.
+    """
+    raw = os.environ.get(_TTS_DOWN_COOLDOWN_ENV, "")
+    if not raw:
+        return _TTS_DOWN_COOLDOWN_DEFAULT
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning(
+            "%s=%r is not a valid float; using default %.1f s",
+            _TTS_DOWN_COOLDOWN_ENV,
+            raw,
+            _TTS_DOWN_COOLDOWN_DEFAULT,
+        )
+        return _TTS_DOWN_COOLDOWN_DEFAULT
+    if value < _TTS_DOWN_COOLDOWN_MIN:
+        logger.warning(
+            "%s=%.1f is below minimum %.1f s; clamping",
+            _TTS_DOWN_COOLDOWN_ENV,
+            value,
+            _TTS_DOWN_COOLDOWN_MIN,
+        )
+        return _TTS_DOWN_COOLDOWN_MIN
+    if value > _TTS_DOWN_COOLDOWN_MAX:
+        logger.warning(
+            "%s=%.1f exceeds maximum %.1f s; clamping",
+            _TTS_DOWN_COOLDOWN_ENV,
+            value,
+            _TTS_DOWN_COOLDOWN_MAX,
+        )
+        return _TTS_DOWN_COOLDOWN_MAX
+    return value
 
 
 _PUNCT_RE = re.compile(r"[^\w\s]", flags=re.UNICODE)
@@ -301,6 +378,16 @@ class ComposablePipeline:
         # Phase 5f.3 — ring buffer of recent assistant utterances
         # (normalized) for content-similarity echo filtering.
         self._recent_assistant_texts: collections.deque[str] = collections.deque(maxlen=ECHO_HISTORY_MAXLEN)
+
+        # TTS-down cascade suppression. ``_tts_down_until`` is 0.0 at start
+        # (not in cooldown). Set to ``time.monotonic() + cooldown_s`` when a
+        # TTS call raises a service-down exception; cleared to 0.0 on the
+        # first subsequent successful TTS call.
+        # ``_tts_down_warned`` gates the single entry-warning: True once the
+        # WARNING has fired for the current cooldown window; reset when the
+        # window expires or TTS recovers.
+        self._tts_down_until: float = 0.0
+        self._tts_down_warned: bool = False
 
         self._conversation_history: list[dict[str, Any]] = []
         if system_prompt:
@@ -532,6 +619,33 @@ class ComposablePipeline:
         if not transcript:
             return
 
+        # TTS-down cascade suppression gate.
+        #
+        # If the TTS service went down recently, suppress this turn entirely
+        # so we don't burn CPU on STT inference + LLM round-trips that end
+        # in another timeout. The gate fires one WARNING on entry and is
+        # then silent (DEBUG) until the cooldown expires or TTS recovers.
+        #
+        # Placed before 5f.2 / 5f.3 / dedup so suppressed turns cost nothing
+        # except a monotonic clock read and a conditional branch.
+        _now = time.monotonic()
+        if _now < self._tts_down_until:
+            remaining = self._tts_down_until - _now
+            if not self._tts_down_warned:
+                # This is the first drop inside the current window. The warning
+                # was already emitted when the window was opened (in
+                # _speak_assistant_text), so this path is reached only if
+                # _on_transcript_completed fires before _speak_assistant_text
+                # has had a chance to open the window. In practice the window
+                # opens inside _speak_assistant_text and this branch fires on
+                # the *second* and subsequent ambient triggers.
+                self._tts_down_warned = True
+            logger.debug(
+                "TTS still down — suppressing turn, %.0f s remaining in cooldown",
+                remaining,
+            )
+            return
+
         # Phase 5f.2 — minimum-utterance filter. Drops short transcripts
         # that almost always come from speaker-echo / whisper hallucination
         # (e.g. ``"You"``, ``"Thank you"``) before they reach the LLM and
@@ -719,7 +833,17 @@ class ComposablePipeline:
             )
 
     async def _speak_assistant_text(self, response: LLMResponse) -> None:
-        """Append the assistant text to history and stream TTS frames out."""
+        """Append the assistant text to history and stream TTS frames out.
+
+        TTS-down detection: if ``tts.synthesize`` raises a service-unreachable
+        exception (``httpx.ConnectTimeout``, ``httpx.ConnectError``,
+        ``httpx.ReadTimeout``, ``OSError``), this method sets
+        ``_tts_down_until`` to suppress future STT-triggered turns for
+        ``REACHY_MINI_TTS_DOWN_COOLDOWN_S`` seconds, then re-raises so the
+        outer ``_run_llm_loop_and_speak`` exception handler logs it. When TTS
+        successfully streams at least one frame, ``_tts_down_until`` is cleared
+        so the cooldown lifts immediately on recovery.
+        """
         text = response.text
         if not text.strip():
             logger.warning("Assistant returned empty text; nothing to speak")
@@ -754,21 +878,45 @@ class ComposablePipeline:
         # downstream telemetry consumers are a separate PR. See
         # ``docs/superpowers/specs/2026-05-16-phase-5a2-delivery-tag-plumbing.md``.
         first_audio_marker: list[float] = []
-        async for frame in self.tts.synthesize(
-            text,
-            tags=response.delivery_tags,
-            first_audio_marker=first_audio_marker,
-        ):
-            # ``console.py``'s playback loop branches on
-            # ``isinstance(handler_output, tuple)`` to dispatch to ALSA
-            # (see ``console.py:1466``). The TTS adapters yield
-            # :class:`AudioFrame` dataclasses for the Protocol-level
-            # surface; the legacy ``elevenlabs_tts.py`` put-site (line
-            # ~487) bypassed the wrapping and pushed
-            # ``(sample_rate, ndarray)`` tuples straight onto the queue.
-            # Unwrap here so downstream consumers stay shape-compatible.
-            # Without this, TTS audio is silently dropped on hardware
-            # (the dataclass falls through ``isinstance(..., tuple)`` and
-            # ``isinstance(..., AdditionalOutputs)`` checks). Caught
-            # during 2026-05-16 hardware validation on ricci.
-            await self.output_queue.put((frame.sample_rate, frame.samples))
+        _frames_emitted = 0
+        try:
+            async for frame in self.tts.synthesize(
+                text,
+                tags=response.delivery_tags,
+                first_audio_marker=first_audio_marker,
+            ):
+                # ``console.py``'s playback loop branches on
+                # ``isinstance(handler_output, tuple)`` to dispatch to ALSA
+                # (see ``console.py:1466``). The TTS adapters yield
+                # :class:`AudioFrame` dataclasses for the Protocol-level
+                # surface; the legacy ``elevenlabs_tts.py`` put-site (line
+                # ~487) bypassed the wrapping and pushed
+                # ``(sample_rate, ndarray)`` tuples straight onto the queue.
+                # Unwrap here so downstream consumers stay shape-compatible.
+                # Without this, TTS audio is silently dropped on hardware
+                # (the dataclass falls through ``isinstance(..., tuple)`` and
+                # ``isinstance(..., AdditionalOutputs)`` checks). Caught
+                # during 2026-05-16 hardware validation on ricci.
+                await self.output_queue.put((frame.sample_rate, frame.samples))
+                _frames_emitted += 1
+        except _TTS_DOWN_EXCEPTIONS as exc:
+            # Service-unreachable failure — arm the cascade-suppression cooldown.
+            cooldown_s = _tts_down_cooldown_s()
+            self._tts_down_until = time.monotonic() + cooldown_s
+            self._tts_down_warned = False  # allow the gate to emit one WARNING
+            logger.warning(
+                "TTS unreachable (%s: %s) — suppressing STT-triggered turns for %.0f s "
+                "to break cascade. Set %s to adjust.",
+                type(exc).__name__,
+                exc,
+                cooldown_s,
+                _TTS_DOWN_COOLDOWN_ENV,
+            )
+            raise  # let _run_llm_loop_and_speak → _on_transcript_completed log it
+        else:
+            # Successful synthesis. If we were in a cooldown window, lift it
+            # and emit a recovery log so the operator can correlate in journalctl.
+            if self._tts_down_until > 0.0:
+                logger.info("TTS recovered after outage — resuming normal turn processing")
+                self._tts_down_until = 0.0
+                self._tts_down_warned = False
