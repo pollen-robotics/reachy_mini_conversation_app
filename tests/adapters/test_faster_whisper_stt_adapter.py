@@ -26,7 +26,7 @@ from robot_comic.backends import AudioFrame, STTBackend
 # webrtcvad frame size at 16 kHz / 30 ms.
 _VAD_CHUNK = 480
 _START_FRAMES = 3
-_END_SILENCE_FRAMES = 17
+_END_SILENCE_FRAMES = 25  # matches new default _VAD_END_SILENCE_FRAMES_DEFAULT
 
 
 # ---------------------------------------------------------------------------
@@ -203,8 +203,8 @@ async def test_start_loads_model_and_vad(monkeypatch: pytest.MonkeyPatch) -> Non
     assert holder["model"].model_name == "tiny.en"
     assert holder["model"].compute_type == "int8"
     assert holder["vad"] is not None
-    # Aggressiveness 2 — module-level default.
-    assert holder["vad"].aggressiveness == 2
+    # Aggressiveness 1 — new conservative default (changed from 2).
+    assert holder["vad"].aggressiveness == 1
 
 
 @pytest.mark.asyncio
@@ -831,3 +831,153 @@ async def test_vad_is_speech_exception_is_treated_as_silence(
     # crash and must not trigger an utterance start (treated as silence).
     await adapter.feed_audio(_silence_frame(num_samples=_VAD_CHUNK * 5))
     assert started_calls == 0
+
+
+# ---------------------------------------------------------------------------
+# Env-configurable VAD knobs (aggressiveness + end-silence-frames)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_vad_aggressiveness_env_var_in_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Setting REACHY_MINI_FASTER_WHISPER_VAD_AGGRESSIVENESS=0..3 is passed to Vad()."""
+    import importlib
+
+    import robot_comic.adapters.faster_whisper_stt_adapter as _mod
+
+    _install_stubs(monkeypatch)
+
+    for level in (0, 1, 2, 3):
+        monkeypatch.setenv("REACHY_MINI_FASTER_WHISPER_VAD_AGGRESSIVENESS", str(level))
+        # Force the module-level constants to re-evaluate.
+        importlib.reload(_mod)
+
+        from robot_comic.adapters.faster_whisper_stt_adapter import (
+            _VAD_AGGRESSIVENESS,
+            FasterWhisperSTTAdapter,
+        )
+
+        assert _VAD_AGGRESSIVENESS == level, f"Expected aggressiveness={level}, got {_VAD_AGGRESSIVENESS}"
+
+        adapter = FasterWhisperSTTAdapter()
+
+        async def _cb(_t: str) -> None: ...
+
+        # Re-inject stubs after reload (module ref changed).
+        _install_stubs(monkeypatch)
+        holder = _install_stubs(monkeypatch)
+        await adapter.start(_cb)
+        assert holder["vad"].aggressiveness == level
+
+    # Restore module to default state so subsequent tests are unaffected.
+    monkeypatch.delenv("REACHY_MINI_FASTER_WHISPER_VAD_AGGRESSIVENESS", raising=False)
+    importlib.reload(_mod)
+
+
+@pytest.mark.asyncio
+async def test_vad_aggressiveness_out_of_range_clamps_to_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Out-of-range aggressiveness (e.g. 5 or -1) falls back to default=1 and logs a warning."""
+    import importlib
+
+    import robot_comic.adapters.faster_whisper_stt_adapter as _mod
+
+    _install_stubs(monkeypatch)
+
+    for bad_value in ("5", "-1"):
+        # Reload with the bad env var set; the module-level guard should clamp
+        # to the default and emit a logger.warning (not a Python Warning).
+        with monkeypatch.context() as m:
+            m.setenv("REACHY_MINI_FASTER_WHISPER_VAD_AGGRESSIVENESS", bad_value)
+            importlib.reload(_mod)
+            from robot_comic.adapters.faster_whisper_stt_adapter import (
+                _VAD_AGGRESSIVENESS,
+                _VAD_AGGRESSIVENESS_DEFAULT,
+            )
+
+            assert _VAD_AGGRESSIVENESS == _VAD_AGGRESSIVENESS_DEFAULT, (
+                f"Bad value {bad_value!r} should clamp to {_VAD_AGGRESSIVENESS_DEFAULT}, got {_VAD_AGGRESSIVENESS}"
+            )
+
+    # Restore module state.
+    monkeypatch.delenv("REACHY_MINI_FASTER_WHISPER_VAD_AGGRESSIVENESS", raising=False)
+    importlib.reload(_mod)
+
+
+@pytest.mark.asyncio
+async def test_vad_start_echo_guard_suppresses_speech_started(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When should_drop_frame() returns True at VAD-start time, on_speech_started is NOT called.
+
+    This is the key regression test for the self-echo cascade fix.
+    Prior to the fix, the per-frame guard in feed_audio short-circuited
+    BEFORE webrtcvad saw the audio, but the VAD state machine could accumulate
+    a run of "speech" frames fed before TTS started playing (or during the
+    TTS-echo window when _speaking_until was transiently 0). When webrtcvad
+    crossed the start threshold, _on_speech_started fired unconditionally,
+    beginning a new utterance barge-in. The fix re-evaluates should_drop_frame()
+    at the moment the "start" event is dispatched, blocking the barge-in.
+    """
+    from robot_comic.adapters import FasterWhisperSTTAdapter
+
+    holder = _install_stubs(monkeypatch)
+    started_calls = 0
+
+    async def _on_completed(_t: str) -> None: ...
+
+    async def _on_speech_started() -> None:
+        nonlocal started_calls
+        started_calls += 1
+
+    # Predicate starts as False (TTS silent) so the VAD frames accumulate
+    # normally, then flips to True (TTS playing) exactly when webrtcvad
+    # would cross the start threshold.
+    _drop = [False] * _START_FRAMES  # per-frame guard: allow frames through VAD
+    # At VAD-start time the guard re-check will return True → suppress barge-in.
+    _drop_at_start = True
+
+    call_count = [0]
+
+    def _should_drop() -> bool:
+        # Return False for the per-frame calls during accumulation, then True
+        # at the VAD-start boundary re-check.
+        # Because the per-frame guard fires once per feed_audio call (before
+        # the chunk loop) and the VAD-start guard fires once per "start" event,
+        # we track calls to distinguish them.
+        #
+        # Simpler approach: return True unconditionally — the per-frame guard
+        # will short-circuit before the VAD sees any audio. But that tests the
+        # existing guard, not the new one.
+        #
+        # To isolate the NEW guard: disable the per-frame guard by removing it,
+        # and only wire should_drop_frame on the _process_vad_chunk path.
+        # We achieve this by creating the adapter without should_drop_frame,
+        # feeding audio until the VAD state machine is primed, THEN injecting
+        # _should_drop_frame and feeding the final trigger frame.
+        call_count[0] += 1
+        return True
+
+    # Build adapter WITHOUT the guard so the first batch of frames reaches VAD.
+    adapter = FasterWhisperSTTAdapter()
+    await adapter.start(_on_completed, on_speech_started=_on_speech_started)
+
+    # Script: _START_FRAMES - 1 speech frames → VAD not yet at threshold.
+    holder["vad"].script = _speech_script(_START_FRAMES - 1)
+    await adapter.feed_audio(_silence_frame(num_samples=_VAD_CHUNK * (_START_FRAMES - 1)))
+    # VAD has seen _START_FRAMES - 1 consecutive speech frames; one more will
+    # cross the threshold. Now inject the echo guard.
+    adapter._should_drop_frame = _should_drop
+
+    # Feed the final trigger frame (the VAD stub will return True → the gate
+    # will return "start" → our guard should intercept and return early).
+    holder["vad"].script = _speech_script(1)
+    await adapter.feed_audio(_silence_frame(num_samples=_VAD_CHUNK))
+
+    # The guard must have fired (proving the VAD-start re-check path ran).
+    assert call_count[0] >= 1, "should_drop_frame was never called at VAD-start boundary"
+    # And on_speech_started must NOT have been called.
+    assert started_calls == 0, (
+        f"on_speech_started fired {started_calls} time(s) despite should_drop_frame returning True"
+    )

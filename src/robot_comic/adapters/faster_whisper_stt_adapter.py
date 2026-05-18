@@ -82,6 +82,7 @@ install command — mirrors :class:`LocalSTTDependencyError` from
 """
 
 from __future__ import annotations
+import os
 import asyncio
 import logging
 from typing import Any, Callable
@@ -105,17 +106,53 @@ logger = logging.getLogger(__name__)
 _VAD_SAMPLE_RATE = 16000
 _VAD_FRAME_MS = 30
 _VAD_CHUNK_SAMPLES = _VAD_SAMPLE_RATE * _VAD_FRAME_MS // 1000  # 480
-# Aggressiveness mode 0-3, higher = more aggressive at filtering
-# non-speech. 2 is a reasonable starting middle ground; on-device A/B
-# can dial it.
-_VAD_AGGRESSIVENESS = 2
+
+# ---------------------------------------------------------------------------
+# Env-configurable VAD knobs
+# ---------------------------------------------------------------------------
+# Aggressiveness mode 0-3 (webrtcvad contract). Lower values are less
+# aggressive at filtering non-speech; higher values reject more non-speech
+# but risk clipping real speech. Default changed from 2 → 1 to reduce
+# spurious VAD triggers from chassis-mic echo that drove the self-echo
+# cascade (#460 root-cause follow-up). Override via env:
+#   REACHY_MINI_FASTER_WHISPER_VAD_AGGRESSIVENESS=0..3
+_VAD_AGGRESSIVENESS_DEFAULT = 1
+_VAD_AGGRESSIVENESS_ENV = int(
+    os.getenv("REACHY_MINI_FASTER_WHISPER_VAD_AGGRESSIVENESS", str(_VAD_AGGRESSIVENESS_DEFAULT))
+)
+if not (0 <= _VAD_AGGRESSIVENESS_ENV <= 3):
+    logging.getLogger(__name__).warning(
+        "REACHY_MINI_FASTER_WHISPER_VAD_AGGRESSIVENESS=%d is out of range [0, 3]; falling back to default %d.",
+        _VAD_AGGRESSIVENESS_ENV,
+        _VAD_AGGRESSIVENESS_DEFAULT,
+    )
+    _VAD_AGGRESSIVENESS_ENV = _VAD_AGGRESSIVENESS_DEFAULT
+_VAD_AGGRESSIVENESS = _VAD_AGGRESSIVENESS_ENV
+
 # Debounce: N consecutive speech frames before we declare an utterance
 # started. 3 × 30 ms ≈ 90 ms — filters single-frame noise spikes.
 _VAD_START_FRAMES = 3
+
 # Trailing silence: N consecutive non-speech frames before we declare
-# the utterance ended. 17 × 30 ms ≈ 510 ms — generous enough that the
-# comedian persona's deliberate pauses don't trigger early flushes.
-_VAD_END_SILENCE_FRAMES = 17
+# the utterance ended. Default changed from 17 → 25 (750 ms) to reduce
+# premature utterance-end triggers that compounded the echo cascade.
+# Override via env:
+#   REACHY_MINI_FASTER_WHISPER_VAD_END_SILENCE_FRAMES=5..100
+_VAD_END_SILENCE_FRAMES_DEFAULT = 25
+_VAD_END_SILENCE_FRAMES_ENV = int(
+    os.getenv(
+        "REACHY_MINI_FASTER_WHISPER_VAD_END_SILENCE_FRAMES",
+        str(_VAD_END_SILENCE_FRAMES_DEFAULT),
+    )
+)
+if not (5 <= _VAD_END_SILENCE_FRAMES_ENV <= 100):
+    logging.getLogger(__name__).warning(
+        "REACHY_MINI_FASTER_WHISPER_VAD_END_SILENCE_FRAMES=%d is out of range [5, 100]; falling back to default %d.",
+        _VAD_END_SILENCE_FRAMES_ENV,
+        _VAD_END_SILENCE_FRAMES_DEFAULT,
+    )
+    _VAD_END_SILENCE_FRAMES_ENV = _VAD_END_SILENCE_FRAMES_DEFAULT
+_VAD_END_SILENCE_FRAMES = _VAD_END_SILENCE_FRAMES_ENV
 
 
 class FasterWhisperSTTDependencyError(RuntimeError):
@@ -332,6 +369,15 @@ class FasterWhisperSTTAdapter:
         event = gate.feed(chunk.tobytes())
 
         if event == "start":
+            # Echo guard at VAD-start boundary: if TTS is still playing when
+            # webrtcvad declares speech started, the trigger is almost certainly
+            # acoustic echo — discard this detection cycle entirely.
+            # The per-frame guard in feed_audio fires only BEFORE audio is fed
+            # to webrtcvad; it cannot catch the case where TTS ends mid-utterance
+            # or where _speaking_until was already cleared before the VAD state
+            # machine crosses the start threshold. Rechecking here closes that gap.
+            if self._should_drop_frame is not None and self._should_drop_frame():
+                return
             self._in_utterance = True
             # Restart the buffer with this chunk (speech began here, so
             # include the leading audio in the transcription buffer).
