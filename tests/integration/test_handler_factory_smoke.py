@@ -43,13 +43,18 @@ from robot_comic.config import (
     GEMINI_BACKEND,
     OPENAI_BACKEND,
     AUDIO_OUTPUT_HF,
+    XTTS_DEFAULT_URL,
+    AUDIO_OUTPUT_XTTS,
     CHATTERBOX_OUTPUT,
     ELEVENLABS_OUTPUT,
     GEMINI_TTS_OUTPUT,
     LLM_BACKEND_LLAMA,
     LOCAL_STT_BACKEND,
     LLM_BACKEND_GEMINI,
+    XTTS_DEFAULT_SPEAKER,
     AUDIO_INPUT_MOONSHINE,
+    XTTS_DEFAULT_LANGUAGE,
+    XTTS_DEFAULT_TIMEOUT_S,
     AUDIO_INPUT_GEMINI_LIVE,
     AUDIO_OUTPUT_CHATTERBOX,
     AUDIO_OUTPUT_ELEVENLABS,
@@ -100,13 +105,13 @@ def _expected_handler_name(input_b: str, output_b: str, llm_backend: str) -> str
         if output_b == AUDIO_OUTPUT_HF:
             return "LocalSTTHuggingFaceRealtimeHandler"
         # Composable triples — always wrapped.
-        if output_b in (AUDIO_OUTPUT_CHATTERBOX, AUDIO_OUTPUT_ELEVENLABS, AUDIO_OUTPUT_GEMINI_TTS):
+        if output_b in (AUDIO_OUTPUT_CHATTERBOX, AUDIO_OUTPUT_ELEVENLABS, AUDIO_OUTPUT_GEMINI_TTS, AUDIO_OUTPUT_XTTS):
             return "ComposableConversationHandler"
     if input_b == AUDIO_INPUT_FASTER_WHISPER:
         # Phase 5f: faster-whisper only pairs with composable triples; the
         # realtime-output hybrids stay on the LocalSTTInputMixin path
         # (faster-whisper does not slot into those).
-        if output_b in (AUDIO_OUTPUT_CHATTERBOX, AUDIO_OUTPUT_ELEVENLABS, AUDIO_OUTPUT_GEMINI_TTS):
+        if output_b in (AUDIO_OUTPUT_CHATTERBOX, AUDIO_OUTPUT_ELEVENLABS, AUDIO_OUTPUT_GEMINI_TTS, AUDIO_OUTPUT_XTTS):
             return "ComposableConversationHandler"
     raise AssertionError(f"unexpected combo: {input_b!r} → {output_b!r} (llm={llm_backend!r})")
 
@@ -144,6 +149,10 @@ class TestFactoryInstantiationMatrix:
         deps = make_tool_deps()
         with patch("robot_comic.handler_factory.config") as mock_cfg:
             mock_cfg.LLM_BACKEND = llm_backend
+            mock_cfg.XTTS_URL = XTTS_DEFAULT_URL
+            mock_cfg.XTTS_DEFAULT_SPEAKER_KEY = XTTS_DEFAULT_SPEAKER
+            mock_cfg.XTTS_LANGUAGE = XTTS_DEFAULT_LANGUAGE
+            mock_cfg.XTTS_TIMEOUT_S = XTTS_DEFAULT_TIMEOUT_S
             handler = HandlerFactory.build(input_b, output_b, deps)
 
         expected_name = _expected_handler_name(input_b, output_b, llm_backend)
@@ -241,6 +250,10 @@ def _build_handler_with_mocks(
     deps = make_tool_deps()
     with patch("robot_comic.handler_factory.config") as mock_cfg:
         mock_cfg.LLM_BACKEND = llm_backend
+        mock_cfg.XTTS_URL = XTTS_DEFAULT_URL
+        mock_cfg.XTTS_DEFAULT_SPEAKER_KEY = XTTS_DEFAULT_SPEAKER
+        mock_cfg.XTTS_LANGUAGE = XTTS_DEFAULT_LANGUAGE
+        mock_cfg.XTTS_TIMEOUT_S = XTTS_DEFAULT_TIMEOUT_S
         handler = HandlerFactory.build(input_b, output_b, deps)
 
     return handler, transcriber_mock

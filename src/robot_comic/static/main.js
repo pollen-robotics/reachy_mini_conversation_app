@@ -22,6 +22,8 @@ const AUDIO_INPUT_HF = "hf_input";
 const AUDIO_OUTPUT_CHATTERBOX = "chatterbox";
 const AUDIO_OUTPUT_GEMINI_TTS = "gemini_tts";
 const AUDIO_OUTPUT_ELEVENLABS = "elevenlabs";
+const AUDIO_OUTPUT_XTTS = "xtts";
+const XTTS_OUTPUT = "xtts";
 const AUDIO_OUTPUT_OPENAI_REALTIME = "openai_realtime_output";
 const AUDIO_OUTPUT_GEMINI_LIVE = "gemini_live_output";
 const AUDIO_OUTPUT_HF = "hf_output";
@@ -54,6 +56,7 @@ function legacyResponseToAudioOutput(legacy) {
     case ELEVENLABS_OUTPUT: return AUDIO_OUTPUT_ELEVENLABS;
     case LLAMA_ELEVENLABS_TTS_OUTPUT: return AUDIO_OUTPUT_ELEVENLABS;
     case GEMINI_TTS_OUTPUT: return AUDIO_OUTPUT_GEMINI_TTS;
+    case XTTS_OUTPUT: return AUDIO_OUTPUT_XTTS;
     case HF_BACKEND: return AUDIO_OUTPUT_HF;
     case OPENAI_BACKEND:
     default: return AUDIO_OUTPUT_OPENAI_REALTIME;
@@ -68,6 +71,7 @@ function audioOutputToLegacyResponse(audioOutputBackend, llmBackend) {
     return llmBackend === LLM_BACKEND_LLAMA ? LLAMA_ELEVENLABS_TTS_OUTPUT : ELEVENLABS_OUTPUT;
   }
   if (audioOutputBackend === AUDIO_OUTPUT_GEMINI_TTS) return GEMINI_TTS_OUTPUT;
+  if (audioOutputBackend === AUDIO_OUTPUT_XTTS) return XTTS_OUTPUT;
   if (audioOutputBackend === AUDIO_OUTPUT_HF) return HF_BACKEND;
   return OPENAI_BACKEND;
 }
@@ -87,10 +91,12 @@ const PIPELINE_TO_BACKEND = {
   [`${LLM_BACKEND_LLAMA}|${CHATTERBOX_OUTPUT}`]:  { output: CHATTERBOX_OUTPUT,        llm_backend: LLM_BACKEND_LLAMA },
   [`${LLM_BACKEND_LLAMA}|${ELEVENLABS_OUTPUT}`]:  { output: LLAMA_ELEVENLABS_TTS_OUTPUT, llm_backend: LLM_BACKEND_LLAMA },
   [`${LLM_BACKEND_LLAMA}|${GEMINI_TTS_OUTPUT}`]:  { output: GEMINI_TTS_OUTPUT,         llm_backend: LLM_BACKEND_LLAMA },
+  [`${LLM_BACKEND_LLAMA}|${XTTS_OUTPUT}`]:        { output: XTTS_OUTPUT,               llm_backend: LLM_BACKEND_LLAMA },
   [`${LLM_BACKEND_LLAMA}|${OPENAI_BACKEND}`]:     { output: OPENAI_BACKEND,            llm_backend: LLM_BACKEND_LLAMA },
   [`${LLM_BACKEND_LLAMA}|${HF_BACKEND}`]:         { output: HF_BACKEND,                llm_backend: LLM_BACKEND_LLAMA },
   [`${LLM_BACKEND_GEMINI}|${CHATTERBOX_OUTPUT}`]: { output: CHATTERBOX_OUTPUT,         llm_backend: LLM_BACKEND_GEMINI },
   [`${LLM_BACKEND_GEMINI}|${ELEVENLABS_OUTPUT}`]: { output: ELEVENLABS_OUTPUT,         llm_backend: LLM_BACKEND_GEMINI },
+  [`${LLM_BACKEND_GEMINI}|${XTTS_OUTPUT}`]:       { output: XTTS_OUTPUT,               llm_backend: LLM_BACKEND_GEMINI },
   // gemini_tts + gemini LLM is redundant (uses Gemini for both — handled as llama path)
   // openai/hf realtime do not support a separate LLM backend
 };
@@ -253,6 +259,10 @@ function journeyMeta(backend, outputBackend = OPENAI_BACKEND) {
       meta.brainLabel = "llama.cpp (local LLM)";
       meta.outputLabel = "ElevenLabs TTS";
       meta.outputCopy = "Text goes to the local llama.cpp server, then to the selected ElevenLabs voice.";
+    } else if (outputBackend === XTTS_OUTPUT) {
+      meta.brainLabel = "llama.cpp (local LLM)";
+      meta.outputLabel = "xtts (LAN)";
+      meta.outputCopy = "Text goes to the local LLM, then to the LAN xtts-v2 voice-clone TTS.";
     } else {
       meta.brainLabel = "OpenAI response backend";
       meta.outputLabel = "OpenAI voice";
@@ -369,6 +379,10 @@ async function saveBackendConfig(backend, { key = "", hfMode = "", hfHost = "", 
       const voiceEl = document.getElementById("elevenlabs-voice");
       if (keyEl?.value.trim()) body.elevenlabs_api_key = keyEl.value.trim();
       if (voiceEl?.value.trim()) body.elevenlabs_voice = voiceEl.value.trim();
+    }
+    if (responseEl?.value === XTTS_OUTPUT) {
+      const voiceEl = document.getElementById("xtts-voice");
+      if (voiceEl?.value.trim()) body.xtts_voice = voiceEl.value.trim();
     }
   }
   const resp = await fetch("/backend_config", {
@@ -805,6 +819,51 @@ async function init() {
     }
   }
 
+  let xttsVoicesLoaded = false;
+  async function populateXttsVoices() {
+    const select = document.getElementById("xtts-voice");
+    if (!select) return;
+    if (xttsVoicesLoaded) return;
+    xttsVoicesLoaded = true;
+    select.innerHTML = "";
+    const loading = document.createElement("option");
+    loading.value = "";
+    loading.textContent = "(loading voices…)";
+    select.appendChild(loading);
+    try {
+      const url = new URL("/api/xtts/voices", window.location.origin);
+      url.searchParams.set("_", Date.now().toString());
+      const resp = await fetchWithTimeout(url, {}, 5000);
+      if (!resp.ok) throw new Error("voices_failed");
+      const data = await resp.json();
+      const voices = Array.isArray(data?.voices) ? data.voices : [];
+      select.innerHTML = "";
+      if (!voices.length) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "(no voices available)";
+        select.appendChild(opt);
+        return;
+      }
+      for (const v of voices) {
+        const name = (typeof v === "string") ? v : (v?.name ?? "");
+        if (!name) continue;
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        select.appendChild(opt);
+      }
+    } catch (e) {
+      select.innerHTML = "";
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "(unable to load voices)";
+      select.appendChild(opt);
+      // Allow retry on next selection click.
+      xttsVoicesLoaded = false;
+    }
+  }
+
   function renderCrowdHistory(status) {
     const count = Number.parseInt(status.crowd_history_count ?? 0, 10) || 0;
     crowdHistoryChip.textContent = `${count} stored`;
@@ -841,6 +900,8 @@ async function init() {
         return { llm: LLM_BACKEND_LLAMA, output: GEMINI_TTS_OUTPUT };
       case CHATTERBOX_OUTPUT:
         return { llm: LLM_BACKEND_LLAMA, output: CHATTERBOX_OUTPUT };
+      case XTTS_OUTPUT:
+        return { llm: LLM_BACKEND_LLAMA, output: XTTS_OUTPUT };
       case ELEVENLABS_OUTPUT:
         return { llm: LLM_BACKEND_GEMINI, output: ELEVENLABS_OUTPUT };
       case HF_BACKEND:
@@ -921,7 +982,7 @@ async function init() {
       }
     });
 
-    // 5. Secondary fields (chatterbox, elevenlabs)
+    // 5. Secondary fields (chatterbox, elevenlabs, xtts)
     // Use the resolved legacy backend since that's what determines UI extras
     const chatterboxFields = document.getElementById("chatterbox-fields");
     if (chatterboxFields) chatterboxFields.style.display = legacyBackend === CHATTERBOX_OUTPUT ? "" : "none";
@@ -930,6 +991,11 @@ async function init() {
     if (elevenlabsFields) elevenlabsFields.style.display = usesElevenLabs ? "" : "none";
     if (usesElevenLabs) {
       populateElevenLabsVoices();
+    }
+    const xttsFields = document.getElementById("xtts-fields");
+    if (xttsFields) xttsFields.style.display = legacyBackend === XTTS_OUTPUT ? "" : "none";
+    if (legacyBackend === XTTS_OUTPUT) {
+      populateXttsVoices();
     }
   }
 
@@ -966,22 +1032,25 @@ async function init() {
     const localSttUsesHF = selectedBackend === LOCAL_STT_BACKEND && localSttResponse.value === HF_BACKEND;
     const localSttUsesGeminiTTS = selectedBackend === LOCAL_STT_BACKEND && localSttResponse.value === GEMINI_TTS_OUTPUT;
     const localSttUsesChatterbox = selectedBackend === LOCAL_STT_BACKEND && localSttResponse.value === CHATTERBOX_OUTPUT;
+    const localSttUsesXtts = selectedBackend === LOCAL_STT_BACKEND && localSttResponse.value === XTTS_OUTPUT;
     const localSttUsesElevenLabs = selectedBackend === LOCAL_STT_BACKEND && (
       localSttResponse.value === ELEVENLABS_OUTPUT
       || localSttResponse.value === LLAMA_ELEVENLABS_TTS_OUTPUT
     );
-    const localSttUsesOpenAI = selectedBackend === LOCAL_STT_BACKEND && !localSttUsesHF && !localSttUsesGeminiTTS && !localSttUsesChatterbox && !localSttUsesElevenLabs;
+    const localSttUsesOpenAI = selectedBackend === LOCAL_STT_BACKEND && !localSttUsesHF && !localSttUsesGeminiTTS && !localSttUsesChatterbox && !localSttUsesXtts && !localSttUsesElevenLabs;
     const canProceedWithSelectedBackend = localSttUsesHF
       ? backendCanProceed(status, HF_BACKEND)
       : localSttUsesGeminiTTS
         ? backendCanProceed(status, GEMINI_BACKEND)
         : localSttUsesChatterbox
           ? !!(status.can_proceed_with_chatterbox ?? true)
-          : localSttUsesElevenLabs
-            ? !!status.has_elevenlabs_key
-            : localSttUsesOpenAI
-              ? backendCanProceed(status, OPENAI_BACKEND)
-              : backendCanProceed(status, selectedBackend);
+          : localSttUsesXtts
+            ? true
+            : localSttUsesElevenLabs
+              ? !!status.has_elevenlabs_key
+              : localSttUsesOpenAI
+                ? backendCanProceed(status, OPENAI_BACKEND)
+                : backendCanProceed(status, selectedBackend);
     const usesApiKeyForm = selectedBackend === OPENAI_BACKEND || selectedBackend === GEMINI_BACKEND || localSttUsesOpenAI || localSttUsesGeminiTTS;
     const usesHFForm = selectedBackend === HF_BACKEND || localSttUsesHF;
     const usesLocalSTTForm = selectedBackend === LOCAL_STT_BACKEND;
@@ -1445,6 +1514,19 @@ async function init() {
         window.location.reload();
       } catch (e) {
         setStatusMessage(statusEl, "Failed to save Chatterbox config. Please try again.", "error");
+      }
+      return;
+    }
+
+    // xtts (LAN) needs no API key — save directly
+    if (selectedBackend === LOCAL_STT_BACKEND && localSttResponse.value === XTTS_OUTPUT) {
+      setStatusMessage(statusEl, "Saving xtts config...");
+      try {
+        await saveBackendConfig(selectedBackend, {});
+        setStatusMessage(statusEl, "Saved. Reloading…", "ok");
+        window.location.reload();
+      } catch (e) {
+        setStatusMessage(statusEl, "Failed to save xtts config. Please try again.", "error");
       }
       return;
     }

@@ -342,6 +342,13 @@
                   <small>Bundled realtime voice. Requires HF connection.</small>
                 </span>
               </label>
+              <label class="pipeline-cell" data-output-cell="xtts" data-output-card="xtts">
+                <input type="radio" name="local-stt-output" value="xtts" />
+                <span>
+                  <strong>xtts (LAN)</strong>
+                  <small>Local LAN voice-clone TTS. Requires <code>REACHY_MINI_XTTS_URL</code>.</small>
+                </span>
+              </label>
             </fieldset>
           </div>
           <!-- Hidden select kept for back-compat with the server save path -->
@@ -352,6 +359,7 @@
             <option value="chatterbox">Chatterbox TTS</option>
             <option value="elevenlabs">ElevenLabs TTS</option>
             <option value="llama_elevenlabs_tts">llama.cpp + ElevenLabs TTS</option>
+            <option value="xtts">xtts (LAN)</option>
           </select>
           <!-- Hidden input for the LLM backend axis -->
           <input type="hidden" id="local-stt-llm-backend" value="llama" />
@@ -368,6 +376,11 @@
             <input id="elevenlabs-key" type="password" placeholder="sk_..." autocomplete="off" />
             <label for="elevenlabs-voice">Voice</label>
             <select id="elevenlabs-voice"></select>
+          </div>
+
+          <div id="xtts-fields" style="display:none">
+            <label for="xtts-voice">xtts speaker</label>
+            <select id="xtts-voice"></select>
           </div>
 
           <label for="local-stt-model">Local STT model</label>

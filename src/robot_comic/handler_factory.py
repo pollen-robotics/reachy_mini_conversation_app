@@ -42,6 +42,7 @@ from robot_comic.config import (
     AUDIO_INPUT_HF,
     AUDIO_OUTPUT_HF,
     LLM_BACKEND_ENV,
+    AUDIO_OUTPUT_XTTS,
     LLM_BACKEND_LLAMA,
     LLM_BACKEND_GEMINI,
     AUDIO_INPUT_MOONSHINE,
@@ -107,6 +108,7 @@ _OUTPUT_NAMES: dict[str, str] = {
     AUDIO_OUTPUT_CHATTERBOX: "Chatterbox TTS",
     AUDIO_OUTPUT_GEMINI_TTS: "Gemini TTS",
     AUDIO_OUTPUT_ELEVENLABS: "ElevenLabs TTS",
+    AUDIO_OUTPUT_XTTS: "xtts (LAN)",
 }
 
 _SUPPORTED_MATRIX_DOC = (
@@ -117,11 +119,13 @@ _SUPPORTED_MATRIX_DOC = (
     f"  ({AUDIO_INPUT_MOONSHINE}, {AUDIO_OUTPUT_CHATTERBOX})\n"
     f"  ({AUDIO_INPUT_MOONSHINE}, {AUDIO_OUTPUT_GEMINI_TTS})\n"
     f"  ({AUDIO_INPUT_MOONSHINE}, {AUDIO_OUTPUT_ELEVENLABS})\n"
+    f"  ({AUDIO_INPUT_MOONSHINE}, {AUDIO_OUTPUT_XTTS})\n"
     f"  ({AUDIO_INPUT_MOONSHINE}, {AUDIO_OUTPUT_OPENAI_REALTIME})\n"
     f"  ({AUDIO_INPUT_MOONSHINE}, {AUDIO_OUTPUT_HF})\n"
     f"  ({AUDIO_INPUT_FASTER_WHISPER}, {AUDIO_OUTPUT_CHATTERBOX})\n"
     f"  ({AUDIO_INPUT_FASTER_WHISPER}, {AUDIO_OUTPUT_GEMINI_TTS})\n"
     f"  ({AUDIO_INPUT_FASTER_WHISPER}, {AUDIO_OUTPUT_ELEVENLABS})\n"
+    f"  ({AUDIO_INPUT_FASTER_WHISPER}, {AUDIO_OUTPUT_XTTS})\n"
     "See docs/audio-backends.md for details."
 )
 
@@ -243,6 +247,15 @@ class HandlerFactory:
                     )
                     return _build_composable_llama_chatterbox(input_backend=input_backend, **handler_kwargs)
 
+                if output_backend == AUDIO_OUTPUT_XTTS:
+                    logger.info(
+                        "HandlerFactory: selecting ComposableConversationHandler (%s → %s, llm=%s)",
+                        input_backend,
+                        output_backend,
+                        LLM_BACKEND_LLAMA,
+                    )
+                    return _build_composable_llama_xtts(input_backend=input_backend, **handler_kwargs)
+
                 # Llama + gemini_tts is not a supported composable triple
                 # today (the GeminiTTSResponseHandler's bundled LLM+TTS
                 # design owns its own LLM call and ignores LLM_BACKEND).
@@ -252,7 +265,7 @@ class HandlerFactory:
                 # llama + hf_output also fall through to their hybrid
                 # selectors below.
 
-            # LLM_BACKEND=gemini composable triples for Chatterbox / ElevenLabs.
+            # LLM_BACKEND=gemini composable triples for Chatterbox / ElevenLabs / XTTS.
             if _llm_backend == LLM_BACKEND_GEMINI:
                 if output_backend == AUDIO_OUTPUT_CHATTERBOX:
                     logger.info(
@@ -272,6 +285,15 @@ class HandlerFactory:
                     )
                     return _build_composable_gemini_elevenlabs(input_backend=input_backend, **handler_kwargs)
 
+                if output_backend == AUDIO_OUTPUT_XTTS:
+                    logger.info(
+                        "HandlerFactory: selecting ComposableConversationHandler (%s → %s, llm=%s)",
+                        input_backend,
+                        output_backend,
+                        LLM_BACKEND_GEMINI,
+                    )
+                    return _build_composable_gemini_xtts(input_backend=input_backend, **handler_kwargs)
+
                 # Gemini TTS uses its bundled Gemini LLM natively — fall
                 # through to the gemini_tts arm below regardless of
                 # LLM_BACKEND.
@@ -280,7 +302,7 @@ class HandlerFactory:
                         f"{LLM_BACKEND_ENV}={LLM_BACKEND_GEMINI!r} is not yet implemented "
                         f"for the output backend {AUDIO_OUTPUT_BACKEND_ENV}={output_backend!r}.\n"
                         f"Supported Gemini-text output backends: "
-                        f"{AUDIO_OUTPUT_CHATTERBOX!r}, {AUDIO_OUTPUT_ELEVENLABS!r}.\n"
+                        f"{AUDIO_OUTPUT_CHATTERBOX!r}, {AUDIO_OUTPUT_ELEVENLABS!r}, {AUDIO_OUTPUT_XTTS!r}.\n"
                         f"Set {LLM_BACKEND_ENV}=llama to use the existing llama-server path."
                     )
 
@@ -914,6 +936,162 @@ def _build_composable_gemini_tts(
         return ComposableConversationHandler(
             pipeline=pipeline,
             tts_handler=host,
+            deps=handler_kwargs["deps"],
+            build=_build,
+        )
+
+    return _build()
+
+
+def _build_composable_llama_xtts(
+    *,
+    input_backend: str = AUDIO_INPUT_MOONSHINE,
+    **handler_kwargs: Any,
+) -> Any:
+    """Construct the composable (local-STT, llama, xtts) pipeline.
+
+    XTTS is a *native* ``TTSBackend`` — there is no ``XttsResponseHandler``
+    legacy class (xtts-v2 was added after the composable pipeline landed).
+    The adapter is constructed directly from config values and injected
+    into :class:`ComposablePipeline` as the ``tts`` backend.
+
+    The LLM half still wraps a :class:`LlamaElevenLabsTTSResponseHandler`
+    instance via :class:`LlamaLLMAdapter` (the surviving
+    ``BaseLlamaResponseHandler`` subclass that provides the llama-server
+    LLM call surface without coupling to a specific TTS output). The
+    handler's TTS methods are unused — :class:`XttsTTSAdapter` owns the
+    TTS step end-to-end.
+
+    Echo-guard caveat: :class:`XttsTTSAdapter` does not write
+    ``_speaking_until`` (it is stateless between calls — see module
+    docstring "Known gaps"). The ``should_drop_frame`` closure's
+    ``getattr(host, "_speaking_until", 0.0)`` reads the value from the
+    LLM host, which is only updated by the legacy
+    ``_enqueue_audio_frame`` path — a path never exercised here because
+    TTS is handled by the native adapter. The echo-guard is therefore a
+    no-op for this triple, identical to the gemini_tts triple's
+    documented behaviour.
+
+    Phase 5f STT selection: :func:`_build_stt_adapter` picks
+    :class:`MoonshineSTTAdapter` or :class:`FasterWhisperSTTAdapter`
+    based on ``input_backend``, identical to every other composable
+    triple builder.
+    """
+    import time as _time
+
+    from robot_comic.prompts import get_session_instructions
+    from robot_comic.adapters import LlamaLLMAdapter
+    from robot_comic.composable_pipeline import ComposablePipeline
+    from robot_comic.adapters.xtts_tts_adapter import XttsTTSAdapter
+    from robot_comic.composable_conversation_handler import ComposableConversationHandler
+
+    def _build() -> ComposableConversationHandler:
+        # LLM host — provides BaseLlamaResponseHandler's _call_llm surface.
+        # Its TTS methods are unused; XttsTTSAdapter owns TTS end-to-end.
+        from robot_comic.llama_elevenlabs_tts import LlamaElevenLabsTTSResponseHandler
+
+        host = LlamaElevenLabsTTSResponseHandler(**handler_kwargs)
+
+        def _should_drop_frame() -> bool:
+            # Echo-guard: no-op for this triple — XttsTTSAdapter does not
+            # write _speaking_until (stateless native adapter). The getattr
+            # default of 0.0 means the condition is always False. See
+            # docstring for full rationale.
+            return _time.perf_counter() < getattr(host, "_speaking_until", 0.0)
+
+        stt = _build_stt_adapter(input_backend, _should_drop_frame)
+        llm = LlamaLLMAdapter(host)
+        tts = XttsTTSAdapter(
+            base_url=config.XTTS_URL,
+            default_speaker=config.XTTS_DEFAULT_SPEAKER_KEY,
+            language=config.XTTS_LANGUAGE,
+            timeout_s=config.XTTS_TIMEOUT_S,
+        )
+        pipeline = ComposablePipeline(
+            stt,
+            llm,
+            tts,
+            tool_dispatcher=_make_tool_dispatcher(host),
+            system_prompt=get_session_instructions(),
+            deps=handler_kwargs["deps"],
+            welcome_gate=_maybe_build_welcome_gate(),
+        )
+        return ComposableConversationHandler(
+            pipeline=pipeline,
+            tts_handler=tts,  # type: ignore[arg-type]  # native adapter, not a ConversationHandler
+            deps=handler_kwargs["deps"],
+            build=_build,
+        )
+
+    return _build()
+
+
+def _build_composable_gemini_xtts(
+    *,
+    input_backend: str = AUDIO_INPUT_MOONSHINE,
+    **handler_kwargs: Any,
+) -> Any:
+    """Construct the composable (local-STT, gemini, xtts) pipeline.
+
+    Mechanical mirror of :func:`_build_composable_llama_xtts` with the
+    LLM adapter swapped from :class:`LlamaLLMAdapter` to
+    :class:`GeminiLLMAdapter`.
+
+    The LLM host is a :class:`GeminiTextChatterboxResponseHandler`
+    instance — the surviving ``GeminiTextResponseHandler`` subclass that
+    provides the Gemini LLM call surface without coupling to a specific
+    TTS output. Its chatterbox TTS methods are unused; :class:`XttsTTSAdapter`
+    owns TTS end-to-end.
+
+    Echo-guard caveat: identical to :func:`_build_composable_llama_xtts` —
+    the echo-guard ``should_drop_frame`` closure is a no-op because
+    :class:`XttsTTSAdapter` does not write ``_speaking_until``.
+
+    Phase 5f STT selection: :func:`_build_stt_adapter` picks
+    :class:`MoonshineSTTAdapter` or :class:`FasterWhisperSTTAdapter`
+    based on ``input_backend``.
+    """
+    import time as _time
+
+    from robot_comic.prompts import get_session_instructions
+    from robot_comic.adapters import GeminiLLMAdapter
+    from robot_comic.composable_pipeline import ComposablePipeline
+    from robot_comic.adapters.xtts_tts_adapter import XttsTTSAdapter
+    from robot_comic.composable_conversation_handler import ComposableConversationHandler
+
+    def _build() -> ComposableConversationHandler:
+        # LLM host — provides GeminiTextResponseHandler's _call_llm surface.
+        # Its chatterbox TTS methods are unused; XttsTTSAdapter owns TTS.
+        from robot_comic.gemini_text_handlers import GeminiTextChatterboxResponseHandler
+
+        host = GeminiTextChatterboxResponseHandler(**handler_kwargs)
+
+        def _should_drop_frame() -> bool:
+            # Echo-guard: no-op for this triple — XttsTTSAdapter does not
+            # write _speaking_until. See _build_composable_llama_xtts
+            # docstring for the full rationale.
+            return _time.perf_counter() < getattr(host, "_speaking_until", 0.0)
+
+        stt = _build_stt_adapter(input_backend, _should_drop_frame)
+        llm = GeminiLLMAdapter(host)
+        tts = XttsTTSAdapter(
+            base_url=config.XTTS_URL,
+            default_speaker=config.XTTS_DEFAULT_SPEAKER_KEY,
+            language=config.XTTS_LANGUAGE,
+            timeout_s=config.XTTS_TIMEOUT_S,
+        )
+        pipeline = ComposablePipeline(
+            stt,
+            llm,
+            tts,
+            tool_dispatcher=_make_tool_dispatcher(host),
+            system_prompt=get_session_instructions(),
+            deps=handler_kwargs["deps"],
+            welcome_gate=_maybe_build_welcome_gate(),
+        )
+        return ComposableConversationHandler(
+            pipeline=pipeline,
+            tts_handler=tts,  # type: ignore[arg-type]  # native adapter, not a ConversationHandler
             deps=handler_kwargs["deps"],
             build=_build,
         )

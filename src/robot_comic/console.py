@@ -833,6 +833,29 @@ class LocalStream:
                     status_code=500,
                 )
 
+        # GET /api/xtts/voices -> fetch the xtts-v2 LAN speaker list for the
+        # admin UI dropdown (#438). Constructs a throw-away XttsTTSAdapter from
+        # the current config, calls get_available_voices(), then shuts it down.
+        # Falls back gracefully when the xtts service is unreachable.
+        @self._settings_app.get("/api/xtts/voices")
+        async def _xtts_voices() -> JSONResponse:
+            from robot_comic.adapters.xtts_tts_adapter import XttsTTSAdapter
+
+            adapter = XttsTTSAdapter(
+                base_url=config.XTTS_URL,
+                default_speaker=config.XTTS_DEFAULT_SPEAKER_KEY,
+                language=config.XTTS_LANGUAGE,
+                timeout_s=config.XTTS_TIMEOUT_S,
+            )
+            try:
+                voices = await adapter.get_available_voices()
+                return JSONResponse({"ok": True, "voices": voices})
+            except Exception as e:
+                logger.warning("Failed to fetch xtts voices: %s", e)
+                return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+            finally:
+                await adapter.shutdown()
+
         # GET /ready -> whether backend finished loading tools
         @self._settings_app.get("/ready")
         def _ready() -> JSONResponse:
