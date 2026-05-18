@@ -17,6 +17,7 @@ import numpy as np
 from robot_comic.config import (
     LLAMA_CPP_DEFAULT_URL,
     CHATTERBOX_DEFAULT_URL,
+    AUDIO_OUTPUT_CHATTERBOX,
     CHATTERBOX_DEFAULT_GAIN,
     CHATTERBOX_DEFAULT_VOICE,
     CHATTERBOX_DEFAULT_CFG_WEIGHT,
@@ -135,6 +136,14 @@ class ChatterboxTTSResponseHandler(BaseLlamaResponseHandler):
         (streaming POST) + Chatterbox TTS warmup (real TTS round-trip).
         Guard the body so duplicate calls are cheap no-ops. The flag is
         only set on success so a failed attempt still re-tries.
+
+        Non-chatterbox output backend (e.g. ``AUDIO_OUTPUT_BACKEND=xtts``):
+        when this handler is used only as an LLM host — not as the active
+        TTS backend — the base-class httpx setup and tool-manager startup
+        are still required, but the Chatterbox-specific network probes
+        (llama-server health check, LLM KV-cache warmup, TTS warmup) must
+        NOT fire.  They would time-out against an absent Chatterbox service
+        and pollute the journal with spurious warnings on every boot.
         """
         if getattr(self, "_startup_credentials_ready", False):
             return
@@ -145,6 +154,22 @@ class ChatterboxTTSResponseHandler(BaseLlamaResponseHandler):
             self._voice_clone_ref_path = load_voice_clone_ref(config.PROFILES_DIRECTORY / profile)
         else:
             self._voice_clone_ref_path = None
+
+        # Gate the Chatterbox-specific probes on whether chatterbox is the
+        # active TTS backend.  When another backend (e.g. xtts) is selected,
+        # this handler acts only as an LLM host; its TTS machinery is unused
+        # and attempting to reach the Chatterbox service would produce
+        # misleading ConnectTimeout warnings in the journal on every boot.
+        _active_output = getattr(config, "AUDIO_OUTPUT_BACKEND", AUDIO_OUTPUT_CHATTERBOX)
+        if _active_output != AUDIO_OUTPUT_CHATTERBOX:
+            logger.debug(
+                "ChatterboxTTS: skipping TTS probes — active output backend is %r, not %r",
+                _active_output,
+                AUDIO_OUTPUT_CHATTERBOX,
+            )
+            self._startup_credentials_ready = True
+            return
+
         logger.info(
             "ChatterboxTTS handler initialised: llm=%s/v1/chat/completions tts=%s voice=%s exag=%.2f cfg=%.2f temp=%.2f",
             self._llama_cpp_url,
