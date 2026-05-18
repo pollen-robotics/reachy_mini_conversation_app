@@ -183,6 +183,33 @@ class XttsTTSAdapter:
         playback_end = response_start_ts + response_audio_bytes / bytes_per_second
         self._speaking_until_setter(playback_end + cooldown_s)
 
+    def _push_post_tts_cooldown(self, response_start_ts: float, response_audio_bytes: int) -> None:
+        """Extend the echo-guard deadline after the last TTS frame.
+
+        After all audio has been yielded the per-frame guard (``_push_speaking_until``)
+        sets the deadline to ``playback_end + ECHO_COOLDOWN_MS``.  That 800ms
+        window is sufficient for device-buffer + scheduling jitter but NOT for
+        the acoustic reverb decay and chassis-mic AGC recovery that follow TTS
+        playback in an enclosed space (observed 2026-05-18: faster-whisper
+        hallucinated multi-sentence text on ambient audio 2-3 s after TTS ended,
+        restarting the LLM→TTS cycle indefinitely).
+
+        This method adds ``POST_TTS_COOLDOWN_MS`` (default 2500ms) on top of the
+        playback end, giving real silence time before the VAD/STT pipeline accepts
+        new speech.  Called once after the synthesize generator finishes.
+        No-op when ``speaking_until_setter`` was not supplied or when
+        ``response_audio_bytes == 0`` (nothing was synthesized).
+        """
+        if self._speaking_until_setter is None or response_audio_bytes == 0:
+            return
+        cooldown_s = config.ECHO_COOLDOWN_MS / 1000.0
+        post_tts_cooldown_s = config.POST_TTS_COOLDOWN_MS / 1000.0
+        bytes_per_second = _SAMPLE_RATE_HZ * _BYTES_PER_SAMPLE
+        playback_end = response_start_ts + response_audio_bytes / bytes_per_second
+        # The per-frame guard already set the deadline to playback_end + cooldown_s;
+        # we extend it by the additional post-TTS window.
+        self._speaking_until_setter(playback_end + cooldown_s + post_tts_cooldown_s)
+
     # ------------------------------------------------------------------ #
     # Synthesis                                                          #
     # ------------------------------------------------------------------ #
@@ -269,6 +296,13 @@ class XttsTTSAdapter:
             response_audio_bytes += len(buffer)
             self._push_speaking_until(response_start_ts, response_audio_bytes)
             yield AudioFrame(samples=samples, sample_rate=_SAMPLE_RATE_HZ)
+
+        # Post-TTS cooldown: after ALL frames have been yielded, extend the
+        # echo-guard deadline by POST_TTS_COOLDOWN_MS to cover acoustic reverb
+        # decay and chassis-mic AGC recovery.  Without this extension the guard
+        # expires ~800ms after the last byte plays; faster-whisper can then
+        # hallucinate on ambient audio and restart the LLM→TTS cascade.
+        self._push_post_tts_cooldown(response_start_ts, response_audio_bytes)
 
     # ------------------------------------------------------------------ #
     # Voice methods                                                      #

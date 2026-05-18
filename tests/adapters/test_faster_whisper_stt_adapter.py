@@ -1248,3 +1248,86 @@ async def test_vad_start_echo_guard_suppresses_speech_started(
     assert started_calls == 0, (
         f"on_speech_started fired {started_calls} time(s) despite should_drop_frame returning True"
     )
+
+
+# ---------------------------------------------------------------------------
+# no_speech_threshold default + env override (post-TTS hallucination fix)
+# ---------------------------------------------------------------------------
+
+
+def test_no_speech_threshold_default_is_0_4() -> None:
+    """Default no_speech_threshold is 0.4 (raised from 0.6 for post-TTS cascade defence).
+
+    Regression guard: if the constant is changed accidentally this test catches it.
+    Issue: post-TTS hallucination cascade (2026-05-18) — ambient audio after
+    playback had low no_speech_prob despite containing no real speech.
+    """
+    from robot_comic.adapters.faster_whisper_stt_adapter import _NO_SPEECH_THRESHOLD_DEFAULT
+
+    assert _NO_SPEECH_THRESHOLD_DEFAULT == 0.4, (
+        f"_NO_SPEECH_THRESHOLD_DEFAULT should be 0.4, got {_NO_SPEECH_THRESHOLD_DEFAULT}"
+    )
+
+
+def test_no_speech_threshold_default_applied_to_new_adapter() -> None:
+    """FasterWhisperSTTAdapter() without kwargs uses _NO_SPEECH_THRESHOLD_DEFAULT (0.4)."""
+    from robot_comic.adapters import FasterWhisperSTTAdapter
+    from robot_comic.adapters.faster_whisper_stt_adapter import _NO_SPEECH_THRESHOLD_DEFAULT
+
+    adapter = FasterWhisperSTTAdapter()
+    assert adapter._no_speech_threshold == _NO_SPEECH_THRESHOLD_DEFAULT
+
+
+def test_no_speech_threshold_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """REACHY_MINI_FASTER_WHISPER_NO_SPEECH_THRESHOLD overrides the module-level default.
+
+    We patch the env var and re-import the module to pick up the change.
+    The adapter constructor must respect the overridden value.
+    """
+    import sys
+
+    monkeypatch.setenv("REACHY_MINI_FASTER_WHISPER_NO_SPEECH_THRESHOLD", "0.55")
+
+    # Force re-execution of module-level env read by reloading.
+    mod_name = "robot_comic.adapters.faster_whisper_stt_adapter"
+    if mod_name in sys.modules:
+        del sys.modules[mod_name]
+    import robot_comic.adapters.faster_whisper_stt_adapter as reloaded_mod
+
+    assert reloaded_mod._NO_SPEECH_THRESHOLD_DEFAULT == 0.55
+
+    # Restore for other tests.
+    del sys.modules[mod_name]
+
+
+def test_no_speech_threshold_env_invalid_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Invalid REACHY_MINI_FASTER_WHISPER_NO_SPEECH_THRESHOLD logs a warning and uses default."""
+    import sys
+
+    monkeypatch.setenv("REACHY_MINI_FASTER_WHISPER_NO_SPEECH_THRESHOLD", "not_a_float")
+
+    mod_name = "robot_comic.adapters.faster_whisper_stt_adapter"
+    if mod_name in sys.modules:
+        del sys.modules[mod_name]
+    import robot_comic.adapters.faster_whisper_stt_adapter as reloaded_mod
+
+    # Invalid value → falls back to hardcoded default (0.4).
+    assert reloaded_mod._NO_SPEECH_THRESHOLD_DEFAULT == 0.4
+
+    del sys.modules[mod_name]
+
+
+def test_no_speech_threshold_env_out_of_range_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Out-of-range (>1.0) threshold env var falls back to default."""
+    import sys
+
+    monkeypatch.setenv("REACHY_MINI_FASTER_WHISPER_NO_SPEECH_THRESHOLD", "1.5")
+
+    mod_name = "robot_comic.adapters.faster_whisper_stt_adapter"
+    if mod_name in sys.modules:
+        del sys.modules[mod_name]
+    import robot_comic.adapters.faster_whisper_stt_adapter as reloaded_mod
+
+    assert reloaded_mod._NO_SPEECH_THRESHOLD_DEFAULT == 0.4
+
+    del sys.modules[mod_name]

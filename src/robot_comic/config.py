@@ -490,6 +490,22 @@ DEFAULT_MAX_HISTORY_TURNS = 20
 ECHO_COOLDOWN_MS_ENV = "REACHY_MINI_ECHO_COOLDOWN_MS"
 DEFAULT_ECHO_COOLDOWN_MS = 800
 
+# Post-TTS silence cooldown — extra guard added *after* the last TTS audio
+# frame is emitted, on top of the per-frame byte-count deadline.
+# Rationale (2026-05-18): after TTS playback finishes, chassis mic AGC
+# recovers slowly and room reverb decays for 1-3 s; during that window
+# faster-whisper hallucinates multi-sentence plausible text (e.g.
+# "Okay. Bye. Okay? We'll do this again.") from ambient pickup, triggering
+# a new LLM→TTS cycle and creating an infinite hallucination cascade.
+# The 800ms per-frame cooldown (ECHO_COOLDOWN_MS) fires only until the
+# last byte's playback deadline + 800ms, which is too short for acoustic
+# decay. This separate knob extends the guard to 2500ms after the last
+# frame so VAD + whisper see genuine silence before accepting new speech.
+# Override: ``REACHY_MINI_POST_TTS_COOLDOWN_MS=0`` to disable (restore
+# legacy behaviour), or reduce for tighter barge-in tolerance.
+POST_TTS_COOLDOWN_MS_ENV = "REACHY_MINI_POST_TTS_COOLDOWN_MS"
+DEFAULT_POST_TTS_COOLDOWN_MS = 2500
+
 logger = logging.getLogger(__name__)
 
 
@@ -1108,6 +1124,11 @@ class Config:
     # Echo-guard cooldown after assistant audio ends.
     ECHO_COOLDOWN_MS = int(os.getenv(ECHO_COOLDOWN_MS_ENV, str(DEFAULT_ECHO_COOLDOWN_MS)))
 
+    # Extra silence guard applied after the LAST TTS frame — extends the
+    # echo-guard deadline beyond the byte-count playback end to cover
+    # acoustic reverb decay and chassis-mic AGC recovery.
+    POST_TTS_COOLDOWN_MS = int(os.getenv(POST_TTS_COOLDOWN_MS_ENV, str(DEFAULT_POST_TTS_COOLDOWN_MS)))
+
     # Kiosk-mode startup screen: plays a short generic-voice intro + persona
     # listing before the per-persona greeting begins.
     STARTUP_SCREEN_ENABLED = _env_flag("REACHY_MINI_STARTUP_SCREEN", default=False)
@@ -1356,6 +1377,7 @@ def refresh_runtime_config_from_env() -> None:
     config.FORCE_DELIVERY_TAGS = _env_flag("REACHY_MINI_FORCE_DELIVERY_TAGS", default=False)
     config.WELCOME_GATE_ENABLED = _env_flag("REACHY_MINI_WELCOME_GATE_ENABLED", default=False)
     config.ECHO_COOLDOWN_MS = int(os.getenv(ECHO_COOLDOWN_MS_ENV, str(DEFAULT_ECHO_COOLDOWN_MS)))
+    config.POST_TTS_COOLDOWN_MS = int(os.getenv(POST_TTS_COOLDOWN_MS_ENV, str(DEFAULT_POST_TTS_COOLDOWN_MS)))
     config.STARTUP_SCREEN_ENABLED = _env_flag("REACHY_MINI_STARTUP_SCREEN", default=False)
     config.STARTUP_SCREEN_PERSONA_ORDER = os.getenv("REACHY_MINI_STARTUP_SCREEN_PERSONA_ORDER", "")
     config.STARTUP_TRIGGER_MODE = (os.getenv("REACHY_MINI_STARTUP_TRIGGER_MODE") or "canned").strip().lower()

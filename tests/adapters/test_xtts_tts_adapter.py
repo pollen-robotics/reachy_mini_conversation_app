@@ -334,11 +334,12 @@ async def test_http_error_propagates_cleanly() -> None:
 
 @pytest.mark.asyncio
 async def test_speaking_until_setter_called_for_each_frame() -> None:
-    """``speaking_until_setter`` is invoked once per yielded frame.
+    """``speaking_until_setter`` is invoked once per yielded frame plus one post-TTS call.
 
     The setter must be called at least once per audio frame so the STT
     echo-guard (``_should_drop_frame``) sees a non-zero deadline while xtts
-    is streaming.  Three full frames → three setter calls.
+    is streaming.  Three full frames → three per-frame calls + one final
+    post-TTS cooldown call = 4 total.
     """
     # Three 2400-sample frames (= 3 × 4800 bytes of int16 PCM).
     response = _FakeStreamResponse([_silent_pcm_bytes(7200)])
@@ -355,7 +356,8 @@ async def test_speaking_until_setter_called_for_each_frame() -> None:
     async for _ in adapter.synthesize("hello"):
         pass
 
-    assert len(setter_calls) == 3
+    # 3 per-frame calls + 1 post-TTS cooldown call = 4 total.
+    assert len(setter_calls) == 4
 
 
 @pytest.mark.asyncio
@@ -410,10 +412,14 @@ async def test_speaking_until_exceeds_wall_clock_on_first_frame() -> None:
     async for _ in adapter.synthesize("hi"):
         pass
 
-    assert len(received_deadlines) == 1
+    # One per-frame call + one post-TTS cooldown call = 2 total.
+    assert len(received_deadlines) == 2
     now = _time.perf_counter()
-    # deadline must be in the future relative to now — audio duration + cooldown
-    assert received_deadlines[0] > now, f"deadline {received_deadlines[0]:.4f} should exceed wall-clock {now:.4f}"
+    # Both deadlines must be in the future — audio duration + cooldown (+ post-TTS on the second).
+    assert received_deadlines[0] > now, (
+        f"per-frame deadline {received_deadlines[0]:.4f} should exceed wall-clock {now:.4f}"
+    )
+    assert received_deadlines[1] > received_deadlines[0], "post-TTS deadline must exceed per-frame deadline"
 
 
 @pytest.mark.asyncio
@@ -438,7 +444,8 @@ async def test_speaking_until_setter_called_for_trailing_partial_frame() -> None
     frames = [f async for f in adapter.synthesize("trailing")]
 
     assert len(frames) == 2  # sanity: one full + one partial
-    assert len(setter_calls) == 2  # setter fired for each
+    # 2 per-frame calls + 1 post-TTS cooldown call = 3 total.
+    assert len(setter_calls) == 3  # per-frame + post-TTS cooldown
 
 
 @pytest.mark.asyncio
@@ -451,3 +458,115 @@ async def test_speaking_until_setter_not_called_when_none() -> None:
     # Should not raise and should still yield the frame.
     frames = [f async for f in adapter.synthesize("no setter")]
     assert len(frames) == 1
+
+
+# ---------------------------------------------------------------------------
+# Post-TTS cooldown: _push_post_tts_cooldown
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_post_tts_cooldown_extends_deadline_beyond_last_per_frame_call() -> None:
+    """After synthesis finishes, the final setter call extends beyond the per-frame deadline.
+
+    The post-TTS cooldown adds POST_TTS_COOLDOWN_MS (default 2500 ms) on top
+    of the byte-count playback deadline + ECHO_COOLDOWN_MS.  The last
+    setter call must therefore be strictly greater than the second-to-last.
+    """
+    # One full 2400-sample frame so we get exactly 2 calls: 1 per-frame + 1 post-TTS.
+    response = _FakeStreamResponse([_silent_pcm_bytes(2400)])
+    client = _FakeAsyncClient(stream_response=response)
+
+    deadlines: list[float] = []
+    adapter = XttsTTSAdapter(
+        base_url="http://x:1",
+        default_speaker="rickles",
+        _client=client,
+        speaking_until_setter=deadlines.append,
+    )
+
+    async for _ in adapter.synthesize("hello"):
+        pass
+
+    # 1 per-frame call + 1 post-TTS cooldown call.
+    assert len(deadlines) == 2, f"expected 2 deadline calls, got {len(deadlines)}"
+    per_frame_deadline = deadlines[0]
+    post_tts_deadline = deadlines[1]
+    assert post_tts_deadline > per_frame_deadline, (
+        f"post-TTS cooldown deadline {post_tts_deadline:.4f} should exceed per-frame deadline {per_frame_deadline:.4f}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_post_tts_cooldown_gap_matches_config_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The gap between per-frame and post-TTS deadlines equals POST_TTS_COOLDOWN_MS / 1000.
+
+    We monkeypatch config.POST_TTS_COOLDOWN_MS so the test is independent of
+    the actual default and verifies the formula rather than the constant.
+    """
+    from robot_comic.adapters import xtts_tts_adapter as mod
+
+    monkeypatch.setattr(mod.config, "POST_TTS_COOLDOWN_MS", 1000)
+    monkeypatch.setattr(mod.config, "ECHO_COOLDOWN_MS", 800)
+
+    response = _FakeStreamResponse([_silent_pcm_bytes(2400)])
+    client = _FakeAsyncClient(stream_response=response)
+
+    deadlines: list[float] = []
+    adapter = XttsTTSAdapter(
+        base_url="http://x:1",
+        default_speaker="rickles",
+        _client=client,
+        speaking_until_setter=deadlines.append,
+    )
+
+    async for _ in adapter.synthesize("test"):
+        pass
+
+    assert len(deadlines) == 2
+    gap = deadlines[1] - deadlines[0]
+    # gap should be POST_TTS_COOLDOWN_MS / 1000 = 1.0 s (within floating-point tolerance).
+    assert abs(gap - 1.0) < 1e-6, f"post-TTS gap {gap:.6f}s should be 1.000000s"
+
+
+@pytest.mark.asyncio
+async def test_post_tts_cooldown_not_called_when_no_audio_emitted() -> None:
+    """Post-TTS cooldown is a no-op when the server sends zero bytes.
+
+    If no frames were yielded ``response_audio_bytes`` stays at 0 and
+    ``_push_post_tts_cooldown`` must not call the setter (there is no
+    meaningful playback deadline to extend).
+    """
+    response = _FakeStreamResponse([])  # zero bytes from server
+    client = _FakeAsyncClient(stream_response=response)
+
+    setter_calls: list[float] = []
+    adapter = XttsTTSAdapter(
+        base_url="http://x:1",
+        default_speaker="rickles",
+        _client=client,
+        speaking_until_setter=setter_calls.append,
+    )
+
+    async for _ in adapter.synthesize("silence"):
+        pass
+
+    # No audio → no per-frame calls and no post-TTS call.
+    assert len(setter_calls) == 0, f"expected 0 setter calls for empty stream, got {len(setter_calls)}"
+
+
+@pytest.mark.asyncio
+async def test_post_tts_cooldown_default_is_2500ms(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default POST_TTS_COOLDOWN_MS is 2500, giving a 2.5s post-TTS guard window.
+
+    Regression guard: if the constant is changed accidentally this test catches it.
+    """
+    from robot_comic import config as cfg_mod
+
+    # Use the default value (not overridden by any env var in tests).
+    assert cfg_mod.DEFAULT_POST_TTS_COOLDOWN_MS == 2500
+
+
+# ---------------------------------------------------------------------------
+# no_speech_threshold env override
+# ---------------------------------------------------------------------------

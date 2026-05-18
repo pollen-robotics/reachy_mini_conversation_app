@@ -166,7 +166,31 @@ _MODEL_NAME_DEFAULT = "base.en"
 # by how likely it thought the segment contained no speech; filtering
 # at the adapter kills hallucinations at the source before they reach
 # the orchestrator. Issue #429.
-_NO_SPEECH_THRESHOLD_DEFAULT = 0.6
+#
+# Default changed 0.6 → 0.4 (2026-05-18): post-TTS ambient hallucinations
+# observed on ricci — faster-whisper returned low no_speech_prob on long
+# multi-sentence outputs like "Okay. Bye. Okay? We'll do this again." even
+# though the human said nothing.  Lowering the threshold makes the filter
+# more aggressive so higher-confidence-in-speech segments are required to
+# pass; the chassis use case (intentional speech is loud, deliberate) can
+# tolerate this tightening.  Operators who find valid low-volume speech
+# being dropped can relax with:
+#   REACHY_MINI_FASTER_WHISPER_NO_SPEECH_THRESHOLD=0.6
+_NO_SPEECH_THRESHOLD_DEFAULT = 0.4
+_NO_SPEECH_THRESHOLD_RAW = os.getenv("REACHY_MINI_FASTER_WHISPER_NO_SPEECH_THRESHOLD", "")
+if _NO_SPEECH_THRESHOLD_RAW:
+    try:
+        _NO_SPEECH_THRESHOLD_ENV_VAL = float(_NO_SPEECH_THRESHOLD_RAW)
+        if not (0.0 <= _NO_SPEECH_THRESHOLD_ENV_VAL <= 1.0):
+            raise ValueError(f"out of range [0.0, 1.0]: {_NO_SPEECH_THRESHOLD_ENV_VAL}")
+        _NO_SPEECH_THRESHOLD_DEFAULT = _NO_SPEECH_THRESHOLD_ENV_VAL
+    except (ValueError, TypeError) as _e:
+        logging.getLogger(__name__).warning(
+            "REACHY_MINI_FASTER_WHISPER_NO_SPEECH_THRESHOLD=%r is invalid (%s); using default %.2f",
+            _NO_SPEECH_THRESHOLD_RAW,
+            _e,
+            _NO_SPEECH_THRESHOLD_DEFAULT,
+        )
 # Maximum seconds of buffered audio before `_process_vad_chunk` force-
 # flushes the utterance regardless of webrtcvad's end-of-speech state.
 # Backstop for the pathological case where continuous ambient noise
