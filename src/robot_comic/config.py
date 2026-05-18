@@ -1218,6 +1218,14 @@ def refresh_runtime_config_from_env() -> None:
     config.LOCAL_STT_MODEL = _normalize_local_stt_model(os.getenv(LOCAL_STT_MODEL_ENV))
     config.LOCAL_STT_UPDATE_INTERVAL = _normalize_local_stt_update_interval(os.getenv(LOCAL_STT_UPDATE_INTERVAL_ENV))
     config.REACHY_MINI_CUSTOM_PROFILE = LOCKED_PROFILE or os.getenv("REACHY_MINI_CUSTOM_PROFILE")
+    # External profile / tool directories. Class-body reads only fire once at
+    # module import — re-read here so values loaded from .env by load_dotenv()
+    # in main.py (which runs after config.py imports) take effect.
+    _refresh_profiles_dir = os.getenv("REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY")
+    config.PROFILES_DIRECTORY = Path(_refresh_profiles_dir) if _refresh_profiles_dir else DEFAULT_PROFILES_DIRECTORY
+    _refresh_tools_dir = os.getenv("REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY")
+    config.TOOLS_DIRECTORY = Path(_refresh_tools_dir) if _refresh_tools_dir else None
+    config.AUTOLOAD_EXTERNAL_TOOLS = _env_flag("AUTOLOAD_EXTERNAL_TOOLS", default=False)
     config.GEMINI_LIVE_VIDEO_STREAMING = _env_flag("GEMINI_LIVE_VIDEO_STREAMING", default=False)
     config.GEMINI_LIVE_PRESENCE_ENABLED = _env_flag("GEMINI_LIVE_PRESENCE_ENABLED", default=False)
     config.GEMINI_LIVE_PRESENCE_FIRST_S = float(os.getenv("GEMINI_LIVE_PRESENCE_FIRST_S", "10"))

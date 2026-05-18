@@ -123,3 +123,55 @@ def test_builtin_profile_can_load_profile_local_tools(
 
     assert "local_ping" in core_tools_mod.ALL_TOOLS
     assert "dance" in core_tools_mod.ALL_TOOLS
+
+
+def test_refresh_picks_up_external_profiles_directory_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """refresh_runtime_config_from_env must update PROFILES_DIRECTORY.
+
+    Class-body reads of REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY fire once at
+    module import — before main.py's load_dotenv() runs. Without an explicit
+    refresh, values in the instance .env are silently ignored at runtime,
+    even though refresh_runtime_config_from_env() updates ~70 other attrs.
+    """
+    external_root = tmp_path / "external_profiles"
+    external_root.mkdir()
+    external_tools = tmp_path / "external_tools"
+    external_tools.mkdir()
+
+    original_profiles = config_mod.config.PROFILES_DIRECTORY
+    original_tools = config_mod.config.TOOLS_DIRECTORY
+
+    monkeypatch.setenv("REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY", str(external_root))
+    monkeypatch.setenv("REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY", str(external_tools))
+    monkeypatch.setenv("AUTOLOAD_EXTERNAL_TOOLS", "1")
+
+    try:
+        config_mod.refresh_runtime_config_from_env()
+        assert config_mod.config.PROFILES_DIRECTORY == external_root
+        assert config_mod.config.TOOLS_DIRECTORY == external_tools
+        assert config_mod.config.AUTOLOAD_EXTERNAL_TOOLS is True
+    finally:
+        # Restore — refresh() will reset using the monkeypatched env which
+        # gets unwound after the test, but be explicit so failures don't
+        # leak into the rest of the session.
+        config_mod.config.PROFILES_DIRECTORY = original_profiles
+        config_mod.config.TOOLS_DIRECTORY = original_tools
+
+
+def test_refresh_falls_back_to_default_when_env_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unsetting the env var must restore PROFILES_DIRECTORY to the default."""
+    original_profiles = config_mod.config.PROFILES_DIRECTORY
+    original_tools = config_mod.config.TOOLS_DIRECTORY
+
+    monkeypatch.delenv("REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY", raising=False)
+    monkeypatch.delenv("REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY", raising=False)
+
+    try:
+        config_mod.refresh_runtime_config_from_env()
+        assert config_mod.config.PROFILES_DIRECTORY == config_mod.DEFAULT_PROFILES_DIRECTORY
+        assert config_mod.config.TOOLS_DIRECTORY is None
+    finally:
+        config_mod.config.PROFILES_DIRECTORY = original_profiles
+        config_mod.config.TOOLS_DIRECTORY = original_tools
