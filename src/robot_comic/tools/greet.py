@@ -29,7 +29,13 @@ SWEEP_POSITIONS = ["left", "up", "right", "front"]
 # How long (seconds) to wait for the face tracker to latch before giving up and
 # sweeping.  Overrideable via REACHY_MINI_GREET_SCAN_WAIT_S.
 _DEFAULT_SCAN_WAIT_S = 1.5
-_SCAN_POLL_INTERVAL_S = 0.1
+# How often (seconds) to re-run MediaPipe inference during the face-scan poll
+# loop when no face has been detected yet.  Keeping this above the camera
+# worker's 40 ms frame period (25 Hz) avoids saturating the CPU with redundant
+# inference calls when the room is empty.  Overrideable via
+# REACHY_MINI_GREET_SCAN_POLL_INTERVAL_S.
+_DEFAULT_SCAN_POLL_INTERVAL_S = 0.3
+_SCAN_POLL_INTERVAL_S = _DEFAULT_SCAN_POLL_INTERVAL_S  # kept for backward-compat with tests
 
 # Default MediaPipe face-detection confidence threshold (#269). 0.3 is lower
 # than MediaPipe's 0.5 default to compensate for the Reachy Mini camera lens /
@@ -66,6 +72,30 @@ def _face_detection_confidence() -> float:
         )
         return _DEFAULT_FACE_DETECTION_CONFIDENCE
     return max(0.0, min(1.0, value))
+
+
+def _scan_poll_interval_s() -> float:
+    """Return the MediaPipe inference poll interval for the face-scan loop.
+
+    A higher value reduces CPU load when the room is empty: instead of
+    running inference on every camera frame we only fire it every
+    ``_DEFAULT_SCAN_POLL_INTERVAL_S`` seconds (default 0.3 s ≈ 3 Hz).
+    Override via ``REACHY_MINI_GREET_SCAN_POLL_INTERVAL_S``.  Values below
+    0.05 s are clamped upward to avoid unintentional busy-spin.
+    """
+    raw = os.environ.get("REACHY_MINI_GREET_SCAN_POLL_INTERVAL_S")
+    if raw is None or not raw.strip():
+        return _DEFAULT_SCAN_POLL_INTERVAL_S
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning(
+            "Invalid REACHY_MINI_GREET_SCAN_POLL_INTERVAL_S=%r; using default %.2f",
+            raw,
+            _DEFAULT_SCAN_POLL_INTERVAL_S,
+        )
+        return _DEFAULT_SCAN_POLL_INTERVAL_S
+    return max(0.05, value)
 
 
 def _check_mp_available() -> bool:
@@ -296,7 +326,15 @@ class Greet(Tool):
         # On fresh startup the camera / tracker needs a moment to latch onto a
         # face even when one is already in frame; a single sample (or 3 rapid
         # retries) is not enough to bridge that initialisation gap.
+        #
+        # The poll interval caps how often we run MediaPipe inference.  Running
+        # inference every camera frame (40 ms / 25 Hz) burns ~5% CPU on a Pi 5
+        # when the room is empty and the scan window is several seconds long.
+        # The default 0.3 s cap (≈ 3 Hz) is aggressive enough to detect a face
+        # within one interaction window while keeping inference-induced CPU load
+        # negligible.  Override via REACHY_MINI_GREET_SCAN_POLL_INTERVAL_S.
         scan_wait_s = float(os.environ.get("REACHY_MINI_GREET_SCAN_WAIT_S", _DEFAULT_SCAN_WAIT_S))
+        poll_interval_s = _scan_poll_interval_s()
         deadline = time.monotonic() + scan_wait_s
         while True:
             frame = deps.camera_worker.get_latest_frame()
@@ -324,7 +362,7 @@ class Greet(Tool):
                     return {"face_detected": True}
             if time.monotonic() >= deadline:
                 break
-            await asyncio.sleep(_SCAN_POLL_INTERVAL_S)
+            await asyncio.sleep(poll_interval_s)
 
         # Kill-switch: when this is set, skip the head sweep entirely and just
         # report no_subject. Used to keep the chassis safe while the discrete

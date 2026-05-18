@@ -66,6 +66,15 @@ logger = logging.getLogger(__name__)
 # Configuration constants
 CONTROL_LOOP_FREQUENCY_HZ = 60.0  # Hz - Target frequency for the movement control loop
 
+# Reconnect backoff constants for set_target failures.
+# When the serial/WS bus flakes, the control loop sees a burst of exceptions.
+# Instead of spinning at 60 Hz on a dead connection, we insert an exponentially
+# growing sleep inside the error path so the daemon has time to recover without
+# the app burning 186% CPU in the meantime.
+_RECONNECT_BACKOFF_BASE_S = 0.2  # first failure: 200 ms pause
+_RECONNECT_BACKOFF_MULTIPLIER = 2.0
+_RECONNECT_BACKOFF_CAP_S = 8.0  # maximum wait between attempts
+
 # Type definitions
 FullBodyPose = Tuple[NDArray[np.float32], Tuple[float, float], float]  # (head_pose_4x4, antennas, body_yaw)
 
@@ -305,6 +314,9 @@ class MovementManager:
         self._last_set_target_err = 0.0
         self._set_target_err_interval = 1.0  # seconds between error logs
         self._set_target_err_suppressed = 0
+        # Reconnect backoff state — reset after first successful set_target call.
+        self._set_target_consecutive_failures = 0
+        self._set_target_backoff_s = 0.0  # current backoff delay; 0 means no delay yet
         self._cached_secondary_offsets: tuple[float, ...] = ()  # force miss on first call
         self._cached_secondary_pose: FullBodyPose = (np.eye(4, dtype=np.float32), (0.0, 0.0), 0.0)
 
@@ -717,10 +729,41 @@ class MovementManager:
     def _issue_control_command(
         self, head: NDArray[np.float32], antennas: Tuple[float, float], body_yaw: float
     ) -> None:
-        """Send the fused pose to the robot with throttled error logging."""
+        """Send the fused pose to the robot with throttled error logging and reconnect backoff.
+
+        When set_target raises (serial/WS bus flake), consecutive failures
+        trigger an exponentially growing sleep — starting at
+        ``_RECONNECT_BACKOFF_BASE_S``, doubling on each successive failure, and
+        capping at ``_RECONNECT_BACKOFF_CAP_S``.  This prevents the 60 Hz loop
+        from spinning at full CPU while the daemon is recovering its motor
+        connection (the "54 errors in a burst" scenario seen on Pi 5 field logs).
+
+        The backoff delay is inserted *inside* the exception handler so the
+        normal tick-sleep path is unaffected when the connection is healthy.
+        The backoff resets to zero as soon as one ``set_target`` call succeeds.
+        """
+        # Apply backoff sleep before attempting set_target when we're in a
+        # failure streak.  We sleep here (before the call) so that every failed
+        # attempt pays a delay proportional to how many have already failed —
+        # the first failure in a burst incurs no extra wait (backoff_s == 0
+        # on entry), the second incurs BASE_S, the third 2*BASE_S, etc.
+        if self._set_target_backoff_s > 0:
+            time.sleep(self._set_target_backoff_s)
+
         try:
             self.current_robot.set_target(head=head, antennas=antennas, body_yaw=body_yaw)
         except Exception as e:
+            # Advance backoff for the next attempt.
+            self._set_target_consecutive_failures += 1
+            if self._set_target_consecutive_failures == 1:
+                # First failure starts the backoff sequence.
+                self._set_target_backoff_s = _RECONNECT_BACKOFF_BASE_S
+            else:
+                self._set_target_backoff_s = min(
+                    self._set_target_backoff_s * _RECONNECT_BACKOFF_MULTIPLIER,
+                    _RECONNECT_BACKOFF_CAP_S,
+                )
+
             now = self._now()
             if now - self._last_set_target_err >= self._set_target_err_interval:
                 msg = f"Failed to set robot target: {e}"
@@ -732,6 +775,16 @@ class MovementManager:
             else:
                 self._set_target_err_suppressed += 1
         else:
+            # Successful call — reset the backoff so the next failure sequence
+            # starts from scratch rather than carrying over stale state.
+            if self._set_target_consecutive_failures > 0:
+                logger.info(
+                    "set_target recovered after %d consecutive failure(s)",
+                    self._set_target_consecutive_failures,
+                )
+            self._set_target_consecutive_failures = 0
+            self._set_target_backoff_s = 0.0
+
             # Update velocity-cap reference with the pose we just issued.
             self._last_safe_head_pose = head
             with self._status_lock:
