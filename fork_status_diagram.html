@@ -54,11 +54,60 @@
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 16px;
-    overflow: auto;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: calc(100vh - 110px);
+    position: relative;
+    overflow: hidden;
   }
-  .diagram-panel .mermaid {
+  .toolbar {
+    display: flex;
+    gap: 6px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(0,0,0,0.18);
+    font-size: 12px;
+    align-items: center;
+    flex: 0 0 auto;
+  }
+  .toolbar button {
+    background: #1f2533;
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 5px 10px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .toolbar button:hover { background: #2a3142; }
+  .toolbar button:active { background: #15192a; }
+  .toolbar .hint {
+    color: var(--muted);
+    margin-left: auto;
+    font-size: 11px;
+  }
+  .diagram-viewport {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    position: relative;
+    cursor: grab;
+  }
+  .diagram-viewport:active { cursor: grabbing; }
+  .diagram-viewport .mermaid {
     background: transparent;
+    width: 100%;
+    height: 100%;
+  }
+  .diagram-viewport svg {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
+    display: block;
   }
   aside {
     display: flex;
@@ -132,6 +181,7 @@
   a:hover { text-decoration: underline; }
   @media (max-width: 1100px) {
     main { grid-template-columns: 1fr; }
+    .diagram-panel { height: 70vh; }
   }
 </style>
 </head>
@@ -143,6 +193,14 @@
 
 <main>
   <section class="diagram-panel">
+    <div class="toolbar">
+      <button id="zoom-in" title="Zoom in (or scroll up on diagram)">+ Zoom in</button>
+      <button id="zoom-out" title="Zoom out (or scroll down on diagram)">− Zoom out</button>
+      <button id="zoom-reset" title="Reset to fit">⤺ Reset</button>
+      <button id="zoom-fit" title="Fit to viewport">⛶ Fit</button>
+      <span class="hint">drag to pan • scroll to zoom • double-click to reset</span>
+    </div>
+    <div class="diagram-viewport" id="diagram-viewport">
 <pre class="mermaid">
 flowchart TB
   %% =========================
@@ -331,6 +389,7 @@ flowchart TB
   %% open / not-yet-wired
   class sttsvr open
 </pre>
+    </div>
   </section>
 
   <aside>
@@ -386,14 +445,80 @@ flowchart TB
   </aside>
 </main>
 
+<script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
 <script type="module">
   import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+
   mermaid.initialize({
-    startOnLoad: true,
+    startOnLoad: false,
     theme: "dark",
     securityLevel: "loose",
-    flowchart: { useMaxWidth: true, htmlLabels: true, curve: "basis" },
+    // useMaxWidth:false lets the SVG render at its natural size so svg-pan-zoom
+    // has actual content to scale; otherwise Mermaid shrinks it to fit the
+    // container and pan/zoom feel cramped.
+    flowchart: { useMaxWidth: false, htmlLabels: true, curve: "basis" },
   });
+
+  async function render() {
+    await mermaid.run({ querySelector: ".mermaid" });
+    const svg = document.querySelector("#diagram-viewport svg");
+    if (!svg) return;
+
+    // Mermaid sets width/height attrs that fight svg-pan-zoom. Clear them so
+    // the panZoom controller can manage transforms freely.
+    svg.removeAttribute("width");
+    svg.removeAttribute("height");
+    svg.style.width = "100%";
+    svg.style.height = "100%";
+    svg.style.maxWidth = "none";
+
+    const panZoom = svgPanZoom(svg, {
+      panEnabled: true,
+      zoomEnabled: true,
+      controlIconsEnabled: false, // we use our own toolbar
+      dblClickZoomEnabled: false, // we use dblclick to reset instead
+      mouseWheelZoomEnabled: true,
+      preventMouseEventsDefault: true,
+      zoomScaleSensitivity: 0.4,
+      minZoom: 0.2,
+      maxZoom: 12,
+      fit: true,
+      center: true,
+      contain: false,
+    });
+
+    document.getElementById("zoom-in").onclick = () => panZoom.zoomBy(1.35);
+    document.getElementById("zoom-out").onclick = () => panZoom.zoomBy(1 / 1.35);
+    document.getElementById("zoom-reset").onclick = () => {
+      panZoom.resetZoom();
+      panZoom.resetPan();
+      panZoom.fit();
+      panZoom.center();
+    };
+    document.getElementById("zoom-fit").onclick = () => {
+      panZoom.fit();
+      panZoom.center();
+    };
+    document.getElementById("diagram-viewport").addEventListener("dblclick", () => {
+      panZoom.resetZoom();
+      panZoom.resetPan();
+      panZoom.fit();
+      panZoom.center();
+    });
+
+    // Re-fit when the window resizes so the SVG never spills out.
+    let resizeTimer;
+    window.addEventListener("resize", () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        panZoom.resize();
+        panZoom.fit();
+        panZoom.center();
+      }, 120);
+    });
+  }
+
+  render();
 </script>
 </body>
 </html>
