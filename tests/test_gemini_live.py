@@ -151,9 +151,7 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
     handler.client = _FakeLiveClient(session)
 
     task = asyncio.create_task(handler._run_live_session())
-    await _wait_for(
-        lambda: handler.output_queue.qsize() >= 3
-    )
+    await _wait_for(lambda: handler.output_queue.qsize() >= 3)
 
     handler._stop_event.set()
     await asyncio.wait_for(task, timeout=1.0)
@@ -177,6 +175,7 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
     assert any(isinstance(output, tuple) for output in outputs), "audio output was not emitted"
     movement_manager.set_listening.assert_has_calls([call(True), call(False)])
     assert movement_manager.set_listening.call_args_list[-1] == call(False)
+
 
 @pytest.mark.asyncio
 async def test_gemini_camera_tool_sends_snapshot_and_returns_json_result() -> None:
