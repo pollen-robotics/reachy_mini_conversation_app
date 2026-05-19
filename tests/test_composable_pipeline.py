@@ -258,6 +258,197 @@ async def test_tool_loop_respects_max_rounds() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Issue #430: same-tool-repeat guard
+# ---------------------------------------------------------------------------
+
+
+def _tool_response(name: str, call_id: str) -> LLMResponse:
+    return LLMResponse(tool_calls=(ToolCall(id=call_id, name=name, args={}),))
+
+
+async def _drive_one_turn(stt: _ProgrammableSTT, transcript: str = "hi") -> None:
+    await stt.on_completed(transcript)
+    for _ in range(20):
+        await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_same_tool_repeats_inject_stop_nudge() -> None:
+    """Calling one tool >MAX_SAME_TOOL_REPEATS times splices a system nudge."""
+    stt = _ProgrammableSTT()
+    # 3 looping calls to "spin", then a text response.
+    llm = _ScriptedLLM(
+        [
+            _tool_response("spin", "t-1"),
+            _tool_response("spin", "t-2"),
+            _tool_response("spin", "t-3"),
+            LLMResponse(text="Okay, fine."),
+        ]
+    )
+    tts = _RecordingTTS()
+
+    async def _dispatch(call: ToolCall) -> str:
+        return "ok"
+
+    pipeline = ComposablePipeline(
+        stt=stt,
+        llm=llm,
+        tts=tts,
+        tool_dispatcher=_dispatch,
+        max_tool_rounds=8,
+    )
+
+    task = asyncio.create_task(pipeline.start_up())
+    await _wait_for_callback(stt)
+    await _drive_one_turn(stt, "spin around")
+
+    # 4 LLM round-trips total: 3 tool loops + 1 nudge round that returns text.
+    assert len(llm.calls) == 4
+    # The 4th round-trip's messages must include a one-shot system nudge
+    # naming the looping tool.
+    nudge_messages = [m for m in llm.calls[3] if m.get("role") == "system"]
+    assert len(nudge_messages) == 1
+    assert "spin" in nudge_messages[0]["content"]
+    assert "stop calling tools" in nudge_messages[0]["content"].lower()
+    # Text response was spoken.
+    assert tts.calls == [("Okay, fine.", ())]
+
+    await pipeline.shutdown()
+    await task
+
+
+@pytest.mark.asyncio
+async def test_nudge_not_persisted_to_conversation_history() -> None:
+    """The synthetic system nudge must NOT leak into self._conversation_history."""
+    stt = _ProgrammableSTT()
+    llm = _ScriptedLLM(
+        [
+            _tool_response("spin", "t-1"),
+            _tool_response("spin", "t-2"),
+            _tool_response("spin", "t-3"),
+            LLMResponse(text="Okay, fine."),
+        ]
+    )
+    tts = _RecordingTTS()
+
+    async def _dispatch(call: ToolCall) -> str:
+        return "ok"
+
+    pipeline = ComposablePipeline(stt=stt, llm=llm, tts=tts, tool_dispatcher=_dispatch, max_tool_rounds=8)
+    task = asyncio.create_task(pipeline.start_up())
+    await _wait_for_callback(stt)
+    await _drive_one_turn(stt, "spin around")
+
+    # Persistent history: user + 3 tool results + assistant. No system role.
+    roles = [m["role"] for m in pipeline.conversation_history]
+    assert roles == ["user", "tool", "tool", "tool", "assistant"]
+
+    await pipeline.shutdown()
+    await task
+
+
+@pytest.mark.asyncio
+async def test_nudge_fires_at_most_once_per_turn() -> None:
+    """If the LLM ignores the nudge, max_tool_rounds — not a second nudge — bounds the loop."""
+    stt = _ProgrammableSTT()
+    # 8 spin responses; max_tool_rounds=6 caps the loop. Nudge should appear
+    # on exactly one round's messages, never again.
+    llm = _ScriptedLLM([_tool_response("spin", f"t-{i}") for i in range(8)])
+    tts = _RecordingTTS()
+
+    async def _dispatch(call: ToolCall) -> str:
+        return "ok"
+
+    pipeline = ComposablePipeline(stt=stt, llm=llm, tts=tts, tool_dispatcher=_dispatch, max_tool_rounds=6)
+    task = asyncio.create_task(pipeline.start_up())
+    await _wait_for_callback(stt)
+    await _drive_one_turn(stt, "spin around")
+
+    assert len(llm.calls) == 6
+    # Exactly one of the 6 round-trips carried a system-role nudge.
+    nudge_round_count = sum(1 for round_messages in llm.calls for m in round_messages if m.get("role") == "system")
+    assert nudge_round_count == 1
+
+    await pipeline.shutdown()
+    await task
+
+
+@pytest.mark.asyncio
+async def test_different_tools_each_under_threshold_does_not_nudge() -> None:
+    """Per-NAME threshold: two different tools called twice each → no nudge."""
+    stt = _ProgrammableSTT()
+    llm = _ScriptedLLM(
+        [
+            _tool_response("alpha", "t-1"),
+            _tool_response("beta", "t-2"),
+            _tool_response("alpha", "t-3"),
+            _tool_response("beta", "t-4"),
+            LLMResponse(text="Done."),
+        ]
+    )
+    tts = _RecordingTTS()
+
+    async def _dispatch(call: ToolCall) -> str:
+        return "ok"
+
+    pipeline = ComposablePipeline(stt=stt, llm=llm, tts=tts, tool_dispatcher=_dispatch, max_tool_rounds=8)
+    task = asyncio.create_task(pipeline.start_up())
+    await _wait_for_callback(stt)
+    await _drive_one_turn(stt, "do stuff")
+
+    # No round carried a system-role nudge — each tool stayed at count=2,
+    # which is not > MAX_SAME_TOOL_REPEATS.
+    nudge_round_count = sum(1 for round_messages in llm.calls for m in round_messages if m.get("role") == "system")
+    assert nudge_round_count == 0
+    assert tts.calls == [("Done.", ())]
+
+    await pipeline.shutdown()
+    await task
+
+
+@pytest.mark.asyncio
+async def test_repeat_counter_resets_between_turns() -> None:
+    """A tool that looped in turn 1 must not pre-arm the nudge in turn 2."""
+    stt = _ProgrammableSTT()
+    llm = _ScriptedLLM(
+        [
+            # Turn 1: spin × 3 + text
+            _tool_response("spin", "t-1"),
+            _tool_response("spin", "t-2"),
+            _tool_response("spin", "t-3"),
+            LLMResponse(text="Turn one done."),
+            # Turn 2: spin × 2 + text. Counter must have reset; no nudge.
+            _tool_response("spin", "t-4"),
+            _tool_response("spin", "t-5"),
+            LLMResponse(text="Turn two done."),
+        ]
+    )
+    tts = _RecordingTTS()
+
+    async def _dispatch(call: ToolCall) -> str:
+        return "ok"
+
+    pipeline = ComposablePipeline(stt=stt, llm=llm, tts=tts, tool_dispatcher=_dispatch, max_tool_rounds=8)
+    task = asyncio.create_task(pipeline.start_up())
+    await _wait_for_callback(stt)
+
+    await _drive_one_turn(stt, "turn one")
+    await _drive_one_turn(stt, "turn two")
+
+    # Total round-trips: 4 (turn 1) + 3 (turn 2) = 7.
+    assert len(llm.calls) == 7
+    # Only the 4th call (turn 1's nudge round) carried a system message.
+    nudge_indices = [
+        i for i, round_messages in enumerate(llm.calls) for m in round_messages if m.get("role") == "system"
+    ]
+    assert nudge_indices == [3]
+    assert tts.calls == [("Turn one done.", ()), ("Turn two done.", ())]
+
+    await pipeline.shutdown()
+    await task
+
+
+# ---------------------------------------------------------------------------
 # Lifecycle
 # ---------------------------------------------------------------------------
 

@@ -113,6 +113,16 @@ ToolDispatcher = Callable[[ToolCall], Awaitable[str]]
 # can otherwise burn the budget. See #286 / PR #322.
 DEFAULT_MAX_TOOL_ROUNDS = 8
 
+# Per-turn cap on calls to the *same* tool name (issue #430). Once a tool
+# has been dispatched more than this many times in a turn, the orchestrator
+# splices a non-persistent system nudge into the next ``llm.chat`` call
+# telling the model to stop calling tools and respond in text. The nudge
+# fires exactly once per turn; if the LLM still loops, ``max_tool_rounds``
+# remains the hard backstop. PR #418 fixed the ``greet`` retry-trap on the
+# tool side; this is the orchestrator-side safety net that covers every
+# other tool without per-tool ``retry_hint`` plumbing.
+MAX_SAME_TOOL_REPEATS = 2
+
 
 # Phase 5f.2 — minimum-utterance filter (self-echo cascade defence).
 #
@@ -802,7 +812,20 @@ class ComposablePipeline:
             logger.exception("ComposablePipeline turn failed")
 
     async def _run_llm_loop_and_speak(self) -> None:
-        """Run the LLM round-trips with tool dispatch, then synthesize speech."""
+        """Run the LLM round-trips with tool dispatch, then synthesize speech.
+
+        Two per-turn safety nets bound the loop:
+
+        - ``max_tool_rounds`` — hard cap on total round-trips.
+        - ``MAX_SAME_TOOL_REPEATS`` — per-name repeat ceiling (issue #430).
+          When a single tool is called more than the ceiling, the next
+          ``llm.chat`` invocation receives a one-shot system nudge
+          ("stop calling tools and respond in text"). The nudge is NOT
+          appended to the persistent conversation history; it's spliced
+          into a local message list for that single call so future turns
+          aren't contaminated. Fires at most once per turn; if the LLM
+          still loops, ``max_tool_rounds`` is the backstop.
+        """
         # Lifecycle Hook #5 (#337): cap the conversation history at
         # ``REACHY_MINI_MAX_HISTORY_TURNS`` user turns so long sessions don't
         # blow the model's context window or run the token bill into the
@@ -810,9 +833,39 @@ class ComposablePipeline:
         # ``_dispatch_completed_transcript``. Legacy parity:
         # llama_base.py:506, gemini_tts.py:365, elevenlabs_tts.py:565.
         trim_history_in_place(self._conversation_history)
+        tool_call_counts: collections.Counter[str] = collections.Counter()
+        nudge_sent = False
         for _round in range(self.max_tool_rounds):
+            looper: str | None = None
+            if not nudge_sent:
+                looper = next(
+                    (name for name, count in tool_call_counts.items() if count > MAX_SAME_TOOL_REPEATS),
+                    None,
+                )
+            if looper is not None:
+                logger.warning(
+                    "ComposablePipeline: tool %r called %d times this turn "
+                    "(> MAX_SAME_TOOL_REPEATS=%d); injecting one-shot "
+                    "stop-calling-tools nudge",
+                    looper,
+                    tool_call_counts[looper],
+                    MAX_SAME_TOOL_REPEATS,
+                )
+                messages: list[dict[str, Any]] = list(self._conversation_history) + [
+                    {
+                        "role": "system",
+                        "content": (
+                            f"Tool '{looper}' has been called {tool_call_counts[looper]} "
+                            "times this turn with no resolution. Stop calling tools and "
+                            "respond to the user in text."
+                        ),
+                    }
+                ]
+                nudge_sent = True
+            else:
+                messages = self._conversation_history
             response = await self.llm.chat(
-                self._conversation_history,
+                messages,
                 tools=self.tools_spec or None,
             )
             if response.tool_calls:
@@ -824,6 +877,8 @@ class ComposablePipeline:
                     )
                     break
                 await self._dispatch_tools_and_record(response.tool_calls)
+                for call in response.tool_calls:
+                    tool_call_counts[call.name] += 1
                 continue
             # No more tool calls — assistant text is final.
             await self._speak_assistant_text(response)
