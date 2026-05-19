@@ -37,27 +37,22 @@ def _blank_frame() -> "np.ndarray":  # type: ignore[type-arg]
 class _FrameSource:
     """Fake camera_worker that returns None for ``blank_count`` polls then a frame.
 
-    The scan implementation makes one initial frame call (guard check) before
-    entering the polling loop.  This helper intentionally returns a frame for
-    that first call so the guard passes; subsequent calls are the ones that may
-    return None before the tracker latches.
+    Used to exercise the lazy-camera race: get_latest_frame() returns None
+    on early polls (camera just started, gstreamer hasn't latched a frame
+    yet) and then yields a frame once the pipeline catches up. The poll
+    loop in _scan must tolerate this.
 
     To avoid a real MediaPipe inference we patch `_detect_face` in the tests.
     """
 
     def __init__(self, blank_count: int) -> None:
-        # blank_count = how many polls inside the loop return None before a face
+        # blank_count = how many polls return None before a face
         self._blank_count = blank_count
         self._calls = 0
 
     def get_latest_frame(self) -> "np.ndarray | None":  # type: ignore[type-arg]
         self._calls += 1
-        # First call is the guard check — always return a frame so we don't bail
-        # out early with "No frame available".
-        if self._calls == 1:
-            return _blank_frame()
-        # Subsequent calls: return None for blank_count polls, then a frame
-        if self._calls <= self._blank_count + 1:
+        if self._calls <= self._blank_count:
             return None
         return _blank_frame()
 
@@ -88,7 +83,8 @@ async def test_scan_returns_face_when_tracker_latches_after_initial_miss(
         result = await Greet()._scan(deps)
 
     assert result == {"face_detected": True}, f"Unexpected result: {result}"
-    # Must have polled at least 3 times (2 blank + 1 hit)
+    # Must have polled at least 3 times (2 blank + 1 hit on the third call).
+    # With the lazy-camera guard removed, all calls happen inside the poll loop.
     assert camera._calls >= 3
 
 
@@ -148,9 +144,9 @@ async def test_scan_returns_face_on_very_first_poll(
         result = await Greet()._scan(deps)
 
     assert result == {"face_detected": True}
-    # The guard check calls get_latest_frame once; the polling loop calls it
-    # once more (and hits on the first attempt).  Total = 2.
-    assert camera.get_latest_frame.call_count == 2
+    # With no initial-guard pre-poll, the poll loop's first iteration both
+    # fetches the frame and hits the face on the first attempt. Total = 1.
+    assert camera.get_latest_frame.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -165,18 +161,22 @@ async def test_scan_no_camera_returns_error() -> None:
 async def test_scan_no_frame_on_first_call_then_face(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Edge: very first get_latest_frame() returns None (camera not started).
+    """Regression for 2026-05-19 lazy-camera race: first get_latest_frame() is None.
 
-    The initial None-frame guard currently returns early with an error.
-    This test documents that existing behaviour and ensures it doesn't regress.
-    If the behaviour is changed to wait instead, update this test accordingly.
+    Pre-fix, an initial-guard early return on a None first frame caused greet
+    to bail in <3 ms before the poll loop ran; the LLM retried up to 8 times
+    and turns finished without TTS (silent robot). Post-fix the poll loop
+    drains and falls through to no_subject — never to the fast-error path.
     """
     monkeypatch.setattr(greet_mod, "MP_AVAILABLE", True)
+    monkeypatch.setenv("REACHY_MINI_GREET_SCAN_WAIT_S", "0.0")
+    monkeypatch.setenv("REACHY_MINI_GREET_SWEEP_DISABLED", "1")
 
     camera = MagicMock()
     camera.get_latest_frame.return_value = None
     deps = _make_deps(camera)
 
     result = await Greet()._scan(deps)
-    # Current contract: first call returns None → immediate error
-    assert "error" in result
+    # New contract: persistent None falls through, no fast-error.
+    assert result.get("error") != "No frame available"
+    assert result.get("no_subject") is True

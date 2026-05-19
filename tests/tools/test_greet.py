@@ -181,12 +181,50 @@ async def test_scan_camera_worker_none(Greet):
 
 
 @pytest.mark.asyncio
-async def test_scan_no_frame_available(Greet):
-    """get_latest_frame returns None — returns error."""
+async def test_scan_no_frame_available_polls_then_falls_through(Greet, monkeypatch: pytest.MonkeyPatch):
+    """get_latest_frame always None — scan must NOT fast-error.
+
+    Regression for the lazy-camera race (2026-05-19): an initial-guard early
+    return on a None first frame caused greet to bail before the poll loop
+    ran, the LLM to retry 8 times, and turns to finish without TTS (silent
+    robot). With the guard removed the poll loop drains, the sweep runs (or
+    the sweep kill-switch returns no_subject), and the result is a well-
+    formed dict — never ``{"error": "No frame available"}``.
+    """
+    monkeypatch.setenv("REACHY_MINI_GREET_SCAN_WAIT_S", "0.0")
     deps = make_deps()
     deps.camera_worker.get_latest_frame.return_value = None
-    result = await Greet()(deps, action="scan")
-    assert "error" in result
+    with (
+        patch("greet_test_module.MP_AVAILABLE", True),
+        patch("greet_test_module._detect_face_with_scores", return_value=(False, [])),
+        patch("asyncio.sleep"),
+    ):
+        result = await Greet()(deps, action="scan")
+    # The exact return shape depends on whether the sweep kill-switch is set,
+    # but the result must not be the legacy fast-error.
+    assert result.get("error") != "No frame available"
+    assert result.get("no_subject") is True
+
+
+@pytest.mark.asyncio
+async def test_scan_first_frame_none_then_face_found(Greet):
+    """Lazy-camera race: first poll returns None, second returns a frame with a face.
+
+    Confirms the poll loop tolerates an initial None (the camera worker just
+    lazy-started and gstreamer hasn't latched a frame yet) and recovers once a
+    real frame arrives.
+    """
+    frame = np.zeros((32, 32, 3), dtype=np.uint8)
+    deps = make_deps()
+    # First call -> None (camera warming up); subsequent calls -> real frame.
+    deps.camera_worker.get_latest_frame.side_effect = [None, frame, frame, frame]
+    with (
+        patch("greet_test_module.MP_AVAILABLE", True),
+        patch("greet_test_module._detect_face_with_scores", return_value=(True, [0.9])),
+        patch("asyncio.sleep"),
+    ):
+        result = await Greet()(deps, action="scan")
+    assert result == {"face_detected": True}
 
 
 # ── identify: match found ─────────────────────────────────────────────────────

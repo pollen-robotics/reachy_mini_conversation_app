@@ -157,8 +157,8 @@ async def test_scan_inference_count_respects_poll_rate(
     with patch.object(greet_mod, "_detect_face_with_scores", side_effect=_count_inference):
         await Greet()._scan(deps)
 
-    # At 0.2 s interval over 0.5 s: at most 3 loop iterations (t=0, t=0.2, t=0.4)
-    # plus the initial guard check frame; give generous headroom for timing jitter.
+    # At 0.2 s interval over 0.5 s: at most 3 loop iterations (t=0, t=0.2, t=0.4);
+    # give generous headroom for timing jitter.
     max_expected = 6
     assert inference_calls <= max_expected, (
         f"inference fired {inference_calls} times; expected <= {max_expected} "

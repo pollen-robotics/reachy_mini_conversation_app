@@ -200,12 +200,20 @@ async def test_scan_info_summary_after_sweep_path(
 
 
 @pytest.mark.asyncio
-async def test_scan_logs_when_initial_frame_is_none(
+async def test_scan_persistent_none_frames_log_and_fall_through(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """When the initial guard sees a None frame, log a DEBUG line and bail."""
+    """Persistent None frames must trigger the poll-loop DEBUG log and fall through.
+
+    Pre-fix (2026-05-19): an initial-guard early return on a None first frame
+    caused greet to bail before the poll loop, the LLM to retry 8 times, and
+    turns to finish without TTS (silent robot). Post-fix the poll loop drains
+    and logs from its own None branch.
+    """
     monkeypatch.setattr(greet_mod, "MP_AVAILABLE", True)
+    monkeypatch.setenv("REACHY_MINI_GREET_SCAN_WAIT_S", "0.0")
+    monkeypatch.setenv("REACHY_MINI_GREET_SWEEP_DISABLED", "1")
 
     camera = MagicMock()
     camera.get_latest_frame.return_value = None
@@ -214,10 +222,12 @@ async def test_scan_logs_when_initial_frame_is_none(
     caplog.set_level(logging.DEBUG, logger="robot_comic.tools.greet")
     result = await Greet()._scan(deps)
 
-    assert "error" in result
+    # New contract: no fast-error, fall through to no_subject.
+    assert result.get("error") != "No frame available"
+    assert result.get("no_subject") is True
     debug_msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG]
-    none_lines = [m for m in debug_msgs if "returned None" in m and "initial guard" in m]
-    assert none_lines, f"No initial-guard None DEBUG log found in: {debug_msgs}"
+    none_lines = [m for m in debug_msgs if "returned None" in m and "during poll" in m]
+    assert none_lines, f"No poll-None DEBUG log found in: {debug_msgs}"
 
 
 @pytest.mark.asyncio

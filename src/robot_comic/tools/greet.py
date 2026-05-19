@@ -305,10 +305,15 @@ class Greet(Tool):
         if deps.camera_worker is None:
             return {"error": "Camera not available"}
 
-        frame = deps.camera_worker.get_latest_frame()
-        if frame is None:
-            logger.debug("greet._scan: camera_worker.get_latest_frame() returned None on initial guard")
-            return {"error": "No frame available"}
+        # NOTE: do NOT early-return on a None first frame. The camera worker
+        # is lazy-started (camera_worker.py: "Camera worker lazy-started on
+        # first use"), so the FIRST scan after app boot races the gstreamer
+        # pipeline producing its first frame: the initial get_latest_frame()
+        # returns None and we'd bail before the poll loop below ever ran.
+        # That fast-error caused the LLM to retry greet action=scan repeatedly
+        # (8 rounds, ~2.7 s) and the turn to finish without ever reaching
+        # TTS — silent robot. The poll loop below already handles None
+        # correctly: it debug-logs and continues until scan_wait_s elapses.
 
         if not _check_mp_available():
             return {"face_detected": True, "note": "MediaPipe unavailable, assuming face present"}
