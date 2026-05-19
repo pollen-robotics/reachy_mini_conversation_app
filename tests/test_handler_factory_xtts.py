@@ -118,10 +118,18 @@ class TestLlamaXttsCombinations:
         assert result.pipeline.tool_dispatcher is not None
 
     def test_xtts_adapter_uses_config_values(self, monkeypatch: pytest.MonkeyPatch, mock_deps: MagicMock) -> None:
-        """The XttsTTSAdapter is constructed from the live config values."""
+        """The XttsTTSAdapter is constructed from the live config values.
+
+        Clears REACHY_MINI_CUSTOM_PROFILE so no profile voice.txt /
+        xtts_voice.txt overrides the env-default (#481 introduced per-backend
+        precedence via get_session_voice; this test asserts the env-default
+        fallback path, not the per-backend override which has its own coverage
+        in tests/test_per_backend_voice_construction.py).
+        """
         from robot_comic import config as cfg_mod
 
         monkeypatch.setattr(cfg_mod.config, "LLM_BACKEND", LLM_BACKEND_LLAMA)
+        monkeypatch.setattr(cfg_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "")
         monkeypatch.setattr(cfg_mod.config, "XTTS_URL", "http://test-xtts.lan:9999")
         monkeypatch.setattr(cfg_mod.config, "XTTS_DEFAULT_SPEAKER_KEY", "test_speaker")
         monkeypatch.setattr(cfg_mod.config, "XTTS_LANGUAGE", "fr")
