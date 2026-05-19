@@ -131,8 +131,21 @@ if not (0 <= _VAD_AGGRESSIVENESS_ENV <= 3):
 _VAD_AGGRESSIVENESS = _VAD_AGGRESSIVENESS_ENV
 
 # Debounce: N consecutive speech frames before we declare an utterance
-# started. 3 × 30 ms ≈ 90 ms — filters single-frame noise spikes.
-_VAD_START_FRAMES = 3
+# started. New default: 7 frames (210ms) — tightened from 3 (90ms) to
+# reject ambient enclosure noise that was opening turns on its own. See
+# the 2026-05-19 audit ("every turn interrupted" pattern) for the chain
+# of reasoning. Tune via env if your acoustics differ.
+#   REACHY_MINI_FASTER_WHISPER_VAD_START_FRAMES=1..50
+_VAD_START_FRAMES_DEFAULT = 7
+_VAD_START_FRAMES_ENV = int(os.getenv("REACHY_MINI_FASTER_WHISPER_VAD_START_FRAMES", str(_VAD_START_FRAMES_DEFAULT)))
+if not (1 <= _VAD_START_FRAMES_ENV <= 50):
+    logger.warning(
+        "REACHY_MINI_FASTER_WHISPER_VAD_START_FRAMES=%d is out of range [1, 50]; falling back to default %d.",
+        _VAD_START_FRAMES_ENV,
+        _VAD_START_FRAMES_DEFAULT,
+    )
+    _VAD_START_FRAMES_ENV = _VAD_START_FRAMES_DEFAULT
+_VAD_START_FRAMES = _VAD_START_FRAMES_ENV
 
 # Trailing silence: N consecutive non-speech frames before we declare
 # the utterance ended. Default changed from 17 → 25 (750 ms) to reduce

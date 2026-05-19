@@ -25,7 +25,7 @@ from robot_comic.backends import AudioFrame, STTBackend
 
 # webrtcvad frame size at 16 kHz / 30 ms.
 _VAD_CHUNK = 480
-_START_FRAMES = 3
+_START_FRAMES = 7  # matches _VAD_START_FRAMES_DEFAULT (raised from 3 → 7, 2026-05-19)
 _END_SILENCE_FRAMES = 25  # matches new default _VAD_END_SILENCE_FRAMES_DEFAULT
 
 
@@ -1338,6 +1338,100 @@ def test_no_speech_threshold_env_out_of_range_falls_back_to_default(monkeypatch:
     del sys.modules[mod_name]
 
 
+# ---------------------------------------------------------------------------
+# VAD start-frames knob (2026-05-19 ambient-noise fix)
+# ---------------------------------------------------------------------------
+
+
+def test_vad_start_frames_default() -> None:
+    """Module-level default is 7 (raised from 3 to reject ambient enclosure noise)."""
+    from robot_comic.adapters.faster_whisper_stt_adapter import _VAD_START_FRAMES, _VAD_START_FRAMES_DEFAULT
+
+    assert _VAD_START_FRAMES_DEFAULT == 7, f"_VAD_START_FRAMES_DEFAULT should be 7, got {_VAD_START_FRAMES_DEFAULT}"
+    assert _VAD_START_FRAMES == _VAD_START_FRAMES_DEFAULT, (
+        f"_VAD_START_FRAMES should equal _VAD_START_FRAMES_DEFAULT ({_VAD_START_FRAMES_DEFAULT}), "
+        f"got {_VAD_START_FRAMES}"
+    )
+
+
+def test_vad_start_frames_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """REACHY_MINI_FASTER_WHISPER_VAD_START_FRAMES=5 overrides the module-level default."""
+    import importlib
+
+    import robot_comic.adapters.faster_whisper_stt_adapter as _mod
+
+    monkeypatch.setenv("REACHY_MINI_FASTER_WHISPER_VAD_START_FRAMES", "5")
+    importlib.reload(_mod)
+
+    from robot_comic.adapters.faster_whisper_stt_adapter import _VAD_START_FRAMES
+
+    assert _VAD_START_FRAMES == 5, f"Expected _VAD_START_FRAMES=5 after env override, got {_VAD_START_FRAMES}"
+
+    # Restore module to default state so subsequent tests are unaffected.
+    monkeypatch.delenv("REACHY_MINI_FASTER_WHISPER_VAD_START_FRAMES", raising=False)
+    importlib.reload(_mod)
+
+
+def test_vad_start_frames_out_of_range_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Out-of-range values (0, 100) fall back to _VAD_START_FRAMES_DEFAULT and log a warning."""
+    import importlib
+
+    import robot_comic.adapters.faster_whisper_stt_adapter as _mod
+
+    for bad_value in ("0", "100"):
+        with monkeypatch.context() as m:
+            m.setenv("REACHY_MINI_FASTER_WHISPER_VAD_START_FRAMES", bad_value)
+            importlib.reload(_mod)
+
+            from robot_comic.adapters.faster_whisper_stt_adapter import (
+                _VAD_START_FRAMES,
+                _VAD_START_FRAMES_DEFAULT,
+            )
+
+            assert _VAD_START_FRAMES == _VAD_START_FRAMES_DEFAULT, (
+                f"Bad value {bad_value!r} should clamp to {_VAD_START_FRAMES_DEFAULT}, got {_VAD_START_FRAMES}"
+            )
+
+    # Restore.
+    monkeypatch.delenv("REACHY_MINI_FASTER_WHISPER_VAD_START_FRAMES", raising=False)
+    importlib.reload(_mod)
+
+
+@pytest.mark.asyncio
+async def test_vad_gate_opens_only_after_threshold_frames(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``on_speech_started`` fires only after _VAD_START_FRAMES consecutive speech frames.
+
+    Feeds N-1 speech frames (must stay silent) then the Nth frame (must fire).
+    Verifies the debounce gate is gated by the current module-level threshold.
+    """
+    from robot_comic.adapters import FasterWhisperSTTAdapter
+    from robot_comic.adapters.faster_whisper_stt_adapter import _VAD_START_FRAMES
+
+    holder = _install_stubs(monkeypatch)
+    started_calls = 0
+
+    async def _on_completed(_t: str) -> None: ...
+
+    async def _on_speech_started() -> None:
+        nonlocal started_calls
+        started_calls += 1
+
+    adapter = FasterWhisperSTTAdapter()
+    await adapter.start(_on_completed, on_speech_started=_on_speech_started)
+
+    # Feed N-1 consecutive speech frames — gate must NOT open yet.
+    holder["vad"].script = _speech_script(_VAD_START_FRAMES - 1)
+    await adapter.feed_audio(_silence_frame(num_samples=_VAD_CHUNK * (_VAD_START_FRAMES - 1)))
+    assert started_calls == 0, (
+        f"on_speech_started fired after only {_VAD_START_FRAMES - 1} frames (threshold is {_VAD_START_FRAMES})"
+    )
+
+    # Feed one more speech frame — gate must open now.
+    holder["vad"].script = _speech_script(1)
+    await adapter.feed_audio(_silence_frame(num_samples=_VAD_CHUNK))
+    assert started_calls == 1, (
+        f"on_speech_started should have fired after {_VAD_START_FRAMES} frames, fired {started_calls} time(s)"
+    )
 # ---------------------------------------------------------------------------
 # cpu_threads — WhisperModel constructor arg (CTranslate2 intra-op threads)
 # ---------------------------------------------------------------------------
