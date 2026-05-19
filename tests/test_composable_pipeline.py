@@ -387,7 +387,24 @@ async def test_empty_transcript_is_ignored() -> None:
 
 
 @pytest.mark.asyncio
-async def test_empty_assistant_text_does_not_speak() -> None:
+async def test_empty_assistant_text_substitutes_canned_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty-text LLMResponse triggers the #267 canned-line fallback.
+
+    Pre-#267 behaviour was a single ``logger.warning`` followed by a
+    dropped turn — the operator perceived the robot as silently hung
+    whenever Gemini emitted ``finish_reason=STOP`` with zero parts (the
+    short-input + tools-configured + comedian-style-prompt case).
+    The new behaviour speaks a persona-appropriate canned line and
+    records it in conversation_history so the LLM keeps continuity.
+    """
+    from robot_comic import composable_pipeline as mod
+
+    # Pin the profile-dir resolver so the default-pool path is exercised
+    # regardless of the test process's ambient REACHY_MINI_CUSTOM_PROFILE.
+    monkeypatch.setattr(mod, "_resolve_empty_stop_profile_dir", lambda: None)
+
     stt = _ProgrammableSTT()
     llm = _ScriptedLLM([LLMResponse(text="   ")])  # whitespace-only
     tts = _RecordingTTS()
@@ -396,12 +413,21 @@ async def test_empty_assistant_text_does_not_speak() -> None:
     task = asyncio.create_task(pipeline.start_up())
     await _wait_for_callback(stt)
 
-    await stt.on_completed("hi")
-    for _ in range(5):
-        await asyncio.sleep(0)
+    await stt.on_completed("hi robot")
+    item = await asyncio.wait_for(pipeline.output_queue.get(), timeout=1.0)
+    assert isinstance(item, tuple)  # one TTS frame emitted
 
-    assert tts.calls == []
-    assert pipeline.output_queue.empty()
+    # The canned line is sampled from the default pool — check we got
+    # one of those entries verbatim, both in TTS and in history.
+    from robot_comic.empty_stop_fallbacks import get_default_pool
+
+    assert len(tts.calls) == 1
+    spoken_text, _tags = tts.calls[0]
+    assert spoken_text in get_default_pool()
+    assert pipeline.conversation_history == [
+        {"role": "user", "content": "hi robot"},
+        {"role": "assistant", "content": spoken_text},
+    ]
 
     await pipeline.shutdown()
     await task
@@ -893,12 +919,16 @@ async def test_record_joke_history_called_for_non_empty_assistant_text(
 async def test_record_joke_history_not_called_for_empty_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Whitespace-only assistant text must not trigger joke-history capture.
+    """The #267 empty-STOP canned fallback must not pollute joke history.
 
-    Mirrors the legacy ``if response_text and JOKE_HISTORY_ENABLED:`` guard
-    in ``llama_base.py:579``.
+    Pre-#267 the empty-text path simply dropped the turn, so joke-history
+    capture obviously didn't fire. With the fallback path active the
+    orchestrator does speak something — but the canned filler is not a
+    comedy punchline, so it stays out of the cross-persona joke history.
     """
     from robot_comic import composable_pipeline as mod
+
+    monkeypatch.setattr(mod, "_resolve_empty_stop_profile_dir", lambda: None)
 
     captured: list[str] = []
 
@@ -915,9 +945,9 @@ async def test_record_joke_history_not_called_for_empty_text(
     task = asyncio.create_task(pipeline.start_up())
     await _wait_for_callback(stt)
 
-    await stt.on_completed("hi")
-    for _ in range(5):
-        await asyncio.sleep(0)
+    await stt.on_completed("hi robot")
+    # Drain the queued canned-line audio so the pipeline can shut down.
+    await asyncio.wait_for(pipeline.output_queue.get(), timeout=1.0)
 
     assert captured == []
 
@@ -2056,3 +2086,163 @@ async def test_speech_started_no_op_for_legacy_pipeline_without_callbacks() -> N
     # response so the loop doesn't exhaust.
     pipeline.llm = _ScriptedLLM([LLMResponse(text="ok")])
     await pipeline._on_transcript_completed("hi")
+
+
+# ---------------------------------------------------------------------------
+# Issue #267 — canned-line fallback for Gemini empty-STOP turns
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_empty_stop_fallback_no_immediate_repeat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two consecutive empty-STOPs sample two different canned lines.
+
+    The no-immediate-repeat invariant prevents the operator from hearing
+    the same filler twice in a row, which would feel canned/broken. The
+    sampler only guarantees this when the pool has >=2 entries; the
+    bundled default pool has 5, so the invariant always holds for users
+    who don't override.
+    """
+    from robot_comic import composable_pipeline as mod
+    from robot_comic import empty_stop_fallbacks as fb_mod
+
+    monkeypatch.setattr(mod, "_resolve_empty_stop_profile_dir", lambda: None)
+    # Pin to a tiny two-entry pool so the no-repeat invariant is the only
+    # possible outcome (default pool sampling would still satisfy the
+    # invariant, but a flake from random.choice would be misleading).
+    monkeypatch.setattr(mod, "_load_empty_stop_pool", lambda _d: ("A", "B"))
+    # Force pick_fallback to use the bare random.choice path; we already
+    # constrained the pool to exactly two entries, so the no-repeat code
+    # path is the only branch that fires.
+
+    stt = _ProgrammableSTT()
+    llm = _ScriptedLLM(
+        [LLMResponse(text=""), LLMResponse(text="")],
+    )
+    tts = _RecordingTTS()
+    pipeline = mod.ComposablePipeline(stt=stt, llm=llm, tts=tts)
+
+    task = asyncio.create_task(pipeline.start_up())
+    await _wait_for_callback(stt)
+
+    await stt.on_completed("hello there")
+    await asyncio.wait_for(pipeline.output_queue.get(), timeout=1.0)
+    # Wait past the dedup window so the second utterance isn't suppressed
+    # as a near-duplicate of the first.
+    await asyncio.sleep(0)
+    pipeline._last_completed_at = 0.0
+    await stt.on_completed("totally different second turn")
+    await asyncio.wait_for(pipeline.output_queue.get(), timeout=1.0)
+
+    spoken = [text for text, _tags in tts.calls]
+    assert len(spoken) == 2
+    assert spoken[0] != spoken[1]
+    assert set(spoken) == {"A", "B"}
+    # Guard against the stale module-level cache so other tests aren't
+    # affected by what we monkeypatched above.
+    fb_mod.clear_cache()
+
+    await pipeline.shutdown()
+    await task
+
+
+@pytest.mark.asyncio
+async def test_empty_stop_fallback_skipped_when_tool_calls_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Tool-call rounds with no text must NOT trigger the canned fallback.
+
+    The orchestrator's ``_run_llm_loop_and_speak`` loop ``continue``-s on
+    any non-empty ``tool_calls`` before reaching ``_speak_assistant_text``,
+    so the canned line is only ever a substitute for the
+    real-empty-STOP case — never for an in-flight tool round-trip.
+    """
+    from robot_comic import composable_pipeline as mod
+
+    monkeypatch.setattr(mod, "_resolve_empty_stop_profile_dir", lambda: None)
+
+    stt = _ProgrammableSTT()
+    llm = _ScriptedLLM(
+        [
+            LLMResponse(tool_calls=(ToolCall(id="t1", name="dance", args={}),)),
+            LLMResponse(text="Done."),
+        ]
+    )
+    tts = _RecordingTTS()
+
+    async def _dispatch(call: ToolCall) -> str:
+        return "ok"
+
+    pipeline = mod.ComposablePipeline(
+        stt=stt,
+        llm=llm,
+        tts=tts,
+        tool_dispatcher=_dispatch,
+        tools_spec=[{"name": "dance"}],
+    )
+
+    task = asyncio.create_task(pipeline.start_up())
+    await _wait_for_callback(stt)
+
+    await stt.on_completed("dance for me")
+    await asyncio.wait_for(pipeline.output_queue.get(), timeout=1.0)
+
+    assert len(tts.calls) == 1
+    assert tts.calls[0][0] == "Done."
+
+    await pipeline.shutdown()
+    await task
+
+
+@pytest.mark.asyncio
+async def test_non_empty_text_takes_no_fallback_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-empty assistant text bypasses the #267 fallback entirely."""
+    from robot_comic import composable_pipeline as mod
+
+    monkeypatch.setattr(mod, "_resolve_empty_stop_profile_dir", lambda: None)
+
+    stt = _ProgrammableSTT()
+    llm = _ScriptedLLM([LLMResponse(text="real punchline")])
+    tts = _RecordingTTS()
+    pipeline = mod.ComposablePipeline(stt=stt, llm=llm, tts=tts)
+
+    task = asyncio.create_task(pipeline.start_up())
+    await _wait_for_callback(stt)
+
+    await stt.on_completed("hi robot")
+    await asyncio.wait_for(pipeline.output_queue.get(), timeout=1.0)
+
+    assert tts.calls == [("real punchline", ())]
+    # No fallback recorded for the no-repeat memory.
+    assert pipeline._last_empty_stop_fallback is None
+
+    await pipeline.shutdown()
+    await task
+
+
+@pytest.mark.asyncio
+async def test_apply_personality_resets_no_repeat_memory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Persona switch must clear the prior persona's no-repeat memory."""
+    from robot_comic import composable_pipeline as mod
+
+    monkeypatch.setattr(mod, "_resolve_empty_stop_profile_dir", lambda: None)
+    monkeypatch.setattr(mod, "_load_empty_stop_pool", lambda _d: ("A", "B", "C"))
+
+    monkeypatch.setattr(mod, "get_session_instructions", lambda: "sys")
+    monkeypatch.setattr(mod, "set_custom_profile", lambda _p: None)
+
+    pipeline = mod.ComposablePipeline(
+        stt=_ProgrammableSTT(),
+        llm=_ScriptedLLM([]),
+        tts=_ResettableTTS(),
+    )
+    pipeline._last_empty_stop_fallback = "A"
+
+    await pipeline.apply_personality("other_persona")
+    assert pipeline._last_empty_stop_fallback is None

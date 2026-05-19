@@ -224,12 +224,13 @@ tts_first_audio: Optional[metrics.Histogram] = None
 frame_drops: Optional[metrics.Counter] = None
 playback_underruns: Optional[metrics.Counter] = None
 errors: Optional[metrics.Counter] = None
+empty_stop_fallback: Optional[metrics.Counter] = None
 
 
 def _init_instruments() -> None:
     global _meter, turn_duration, llm_operation_duration, ttft
     global stt_duration, tts_duration, tts_first_audio
-    global frame_drops, playback_underruns, errors
+    global frame_drops, playback_underruns, errors, empty_stop_fallback
 
     _meter = get_meter()
 
@@ -277,6 +278,13 @@ def _init_instruments() -> None:
         "robot.errors",
         unit="events",
         description="Application errors",
+    )
+    empty_stop_fallback = _meter.create_counter(
+        "composable.empty_stop_fallback",
+        unit="events",
+        description=(
+            "Composable pipeline canned-line fallbacks spoken in place of an empty assistant turn (issue #267)."
+        ),
     )
 
 
@@ -353,6 +361,12 @@ def inc_errors(attrs: dict[str, Any]) -> None:
     """Increment robot.errors counter."""
     if errors is not None:
         errors.add(1, attributes=attrs)
+
+
+def inc_empty_stop_fallback(attrs: dict[str, Any]) -> None:
+    """Increment composable.empty_stop_fallback counter (issue #267)."""
+    if empty_stop_fallback is not None:
+        empty_stop_fallback.add(1, attributes=attrs)
 
 
 _FIRST_GREETING_EMITTED: bool = False

@@ -83,6 +83,15 @@ from robot_comic.backends import (
 from robot_comic.history_trim import trim_history_in_place
 from robot_comic.joke_history import record_joke_history
 from robot_comic.welcome_gate import GateState, WelcomeGate
+from robot_comic.empty_stop_fallbacks import (
+    load_pool as _load_empty_stop_pool,
+)
+from robot_comic.empty_stop_fallbacks import (
+    pick_fallback as _pick_empty_stop_fallback,
+)
+from robot_comic.empty_stop_fallbacks import (
+    resolve_profile_dir as _resolve_empty_stop_profile_dir,
+)
 from robot_comic.tools.name_validation import record_user_transcript
 
 
@@ -379,6 +388,13 @@ class ComposablePipeline:
         # (normalized) for content-similarity echo filtering.
         self._recent_assistant_texts: collections.deque[str] = collections.deque(maxlen=ECHO_HISTORY_MAXLEN)
 
+        # Issue #267 — last canned line spoken by the empty-STOP fallback
+        # path this session, so :meth:`_speak_assistant_text` can avoid
+        # picking it twice in a row when Gemini emits two consecutive
+        # empty-parts STOP responses. ``None`` until the first fallback
+        # fires; persona-reset (``apply_personality``) clears it.
+        self._last_empty_stop_fallback: str | None = None
+
         # TTS-down cascade suppression. ``_tts_down_until`` is 0.0 at start
         # (not in cooldown). Set to ``time.monotonic() + cooldown_s`` when a
         # TTS call raises a service-down exception; cleared to 0.0 on the
@@ -515,6 +531,9 @@ class ComposablePipeline:
         # Phase 5f.3: drop the prior persona's echo-history so the new
         # persona's similarity filter starts clean.
         self._recent_assistant_texts.clear()
+        # Issue #267: reset the empty-STOP fallback no-repeat memory so the
+        # new persona's first fallback (if any) is sampled uniformly.
+        self._last_empty_stop_fallback = None
         self._conversation_history.append({"role": "system", "content": get_session_instructions()})
         return f"Applied personality {profile!r}. Conversation history reset."
 
@@ -835,6 +854,23 @@ class ComposablePipeline:
     async def _speak_assistant_text(self, response: LLMResponse) -> None:
         """Append the assistant text to history and stream TTS frames out.
 
+        Issue #267: Gemini 2.5 Flash sometimes returns ``finish_reason=STOP``
+        with zero parts (no text, no function_call) under the combination
+        of (tools-enabled config + short user input + certain persona
+        prompts). The legacy ``elevenlabs_tts.py`` path already substitutes
+        a canned filler for this case; the composable path used to log
+        and drop the turn, which the operator perceived as a silent hang.
+
+        Trigger: the orchestrator only reaches this method when
+        ``response.tool_calls == ()`` (the loop in
+        :meth:`_run_llm_loop_and_speak` ``continue``-s on any non-empty
+        tool_calls), so an empty text here is exactly the empty-STOP
+        case. We pick a persona-appropriate canned line, log a single
+        WARNING, increment ``composable.empty_stop_fallback``, and fall
+        through into the normal TTS path so the line is spoken and
+        recorded in history as an ``assistant`` turn — the LLM keeps
+        continuity on the next request.
+
         TTS-down detection: if ``tts.synthesize`` raises a service-unreachable
         exception (``httpx.ConnectTimeout``, ``httpx.ConnectError``,
         ``httpx.ReadTimeout``, ``OSError``), this method sets
@@ -845,9 +881,22 @@ class ComposablePipeline:
         so the cooldown lifts immediately on recovery.
         """
         text = response.text
+        is_empty_stop_fallback = False
         if not text.strip():
-            logger.warning("Assistant returned empty text; nothing to speak")
-            return
+            pool = _load_empty_stop_pool(_resolve_empty_stop_profile_dir())
+            fallback = _pick_empty_stop_fallback(pool, last_spoken=self._last_empty_stop_fallback)
+            self._last_empty_stop_fallback = fallback
+            logger.warning(
+                "Assistant returned empty text (Gemini empty-STOP, issue #267); substituting canned fallback %r",
+                fallback,
+            )
+            telemetry.inc_empty_stop_fallback({"robot.persona": telemetry.current_persona()})
+            # Fall through into the normal TTS path with the canned line
+            # as if Gemini had returned it directly. Continuing means the
+            # line lands in conversation_history, the echo ring buffer,
+            # and the TTS adapter — all the regular per-turn machinery.
+            text = fallback
+            is_empty_stop_fallback = True
         # Lifecycle Hook #4 (#337): capture the punchline + topic into joke
         # history so the next session's system-prompt builder can include
         # them in the "RECENT JOKES (DO NOT REPEAT)" section. Best-effort —
@@ -855,10 +904,14 @@ class ComposablePipeline:
         # belt-and-braces so a future code change in the helper can't kill
         # the turn before TTS runs. Legacy parity sites:
         # llama_base.py:578-594 and gemini_tts.py:380-394.
-        try:
-            await record_joke_history(text)
-        except Exception as exc:  # pragma: no cover — helper is itself defensive
-            logger.debug("record_joke_history raised through to orchestrator: %s", exc)
+        # Skip joke-history capture for empty-STOP canned fallbacks (#267):
+        # the canned filler is not a comedy punchline and would pollute the
+        # cross-persona "RECENT JOKES (DO NOT REPEAT)" prompt section.
+        if not is_empty_stop_fallback:
+            try:
+                await record_joke_history(text)
+            except Exception as exc:  # pragma: no cover — helper is itself defensive
+                logger.debug("record_joke_history raised through to orchestrator: %s", exc)
         self._conversation_history.append({"role": "assistant", "content": text})
         # Phase 5f.3 — record the normalized assistant text in the ring
         # buffer so the next user transcript's similarity check has the
