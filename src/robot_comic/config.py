@@ -471,6 +471,8 @@ FASTER_WHISPER_NO_SPEECH_THRESHOLD_ENV = "REACHY_MINI_FASTER_WHISPER_NO_SPEECH_T
 FASTER_WHISPER_DEFAULT_NO_SPEECH_THRESHOLD = 0.6
 FASTER_WHISPER_MAX_BUFFER_SEC_ENV = "REACHY_MINI_FASTER_WHISPER_MAX_BUFFER_SEC"
 FASTER_WHISPER_DEFAULT_MAX_BUFFER_SEC = 10.0
+FASTER_WHISPER_CPU_THREADS_ENV = "REACHY_MINI_FASTER_WHISPER_CPU_THREADS"
+FASTER_WHISPER_DEFAULT_CPU_THREADS = 1
 
 # Cap how many user turns are kept in handler-managed conversation history.
 # 0 disables trimming; live realtime backends (OpenAI/HF/Gemini Live) manage
@@ -1074,6 +1076,12 @@ class Config:
         lo=1.0,
         hi=60.0,
     )
+    FASTER_WHISPER_CPU_THREADS = _env_int_clamped(
+        FASTER_WHISPER_CPU_THREADS_ENV,
+        default=FASTER_WHISPER_DEFAULT_CPU_THREADS,
+        lo=1,
+        hi=16,
+    )
     AUDIO_CAPTURE_PATH = _resolve_audio_capture_path()
     # OTel instrumentation mode: unset=disabled, "trace"=console only, "remote"=console+OTLP
     ROBOT_INSTRUMENTATION = os.getenv("ROBOT_INSTRUMENTATION", "")
@@ -1369,6 +1377,12 @@ def refresh_runtime_config_from_env() -> None:
         default=FASTER_WHISPER_DEFAULT_MAX_BUFFER_SEC,
         lo=1.0,
         hi=60.0,
+    )
+    config.FASTER_WHISPER_CPU_THREADS = _env_int_clamped(
+        FASTER_WHISPER_CPU_THREADS_ENV,
+        default=FASTER_WHISPER_DEFAULT_CPU_THREADS,
+        lo=1,
+        hi=16,
     )
     config.AUDIO_CAPTURE_PATH = _resolve_audio_capture_path()
     config.CHATTERBOX_URL = os.getenv(CHATTERBOX_URL_ENV, CHATTERBOX_DEFAULT_URL)

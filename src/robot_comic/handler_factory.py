@@ -548,6 +548,7 @@ def _build_stt_adapter(
             vad_aggressiveness=config.FASTER_WHISPER_VAD_AGGRESSIVENESS,
             no_speech_threshold=config.FASTER_WHISPER_NO_SPEECH_THRESHOLD,
             max_buffer_sec=config.FASTER_WHISPER_MAX_BUFFER_SEC,
+            cpu_threads=config.FASTER_WHISPER_CPU_THREADS,
         )
     raise NotImplementedError(
         f"No STT adapter implementation exists for {AUDIO_INPUT_BACKEND_ENV}={input_backend!r}. "

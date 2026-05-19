@@ -103,3 +103,23 @@ def test_llama_cpp_default_url_is_port_8080(monkeypatch):
 def test_llama_cpp_url_env_override(monkeypatch):
     cfg = _reload_config(monkeypatch, {"LLAMA_CPP_URL": "http://myhost.lan:9999"})
     assert cfg.LLAMA_CPP_URL == "http://myhost.lan:9999"
+
+
+def test_faster_whisper_cpu_threads_defaults_to_1(monkeypatch):
+    cfg = _reload_config(monkeypatch, {})
+    assert cfg.FASTER_WHISPER_CPU_THREADS == 1
+
+
+def test_faster_whisper_cpu_threads_env_override(monkeypatch):
+    cfg = _reload_config(monkeypatch, {"REACHY_MINI_FASTER_WHISPER_CPU_THREADS": "2"})
+    assert cfg.FASTER_WHISPER_CPU_THREADS == 2
+
+
+def test_faster_whisper_cpu_threads_invalid_env_falls_back_to_default(monkeypatch):
+    cfg = _reload_config(monkeypatch, {"REACHY_MINI_FASTER_WHISPER_CPU_THREADS": "not-a-number"})
+    assert cfg.FASTER_WHISPER_CPU_THREADS == 1
+
+
+def test_faster_whisper_cpu_threads_env_zero_clamped_to_1(monkeypatch):
+    cfg = _reload_config(monkeypatch, {"REACHY_MINI_FASTER_WHISPER_CPU_THREADS": "0"})
+    assert cfg.FASTER_WHISPER_CPU_THREADS == 1

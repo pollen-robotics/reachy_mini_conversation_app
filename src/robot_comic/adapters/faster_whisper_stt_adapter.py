@@ -198,6 +198,15 @@ if _NO_SPEECH_THRESHOLD_RAW:
 # 2026-05-16). Issue #429.
 _MAX_BUFFER_SEC_DEFAULT = 10.0
 
+# Number of intra-op threads passed to CTranslate2 via WhisperModel(cpu_threads=N).
+# CTranslate2 defaults to 4 (all cores), which over-subscribes a 4-core Pi CM4
+# when sharing with mediapipe + GStreamer + uvicorn + websockets — observed
+# ~45× slower-than-realtime inference for a 0.78s audio chunk on 2026-05-19.
+# Default 1 matches the live-tuned OMP_NUM_THREADS=1 systemd setting; CTranslate2
+# honors the constructor arg over the env var so both are needed.
+# Override via env: REACHY_MINI_FASTER_WHISPER_CPU_THREADS=N (int >= 1)
+_CPU_THREADS_DEFAULT = 1
+
 
 class FasterWhisperSTTDependencyError(RuntimeError):
     """Raised when the optional ``faster_whisper_stt`` extras aren't installed."""
@@ -288,6 +297,7 @@ class FasterWhisperSTTAdapter:
         vad_aggressiveness: int = _VAD_AGGRESSIVENESS,
         no_speech_threshold: float = _NO_SPEECH_THRESHOLD_DEFAULT,
         max_buffer_sec: float = _MAX_BUFFER_SEC_DEFAULT,
+        cpu_threads: int = _CPU_THREADS_DEFAULT,
     ) -> None:
         """Capture echo-guard + tuning knobs; defer all model loads to ``start()``.
 
@@ -310,6 +320,11 @@ class FasterWhisperSTTAdapter:
         ``max_buffer_sec`` — force a transcribe + gate reset when the
         utterance buffer reaches this many seconds without a VAD end
         event. Backstop for VAD-pinned-to-speech in continuous noise.
+
+        ``cpu_threads`` — number of intra-op threads for CTranslate2.
+        Default 1 prevents over-subscription on Pi CM4 (4 cores shared
+        with mediapipe + GStreamer + uvicorn). CTranslate2 honors the
+        constructor arg over the ``OMP_NUM_THREADS`` env var.
         """
         self._should_drop_frame = should_drop_frame
         self._model_name = model_name
@@ -317,6 +332,10 @@ class FasterWhisperSTTAdapter:
         self._vad_aggressiveness = vad_aggressiveness
         self._no_speech_threshold = no_speech_threshold
         self._max_buffer_samples = max(0, int(max_buffer_sec * _VAD_SAMPLE_RATE))
+        try:
+            self._cpu_threads = max(1, int(cpu_threads))
+        except (TypeError, ValueError):
+            self._cpu_threads = _CPU_THREADS_DEFAULT
 
         self._on_completed: TranscriptCallback | None = None
         self._on_speech_started: SpeechStartedCallback | None = None
@@ -384,14 +403,16 @@ class FasterWhisperSTTAdapter:
             ) from e
 
         logger.info(
-            "Loading faster-whisper STT: model=%s compute_type=%s",
+            "Loading faster-whisper STT: model=%s compute_type=%s cpu_threads=%d",
             self._model_name,
             self._compute_type,
+            self._cpu_threads,
         )
         self._model = WhisperModel(
             self._model_name,
             device="cpu",
             compute_type=self._compute_type,
+            cpu_threads=self._cpu_threads,
         )
         vad = webrtcvad.Vad(self._vad_aggressiveness)
         self._vad_gate = _WebRTCVadGate(vad)

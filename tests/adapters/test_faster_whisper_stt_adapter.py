@@ -48,10 +48,13 @@ class _StubWhisperModel:
     of segments for each call so tests can stage multi-utterance scenarios.
     """
 
-    def __init__(self, model_name: str, *, device: str = "cpu", compute_type: str = "int8") -> None:
+    def __init__(
+        self, model_name: str, *, device: str = "cpu", compute_type: str = "int8", cpu_threads: int = 4
+    ) -> None:
         self.model_name = model_name
         self.device = device
         self.compute_type = compute_type
+        self.cpu_threads = cpu_threads
         self.transcribe_calls: list[np.ndarray] = []
         # Tests push transcript strings here; each transcribe call pops the
         # next entry (or returns "" if empty).
@@ -129,8 +132,10 @@ def _install_stubs(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """
     holder: dict[str, Any] = {"model": None, "vad": None}
 
-    def _make_model(name: str, *, device: str = "cpu", compute_type: str = "int8") -> _StubWhisperModel:
-        m = _StubWhisperModel(name, device=device, compute_type=compute_type)
+    def _make_model(
+        name: str, *, device: str = "cpu", compute_type: str = "int8", cpu_threads: int = 4
+    ) -> _StubWhisperModel:
+        m = _StubWhisperModel(name, device=device, compute_type=compute_type, cpu_threads=cpu_threads)
         holder["model"] = m
         return m
 
@@ -1331,3 +1336,50 @@ def test_no_speech_threshold_env_out_of_range_falls_back_to_default(monkeypatch:
     assert reloaded_mod._NO_SPEECH_THRESHOLD_DEFAULT == 0.4
 
     del sys.modules[mod_name]
+
+
+# ---------------------------------------------------------------------------
+# cpu_threads — WhisperModel constructor arg (CTranslate2 intra-op threads)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_whisper_model_constructed_with_cpu_threads_1_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """WhisperModel receives cpu_threads=1 when no env override is set."""
+    from robot_comic.adapters import FasterWhisperSTTAdapter
+
+    holder = _install_stubs(monkeypatch)
+    adapter = FasterWhisperSTTAdapter()
+
+    async def _cb(_t: str) -> None: ...
+
+    await adapter.start(_cb)
+    assert holder["model"].cpu_threads == 1
+
+
+@pytest.mark.asyncio
+async def test_whisper_model_cpu_threads_constructor_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Passing cpu_threads=2 to the constructor is forwarded to WhisperModel."""
+    from robot_comic.adapters import FasterWhisperSTTAdapter
+
+    holder = _install_stubs(monkeypatch)
+    adapter = FasterWhisperSTTAdapter(cpu_threads=2)
+
+    async def _cb(_t: str) -> None: ...
+
+    await adapter.start(_cb)
+    assert holder["model"].cpu_threads == 2
+
+
+@pytest.mark.asyncio
+async def test_whisper_model_cpu_threads_lower_bound_clamped_to_1(monkeypatch: pytest.MonkeyPatch) -> None:
+    """cpu_threads=0 is clamped to 1 (CTranslate2 requires >= 1)."""
+    from robot_comic.adapters import FasterWhisperSTTAdapter
+
+    holder = _install_stubs(monkeypatch)
+    adapter = FasterWhisperSTTAdapter(cpu_threads=0)
+
+    async def _cb(_t: str) -> None: ...
+
+    await adapter.start(_cb)
+    assert holder["model"].cpu_threads == 1
