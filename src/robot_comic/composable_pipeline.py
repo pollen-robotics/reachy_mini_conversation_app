@@ -874,10 +874,19 @@ class ComposablePipeline:
         # structured cues from the LLM populate the field and the consume
         # path activates without further orchestrator changes.
         # ``first_audio_marker`` (Phase 5a.2): allocate a fresh list per
-        # turn so the TTS adapter can stamp first-audio-out wallclock;
-        # downstream telemetry consumers are a separate PR. See
+        # turn so the TTS adapter can stamp first-audio-out wallclock.
+        # The marker is consumed below to emit ``robot.tts.time_to_first_audio``
+        # (#271 ask 1). See
         # ``docs/superpowers/specs/2026-05-16-phase-5a2-delivery-tag-plumbing.md``.
+        #
+        # ``response_committed_at`` (Phase 5 / #271 ask 1): record when the
+        # orchestrator hands the final assistant text to the TTS backend so
+        # the ``robot.tts.time_to_first_audio`` metric reflects the operator-
+        # perceived wait from "response finalized" to "first audio emitted".
+        # Uses ``time.monotonic()`` to match the TTS adapters' stamp clock.
         first_audio_marker: list[float] = []
+        response_committed_at: float = time.monotonic()
+        _first_audio_recorded: bool = False
         _frames_emitted = 0
         try:
             async for frame in self.tts.synthesize(
@@ -885,6 +894,31 @@ class ComposablePipeline:
                 tags=response.delivery_tags,
                 first_audio_marker=first_audio_marker,
             ):
+                # Issue #271 ask 1 — emit ``robot.tts.time_to_first_audio`` on
+                # the first frame of the first TTS call of this turn. Multi-
+                # sentence responses produce multiple ``synthesize`` calls (one
+                # per sentence) but only the first sentence's first-audio is
+                # the "user-perceived latency to first hear something"; subsequent
+                # sentences' first-audio stamps are NOT re-recorded.
+                #
+                # The marker list is populated by the TTS adapter on its first
+                # yielded frame (Phase 5a.2). If the adapter did not populate
+                # it (e.g. a test stub with no marker support or an adapter that
+                # yields no frames for an empty segment), the list stays empty
+                # and we skip the metric rather than recording a garbage value.
+                if not _first_audio_recorded and first_audio_marker:
+                    _first_audio_recorded = True
+                    first_audio_latency_s = first_audio_marker[0] - response_committed_at
+                    telemetry.record_tts_first_audio(
+                        first_audio_latency_s,
+                        {"gen_ai.system": "tts", "robot.persona": telemetry.current_persona()},
+                    )
+                    logger.debug(
+                        "tts.first_audio_latency_s=%.3f (committed_at=%.3f first_audio=%.3f)",
+                        first_audio_latency_s,
+                        response_committed_at,
+                        first_audio_marker[0],
+                    )
                 # ``console.py``'s playback loop branches on
                 # ``isinstance(handler_output, tuple)`` to dispatch to ALSA
                 # (see ``console.py:1466``). The TTS adapters yield
