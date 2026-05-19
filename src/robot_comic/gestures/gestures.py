@@ -60,6 +60,7 @@ def _goto(
 ) -> None:
     """Queue a single goto move to the given head pose (degrees)."""
     target = create_head_pose(0, 0, 0, roll, pitch, yaw, degrees=True)
+    speed = getattr(manager, "speed_factor", 1.0)
     move = GotoQueueMove(
         target_head_pose=target,
         start_head_pose=None,  # manager fills from last pose
@@ -68,6 +69,7 @@ def _goto(
         target_body_yaw=0.0,
         start_body_yaw=0.0,
         duration=duration,
+        speed_factor=speed,
     )
     manager.queue_move(move)
 

@@ -20,6 +20,7 @@ def _make_manager() -> MagicMock:
     """Return a mock that satisfies the MovementManager interface used by gestures."""
     manager = MagicMock()
     manager.queue_move = MagicMock()
+    manager.speed_factor = 1.0  # must be a float so GotoQueueMove clamping works
     return manager
 
 
