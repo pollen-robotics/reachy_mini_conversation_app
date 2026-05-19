@@ -6,7 +6,7 @@ and executed sequentially by the MovementManager.
 
 from __future__ import annotations
 import logging
-from typing import Tuple
+from typing import Tuple, Callable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -89,7 +89,7 @@ class GotoQueueMove(Move):  # type: ignore
     def __init__(
         self,
         target_head_pose: NDArray[np.float32],
-        start_head_pose: NDArray[np.float32] | None = None,
+        start_head_pose: NDArray[np.float32] | Callable[[], NDArray[np.float32]] | None = None,
         target_antennas: Tuple[float, float] = (0, 0),
         start_antennas: Tuple[float, float] | None = None,
         target_body_yaw: float = 0,
@@ -105,11 +105,22 @@ class GotoQueueMove(Move):  # type: ignore
         (3t² − 2t³) so velocity is zero at both endpoints. Used by single-shot
         head pointing (#264) to avoid the snap at the start and end of each
         move when discrete ``move_head`` calls chain together.
+
+        ``start_head_pose`` accepts three forms:
+
+        * ``None`` — neutral-pose fallback (legacy gesture path, unchanged).
+        * ``NDArray`` — explicit array captured at call time (legacy path).
+        * ``Callable[[], NDArray]`` — lazy sentinel: invoked exactly once on the
+          **first** ``evaluate()`` call so the start pose reflects where the head
+          *actually* is when the move begins executing, not where it was when the
+          LLM queued the call.  This is the fix for the "head whip" bug where
+          rapid sequential ``move_head`` calls all captured a mid-swing pose.
         """
         self.speed_factor = max(0.1, min(2.0, speed_factor))
         self._duration = duration / self.speed_factor
         self.target_head_pose = target_head_pose
-        self.start_head_pose = start_head_pose
+        self.start_head_pose: NDArray[np.float32] | Callable[[], NDArray[np.float32]] | None = start_head_pose
+        self._resolved_start_pose: NDArray[np.float32] | None = None if callable(start_head_pose) else start_head_pose
         self.target_antennas = target_antennas
         self.start_antennas = start_antennas or (0, 0)
         self.target_body_yaw = target_body_yaw
@@ -131,18 +142,38 @@ class GotoQueueMove(Move):  # type: ignore
 
         Linear interpolation by default; cubic smoothstep when ``ease=True``
         was passed at construction.
+
+        On the **first** call, if ``start_head_pose`` was supplied as a
+        callable, it is invoked here (dequeue time) and the result is cached in
+        ``_resolved_start_pose``.  Subsequent calls reuse the cached array.
+        If the callable raises, we fall back to neutral pose so the worker loop
+        does not crash.
         """
         try:
             from reachy_mini.utils import create_head_pose
             from reachy_mini.utils.interpolation import linear_pose_interpolation
 
+            # Resolve callable start pose exactly once (dequeue-time capture).
+            if callable(self.start_head_pose) and self._resolved_start_pose is None:
+                try:
+                    self._resolved_start_pose = self.start_head_pose()
+                except Exception as exc:
+                    logger.warning(
+                        "GotoQueueMove: start_head_pose callable raised %s; falling back to neutral pose",
+                        exc,
+                    )
+                    self._resolved_start_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
+
             # Clamp t to [0, 1] for interpolation
             t_clamped = max(0, min(1, t / self.duration))
             t_eff = self._smoothstep(t_clamped) if self.ease else t_clamped
 
-            # Use start pose if available, otherwise neutral
-            if self.start_head_pose is not None:
-                start_pose = self.start_head_pose
+            # Use resolved/cached start pose if available, otherwise neutral.
+            # For the callable path, _resolved_start_pose is set above.
+            # For the array path, _resolved_start_pose mirrors start_head_pose.
+            # For the None path, fall back to neutral (legacy gesture behavior).
+            if self._resolved_start_pose is not None:
+                start_pose = self._resolved_start_pose
             else:
                 start_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
 

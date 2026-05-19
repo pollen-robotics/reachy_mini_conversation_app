@@ -201,8 +201,10 @@ class MoveHead(Tool):
         try:
             movement_manager = deps.movement_manager
 
-            # Get current state for interpolation
-            current_head_pose = deps.reachy_mini.get_current_head_pose()
+            # Get current antennas now (no queueing concern for antennas).
+            # Head pose start is captured LAZILY at dequeue time via callable
+            # so that rapid back-to-back move_head calls don't all snapshot the
+            # same mid-swing pose (the "head whip" / ~11° snap bug).
             _, current_antennas = deps.reachy_mini.get_current_joint_positions()
 
             # Create goto move
@@ -212,7 +214,7 @@ class MoveHead(Tool):
                 speed = 1.0
             goto_move = GotoQueueMove(
                 target_head_pose=target,
-                start_head_pose=current_head_pose,
+                start_head_pose=deps.reachy_mini.get_current_head_pose,  # callable — lazy dequeue-time capture
                 target_antennas=(0, 0),  # Reset antennas to default
                 start_antennas=(
                     current_antennas[0],
