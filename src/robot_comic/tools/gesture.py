@@ -122,16 +122,21 @@ class Gesture(Tool):
                 ),
             },
         },
-        # Either name or beat is required; both can be supplied (name wins).
-        # Each anyOf branch MUST specify ``"type": "object"`` explicitly.
+        # NOTE: no schema-level ``anyOf`` constraint on (name OR beat).
         # Gemini Live's BidiGenerateContentRequest validator rejects the
-        # alternative untyped branches with ``required: only allowed for
-        # OBJECT`` (caught live 2026-05-19: the app crash-looped every time
-        # a persona exposed this tool until each branch was tagged).
-        "anyOf": [
-            {"type": "object", "required": ["name"]},
-            {"type": "object", "required": ["beat"]},
-        ],
+        # patterns we tried:
+        #   1. ``anyOf: [{required:[name]}, {required:[beat]}]`` →
+        #      ``required: only allowed for OBJECT`` (anyOf branch must
+        #      declare type).
+        #   2. ``anyOf: [{type:object, required:[name]}, ...]`` →
+        #      ``required[0]: property is not defined`` (Gemini doesn't
+        #      inherit parent ``properties`` into anyOf branches).
+        # Both failures were caught live on 2026-05-19 (1007 close +
+        # crash-loop). The either-or constraint IS enforced at runtime
+        # in ``__call__`` (returns an explicit error dict when both are
+        # missing), and the tool ``description`` tells the LLM to use
+        # one or the other. Schema-level validation would be belt-and-
+        # braces but isn't load-bearing — leave it off for portability.
     }
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
