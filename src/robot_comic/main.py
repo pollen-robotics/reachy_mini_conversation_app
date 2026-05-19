@@ -350,6 +350,22 @@ def run(
         )
     log_checkpoint("movement manager", logger)
 
+    # Pin antennas to neutral so the motor controller's PID has an explicit
+    # target to hold during the idle window between init and the first
+    # conversation turn. Without this, the antennas exhibit small-amplitude
+    # PID hunting (±0.005 rad ≈ ±0.3°) visible to the operator; holding the
+    # antenna physically converges the loop, so does any explicit set_target.
+    # Caught live 2026-05-19 — the controller drifts a few encoder ticks
+    # when no target is asserted. The movement manager's 60 Hz loop hasn't
+    # started yet (start() is called at the end of this function), so this
+    # single set_target sticks until the loop takes over.
+    try:
+        idle_head = robot.get_current_head_pose()
+        robot.set_target(head=idle_head, antennas=[0.0, 0.0], body_yaw=0.0)
+        logger.info("Pinned idle antennas to neutral [0.0, 0.0]")
+    except Exception as idle_exc:
+        logger.warning("Could not pin idle antennas to neutral: %s", idle_exc)
+
     head_wobbler = HeadWobbler(
         set_speech_offsets=movement_manager.set_speech_offsets,
         speed_factor_getter=lambda: movement_manager.speed_factor,
