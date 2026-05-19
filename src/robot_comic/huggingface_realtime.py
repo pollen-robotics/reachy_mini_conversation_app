@@ -77,7 +77,7 @@ class HuggingFaceRealtimeHandler(BaseRealtimeHandler):
 
     def _get_session_voice(self, default: str | None = None) -> str:
         """Return the configured Hugging Face session voice."""
-        return get_session_voice(default)
+        return get_session_voice(default, backend="huggingface")
 
     def _get_active_tool_specs(self) -> list[dict[str, Any]]:
         """Return active tool specs for the current session dependencies."""

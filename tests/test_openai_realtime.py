@@ -36,7 +36,7 @@ async def _run_openai_handler_with_events(
 ) -> OpenaiRealtimeHandler:
     """Run an OpenAI realtime handler against a fixed event sequence."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
-    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
+    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE, backend=None: "alloy")
     monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
 
     class FakeSession:
@@ -113,7 +113,7 @@ async def _run_openai_handler_with_events(
 async def test_tool_completion_does_not_reset_head_wobbler(monkeypatch: Any) -> None:
     """Tool completion should not interrupt ongoing speech wobble."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
-    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
+    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE, backend=None: "alloy")
     monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
 
     async def _fake_dispatch(tool_name: str, args_json: str, deps: Any, **_kw: Any) -> dict[str, Any]:
@@ -219,7 +219,7 @@ async def test_tool_completion_does_not_reset_head_wobbler(monkeypatch: Any) -> 
 async def test_non_idle_tool_call_does_not_queue_progress_response(monkeypatch: Any) -> None:
     """Tool-call startup should not enqueue a second speech response."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
-    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
+    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE, backend=None: "alloy")
     monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
 
     class FakeEvent:
@@ -317,7 +317,7 @@ async def test_non_idle_tool_call_does_not_queue_progress_response(monkeypatch: 
 async def test_user_speech_events_reset_idle_timer(monkeypatch: Any) -> None:
     """User speech/transcription events should postpone idle behavior."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
-    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
+    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE, backend=None: "alloy")
     monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
 
     class FakeEvent:
@@ -451,7 +451,7 @@ async def test_empty_audio_buffer_error_exits_listening_without_chat_error(monke
 async def test_apply_personality_preserves_manual_voice_override(monkeypatch: Any) -> None:
     """Applying a profile should not discard a voice manually selected in the current session."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
-    monkeypatch.setattr(rt_mod, "get_session_voice", lambda: "cedar")
+    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=None, backend=None: "cedar")
     monkeypatch.setattr("robot_comic.config.set_custom_profile", lambda _profile: None)
 
     handler = OpenaiRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
@@ -660,7 +660,7 @@ async def test_start_up_openai_sim_polls_env_for_api_key(monkeypatch: Any) -> No
 async def test_run_realtime_session_propagates_session_update_failure(monkeypatch: Any) -> None:
     """A failed session.update must abort startup instead of looking like a clean session exit."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
-    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
+    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE, backend=None: "alloy")
     monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
 
     class FakeSession:
@@ -774,7 +774,7 @@ async def test_response_sender_retries_when_active_response_error_uses_type_only
     caplog.set_level(logging.DEBUG)
     monkeypatch.setattr(base_rt_mod, "_RESPONSE_REJECTION_RETRY_DELAY", 0.01)
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
-    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
+    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE, backend=None: "alloy")
     monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
 
     class FakeError:
@@ -912,7 +912,7 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
     FakeCCE = type("FakeCCE", (Exception,), {})
     monkeypatch.setattr(base_rt_mod, "ConnectionClosedError", FakeCCE)
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
-    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
+    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE, backend=None: "alloy")
     monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
 
     N_TOOL_RESULTS = 80
@@ -1245,7 +1245,7 @@ async def test_response_sender_loop_times_out_waiting_for_previous_response(
 async def test_openai_excludes_head_tracking_when_no_head_tracker(monkeypatch: Any) -> None:
     """head_tracking tool must not appear in OpenAI session config when head_tracker is not active."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
-    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=None: "alloy")
+    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=None, backend=None: "alloy")
 
     # mock ALL_TOOL_SPECS to include at least head_tracking and one other tool, to verify that only head_tracking is excluded, not all tools.
     # Also force _TOOLS_INITIALIZED=True so _initialize_tools() (called by get_active_tool_specs) becomes a no-op and does not

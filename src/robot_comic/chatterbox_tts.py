@@ -26,7 +26,7 @@ from robot_comic.config import (
     CHATTERBOX_DEFAULT_EXAGGERATION,
     config,
 )
-from robot_comic.prompts import get_session_instructions
+from robot_comic.prompts import get_session_voice, get_session_instructions
 from robot_comic.audio_gain import normalize_gain
 from robot_comic.llama_base import _OUTPUT_SAMPLE_RATE, BaseLlamaResponseHandler, split_sentences
 from robot_comic.wake_on_lan import send_magic_packet
@@ -89,7 +89,13 @@ class ChatterboxTTSResponseHandler(BaseLlamaResponseHandler):
         if self._voice_override:
             return self._voice_override
         params = self._load_profile_params()
-        return str(params.get("voice") or getattr(config, "CHATTERBOX_VOICE", CHATTERBOX_DEFAULT_VOICE))
+        return str(
+            params.get("voice")
+            or get_session_voice(
+                backend="chatterbox",
+                default=getattr(config, "CHATTERBOX_VOICE", CHATTERBOX_DEFAULT_VOICE),
+            )
+        )
 
     @property
     def _exaggeration(self) -> float:

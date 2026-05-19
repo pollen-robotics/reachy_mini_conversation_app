@@ -986,7 +986,7 @@ def _build_composable_llama_xtts(
     """
     import time as _time
 
-    from robot_comic.prompts import get_session_instructions
+    from robot_comic.prompts import get_session_voice, get_session_instructions
     from robot_comic.adapters import LlamaLLMAdapter
     from robot_comic.composable_pipeline import ComposablePipeline
     from robot_comic.adapters.xtts_tts_adapter import XttsTTSAdapter
@@ -1008,7 +1008,7 @@ def _build_composable_llama_xtts(
         llm = LlamaLLMAdapter(host)
         tts = XttsTTSAdapter(
             base_url=config.XTTS_URL,
-            default_speaker=config.XTTS_DEFAULT_SPEAKER_KEY,
+            default_speaker=get_session_voice(backend="xtts", default=config.XTTS_DEFAULT_SPEAKER_KEY),
             language=config.XTTS_LANGUAGE,
             timeout_s=config.XTTS_TIMEOUT_S,
             speaking_until_setter=lambda deadline: setattr(host, "_speaking_until", deadline),
@@ -1060,7 +1060,7 @@ def _build_composable_gemini_xtts(
     """
     import time as _time
 
-    from robot_comic.prompts import get_session_instructions
+    from robot_comic.prompts import get_session_voice, get_session_instructions
     from robot_comic.adapters import GeminiLLMAdapter
     from robot_comic.composable_pipeline import ComposablePipeline
     from robot_comic.adapters.xtts_tts_adapter import XttsTTSAdapter
@@ -1082,7 +1082,7 @@ def _build_composable_gemini_xtts(
         llm = GeminiLLMAdapter(host)
         tts = XttsTTSAdapter(
             base_url=config.XTTS_URL,
-            default_speaker=config.XTTS_DEFAULT_SPEAKER_KEY,
+            default_speaker=get_session_voice(backend="xtts", default=config.XTTS_DEFAULT_SPEAKER_KEY),
             language=config.XTTS_LANGUAGE,
             timeout_s=config.XTTS_TIMEOUT_S,
             speaking_until_setter=lambda deadline: setattr(host, "_speaking_until", deadline),

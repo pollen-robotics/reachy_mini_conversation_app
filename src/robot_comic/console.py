@@ -839,11 +839,12 @@ class LocalStream:
         # Falls back gracefully when the xtts service is unreachable.
         @self._settings_app.get("/api/xtts/voices")
         async def _xtts_voices() -> JSONResponse:
+            from robot_comic.prompts import get_session_voice
             from robot_comic.adapters.xtts_tts_adapter import XttsTTSAdapter
 
             adapter = XttsTTSAdapter(
                 base_url=config.XTTS_URL,
-                default_speaker=config.XTTS_DEFAULT_SPEAKER_KEY,
+                default_speaker=get_session_voice(backend="xtts", default=config.XTTS_DEFAULT_SPEAKER_KEY),
                 language=config.XTTS_LANGUAGE,
                 timeout_s=config.XTTS_TIMEOUT_S,
             )

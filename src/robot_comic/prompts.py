@@ -25,6 +25,11 @@ _TTS_SECTION_RE = re.compile(
     re.DOTALL,
 )
 
+# Pattern for valid backend identifiers — only lowercase letters, digits, and
+# underscores.  Anything else (e.g. "../etc/passwd") is rejected to prevent
+# path traversal.
+_BACKEND_NAME_RE = re.compile(r"^[a-z0-9_]+$")
+
 
 def _uses_gemini_tts(audio_output_backend: str) -> bool:
     """Return True when the active audio output backend renders Gemini TTS delivery tags.
@@ -174,22 +179,54 @@ def get_session_instructions() -> str:
         sys.exit(1)
 
 
-def get_session_voice(default: str | None = None) -> str:
+def _per_backend_voice_filename(backend: str) -> str:
+    """Return the per-backend voice filename for *backend* (e.g. ``"gemini_voice.txt"``)."""
+    return f"{backend}_voice.txt"
+
+
+def get_session_voice(default: str | None = None, backend: str | None = None) -> str:
     """Resolve the voice to use for the session.
 
-    If a custom profile is selected and contains a voice.txt, return its
-    trimmed content; otherwise return the provided default or the active
-    backend default voice.
+    Resolution order:
+    1. If *backend* is given and the profile contains ``<backend>_voice.txt``
+       with non-empty content, return that.
+    2. Fall through to the shared ``voice.txt`` lookup (unchanged).
+    3. Final fallback: *default*, or the active backend's default voice.
+
+    *backend* must match ``[a-z0-9_]+``; anything else is treated as
+    ``backend=None`` and a warning is logged (prevents path traversal).
     """
     fallback = get_default_voice_for_provider() if default is None else default
     profile = config.REACHY_MINI_CUSTOM_PROFILE
     if not profile:
         return fallback
+
+    # Validate the backend name before using it in a path component.
+    resolved_backend: str | None = backend
+    if backend is not None and not _BACKEND_NAME_RE.match(backend):
+        logger.warning(
+            "get_session_voice: invalid backend name %r — ignoring (path traversal guard)",
+            backend,
+        )
+        resolved_backend = None
+
     try:
-        voice_file = config.PROFILES_DIRECTORY / profile / VOICE_FILENAME
+        profiles_dir = config.PROFILES_DIRECTORY
+
+        # 1. Per-backend file takes precedence when the caller supplies a backend.
+        if resolved_backend is not None:
+            per_backend_file = profiles_dir / profile / _per_backend_voice_filename(resolved_backend)
+            if per_backend_file.exists():
+                per_backend_voice = per_backend_file.read_text(encoding="utf-8").strip()
+                if per_backend_voice:
+                    return per_backend_voice
+
+        # 2. Shared voice.txt fallback.
+        voice_file = profiles_dir / profile / VOICE_FILENAME
         if voice_file.exists():
             voice = voice_file.read_text(encoding="utf-8").strip()
             return voice or fallback
     except Exception:
         pass
+
     return fallback

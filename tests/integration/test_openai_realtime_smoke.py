@@ -154,7 +154,7 @@ async def test_openai_realtime_audio_frame_emitted(monkeypatch: pytest.MonkeyPat
       3. Audio bytes flowing from the delta event → output_queue as PCM tuples.
     """
     monkeypatch.setattr(openai_rt_mod, "get_session_instructions", lambda: "Be funny.")
-    monkeypatch.setattr(openai_rt_mod, "get_session_voice", lambda default=None: "alloy")
+    monkeypatch.setattr(openai_rt_mod, "get_session_voice", lambda default=None, backend=None: "alloy")
     monkeypatch.setattr(openai_rt_mod, "get_active_tool_specs", lambda _: [])
 
     deps = make_tool_deps()

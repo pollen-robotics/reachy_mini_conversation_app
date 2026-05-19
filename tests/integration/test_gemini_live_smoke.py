@@ -122,7 +122,7 @@ async def test_gemini_live_audio_frame_emitted(monkeypatch: pytest.MonkeyPatch) 
     """
     # Patch module-level callables that would reach external services.
     monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda: "Be funny.")
-    monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
+    monkeypatch.setattr(gemini_mod, "get_session_voice", lambda default=None, backend=None: "Kore")
     monkeypatch.setattr(gemini_mod, "get_active_tool_specs", lambda _: [])
 
     deps = make_tool_deps()

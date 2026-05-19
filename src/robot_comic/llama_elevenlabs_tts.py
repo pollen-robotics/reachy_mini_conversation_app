@@ -24,6 +24,7 @@ from robot_comic.config import (
     ELEVENLABS_AVAILABLE_VOICES,
     config,
 )
+from robot_comic.prompts import get_session_voice
 from robot_comic.gemini_tts import (
     SHORT_PAUSE_MS,
     SHORT_PAUSE_TAG,
@@ -176,7 +177,10 @@ class LlamaElevenLabsTTSResponseHandler(BaseLlamaResponseHandler):
         if env_voice:
             return env_voice
         config_params = load_profile_elevenlabs_config()
-        voice = config_params.get("voice") or ELEVENLABS_DEFAULT_VOICE
+        voice = config_params.get("voice") or get_session_voice(
+            backend="elevenlabs",
+            default=ELEVENLABS_DEFAULT_VOICE,
+        )
         # We no longer gate on `voice in ELEVENLABS_AVAILABLE_VOICES` here — the
         # API returns decorated names (e.g. "Brian - Deep, Resonant and
         # Comforting") so an exact-name gate forces every profile to use the

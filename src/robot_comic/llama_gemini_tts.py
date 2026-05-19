@@ -26,6 +26,7 @@ from robot_comic.config import (
     GEMINI_TTS_AVAILABLE_VOICES,
     config,
 )
+from robot_comic.prompts import get_session_voice
 from robot_comic.gemini_tts import (
     SHORT_PAUSE_MS,
     SHORT_PAUSE_TAG,
@@ -121,7 +122,10 @@ class LlamaGeminiTTSResponseHandler(BaseLlamaResponseHandler):
         return list(GEMINI_TTS_AVAILABLE_VOICES)
 
     def get_current_voice(self) -> str:
-        voice = self._voice_override or GEMINI_TTS_DEFAULT_VOICE
+        voice = self._voice_override or get_session_voice(
+            backend="gemini",
+            default=GEMINI_TTS_DEFAULT_VOICE,
+        )
         if voice not in GEMINI_TTS_AVAILABLE_VOICES:
             return GEMINI_TTS_DEFAULT_VOICE
         return voice

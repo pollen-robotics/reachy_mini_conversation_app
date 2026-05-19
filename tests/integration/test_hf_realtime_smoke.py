@@ -154,7 +154,7 @@ async def test_hf_realtime_audio_frame_emitted(monkeypatch: pytest.MonkeyPatch) 
       3. Audio bytes flowing from the delta event → output_queue as PCM tuples.
     """
     monkeypatch.setattr(hf_rt_mod, "get_session_instructions", lambda: "Be funny.")
-    monkeypatch.setattr(hf_rt_mod, "get_session_voice", lambda default=None: "default")
+    monkeypatch.setattr(hf_rt_mod, "get_session_voice", lambda default=None, backend=None: "default")
     monkeypatch.setattr(hf_rt_mod, "get_active_tool_specs", lambda _: [])
 
     deps = make_tool_deps()

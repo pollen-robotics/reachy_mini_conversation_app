@@ -101,7 +101,7 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
 ) -> None:
     """Gemini turns should emit one transcript per role and let the wobbler reset after speech."""
     monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda: "test")
-    monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
+    monkeypatch.setattr(gemini_mod, "get_session_voice", lambda default=None, backend=None: "Kore")
     monkeypatch.setattr(gemini_mod, "get_active_tool_specs", lambda _: [])
 
     movement_manager = MagicMock()
@@ -313,7 +313,7 @@ async def test_gemini_tool_result_sends_b64_scene_as_video_and_compacts_json() -
 async def test_apply_personality_preserves_manual_voice_override(monkeypatch) -> None:
     """Applying a profile should keep a manually selected Gemini voice active."""
     monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda: "test")
-    monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
+    monkeypatch.setattr(gemini_mod, "get_session_voice", lambda default=None, backend=None: "Kore")
     monkeypatch.setattr("robot_comic.config.set_custom_profile", lambda _profile: None)
 
     handler = GeminiLiveHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
@@ -355,7 +355,7 @@ def test_copy_preserves_current_voice_override() -> None:
 def test_gemini_excludes_head_tracking_when_no_head_tracker(monkeypatch) -> None:
     """head_tracking tool must not appear in Gemini session config when head_tracker is not active."""
     monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda: "test")
-    monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
+    monkeypatch.setattr(gemini_mod, "get_session_voice", lambda default=None, backend=None: "Kore")
 
     # Monkeypatch get_active_tool_specs on the gemini_mod namespace (where it is
     # bound at import time) so _build_live_config sees the controlled spec list.
@@ -397,7 +397,7 @@ def test_gemini_excludes_head_tracking_when_no_head_tracker(monkeypatch) -> None
 async def test_video_task_not_started_when_streaming_disabled(monkeypatch):
     """Video sender task must not start when GEMINI_LIVE_VIDEO_STREAMING=False."""
     monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda: "test")
-    monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
+    monkeypatch.setattr(gemini_mod, "get_session_voice", lambda default=None, backend=None: "Kore")
     monkeypatch.setattr(gemini_mod, "get_active_tool_specs", lambda _: [])
 
     camera = MagicMock()

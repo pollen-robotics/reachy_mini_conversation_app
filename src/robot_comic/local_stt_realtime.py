@@ -926,7 +926,7 @@ class LocalSTTOpenAIRealtimeHandler(LocalSTTInputMixin, OpenaiRealtimeHandler):
 
     def _get_session_voice(self, default: str | None = None) -> str:
         """Return the configured OpenAI voice for the local-STT response backend."""
-        return get_session_voice(default)
+        return get_session_voice(default, backend="openai")
 
     def _get_active_tool_specs(self) -> list[dict[str, Any]]:
         """Return active tool specs for the current session dependencies."""

@@ -597,7 +597,7 @@ class GeminiLiveHandler(AsyncStreamHandler, ConversationHandler):
 
             try:
                 _ = get_session_instructions()
-                _ = get_session_voice()
+                _ = get_session_voice(backend="gemini")
             except BaseException as e:
                 logger.error("Failed to resolve personality content: %s", e)
                 return f"Failed to apply personality: {e}"
@@ -630,7 +630,7 @@ class GeminiLiveHandler(AsyncStreamHandler, ConversationHandler):
 
     def get_current_voice(self) -> str:
         """Return the resolved Gemini voice currently selected for this handler."""
-        return _resolve_gemini_voice(self._voice_override or get_session_voice())
+        return _resolve_gemini_voice(self._voice_override or get_session_voice(backend="gemini"))
 
     async def start_up(self) -> None:
         """Start the handler with retries on unexpected closure."""
@@ -747,7 +747,7 @@ class GeminiLiveHandler(AsyncStreamHandler, ConversationHandler):
         if live_styling:
             instructions = f"{instructions}\n\n## DELIVERY\n{live_styling}"
 
-        voice = _resolve_gemini_voice(self._voice_override or get_session_voice())
+        voice = _resolve_gemini_voice(self._voice_override or get_session_voice(backend="gemini"))
 
         # Convert OpenAI-style tool specs to Gemini function declarations
         tool_specs = get_active_tool_specs(self.deps)
