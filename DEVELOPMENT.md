@@ -170,6 +170,31 @@ The fast PR gate (`pytest-fast` workflow) runs
 `-m 'not slow and not integration and not hardware'`. Anything that
 shouldn't block merge gets one of those three markers.
 
+## Persistent STT service (reachy-stt)
+
+The `reachy-stt` systemd service hosts faster-whisper in memory so it
+survives app restarts. The app talks to it over a Unix-domain socket
+at `/run/reachy-stt/reachy-stt.sock`.
+
+**Status:** PR-B (this) ships the unit file but not the client adapter
+yet — PR-C wires the app to use it. Until then the service runs idle
+and the app continues loading faster-whisper in-process.
+
+**Install on the robot:**
+(see header comment in `deploy/systemd/reachy-stt.service`)
+
+**Local dev (Windows / macOS without UDS):**
+
+    uvicorn robot_comic.stt_service.server:app --host 127.0.0.1 --port 8021
+
+(--uds is Linux-only.)
+
+**Warm-load behavior:** The unit runs unconditionally but stays idle
+(~30 MB resident) unless `REACHY_MINI_AUDIO_INPUT_BACKEND` in
+`/home/pollen/.robot_comic/.env` selects an on-device STT backend. The
+`scripts/reachy-stt-warm-load.sh` helper makes that decision and POSTs
+`/preload` only when needed.
+
 ## Running on the robot
 
 The robot autostart flow:

@@ -1,0 +1,48 @@
+# systemd unit for the persistent faster-whisper STT service on Reachy Mini.
+#
+# Install (run on the robot as root):
+#
+#   install -m 755 scripts/reachy-stt-warm-load.sh /usr/local/bin/reachy-stt-warm-load.sh
+#   install -m 644 deploy/systemd/reachy-stt.service /etc/systemd/system/reachy-stt.service
+#   systemctl daemon-reload
+#   systemctl enable --now reachy-stt
+#
+# Verify:
+#   systemctl is-active reachy-stt
+#   curl --unix-socket /run/reachy-stt/reachy-stt.sock http://localhost/healthz
+#
+# Logs:
+#   journalctl -u reachy-stt -f
+#
+# Note: the service runs unconditionally but stays IDLE (~30 MB resident) unless
+# the warm-load helper detects an on-device STT backend and POSTs /preload.
+# This is by design — PR-C (forthcoming) will add the client-side REMOTE adapter
+# that talks to this socket. Until PR-C lands, this unit is harmless overhead.
+
+[Unit]
+Description=Reachy Mini — persistent faster-whisper STT service (#471)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pollen
+RuntimeDirectory=reachy-stt
+RuntimeDirectoryMode=0750
+WorkingDirectory=/home/pollen/apps/robot_comic
+ExecStart=/venvs/apps_venv/bin/python -u -m robot_comic.stt_service --uds /run/reachy-stt/reachy-stt.sock
+
+# Conditional warm-load: only POST /preload when on-device STT is the active backend.
+# (Reads /home/pollen/.robot_comic/.env; the helper script exits 0 either way so this
+# never blocks startup.)
+ExecStartPost=/usr/local/bin/reachy-stt-warm-load.sh
+
+Restart=on-failure
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=reachy-stt
+
+[Install]
+WantedBy=multi-user.target
