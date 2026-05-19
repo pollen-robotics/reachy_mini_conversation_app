@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any, Callable, Optional
+from pathlib import Path
 
 from fastapi import Query, FastAPI, Request
 from pydantic import BaseModel
@@ -21,6 +22,7 @@ from .config import (
     get_available_voices_for_provider,
 )
 from robot_comic import telemetry
+from .startup_settings import write_startup_settings
 from .conversation_handler import ConversationHandler
 from .headless_personality import (
     DEFAULT_OPTION,
@@ -51,6 +53,7 @@ def mount_personality_routes(
     *,
     persist_personality: Callable[[Optional[str], Optional[str]], None] | None = None,
     get_persisted_personality: Callable[[], Optional[str]] | None = None,
+    instance_path: str | Path | None = None,
 ) -> None:
     """Register personality management endpoints on a FastAPI app."""
     try:
@@ -394,6 +397,10 @@ def mount_personality_routes(
         try:
             fut = asyncio.run_coroutine_threadsafe(_do(), loop)
             status = fut.result(timeout=10)
+            try:
+                write_startup_settings(instance_path, voice=voice)
+            except Exception as e:
+                logger.warning("Failed to persist voice to startup_settings: %s", e)
             return {"ok": True, "status": status}
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore

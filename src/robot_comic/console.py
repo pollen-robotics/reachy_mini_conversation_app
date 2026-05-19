@@ -1300,6 +1300,7 @@ class LocalStream:
                         lambda: self._asyncio_loop,
                         persist_personality=self._persist_personality,
                         get_persisted_personality=self._read_persisted_personality,
+                        instance_path=self._instance_path,
                     )
             except Exception:
                 pass
