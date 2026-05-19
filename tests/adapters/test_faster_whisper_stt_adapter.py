@@ -1432,6 +1432,8 @@ async def test_vad_gate_opens_only_after_threshold_frames(monkeypatch: pytest.Mo
     assert started_calls == 1, (
         f"on_speech_started should have fired after {_VAD_START_FRAMES} frames, fired {started_calls} time(s)"
     )
+
+
 # ---------------------------------------------------------------------------
 # cpu_threads — WhisperModel constructor arg (CTranslate2 intra-op threads)
 # ---------------------------------------------------------------------------
