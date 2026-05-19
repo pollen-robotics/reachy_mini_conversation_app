@@ -123,7 +123,15 @@ class Gesture(Tool):
             },
         },
         # Either name or beat is required; both can be supplied (name wins).
-        "anyOf": [{"required": ["name"]}, {"required": ["beat"]}],
+        # Each anyOf branch MUST specify ``"type": "object"`` explicitly.
+        # Gemini Live's BidiGenerateContentRequest validator rejects the
+        # alternative untyped branches with ``required: only allowed for
+        # OBJECT`` (caught live 2026-05-19: the app crash-looped every time
+        # a persona exposed this tool until each branch was tagged).
+        "anyOf": [
+            {"type": "object", "required": ["name"]},
+            {"type": "object", "required": ["beat"]},
+        ],
     }
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
