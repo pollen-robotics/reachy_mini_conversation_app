@@ -158,6 +158,67 @@ def main() -> None:
 ADMIN_RESTART_EXIT_CODE: int = 75
 
 
+def _install_shutdown_signal_handlers(
+    loop: asyncio.AbstractEventLoop,
+    stop_event: Optional[threading.Event],
+) -> None:
+    """Install SIGTERM/SIGINT handlers that trigger graceful shutdown via *stop_event*.
+
+    On Unix the handlers are registered with the asyncio event loop
+    (``loop.add_signal_handler``) so they are delivered safely inside the loop
+    without re-entrancy issues.  On Windows ``loop.add_signal_handler`` is not
+    available; we fall back to ``signal.signal()`` with a thread-safe wrapper
+    that schedules ``stop_event.set()`` onto the loop.
+
+    The function is extracted so tests can exercise it without spinning up the
+    full ``run()`` stack.
+    """
+    import logging as _logging
+
+    _handler_logger = _logging.getLogger(__name__)
+
+    def _on_signal(signum: int) -> None:
+        try:
+            name = signal.Signals(signum).name
+        except ValueError:
+            name = str(signum)
+        _handler_logger.info("Received %s — initiating graceful shutdown", name)
+        if stop_event is not None:
+            stop_event.set()
+        else:
+            # No stop_event wired — escalate to KeyboardInterrupt so the
+            # existing finally-block path still runs.
+            raise KeyboardInterrupt
+
+    if sys.platform != "win32":
+        # Unix path: use the loop-safe add_signal_handler API.
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                loop.add_signal_handler(sig, _on_signal, sig.value)
+            except (NotImplementedError, RuntimeError):
+                # add_signal_handler may raise if we're not in the main thread
+                # or on an unsupported loop implementation.
+                pass
+    else:
+        # Windows path: signal.signal() is limited to the main thread; use a
+        # thread-safe wrapper that calls stop_event.set() and schedules a
+        # loop wake-up so the running coroutine sees the event promptly.
+        def _windows_handler(signum: int, _frame: Any) -> None:
+            _on_signal(signum)
+            # Wake the loop so stop_event is noticed without waiting for I/O.
+            try:
+                loop.call_soon_threadsafe(lambda: None)
+            except RuntimeError:
+                pass
+
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                signal.signal(sig, _windows_handler)
+            except (ValueError, OSError):
+                # signal.signal() only works in the main thread; skip silently.
+                pass
+
+
 def run(
     args: argparse.Namespace,
     robot: ReachyMini = None,
@@ -166,6 +227,11 @@ def run(
     instance_path: Optional[str] = None,
 ) -> None:
     """Run Robot Comic."""
+    # Install signal handlers as early as possible so a SIGTERM during cold-boot
+    # still triggers the graceful shutdown path (movement_manager.stop(),
+    # robot.goto_sleep(), etc.) rather than escalating to SIGKILL.
+    _install_shutdown_signal_handlers(asyncio.get_event_loop(), app_stop_event)
+
     # Putting these dependencies here makes the dashboard faster to load when Robot Comic is installed.
     from robot_comic.moves import MovementManager
     from robot_comic.config import (
@@ -625,28 +691,6 @@ def run(
 
     if app_stop_event:
         threading.Thread(target=poll_stop_event, daemon=True).start()
-
-    # Translate SIGTERM into the same graceful path as KeyboardInterrupt so
-    # `systemctl stop` (and any future power-button hook) drives the head back
-    # to a neutral pose instead of letting motors cut mid-motion.
-    def _request_graceful_shutdown(signum: int, _frame: Any) -> None:
-        try:
-            name = signal.Signals(signum).name
-        except ValueError:
-            name = str(signum)
-        logger.info("Received %s; requesting graceful shutdown", name)
-        if app_stop_event is not None:
-            app_stop_event.set()
-        else:
-            # No external stop_event plumbed — fall back to raising
-            # KeyboardInterrupt so the existing finally-block path runs.
-            raise KeyboardInterrupt
-
-    try:
-        signal.signal(signal.SIGTERM, _request_graceful_shutdown)
-    except ValueError:
-        # signal.signal() only works in the main thread; skip silently if not.
-        logger.debug("Skipped SIGTERM handler install (not in main thread)")
 
     try:
         if args.sim:
