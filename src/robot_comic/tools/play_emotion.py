@@ -16,6 +16,18 @@ logger = logging.getLogger(__name__)
 BLOCKED_EMOTION_PREFIXES: tuple[str, ...] = ("lonely",)
 
 
+def _get_play_emotion_denylist() -> frozenset[str]:
+    """Return the current chassis-safety denylist from config.
+
+    Imported lazily to avoid a circular import at module load time.
+    Always reflects the live config value so .env overrides applied by
+    refresh_runtime_config_from_env() take effect at call time.
+    """
+    from robot_comic.config import config  # noqa: PLC0415
+
+    return config.PLAY_EMOTION_DENYLIST
+
+
 def _is_blocked_emotion(name: str) -> bool:
     return any(name.startswith(prefix) for prefix in BLOCKED_EMOTION_PREFIXES)
 
@@ -122,8 +134,9 @@ if not _load_catalog_from_cache():
 
 
 def _safe_emotion_names() -> list[str]:
-    """Return the available emotion names with blocked prefixes filtered out."""
-    return list(_CATALOG_NAMES)
+    """Return the available emotion names with blocked prefixes and denylist filtered out."""
+    denylist = _get_play_emotion_denylist()
+    return [n for n in _CATALOG_NAMES if n not in denylist]
 
 
 def get_available_emotions_and_descriptions() -> str:
@@ -142,20 +155,45 @@ class PlayEmotion(Tool):
 
     name = "play_emotion"
     description = "Play a pre-recorded emotion"
-    parameters_schema = {
+    # NOTE: parameters_schema is defined as a class attribute for compatibility
+    # with Tool.spec(); PlayEmotion overrides spec() below so the LLM always
+    # receives an enum that reflects the *current* denylist at call time.
+    parameters_schema: Dict[str, Any] = {
         "type": "object",
         "properties": {
             "emotion": {
                 "type": "string",
-                "enum": _safe_emotion_names(),
-                "description": f"""Name of the emotion to play; omit for random.
-                                    Here is a list of the available emotions, you MUST only choose from these: \n
-                                    {get_available_emotions_and_descriptions()}
-                                    """,
+                "enum": [],  # populated dynamically by spec()
+                "description": "",  # populated dynamically by spec()
             },
         },
         "required": [],
     }
+
+    def spec(self) -> Dict[str, Any]:
+        """Return the function spec with emotion enum filtered by the live denylist."""
+        safe_names = _safe_emotion_names()
+        desc = get_available_emotions_and_descriptions()
+        return {
+            "type": "function",
+            "name": self.name,
+            "description": self.description,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "emotion": {
+                        "type": "string",
+                        "enum": safe_names,
+                        "description": (
+                            "Name of the emotion to play; omit for random.\n"
+                            "Here is a list of the available emotions, you MUST only choose from these:\n"
+                            f"{desc}"
+                        ),
+                    },
+                },
+                "required": [],
+            },
+        }
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Play a pre-recorded emotion."""
@@ -174,6 +212,23 @@ class PlayEmotion(Tool):
         if emotion_name and _is_blocked_emotion(emotion_name):
             logger.warning("Refusing blocked emotion %r (matches BLOCKED_EMOTION_PREFIXES)", emotion_name)
             return {"error": f"Emotion '{emotion_name}' is disabled on this chassis."}
+
+        # Chassis-safety denylist check (issue #480): defense-in-depth guard
+        # against emotions that drive the head chin-down toward the cowling.
+        # The spec() override already removes these from the LLM's enum; this
+        # check catches any case where the LLM ignores the enum or the denylist
+        # changed between spec generation and call time.
+        denylist = _get_play_emotion_denylist()
+        if emotion_name and emotion_name in denylist:
+            logger.warning(
+                "Refusing denylisted emotion %r (REACHY_MINI_PLAY_EMOTION_DENYLIST chassis safety)", emotion_name
+            )
+            return {
+                "error": (
+                    f"emotion '{emotion_name}' is denylisted by REACHY_MINI_PLAY_EMOTION_DENYLIST"
+                    " (chassis safety). Pick a different emotion."
+                )
+            }
 
         # Check if emotion exists
         try:

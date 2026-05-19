@@ -971,6 +971,26 @@ else:
         logger.warning("No .env file found, using environment variables")
 
 
+# ---------------------------------------------------------------------------
+# Chassis-safety: emotions blocked from being played by the LLM.
+# boredom1/boredom2/sleep1 drive the head chin-down toward the cowling
+# (observed live 2026-05-19, issue #480). Operators can override via .env.
+# ---------------------------------------------------------------------------
+PLAY_EMOTION_DENYLIST_ENV = "REACHY_MINI_PLAY_EMOTION_DENYLIST"
+PLAY_EMOTION_DENYLIST_DEFAULT = "boredom1,boredom2,sleep1"
+
+
+def _parse_play_emotion_denylist(raw: str | None) -> frozenset[str]:
+    """Parse a comma-separated emotion denylist string into a frozenset.
+
+    Empty string → empty set (operator explicitly cleared the denylist).
+    None → use the default list.  Whitespace around names is stripped.
+    """
+    if raw is None:
+        raw = PLAY_EMOTION_DENYLIST_DEFAULT
+    return frozenset(name.strip() for name in raw.split(",") if name.strip())
+
+
 class Config:
     """Configuration class for Robot Comic."""
 
@@ -1029,6 +1049,10 @@ class Config:
     GEMINI_LIVE_VAD_END_SENSITIVITY = os.getenv("GEMINI_LIVE_VAD_END_SENSITIVITY", "LOW").upper()
     MOVEMENT_SPEED_FACTOR = _env_float_clamped("MOVEMENT_SPEED_FACTOR", default=0.3, lo=0.1, hi=2.0)
     IDLE_ANIMATION_ENABLED = _env_flag("IDLE_ANIMATION_ENABLED", default=False)
+    # Chassis-safe emotion denylist: emotions in this set are hidden from the LLM
+    # tool spec and blocked at call time.  Default covers boredom/sleep motions
+    # observed to drive the head chin-down toward the cowling (issue #480).
+    PLAY_EMOTION_DENYLIST: frozenset[str] = _parse_play_emotion_denylist(os.getenv(PLAY_EMOTION_DENYLIST_ENV))
     MOONSHINE_HEARTBEAT = _env_flag("MOONSHINE_HEARTBEAT", default=False)
     FASTER_WHISPER_MODEL = os.getenv(FASTER_WHISPER_MODEL_ENV, FASTER_WHISPER_DEFAULT_MODEL)
     FASTER_WHISPER_COMPUTE_TYPE = os.getenv(FASTER_WHISPER_COMPUTE_TYPE_ENV, FASTER_WHISPER_DEFAULT_COMPUTE_TYPE)
@@ -1322,6 +1346,7 @@ def refresh_runtime_config_from_env() -> None:
     config.GEMINI_LIVE_VAD_END_SENSITIVITY = os.getenv("GEMINI_LIVE_VAD_END_SENSITIVITY", "LOW").upper()
     config.MOVEMENT_SPEED_FACTOR = _env_float_clamped("MOVEMENT_SPEED_FACTOR", default=0.3, lo=0.1, hi=2.0)
     config.IDLE_ANIMATION_ENABLED = _env_flag("IDLE_ANIMATION_ENABLED", default=False)
+    config.PLAY_EMOTION_DENYLIST = _parse_play_emotion_denylist(os.getenv(PLAY_EMOTION_DENYLIST_ENV))
     config.MOONSHINE_HEARTBEAT = _env_flag("MOONSHINE_HEARTBEAT", default=False)
     config.FASTER_WHISPER_MODEL = os.getenv(FASTER_WHISPER_MODEL_ENV, FASTER_WHISPER_DEFAULT_MODEL)
     config.FASTER_WHISPER_COMPUTE_TYPE = os.getenv(
