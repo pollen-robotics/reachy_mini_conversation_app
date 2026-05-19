@@ -4,7 +4,6 @@ import logging
 from typing import Any, Dict
 
 from robot_comic.tools.core_tools import Tool, ToolDependencies
-from robot_comic.camera_frame_encoding import encode_bgr_frame_as_jpeg
 
 
 logger = logging.getLogger(__name__)
@@ -55,6 +54,10 @@ class Camera(Tool):
                 if isinstance(vision_result, str)
                 else {"error": "vision returned non-string"}
             )
+
+        # Deferred import: av (via camera_frame_encoding) costs ~0.5–0.8 s at
+        # module load time on the Pi. Only __call__ needs it, so import here.
+        from robot_comic.camera_frame_encoding import encode_bgr_frame_as_jpeg  # noqa: PLC0415
 
         jpeg_bytes = encode_bgr_frame_as_jpeg(frame)
         return {"b64_im": base64.b64encode(jpeg_bytes).decode("utf-8")}

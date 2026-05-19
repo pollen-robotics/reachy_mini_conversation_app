@@ -9,7 +9,6 @@ from typing import Any, Dict
 
 from robot_comic.tools.move_head import MoveHead
 from robot_comic.tools.core_tools import Tool, ToolDependencies
-from robot_comic.camera_frame_encoding import encode_bgr_frame_as_jpeg
 
 
 logger = logging.getLogger(__name__)
@@ -72,6 +71,10 @@ class Roast(Tool):
 
         if deps.vision_processor is None:
             # No local vision — return b64 frames for the realtime backend to interpret
+            # Deferred import: av (via camera_frame_encoding) costs ~0.5–0.8 s at
+            # module load time on the Pi. Only this branch needs it, so import here.
+            from robot_comic.camera_frame_encoding import encode_bgr_frame_as_jpeg  # noqa: PLC0415
+
             jpeg = encode_bgr_frame_as_jpeg(wide_frame)
             return {
                 "b64_scene": base64.b64encode(jpeg).decode("utf-8"),
