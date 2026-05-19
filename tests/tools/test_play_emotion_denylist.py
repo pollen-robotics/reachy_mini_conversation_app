@@ -255,3 +255,33 @@ def test_spec_custom_denylist_overrides_default(monkeypatch: pytest.MonkeyPatch)
     assert "angry1" not in enum_values
     assert "scared2" not in enum_values
     assert "smile1" in enum_values
+
+
+# ---------------------------------------------------------------------------
+# Log ordering: 'Tool call:' INFO must NOT appear for denylisted emotions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_denylisted_emotion_does_not_emit_tool_call_info_log(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The INFO 'Tool call: play_emotion' line must not fire when the emotion is
+    denylisted.  It should appear ONLY after the denylist gate, so a refused
+    emotion produces only the WARNING line — not a misleading INFO+WARNING pair.
+    """
+    _patch_catalog(monkeypatch, ["smile1", "boredom1"])
+    monkeypatch.setenv("REACHY_MINI_PLAY_EMOTION_DENYLIST", "boredom1")
+    config_module.refresh_runtime_config_from_env()
+
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="robot_comic.tools.play_emotion"):
+        result = await pe.PlayEmotion()(_make_deps(), emotion="boredom1")
+
+    assert "error" in result
+    info_msgs = [r.message for r in caplog.records if r.levelno == logging.INFO]
+    assert not any("Tool call: play_emotion" in m for m in info_msgs), (
+        f"INFO 'Tool call: play_emotion' must not appear for a denylisted emotion. Got: {info_msgs}"
+    )

@@ -205,8 +205,6 @@ class PlayEmotion(Tool):
 
         emotion_name = kwargs.get("emotion")
 
-        logger.info("Tool call: play_emotion emotion=%s", emotion_name)
-
         # Defence in depth: if the LLM hallucinates a blocked emotion despite
         # it being absent from the enum, refuse here too.
         if emotion_name and _is_blocked_emotion(emotion_name):
@@ -229,6 +227,8 @@ class PlayEmotion(Tool):
                     " (chassis safety). Pick a different emotion."
                 )
             }
+
+        logger.info("Tool call: play_emotion emotion=%s", emotion_name)
 
         # Check if emotion exists
         try:
