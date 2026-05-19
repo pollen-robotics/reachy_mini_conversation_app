@@ -106,6 +106,12 @@ class CameraWorker:
         self._suppressed_error_count: int = 0
         self._error_suppress_window: float = 60.0  # seconds
 
+        # Diagnostic state: count consecutive None frames so we can log
+        # pipeline/appsink/source introspection when the camera stalls.
+        self._consecutive_none_frames: int = 0
+        self._last_diag_log_time: float = 0.0
+        self._diag_log_interval: float = 30.0  # seconds between periodic re-logs
+
     def get_latest_frame(self) -> NDArray[np.uint8] | None:
         """Get the latest frame (thread-safe).
 
@@ -202,7 +208,59 @@ class CameraWorker:
                 current_time = time.time()
                 frame = self.reachy_mini.media.get_frame()
 
-                if frame is not None:
+                if frame is None:
+                    self._consecutive_none_frames += 1
+                    now = time.monotonic()
+                    _thresholds = {5, 25, 125}
+                    _at_threshold = self._consecutive_none_frames in _thresholds
+                    _interval_elapsed = (now - self._last_diag_log_time) >= self._diag_log_interval
+                    if _at_threshold or (_interval_elapsed and self._consecutive_none_frames > 0):
+                        self._last_diag_log_time = now
+                        # --- pipeline state ---
+                        pipeline_state = "unavailable"
+                        try:
+                            pipeline = self.reachy_mini.media.camera.pipeline
+                            _ret, _state, _pending = pipeline.get_state(timeout=0)
+                            pipeline_state = f"({_ret},{_state},{_pending})"
+                        except Exception:  # noqa: BLE001
+                            pass
+                        # --- appsink buffer count ---
+                        appsink_info = "unavailable"
+                        try:
+                            _appsink = getattr(self.reachy_mini.media.camera, "_appsink", None)
+                            if _appsink is not None:
+                                _lvl = _appsink.get_property("current-level-buffers")
+                                appsink_info = f"current-level-buffers={_lvl}"
+                            else:
+                                appsink_info = "not-found"
+                        except Exception:  # noqa: BLE001
+                            pass
+                        # --- source element state ---
+                        source_state = "unavailable"
+                        try:
+                            pipeline = self.reachy_mini.media.camera.pipeline
+                            for _elem in pipeline.iterate_elements():
+                                _name = _elem.get_name()
+                                if "unixfdsrc" in _name or "v4l2src" in _name or "src" in _name.lower():
+                                    _r, _s, _p = _elem.get_state(timeout=0)
+                                    source_state = f"{_name}:({_r},{_s},{_p})"
+                                    break
+                        except Exception:  # noqa: BLE001
+                            pass
+                        logger.info(
+                            "camera_worker: frame=None streak=%d pipeline_state=%s appsink=%s source=%s",
+                            self._consecutive_none_frames,
+                            pipeline_state,
+                            appsink_info,
+                            source_state,
+                        )
+                elif frame is not None:
+                    if self._consecutive_none_frames > 0:
+                        logger.info(
+                            "camera_worker: Camera recovered after %d consecutive None frames",
+                            self._consecutive_none_frames,
+                        )
+                        self._consecutive_none_frames = 0
                     # Keep the latest frame available for tools and UI consumers
                     with self.frame_lock:
                         self.latest_frame = frame
