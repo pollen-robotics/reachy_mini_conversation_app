@@ -44,6 +44,13 @@ except ImportError:
 _JOURNALD_UNIT = "reachy-app-autostart"
 _MAX_TURNS = 30
 
+# TUI redraw cadence. 1 Hz is the default — turn events stream in live as RCSPAN
+# lines arrive, so the heartbeat redraw only governs spinner / elapsed-time
+# animation and benefits from being calm when watching pipeline timing.
+_DEFAULT_REFRESH_HZ = 1.0
+_MIN_REFRESH_HZ = 0.5
+_MAX_REFRESH_HZ = 10.0
+
 # Thresholds (ms) for green / yellow / red colouring per stage
 _THRESHOLDS: dict[str, tuple[float, float]] = {
     "stt": (300, 600),
@@ -620,7 +627,21 @@ def main() -> None:
         metavar="PATH",
         help="tail a log file instead of the systemd journal",
     )
+    parser.add_argument(
+        "--refresh-hz",
+        type=float,
+        default=_DEFAULT_REFRESH_HZ,
+        metavar="HZ",
+        help=(
+            "TUI redraw cadence in Hz (default: %(default)s). Lower values produce "
+            "a calmer display when watching turn-by-turn pipeline timing. Key input "
+            "remains responsive at ~10 Hz regardless. Clamped to "
+            f"[{_MIN_REFRESH_HZ}, {_MAX_REFRESH_HZ}]."
+        ),
+    )
     args = parser.parse_args()
+    refresh_hz = max(_MIN_REFRESH_HZ, min(_MAX_REFRESH_HZ, args.refresh_hz))
+    render_interval_s = 1.0 / refresh_hz
 
     console = Console()
     buffer = SpanBuffer()
@@ -733,6 +754,12 @@ def main() -> None:
 
     inp = MonitorInput()
 
+    # Decouple render cadence from key-poll cadence: keys stay responsive at
+    # ~10 Hz so the 'S' overlay reacts snappily, but the render heartbeat only
+    # fires every ``render_interval_s`` (1 s at the 1 Hz default). Turn events
+    # still trigger immediate redraws via the main thread's RCSPAN ingestion.
+    _last_render_ts: list[float] = [0.0]
+
     def _auto_refresh() -> None:
         """Background thread: refresh render + handle keyboard input."""
         try:
@@ -766,7 +793,8 @@ def main() -> None:
                         pass
                     _persona_last_check[0] = now
 
-                # Poll for a keystroke (short timeout to maintain ~6 fps render).
+                # Poll for a keystroke at ~10 Hz (key responsiveness is independent
+                # of redraw cadence).
                 key = inp.poll_key(timeout=0.1)
 
                 if key == "s":
@@ -778,8 +806,9 @@ def main() -> None:
                     stop_event.set()
                     break
 
-                if not _overlay_active[0]:
+                if not _overlay_active[0] and now - _last_render_ts[0] >= render_interval_s:
                     live.update(_render())
+                    _last_render_ts[0] = now
         finally:
             pass  # inp is owned by the outer scope; closed there
 
@@ -827,7 +856,7 @@ def main() -> None:
         time.sleep(1.5)
 
     try:
-        with Live(_render(), console=console, refresh_per_second=4, screen=True) as live:
+        with Live(_render(), console=console, refresh_per_second=refresh_hz, screen=True) as live:
             refresh_thread = threading.Thread(target=_auto_refresh, daemon=True)
             refresh_thread.start()
 
