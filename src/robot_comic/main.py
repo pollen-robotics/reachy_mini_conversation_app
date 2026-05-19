@@ -427,8 +427,17 @@ def run(
     # single set_target sticks until the loop takes over.
     try:
         idle_head = robot.get_current_head_pose()
-        robot.set_target(head=idle_head, antennas=[0.0, 0.0], body_yaw=0.0)
-        logger.info("Pinned idle antennas to neutral [0.0, 0.0]")
+        # Preserve the current body yaw instead of forcing 0.0 so a restart
+        # does not snap the body forward if the robot is already turned.
+        # get_current_joint_positions() returns ([body_yaw, ...6 stewart], [ant1, ant2]);
+        # the first element of the head list is the body yaw joint (rad).
+        try:
+            _head_joints, _ = robot.get_current_joint_positions()
+            idle_body_yaw: float = float(_head_joints[0])
+        except Exception:
+            idle_body_yaw = 0.0
+        robot.set_target(head=idle_head, antennas=[0.0, 0.0], body_yaw=idle_body_yaw)
+        logger.info("Pinned idle antennas to neutral [0.0, 0.0] body_yaw=%.4f", idle_body_yaw)
     except Exception as idle_exc:
         logger.warning("Could not pin idle antennas to neutral: %s", idle_exc)
 

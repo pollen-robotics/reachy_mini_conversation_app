@@ -294,6 +294,11 @@ class MovementManager:
         self._thread: threading.Thread | None = None
         self._is_listening = False
         self._last_commanded_pose: FullBodyPose = clone_full_body_pose(self.state.last_primary_pose)
+        # Last full-body target that was successfully sent to set_target. Re-asserted
+        # every tick when no primary move is active so the motor-controller PID always
+        # has an explicit target to hold instead of hunting at whatever pose a completed
+        # gesture left things in. Initialised to neutral; updated by _issue_control_command.
+        self._last_idle_target: FullBodyPose = clone_full_body_pose(self.state.last_primary_pose)
         self._listening_antennas: Tuple[float, float] = self._last_commanded_pose[1]
         self._antenna_unfreeze_blend = 1.0
         self._antenna_blend_duration = 0.4  # seconds to blend back after listening
@@ -789,6 +794,9 @@ class MovementManager:
             self._last_safe_head_pose = head
             with self._status_lock:
                 self._last_commanded_pose = clone_full_body_pose((head, antennas, body_yaw))
+            # Keep idle-re-assert target current so that when no primary move is
+            # active the loop can hold this exact pose without PID hunting.
+            self._last_idle_target = clone_full_body_pose((head, antennas, body_yaw))
 
     def _update_frequency_stats(
         self,
@@ -1007,8 +1015,17 @@ class MovementManager:
             # 3) Update vision-based secondary offsets
             self._update_face_tracking(loop_start)
 
-            # 4) Build primary and secondary full-body poses, then fuse them
-            head, antennas, body_yaw = self._compose_full_body_pose(loop_start)
+            # 4) Build primary and secondary full-body poses, then fuse them.
+            # When no primary move is active (nothing in the queue and no current
+            # move), re-assert the last successfully sent target verbatim so the
+            # motor-controller PID always has an explicit target to hold.  This
+            # prevents antenna oscillation that occurs when the controller is left
+            # with no explicit command after a gesture completes (issue #479).
+            primary_move_active = self.state.current_move is not None or bool(self.move_queue)
+            if primary_move_active:
+                head, antennas, body_yaw = self._compose_full_body_pose(loop_start)
+            else:
+                head, antennas, body_yaw = clone_full_body_pose(self._last_idle_target)
 
             # 4a) Safety layer: clamp head pose to safe RPY envelope, then
             #     cap angular velocity so the head cannot lurch toward the
