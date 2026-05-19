@@ -30,10 +30,10 @@ Source-of-truth plan: `docs/superpowers/specs/2026-05-16-phase-5-exploration.md`
 
 | Sub-phase | Goal | Status | PR / branch |
 |-----------|------|--------|-------------|
-| 5a | Surviving TODO cleanup (composable_conversation_handler.py:158, composable_pipeline.py:278, chatterbox_tts_adapter.py:47, OTel `gen_ai.system` artifact, test-fixture `coroutine never awaited` smell) | 🚧 In flight (5a.1: echo-guard persona reset) | — |
+| 5a | Surviving TODO cleanup (composable_conversation_handler.py:158, composable_pipeline.py:278, chatterbox_tts_adapter.py:47, OTel `gen_ai.system` artifact, test-fixture `coroutine never awaited` smell) | ✅ Done (5a.1 echo-guard persona reset; 5a.2 delivery tags + first-audio marker via #393) | a4d0452 |
 | 5b | Wire `ComposablePipeline.tool_dispatcher` in factory + `tool.execute` span (was latent prod bug — tool-triggered turns silently dropped on 4 of 5 composable triples) | ✅ Done | #388 (commit a8754d5) |
-| 5c | Voice/personality method redesign (`apply_personality` ABC + wrapper forwarding) | ⏸ Pending operator input |  — |
-| 5d | `ConversationHandler` ABC: shrink (FastRTC-shim only) or collapse | ⏸ Pending **operator decision** (shrink vs collapse) | — |
+| 5c | Voice/personality method redesign (`apply_personality` ABC + wrapper forwarding) | ✅ Done (5c-1 wrapper forwards via `pipeline.tts`; 5c-2 `apply_personality` lives on `ComposablePipeline`) | #399 (101d07b), #401 (e3ab697) |
+| 5d | `ConversationHandler` ABC: shrink (FastRTC-shim only) or collapse | ✅ Done — shrunk to FastRTC-shim role (72 lines in `conversation_handler.py`) | #403 (c8fef7d) |
 | 5e | Factory STT decouple — make new STT backends pluggable cleanly (retire `LocalSTTInputMixin` from composable triples) | ✅ Done (6/6 sub-phases) | — |
 | 5e.1 | Standalone `MoonshineSTTAdapter` + `MoonshineListener` (foundational) | ✅ Done | #405 (commit 847e6ac) |
 | 5e.2 | Migrate `(moonshine, llama, elevenlabs)` off `LocalSTTInputMixin` + land `ComposablePipeline` host-concern wiring | ✅ Done | #407 (commit 03d55e2) |
@@ -49,6 +49,25 @@ Source-of-truth plan: `docs/superpowers/specs/2026-05-16-phase-5-exploration.md`
 |----|------|-------|
 | #382 | Hook #3b — `GeminiTTSAdapter` emits `first_greeting.tts_first_audio` | Parity restoration; legacy already emitted at `gemini_tts.py:415`, composable adapter was bypassing |
 | #389 | Telemetry housekeeping + `_prepare_startup_credentials` triple-init guard | 4 orphan OTel attrs allowlisted; 2 dead counters wired (Moonshine errors + welcome-WAV underrun); idempotency guard; `handler.start_up.complete` event moved to post-delegate via `try/finally` |
+
+## Post-Phase-5 follow-up PRs (after 5f close, all landed)
+
+| PR | What | Notes |
+|----|------|-------|
+| #416 | `FasterWhisperSTTAdapter` (closes #387) — alternate to Moonshine | A/B via `AUDIO_INPUT_BACKEND=faster_whisper` |
+| #420 | Phase-5f-1: swap `silero-vad` for `webrtcvad` to fit chassis eMMC | |
+| #422 | Phase-5f-2: drop short transcripts + raise echo cooldown to break self-echo cascade | |
+| #425 | Phase-5: widen transcript dedup + SequenceMatcher similarity for hypothesis-burst | |
+| #426 | Phase-5f-3: content-similarity echo filter to close cascade gap left by 5f.2 | |
+| #442 | `XttsTTSAdapter` — LAN xtts-v2 as composable TTSBackend + admin UI selector (#438) | Native adapter, not legacy-wrapping; raw PCM stream over chunked HTTP |
+| #447 | Record `robot.tts.time_to_first_audio` metric per turn (#271) | |
+| #463 | Scope chatterbox TTS probes to `AUDIO_OUTPUT_BACKEND=chatterbox` | XTTS-deployment boot reliability |
+| #466 | TTS-down cooldown suppresses STT triggers on service outage | |
+| #467 | Wire `speaking_until_setter` to close self-echo barge-in gap on XTTS path | |
+| #468 | Post-TTS cooldown + stricter `no_speech_prob` to stop hallucination cascade | |
+| #473 | Standalone `stt_service/` FastAPI package | Shipped; not yet wired into main app |
+
+See `FORK_STATUS.md` for the consolidated post-fork architecture view.
 
 ## Research memos (2026-05-16, all merged)
 

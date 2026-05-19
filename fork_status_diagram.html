@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>robot_comic — Fork Status Block Diagram</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --border: #262c39;
+    --fg: #e6e8ef;
+    --muted: #8b93a7;
+    --shipped: #1f7a3a;
+    --shipped-fg: #d6f5e0;
+    --wip: #b3791d;
+    --wip-fg: #fff0d4;
+    --open: #5b6275;
+    --open-fg: #e0e3eb;
+    --upstream: #2c5d8a;
+    --upstream-fg: #d6e7f7;
+    --fork: #6a3c8f;
+    --fork-fg: #ecdcff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  header {
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  header h1 {
+    margin: 0 0 4px 0;
+    font-size: 18px;
+    font-weight: 600;
+  }
+  header p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  main {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    gap: 18px;
+    padding: 18px 24px;
+  }
+  .diagram-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    overflow: auto;
+  }
+  .diagram-panel .mermaid {
+    background: transparent;
+  }
+  aside {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .card h2 {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .legend ul, .status ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .legend li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 0;
+    font-size: 13px;
+  }
+  .swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    flex: 0 0 14px;
+    border: 1px solid rgba(255,255,255,0.12);
+  }
+  .swatch.shipped  { background: var(--shipped); }
+  .swatch.fork     { background: var(--fork); }
+  .swatch.wip      { background: var(--wip); }
+  .swatch.open     { background: var(--open); }
+  .swatch.upstream { background: var(--upstream); }
+  .status li {
+    padding: 6px 0;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .status li:first-child { border-top: 0; }
+  .badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .badge.shipped  { background: var(--shipped); color: var(--shipped-fg); }
+  .badge.wip      { background: var(--wip); color: var(--wip-fg); }
+  .badge.open     { background: var(--open); color: var(--open-fg); }
+  .badge.fork     { background: var(--fork); color: var(--fork-fg); }
+  .footnote {
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 10px;
+  }
+  a { color: #79b8ff; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  @media (max-width: 1100px) {
+    main { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>robot_comic — fork status (HEAD <code>172c6f5</code>, 2026-05-19)</h1>
+  <p>Block diagram of everything added since branching from <code>pollen-robotics/reachy_mini_conversation_app</code>, color-coded by status. Companion to <code>FORK_STATUS.md</code>.</p>
+</header>
+
+<main>
+  <section class="diagram-panel">
+<pre class="mermaid">
+flowchart TB
+  %% =========================
+  %% Status classes (used below)
+  %% =========================
+  classDef shipped  fill:#1f7a3a,stroke:#0d4a22,color:#d6f5e0,stroke-width:1px;
+  classDef fork     fill:#6a3c8f,stroke:#3e2255,color:#ecdcff,stroke-width:1px;
+  classDef wip      fill:#b3791d,stroke:#7a4e0a,color:#fff0d4,stroke-width:1px;
+  classDef open     fill:#5b6275,stroke:#363a48,color:#e0e3eb,stroke-width:1px,stroke-dasharray: 4 3;
+  classDef upstream fill:#2c5d8a,stroke:#143b5d,color:#d6e7f7,stroke-width:1px;
+
+  subgraph ENTRY["Entry &amp; lifecycle"]
+    main["main.py<br/>--sim / --debug / --monitor"]
+    warmup["warmup_audio.py<br/>fire-and-forget welcome WAV"]
+    startupT["startup_timer.py<br/>boot-latency stopwatch"]
+    telemetry["telemetry.py<br/>OpenTelemetry / SigNoz"]
+    welcome["welcome_gate.py<br/>persona-name gate (#108/#110)"]
+    pause["pause.py + pause_settings.py<br/>stop-word menu"]
+  end
+
+  subgraph FACTORY["Handler routing"]
+    factory["handler_factory.py<br/>(STT, LLM, TTS) triple → handler"]
+    config["config.py<br/>FACTORY_PATH retired, XTTS knobs"]
+  end
+
+  subgraph BUNDLED["Bundled realtime (upstream + extended)"]
+    base["base_realtime.py"]
+    openai["openai_realtime.py"]
+    hf["huggingface_realtime.py"]
+    glive["gemini_live.py"]
+    hybrid["local_stt_realtime.py<br/>LocalSTT + cloud LLM/TTS hybrid"]
+  end
+
+  subgraph COMPOSABLE["Composable pipeline — Phase 4/5 epic"]
+    backends["backends.py<br/>STT / LLM / TTS Protocols"]
+    pipeline["composable_pipeline.py<br/>tool dispatch + echo guard + joke history + trim"]
+    cch["composable_conversation_handler.py<br/>FastRTC-shim wrapper"]
+    subgraph STT["STT adapters"]
+      moonshine["MoonshineSTTAdapter"]
+      fwhisper["FasterWhisperSTTAdapter (#416)"]
+    end
+    subgraph LLM["LLM adapters"]
+      llama["LlamaLLMAdapter (Qwen3-14B)"]
+      gem["GeminiLLMAdapter"]
+      gemB["GeminiBundledLLMAdapter"]
+    end
+    subgraph TTS["TTS adapters"]
+      cb["ChatterboxTTSAdapter"]
+      el["ElevenLabsTTSAdapter"]
+      gtts["GeminiTTSAdapter"]
+      xtts["XttsTTSAdapter (#442)<br/>LAN xtts-v2, raw PCM stream"]
+    end
+  end
+
+  subgraph TOOLS["Tools"]
+    core["tools/core_tools.py<br/>Tool ABC + ToolDependencies"]
+    bg["background_tool_manager.py"]
+    greet["greet (face DB)"]
+    roast["roast"]
+    lang["language_dissect"]
+    dance["dance / stop_dance"]
+    emo["play_emotion / stop_emotion"]
+    cam["camera"]
+    head["head_tracking / move_head"]
+    crowd["crowd_work"]
+    namev["name_validation"]
+  end
+
+  subgraph MOTION["Motion"]
+    mm["moves.MovementManager"]
+    moves["dance_emotion_moves.py"]
+    safety["motion_safety.py"]
+    wob["audio/head_wobbler.py"]
+    ik["#155 wake_up IK gentling"]
+  end
+
+  subgraph VISION["Vision"]
+    cw["camera_worker.py"]
+    lv["vision/local_vision.py (SmolVLM2)"]
+    ht["head_tracking (mediapipe | yolo)"]
+    fdb["face_db + embedder"]
+  end
+
+  subgraph AUDIO["Audio I/O"]
+    alsa["alsa_rw_capture.py"]
+    gain["audio_gain.py"]
+    tap["speech_tapper.py"]
+  end
+
+  subgraph UI["Admin / settings UI"]
+    console["console.LocalStream<br/>FastAPI + FastRTC"]
+    persUI["headless_personality_ui.py"]
+    static["static/index.html, main.js, main.css"]
+    e2e["#138 admin Restart e2e test"]
+  end
+
+  subgraph PROFILES["Profiles"]
+    p["profiles/default + house_comedian"]
+    opens["openers.py + joke_history.py"]
+    trim["history_trim.py + gemini_retry.py"]
+    guard["guardrail.py"]
+    welc["#108 welcome_name.wav assets"]
+  end
+
+  subgraph STTSVC["stt_service/ (#473)"]
+    sttsvr["server.py — standalone FastAPI<br/>not yet wired into main.py"]
+  end
+
+  subgraph WS["Pi ↔ laptop WS"]
+    wsp["ws_protocol / ws_client / ws_server"]
+    wol["wake_on_lan.py"]
+  end
+
+  %% Edges
+  main --> warmup
+  main --> startupT
+  main --> telemetry
+  main --> welcome
+  main --> pause
+  main --> factory
+  factory --> config
+  factory --> base
+  factory --> cch
+  base --> openai
+  base --> hf
+  base --> glive
+  base --> hybrid
+  cch --> pipeline
+  pipeline --> backends
+  backends --> STT
+  backends --> LLM
+  backends --> TTS
+  main --> mm
+  main --> cw
+  main --> console
+  main --> wob
+  pipeline --> core
+  core --> bg
+  core --> greet
+  core --> roast
+  core --> lang
+  core --> dance
+  core --> emo
+  core --> cam
+  core --> head
+  core --> crowd
+  core --> namev
+  cw --> lv
+  cw --> ht
+  cw --> fdb
+  console --> static
+  console --> persUI
+  persUI --> p
+  pipeline --> opens
+  pipeline --> trim
+  pipeline --> guard
+  llama --> wol
+  cb --> WS
+  xtts --> WS
+  mm --> ik
+  console --> e2e
+  p --> welc
+
+  %% =========================
+  %% Status assignments
+  %% =========================
+
+  %% upstream-kept
+  class base,openai,hf upstream
+
+  %% post-fork additions (shipped)
+  class main,warmup,startupT,telemetry,welcome,pause,factory,config fork
+  class glive,hybrid fork
+  class backends,pipeline,cch,moonshine,fwhisper,llama,gem,gemB,cb,el,gtts,xtts fork
+  class core,bg,greet,roast,lang,dance,emo,cam,head,crowd,namev fork
+  class mm,moves,safety,wob fork
+  class cw,lv,ht,fdb fork
+  class alsa,gain,tap fork
+  class console,persUI,static fork
+  class p,opens,trim,guard fork
+  class wsp,wol fork
+
+  %% in-flight / hardware-validation queue
+  class ik,e2e,welc wip
+
+  %% open / not-yet-wired
+  class sttsvr open
+</pre>
+  </section>
+
+  <aside>
+    <section class="card legend">
+      <h2>Legend</h2>
+      <ul>
+        <li><span class="swatch upstream"></span>Upstream — kept from <code>reachy_mini_conversation_app</code></li>
+        <li><span class="swatch fork"></span>Post-fork addition — shipped</li>
+        <li><span class="swatch wip"></span>In flight — needs on-robot validation</li>
+        <li><span class="swatch open"></span>Carry-forward — not yet wired</li>
+        <li><span class="swatch shipped"></span>(reserved — used below for milestone badges)</li>
+      </ul>
+    </section>
+
+    <section class="card status">
+      <h2>Outstanding milestones</h2>
+      <ul>
+        <li><span class="badge wip">in flight</span><strong>#155</strong> wake_up animation gentling — IK / motion profile</li>
+        <li><span class="badge wip">in flight</span><strong>#138</strong> admin Restart e2e test (exit-75 → systemd)</li>
+        <li><span class="badge wip">in flight</span><strong>#121</strong> boot: 11.5 s gap investigation</li>
+        <li><span class="badge wip">in flight</span><strong>#108</strong> Welcome Gate per-persona WAVs (5 + 6)</li>
+        <li><span class="badge open">next up</span><strong>S2S smoke test</strong> — see <code>FORK_STATUS.md §3</code></li>
+        <li><span class="badge open">next up</span><strong>#54</strong> modular audio pipeline config</li>
+        <li><span class="badge open">next up</span><strong>#78</strong> Qwen3 14B vs 35B benchmark</li>
+        <li><span class="badge open">next up</span><strong>#20</strong> basic L-R movement testing</li>
+        <li><span class="badge open">next up</span><strong>#19</strong> servo calibration</li>
+        <li><span class="badge open">next up</span><strong>#473 follow-up</strong> wire <code>stt_service/</code> into main</li>
+      </ul>
+      <p class="footnote">Status reconciled against HEAD <code>172c6f5</code>. Phase 5a/5c/5d landed in <code>a4d0452</code> / <code>101d07b</code>+<code>e3ab697</code> / <code>c8fef7d</code> respectively — earlier docs labelled them "pending operator decision" in error.</p>
+    </section>
+
+    <section class="card status">
+      <h2>XTTS hardening tail (all shipped)</h2>
+      <ul>
+        <li><span class="badge shipped">done</span><strong>#442</strong> wire LAN xtts-v2 as composable TTS backend</li>
+        <li><span class="badge shipped">done</span><strong>#463</strong> scope chatterbox probes to <code>=chatterbox</code></li>
+        <li><span class="badge shipped">done</span><strong>#466</strong> TTS-down cooldown suppresses STT</li>
+        <li><span class="badge shipped">done</span><strong>#467</strong> wire <code>speaking_until</code> on XTTS path</li>
+        <li><span class="badge shipped">done</span><strong>#468</strong> post-TTS cooldown + stricter <code>no_speech_prob</code></li>
+      </ul>
+      <p class="footnote">Adapter is correct. Remaining work is xtts-v2 <em>service uptime</em> — Windows service wrapper, pin <code>transformers==4.40.2</code>, add <code>/health</code> + warmup probe.</p>
+    </section>
+
+    <section class="card legend">
+      <h2>Pointers</h2>
+      <ul>
+        <li><span class="swatch fork"></span><code>FORK_STATUS.md</code> — full doc</li>
+        <li><span class="swatch fork"></span><code>NOW.md</code> — 30-day rolling status</li>
+        <li><span class="swatch fork"></span><code>PIPELINE_REFACTOR.md</code> — epic table</li>
+        <li><span class="swatch fork"></span><code>FUTURE_RESEARCH.md</code> — hardware-blocked parking lot</li>
+      </ul>
+    </section>
+  </aside>
+</main>
+
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    securityLevel: "loose",
+    flowchart: { useMaxWidth: true, htmlLabels: true, curve: "basis" },
+  });
+</script>
+</body>
+</html>

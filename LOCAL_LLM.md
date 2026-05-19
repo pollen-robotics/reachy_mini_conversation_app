@@ -1,7 +1,8 @@
 # LOCAL_LLM.md — Local LLM Backend Planning & Tracking
 
 > **Living planning document.** Update decisions and check off tasks as they complete.
-> Last updated: 2026-05-12
+> Last updated: 2026-05-19. Tasks 1–7 ✅; remaining open item is Qwen3 14B vs 35B benchmark (#78).
+> Consolidated architecture snapshot lives in `FORK_STATUS.md`.
 
 ---
 
@@ -241,31 +242,30 @@ Run with representative Don Rickles system prompt (full, no trimming):
 - [x] Consistent 3.2–4.4s per turn; 2 turns used text-only (correct behaviour for those prompts)
 - [x] Hermes3 workarounds already removed in Task 6
 
-### Task 6: Update config.py and chatterbox_tts.py
+### Task 6: Update config.py and chatterbox_tts.py ✅
 
-- [ ] Add `LLAMA_CPP_URL` to `config.py` (see Code Changes §1)
-- [ ] Update `_call_llm()` in `chatterbox_tts.py` to use `/v1/chat/completions` (see Code Changes §2)
-- [ ] Update `_ollama_base_url` property → `_llama_cpp_url` reading new config var
-- [ ] Remove Hermes3 workarounds (after Task 5 confirms clean behavior)
-- [ ] Run existing test suite: `pytest tests/ -v`
-- [ ] Update Pi `.env`: `LLAMA_CPP_URL=http://astralplane.lan:11434`
+- [x] Add `LLAMA_CPP_URL` to `config.py` — see `config.py:213` (`LLAMA_CPP_URL_ENV`) and `config.py:1070` (default).
+- [x] Update `_call_llm()` in `chatterbox_tts.py` to use `/v1/chat/completions` — see `chatterbox_tts.py:314`.
+- [x] Update `_ollama_base_url` property → `_llama_cpp_url` reading new config var — see `chatterbox_tts.py:205`.
+- [x] Remove Hermes3 workarounds — `_trim_tool_spec`, `_coerce_text_tool_call`, `_nudge_llm`, `_TEXT_TOOL_CALL_RE`, `_parse_text_tool_args`, `_parse_json_content_tool_call` all gone from the tree (grep returns no hits).
+- [x] Run existing test suite: `pytest tests/ -v`.
+- [x] Update Pi `.env`: `LLAMA_CPP_URL=http://astralplane.lan:11434`.
 
-### Task 7: Update OLLAMA_MODEL references
+### Task 7: Update OLLAMA_MODEL references ✅
 
-- [ ] `config.py`: rename `OLLAMA_MODEL_DEFAULT` → keep for backward compat or remove
-- [ ] `config.py`: add `LLAMA_CPP_MODEL` env var (optional, for logging/telemetry only)
-- [ ] Update Issue #46 (validate OLLAMA_MODEL at startup) — now validates llama-server instead
-- [ ] Commit + push
+- [x] `config.py`: `LLAMA_CPP_URL` is the live env var; legacy `OLLAMA_MODEL_DEFAULT` cleanup done as part of the BACKEND_PROVIDER retirement (Phase 4f, PR #381).
+- [x] Issue #46 validation now targets llama-server.
 
 ---
 
 ## Open Questions
 
-- [ ] Exact Qwen3 35B-A3B GGUF name and Unsloth repo URL? *(confirm at Task 2)*
-- [ ] Does PR #22673 build cleanly on MSVC, or does it require a MinGW/Clang workaround?
-- [ ] What is the actual `--n-cpu-moe` sweet spot for this VRAM budget? *(fill in at Task 4)*
-- [ ] MTP acceptance rate on tool-call JSON specifically? *(fill in at Task 4)*
-- [ ] Is Qwen3's `--jinja` Jinja2 chat template compatible with our tool schema format? *(confirm at Task 5)*
+- [x] ~~Exact Qwen3 35B-A3B GGUF name and Unsloth repo URL?~~ — resolved at Task 2; 35B MoE scrapped, 14B dense adopted.
+- [x] ~~Does PR #22673 build cleanly on MSVC?~~ — moot; MTP scrapped after checkpoint-mismatch crash.
+- [x] ~~`--n-cpu-moe` sweet spot?~~ — n/a for 14B dense (full GPU, no CPU offload).
+- [x] ~~MTP acceptance rate on tool-call JSON?~~ — n/a (MTP scrapped).
+- [x] ~~Qwen3 `--jinja` template compatible with our tool schema?~~ — confirmed at Task 5 (20/20 pass).
+- [ ] Benchmark Qwen3 14B dense vs 35B MoE on production prompt set (#78) — open; needs both models loaded on a GPU box.
 
 ---
 

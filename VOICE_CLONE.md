@@ -1,7 +1,8 @@
 # Voice Clone — Local Infrastructure & Don Rickles Clone
 
 > **Living planning document.** Update decisions and check off tasks as they complete.
-> Last updated: 2026-05-13
+> Last updated: 2026-05-19. Decisions #1–#8 re-checked and still current.
+> Consolidated architecture snapshot lives in `FORK_STATUS.md`.
 
 ---
 
@@ -63,6 +64,8 @@ result as `self._voice_clone_ref_path`.  On every `/tts` request:
 
 **Critical lesson — Ollama GUI vs. direct serve:**
 The Ollama tray/GUI app (`ollama app.exe`) is a wrapper that partially exposes the Ollama API over LAN. It works for simple GET requests (`/api/tags`) but blocks `/api/chat`, `/v1/chat/completions`, and appears to silently drop or mishandle POST requests with large bodies (e.g. our full Rickles system prompt in the `system` field of `/api/generate`). **Never start Ollama by clicking the tray icon.** Always use the desktop shortcut → `Start-RobotServices.ps1`, which runs `ollama.exe serve` directly with `OLLAMA_HOST=0.0.0.0`.
+
+> **Status 2026-05-19:** Ollama has been replaced by llama-server (see `LOCAL_LLM.md`). The cautionary tale above is preserved for historical reference but no longer applies — the active LLM endpoint is `llama-server`'s `/v1/chat/completions` on port 11434.
 
 **Current state at end of Session 2:**
 - Code is on main and correct
@@ -281,6 +284,13 @@ Leaves ~1.5 GB headroom. Both processes can be co-resident.
 ---
 
 ## Phase 2: Don Rickles Voice Clone
+
+> **Status 2026-05-19:** Individual `profiles/don_rickles/` was consolidated
+> into the `profiles/house_comedian/` chimera during the profile cleanup
+> (commit 23583e5). Tasks 10–14 below predate that consolidation. If you
+> want a dedicated Rickles persona again, restore the profile directory
+> first; otherwise treat tasks 10–14 as describing the per-persona clone
+> workflow generically and apply them to whichever persona needs cloning.
 
 ### Task 10: Collect and Prepare Reference Audio
 

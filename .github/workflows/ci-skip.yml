@@ -1,0 +1,121 @@
+name: ci-skip
+# Required-check stub for docs-only PRs (issue: branch protection deadlocks
+# when path-filtered workflows don't fire on a doc change).
+#
+# Pattern: this workflow always triggers; a `changes` job detects whether
+# any code-path file changed; downstream "skip" jobs are gated by an `if:`
+# so they only run when no code-path files changed. The result:
+#
+# - docs-only PR  ─►  real workflows do not fire (paths excluded);
+#                     the skip jobs RUN and report success.
+#                     Branch protection sees the required check names green.
+#
+# - code-touching PR ─► real workflows fire and decide pass/fail;
+#                       the skip jobs are SKIPPED via `if:`.
+#                       GitHub treats `skipped` as passing for branch
+#                       protection, so the real result is what counts.
+#
+# Job names below must stay byte-identical to the required check names
+# produced by the real workflows (.github/workflows/{lint,pytest-fast,
+# pytest-full,typecheck,uv-lock-check}.yml). If you rename a real job or
+# tweak a matrix axis, update the matching stub here too.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code-changed: ${{ steps.detect.outputs.code-changed }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+          fi
+          # Empty/zero base (first push to a new branch) → assume code-changed
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            echo "code-changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only "$base" "$head" || true)
+          echo "Files changed between $base..$head:"
+          echo "$changed"
+          if echo "$changed" | grep -qE '^(src/|tests/|\.github/workflows/|pyproject\.toml$|uv\.lock$)'; then
+            echo "code-changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code-changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  ruff:
+    needs: changes
+    if: needs.changes.outputs.code-changed == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only PR — Ruff workflow did not fire; reporting green stub."
+
+  mypy:
+    needs: changes
+    if: needs.changes.outputs.code-changed == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only PR — Type check workflow did not fire; reporting green stub."
+
+  uv-lock-check:
+    needs: changes
+    if: needs.changes.outputs.code-changed == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only PR — uv.lock check workflow did not fire; reporting green stub."
+
+  pytest-fast-ubuntu:
+    name: pytest-fast (ubuntu-latest, py3.12)
+    needs: changes
+    if: needs.changes.outputs.code-changed == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only PR — pytest-fast workflow did not fire; reporting green stub."
+
+  pytest-fast-windows:
+    name: pytest-fast (windows-latest, py3.12)
+    needs: changes
+    if: needs.changes.outputs.code-changed == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only PR — pytest-fast workflow did not fire; reporting green stub."
+
+  pytest-full-ubuntu:
+    name: pytest-full (ubuntu-latest, py3.12)
+    needs: changes
+    if: needs.changes.outputs.code-changed == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only PR — pytest-full workflow did not fire; reporting green stub."
+
+  pytest-full-windows:
+    name: pytest-full (windows-latest, py3.12)
+    needs: changes
+    if: needs.changes.outputs.code-changed == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Docs-only PR — pytest-full workflow did not fire; reporting green stub."
