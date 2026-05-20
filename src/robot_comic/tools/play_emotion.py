@@ -1,5 +1,6 @@
 import json
 import random
+import difflib
 import logging
 from typing import Any, Dict
 from pathlib import Path
@@ -240,7 +241,23 @@ class PlayEmotion(Tool):
                 emotion_name = random.choice(emotion_names)
 
             if emotion_name not in emotion_names:
-                return {"error": f"Unknown emotion '{emotion_name}'. Available: {emotion_names}"}
+                nearest_matches = difflib.get_close_matches(emotion_name, emotion_names, n=1, cutoff=0.0)
+                nearest = nearest_matches[0] if nearest_matches else None
+                logger.warning(
+                    "play_emotion called with unknown emotion %r (nearest valid: %r)",
+                    emotion_name,
+                    nearest,
+                )
+                if nearest is not None:
+                    return {
+                        "error": (
+                            f"Unknown emotion '{emotion_name}'. Did you mean '{nearest}'?"
+                            " Valid emotions are exposed in the tool spec enum."
+                        )
+                    }
+                return {
+                    "error": (f"Unknown emotion '{emotion_name}'. Valid emotions are exposed in the tool spec enum.")
+                }
 
             # Add emotion to queue
             from robot_comic.dance_emotion_moves import EmotionQueueMove  # noqa: PLC0415
