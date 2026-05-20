@@ -51,13 +51,17 @@ def _require_name_segment(label: str, value: str) -> str:
     return candidate
 
 
+def _apply_name_normalization(value: str) -> str:
+    normalized = _NAME_NORMALIZER_PATTERN.sub("_", value).strip("_")
+    return re.sub(r"_+", "_", normalized)
+
+
 def _normalize_name_segment(label: str, value: str) -> str:
     raw = value.strip()
     if not raw:
         raise ValueError(f"{label.capitalize()} cannot be empty.")
 
-    normalized = _NAME_NORMALIZER_PATTERN.sub("_", raw).strip("_")
-    normalized = re.sub(r"_+", "_", normalized)
+    normalized = _apply_name_normalization(raw)
     if not normalized:
         raise ValueError(f"{label.capitalize()} '{value}' cannot be normalized into a valid tool identifier.")
     if normalized[0].isdigit():
