@@ -5,9 +5,11 @@ import re
 import json
 import asyncio
 import logging
-from typing import Any, Sequence
+from typing import Any
 from pathlib import Path
+from collections import Counter
 from dataclasses import field, asdict, dataclass
+from collections.abc import Sequence
 
 from huggingface_hub import HfApi, SpaceInfo
 
@@ -174,7 +176,7 @@ def _build_installed_tool_space_tools(
     remote_specs: Sequence[RemoteToolSpec],
 ) -> list[InstalledToolSpaceTool]:
     cleaned_names = [_clean_space_tool_name(slug, alias, spec.remote_name) for spec in remote_specs]
-    collisions = {name for name in cleaned_names if cleaned_names.count(name) > 1}
+    collisions = {name for name, count in Counter(cleaned_names).items() if count > 1}
 
     tools: list[InstalledToolSpaceTool] = []
     for remote_spec, cleaned_name in zip(remote_specs, cleaned_names, strict=True):
