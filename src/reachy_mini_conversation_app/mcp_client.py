@@ -51,7 +51,8 @@ def _require_name_segment(label: str, value: str) -> str:
     return candidate
 
 
-def _apply_name_normalization(value: str) -> str:
+def apply_name_normalization(value: str) -> str:
+    """Replace non-identifier characters with underscores and collapse runs."""
     normalized = _NAME_NORMALIZER_PATTERN.sub("_", value).strip("_")
     return re.sub(r"_+", "_", normalized)
 
@@ -61,7 +62,7 @@ def _normalize_name_segment(label: str, value: str) -> str:
     if not raw:
         raise ValueError(f"{label.capitalize()} cannot be empty.")
 
-    normalized = _apply_name_normalization(raw)
+    normalized = apply_name_normalization(raw)
     if not normalized:
         raise ValueError(f"{label.capitalize()} '{value}' cannot be normalized into a valid tool identifier.")
     if normalized[0].isdigit():
