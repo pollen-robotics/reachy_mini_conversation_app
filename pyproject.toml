@@ -190,7 +190,6 @@ ignore = [
 "src/robot_comic/gemini_tts.py" = ["E402", "D102", "D107"]
 "src/robot_comic/llama_base.py" = ["D102", "D107"]
 "src/robot_comic/llama_elevenlabs_tts.py" = ["D102", "D107"]
-"src/robot_comic/llama_gemini_tts.py" = ["D102", "D107"]
 "src/robot_comic/monitor.py" = ["D102", "D107"]
 
 [tool.ruff.lint.isort]

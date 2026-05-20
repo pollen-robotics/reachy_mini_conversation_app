@@ -92,7 +92,7 @@ the `google.genai` SDK and the `fastrtc → gradio` chain.
 
 **Pulled by:** `from google.genai import types` at the top of
 `src/robot_comic/elevenlabs_tts.py:22` (also `gemini_tts.py:22`,
-`gemini_live.py`, `gemini_llm.py`, `llama_gemini_tts.py`).
+`gemini_live.py`, `gemini_llm.py`).
 **Reason for cost:** `google.genai.types` eagerly constructs the full
 pydantic schema for the entire genai REST surface (`google.genai._interactions.types.*` — hundreds of submodules, each defining a `BaseModel`).
 **Recommendation:** **Lazy-load.** This single import is more than a sixth
@@ -100,7 +100,7 @@ of the entire boot budget. The handler classes only need `types` inside
 methods that actually construct a request (e.g. `_build_contents`,
 `_make_generate_call`). Move both `from google import genai` and
 `from google.genai import types` into the first function/method that
-needs them, or into a memoized helper. Same fix in all five files that do
+needs them, or into a memoized helper. Same fix in all four files that do
 the eager import.
 **Expected savings:** ~5.5s off cold-boot for any backend that selects an
 elevenlabs/gemini path. Recovered cost is paid once on first turn, when
@@ -179,7 +179,7 @@ Filed against #277:
 
 - #283 — **lazy-load `google.genai` / `google.genai.types`** (~5.5 s) —
   top-level imports in `elevenlabs_tts.py`, `gemini_tts.py`,
-  `gemini_live.py`, `gemini_llm.py`, `llama_gemini_tts.py`. Move into
+  `gemini_live.py`, `gemini_llm.py`. Move into
   the first method that constructs a request.
 - #284 — **defer `fastrtc` import surface** (~0.75-1.2 s recoverable
   today; ~6.7 s if upstream cooperates) — split the `AsyncStreamHandler`

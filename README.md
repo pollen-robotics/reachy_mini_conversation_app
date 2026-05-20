@@ -145,7 +145,7 @@ Copy `.env.example` to `.env` when you want to switch backends, provide API keys
 | Variable | Description |
 |----------|-------------|
 | `OPENAI_API_KEY` | Required for OpenAI Realtime mode. |
-| `GEMINI_API_KEY` | Required for Gemini mode. Also accepts `GOOGLE_API_KEY`. Get one at [aistudio.google.com](https://aistudio.google.com/apikey). **Note**: the free tier of `gemini-3.1-flash-tts-preview` (used by `gemini_tts` and `llama_gemini_tts`) is capped at ~10 requests/day; enable billing on the key for sustained use or expect 429 `RESOURCE_EXHAUSTED` with a rate-limit message in the chat UI. |
+| `GEMINI_API_KEY` | Required for Gemini mode. Also accepts `GOOGLE_API_KEY`. Get one at [aistudio.google.com](https://aistudio.google.com/apikey). **Note**: the free tier of `gemini-3.1-flash-tts-preview` (used by `gemini_tts`) is capped at ~10 requests/day; enable billing on the key for sustained use or expect 429 `RESOURCE_EXHAUSTED` with a rate-limit message in the chat UI. |
 | `BACKEND_PROVIDER` | Realtime backend to use: `huggingface` (default), `openai`, `gemini`, or `local_stt`. |
 | `MODEL_NAME` | Optional model override for OpenAI Realtime or Gemini Live. Defaults to `gpt-realtime` for OpenAI and `gemini-3.1-flash-live-preview` for Gemini. Hugging Face uses the server's model selection. |
 | `HF_REALTIME_CONNECTION_MODE` | Hugging Face connection selector: `deployed` uses the built-in Hugging Face server; `local` uses `HF_REALTIME_WS_URL`. Defaults to `deployed`. |
@@ -159,7 +159,7 @@ Copy `.env.example` to `.env` when you want to switch backends, provide API keys
 | `LOCAL_STT_CACHE_DIR` | Cache directory for Moonshine model downloads. Defaults to `./cache/moonshine_voice`. |
 | `LOCAL_STT_LANGUAGE` | Language code for the local STT model. Defaults to `en`. |
 | `LOCAL_STT_MODEL` | Moonshine model selector: `tiny_streaming` or `small_streaming`. Defaults to `tiny_streaming`. |
-| `REACHY_MINI_MAX_HISTORY_TURNS` | Cap on retained user turns in handler-managed conversation history (`gemini_tts`, `llama_gemini_tts`, and llama-server response handlers). Default `20`; set `0` to disable trimming. Realtime backends (OpenAI/HF/Gemini Live) manage history server-side and ignore this. |
+| `REACHY_MINI_MAX_HISTORY_TURNS` | Cap on retained user turns in handler-managed conversation history (`gemini_tts` and llama-server response handlers). Default `20`; set `0` to disable trimming. Realtime backends (OpenAI/HF/Gemini Live) manage history server-side and ignore this. |
 | `LOCAL_STT_UPDATE_INTERVAL` | Partial transcript update interval in seconds. Defaults to `0.35`. |
 
 ### Local speech-to-text

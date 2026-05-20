@@ -180,50 +180,6 @@ async def test_tts_429_exhaustion_returns_none_and_logs_loudly(caplog) -> None:
 
 
 @pytest.mark.asyncio
-async def test_llama_gemini_tts_429_backs_off() -> None:
-    """LlamaGeminiTTS handler also honours Retry-After on 429."""
-    from robot_comic.llama_gemini_tts import LlamaGeminiTTSResponseHandler
-
-    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
-    handler = LlamaGeminiTTSResponseHandler(deps)
-    handler._client = MagicMock()
-
-    err = _make_429(retry_delay="3s")
-    call_count = 0
-
-    async def flaky_generate(model, contents, config):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            raise err
-        import base64
-
-        encoded = base64.b64encode(b"\x00" * 240).decode()
-        part = MagicMock()
-        part.inline_data.data = encoded
-        candidate = MagicMock()
-        candidate.content.parts = [part]
-        resp = MagicMock()
-        resp.candidates = [candidate]
-        return resp
-
-    handler._client.aio = MagicMock()
-    handler._client.aio.models = MagicMock()
-    handler._client.aio.models.generate_content = flaky_generate
-
-    sleep_calls: list[float] = []
-
-    async def fake_sleep(delay: float) -> None:
-        sleep_calls.append(delay)
-
-    with patch("robot_comic.llama_gemini_tts.asyncio.sleep", new=fake_sleep):
-        result = await handler._call_gemini_tts("hello")
-
-    assert result is not None
-    assert sleep_calls and sleep_calls[0] >= 3.0
-
-
-@pytest.mark.asyncio
 async def test_dispatch_surfaces_rate_limit_specific_message_to_ui() -> None:
     """On TTS exhaustion via 429, the chat-UI message names the quota, not generic."""
     from fastrtc import AdditionalOutputs

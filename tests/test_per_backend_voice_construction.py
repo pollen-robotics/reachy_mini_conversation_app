@@ -225,22 +225,6 @@ def test_elevenlabs_config_params_wins_over_per_backend_file(tmp_path: Path) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_gemini_tts_get_session_voice_called_with_correct_backend(tmp_path: Path) -> None:
-    """llama_gemini_tts get_current_voice falls through to get_session_voice(backend="gemini").
-
-    Simulates the call site:
-        voice = self._voice_override or get_session_voice(backend="gemini", default=GEMINI_TTS_DEFAULT_VOICE)
-    """
-    profile_dir = _make_profile(tmp_path, "test_persona")
-    (profile_dir / "gemini_voice.txt").write_text("Puck", encoding="utf-8")
-
-    fake = _fake_config(tmp_path, "test_persona")
-    with patch("robot_comic.prompts.config", fake):
-        resolved = get_session_voice(backend="gemini", default="Zephyr")
-
-    assert resolved == "Puck"
-
-
 def test_gemini_tts_env_default_honored_when_no_file(tmp_path: Path) -> None:
     """get_session_voice returns env-var default for gemini when no file exists."""
     _make_profile(tmp_path, "test_persona")
@@ -251,30 +235,6 @@ def test_gemini_tts_env_default_honored_when_no_file(tmp_path: Path) -> None:
         resolved = get_session_voice(backend="gemini", default="Zephyr")
 
     assert resolved == "Zephyr"
-
-
-def test_gemini_tts_voice_override_wins_over_per_backend_file(tmp_path: Path) -> None:
-    """_voice_override on the handler wins over per-backend file.
-
-    In llama_gemini_tts.get_current_voice, the call site is:
-        voice = self._voice_override or get_session_voice(...)
-
-    If _voice_override is set (via change_voice at runtime), the `or` short-circuit
-    means get_session_voice is never called.  This test documents that contract.
-    """
-    profile_dir = _make_profile(tmp_path, "test_persona")
-    (profile_dir / "gemini_voice.txt").write_text("Puck", encoding="utf-8")
-
-    fake = _fake_config(tmp_path, "test_persona")
-    with patch("robot_comic.prompts.config", fake):
-        per_backend = get_session_voice(backend="gemini", default="Zephyr")
-
-    assert per_backend == "Puck"
-
-    # Simulate _voice_override set at runtime (takes precedence via `or` short-circuit).
-    voice_override = "Kore"
-    voice = voice_override or per_backend
-    assert voice == "Kore", "Runtime _voice_override must win over per-backend file"
 
 
 # ---------------------------------------------------------------------------
