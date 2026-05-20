@@ -131,8 +131,8 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         self.connection: AsyncRealtimeConnection | None = None
         self.output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]" = asyncio.Queue()
 
-        self.last_activity_time = asyncio.get_event_loop().time()
-        self.start_time = asyncio.get_event_loop().time()
+        self.last_activity_time = time.monotonic()
+        self.start_time = time.monotonic()
         self.is_idle_tool_call = False
         self.gradio_mode = gradio_mode
         self.instance_path = instance_path
@@ -237,7 +237,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
     def _mark_activity(self, reason: str) -> None:
         """Record non-idle conversation activity for the idle timer."""
-        self.last_activity_time = asyncio.get_event_loop().time()
+        self.last_activity_time = time.monotonic()
         logger.debug("last activity time updated to %s (%s)", self.last_activity_time, reason)
 
     def copy(self) -> "BaseRealtimeHandler":
@@ -957,7 +957,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         # This is called periodically by the fastrtc Stream
 
         # Handle idle
-        idle_duration = asyncio.get_event_loop().time() - self.last_activity_time
+        idle_duration = time.monotonic() - self.last_activity_time
         if idle_duration > 180.0 and self._response_done_event.is_set() and self.deps.movement_manager.is_idle():
             try:
                 await self.send_idle_signal(idle_duration)
@@ -965,7 +965,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 logger.warning("Idle signal skipped (connection closed?): %s", e)
                 return None
 
-            self.last_activity_time = asyncio.get_event_loop().time()  # avoid repeated resets
+            self.last_activity_time = time.monotonic()  # avoid repeated resets
 
         return await self._wait_for_output_item()
 
@@ -1004,7 +1004,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
     def format_timestamp(self) -> str:
         """Format current timestamp with date, time, and elapsed seconds."""
-        loop_time = asyncio.get_event_loop().time()  # monotonic
+        loop_time = time.monotonic()
         elapsed_seconds = loop_time - self.start_time
         dt = datetime.now()  # wall-clock
         return f"[{dt.strftime('%Y-%m-%d %H:%M:%S')} | +{elapsed_seconds:.1f}s]"
