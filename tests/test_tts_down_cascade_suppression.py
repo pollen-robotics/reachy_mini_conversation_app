@@ -19,6 +19,7 @@ from typing import Any, AsyncIterator
 import httpx
 import pytest
 
+from robot_comic.config import config as _cfg
 from robot_comic.backends import AudioFrame, LLMResponse
 from robot_comic.composable_pipeline import (
     _TTS_DOWN_COOLDOWN_ENV,
@@ -27,6 +28,17 @@ from robot_comic.composable_pipeline import (
     _TTS_DOWN_COOLDOWN_DEFAULT,
     ComposablePipeline,
 )
+
+
+@pytest.fixture(autouse=True)
+def _disable_startup_greeting(monkeypatch: pytest.MonkeyPatch):
+    """Suppress the #504 synthetic startup greeting for every test in this
+    module so the TTS-down cooldown assertions aren't pre-armed by the
+    greeting itself. The greeting is covered in
+    ``tests/test_composable_pipeline_startup_greeting.py``.
+    """
+    monkeypatch.setattr(_cfg, "STARTUP_GREETING_ENABLED", False)
+    yield
 
 
 # ---------------------------------------------------------------------------

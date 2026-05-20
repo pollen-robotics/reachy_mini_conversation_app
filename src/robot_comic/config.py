@@ -1179,6 +1179,13 @@ class Config:
     # behind the flag for A/B comparison. Default: canned.
     STARTUP_TRIGGER_MODE: str = (os.getenv("REACHY_MINI_STARTUP_TRIGGER_MODE") or "canned").strip().lower()
 
+    # Composable-pipeline startup greeting (#504). When True, the composable
+    # pipeline fires a synthetic ``[conversation started]`` transcript through
+    # the LLM at ``start_up()`` so the persona kicks off the conversation,
+    # matching the legacy handlers' behaviour. Set to 0/false for chassis-safe
+    # / silent boots where the robot should not speak until the user does.
+    STARTUP_GREETING_ENABLED: bool = _env_flag("REACHY_MINI_STARTUP_GREETING", default=True)
+
     # Face recognition: when enabled, the camera pipeline will attempt to match
     # incoming visitors against the stored face-embedding database and surface
     # a name for repeat-visitor callbacks.  Requires a real FaceEmbedder
@@ -1432,6 +1439,7 @@ def refresh_runtime_config_from_env() -> None:
     config.STARTUP_SCREEN_ENABLED = _env_flag("REACHY_MINI_STARTUP_SCREEN", default=False)
     config.STARTUP_SCREEN_PERSONA_ORDER = os.getenv("REACHY_MINI_STARTUP_SCREEN_PERSONA_ORDER", "")
     config.STARTUP_TRIGGER_MODE = (os.getenv("REACHY_MINI_STARTUP_TRIGGER_MODE") or "canned").strip().lower()
+    config.STARTUP_GREETING_ENABLED = _env_flag("REACHY_MINI_STARTUP_GREETING", default=True)
     config.WS_ENABLED = _env_flag("REACHY_MINI_WS_ENABLED", default=False)
     config.WS_PORT = int(os.getenv("REACHY_MINI_WS_PORT", "8765"))
     config.WS_SERVER_HOST = os.getenv("REACHY_MINI_WS_SERVER_HOST", "localhost")

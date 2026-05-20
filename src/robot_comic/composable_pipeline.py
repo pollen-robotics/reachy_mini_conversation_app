@@ -70,7 +70,7 @@ from opentelemetry import context as otel_context
 
 from robot_comic import telemetry
 from robot_comic.pause import TranscriptDisposition
-from robot_comic.config import set_custom_profile
+from robot_comic.config import config, set_custom_profile
 from robot_comic.prompts import get_session_instructions
 from robot_comic.backends import (
     ToolCall,
@@ -451,6 +451,24 @@ class ComposablePipeline:
             type(self.llm).__name__,
             type(self.tts).__name__,
         )
+        # Issue #504 — Composable mode is input-driven only; without a kick
+        # the persona stays silent until the user speaks. Fire a synthetic
+        # ``[conversation started]`` transcript through the LLM at start_up
+        # so the persona produces its opener, matching the legacy handlers'
+        # behaviour. Gated by ``REACHY_MINI_STARTUP_GREETING`` (default 1;
+        # set 0 for chassis-safe / silent boots).
+        #
+        # Fire-and-forget: scheduled as a separate task so start_up reaches
+        # the ``_stop_event.wait()`` idle state immediately instead of
+        # blocking on the LLM round-trip + TTS synthesis.
+        if config.STARTUP_GREETING_ENABLED:
+            logger.info("ComposablePipeline startup greeting enabled")
+            asyncio.create_task(
+                self._on_transcript_completed("[conversation started]"),
+                name="composable-startup-greeting",
+            )
+        else:
+            logger.info("ComposablePipeline startup greeting disabled")
         await self._stop_event.wait()
 
     async def shutdown(self) -> None:

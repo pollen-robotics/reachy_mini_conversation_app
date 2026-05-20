@@ -6,8 +6,20 @@ from typing import Any, AsyncIterator
 
 import pytest
 
+from robot_comic.config import config as _cfg
 from robot_comic.backends import ToolCall, AudioFrame, LLMResponse
 from robot_comic.composable_pipeline import ComposablePipeline
+
+
+@pytest.fixture(autouse=True)
+def _disable_startup_greeting(monkeypatch: pytest.MonkeyPatch):
+    """Suppress the #504 synthetic startup greeting for every test in this
+    module so existing assertions about conversation history / LLM-call counts
+    remain valid. The greeting itself is covered in
+    ``tests/test_composable_pipeline_startup_greeting.py``.
+    """
+    monkeypatch.setattr(_cfg, "STARTUP_GREETING_ENABLED", False)
+    yield
 
 
 # ---------------------------------------------------------------------------
