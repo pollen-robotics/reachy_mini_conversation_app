@@ -5,6 +5,7 @@ import re
 import json
 import asyncio
 import logging
+import argparse
 from typing import Any
 from pathlib import Path
 from collections import Counter
@@ -282,7 +283,7 @@ def format_space_tool_listing(space: ResolvedInstalledToolSpace) -> str:
     return "\n".join(lines)
 
 
-def handle_tool_spaces_command(args: Any, *, instance_path: str | Path | None = None) -> int:
+def handle_tool_spaces_command(args: argparse.Namespace, *, instance_path: str | Path | None = None) -> int:
     """Handle tool-spaces subcommands from the main CLI."""
     command = getattr(args, "tool_spaces_command", None)
     if command == "add":

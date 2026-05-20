@@ -16,6 +16,8 @@ from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from mcp import ClientSession
+    from mcp.types import Tool as McpTool
+    from mcp.types import CallToolResult as McpCallToolResult
 
 
 _NAME_SEGMENT_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -91,7 +93,7 @@ def build_namespaced_tool_name(server_alias: str, tool_name: str) -> str:
     return f"{alias}{_NAMESPACE_SEPARATOR}{tool_segment}"
 
 
-def _dump_content_block(block: Any) -> dict[str, Any]:
+def _dump_content_block(block: object) -> dict[str, Any]:
     if hasattr(block, "model_dump"):
         dumped = block.model_dump(mode="json", by_alias=True, exclude_none=True)
         if isinstance(dumped, dict):
@@ -191,7 +193,7 @@ class RemoteToolSpec:
     parameters_schema: dict[str, Any]
 
     @classmethod
-    def from_mcp_tool(cls, server_alias: str, tool: Any) -> "RemoteToolSpec":
+    def from_mcp_tool(cls, server_alias: str, tool: "McpTool") -> "RemoteToolSpec":
         """Build an app-facing spec from an MCP SDK tool descriptor."""
         description = (getattr(tool, "description", None) or "").strip()
         parameters_schema = getattr(tool, "inputSchema", None)
@@ -238,7 +240,7 @@ class RemoteToolCallResponse:
         *,
         server_alias: str,
         remote_tool_name: str,
-        result: Any,
+        result: "McpCallToolResult",
     ) -> "RemoteToolCallResponse":
         """Convert an MCP SDK tool result into the app's result envelope."""
         content_blocks = [_dump_content_block(block) for block in getattr(result, "content", [])]
@@ -340,8 +342,8 @@ class RemoteMcpToolClient:
             raise ValueError(f"Unknown remote MCP tool '{namespaced_tool_name}' for server '{self.server.alias}'.")
         return spec
 
-    async def _list_all_tools(self, session: "ClientSession") -> list[Any]:
-        tools: list[Any] = []
+    async def _list_all_tools(self, session: "ClientSession") -> list["McpTool"]:
+        tools: list[McpTool] = []
         cursor: str | None = None
         while True:
             page = await session.list_tools(cursor=cursor)
