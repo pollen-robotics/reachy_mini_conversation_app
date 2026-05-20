@@ -16,6 +16,7 @@ from reachy_mini_conversation_app.mcp_client import (
     RemoteToolSpec,
     RemoteMcpToolClient,
     RemoteMcpServerConfig,
+    apply_name_normalization,
 )
 
 
@@ -24,7 +25,6 @@ logger = logging.getLogger(__name__)
 INSTALLED_TOOL_SPACES_FILENAME = "installed_tool_spaces.json"
 TERMINAL_EXTERNAL_CONTENT_DIRECTORY = Path("external_content")
 _SLUG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
-_NAME_NORMALIZER_PATTERN = re.compile(r"[^A-Za-z0-9_]+")
 
 
 @dataclass(frozen=True)
@@ -137,8 +137,7 @@ def validate_space_slug(slug: str) -> str:
 
 def normalize_space_alias(slug: str) -> str:
     """Derive a local alias from a Space slug."""
-    normalized = _NAME_NORMALIZER_PATTERN.sub("_", slug).strip("_")
-    normalized = re.sub(r"_+", "_", normalized)
+    normalized = apply_name_normalization(slug)
     if not normalized:
         raise ValueError(f"Space slug '{slug}' cannot be normalized into a local alias.")
     if normalized[0].isdigit():
@@ -146,9 +145,8 @@ def normalize_space_alias(slug: str) -> str:
     return normalized
 
 
-def _normalize_name_segment(value: str) -> str:
-    normalized = _NAME_NORMALIZER_PATTERN.sub("_", value).strip("_")
-    normalized = re.sub(r"_+", "_", normalized)
+def _normalize_segment(value: str) -> str:
+    normalized = apply_name_normalization(value)
     if not normalized:
         return "tool"
     if normalized[0].isdigit():
@@ -157,9 +155,9 @@ def _normalize_name_segment(value: str) -> str:
 
 
 def _clean_space_tool_name(slug: str, alias: str, remote_name: str) -> str:
-    normalized_remote_name = _normalize_name_segment(remote_name)
+    normalized_remote_name = _normalize_segment(remote_name)
     space_name = slug.split("/", maxsplit=1)[1]
-    normalized_space_name = _normalize_name_segment(space_name)
+    normalized_space_name = _normalize_segment(space_name)
     redundant_prefix = f"{normalized_space_name}_"
 
     if normalized_remote_name.startswith(redundant_prefix):
