@@ -209,7 +209,25 @@ if _NO_SPEECH_THRESHOLD_RAW:
 # Backstop for the pathological case where continuous ambient noise
 # keeps the VAD in-utterance indefinitely (62s observation on
 # 2026-05-16). Issue #429.
+# Override via env: REACHY_MINI_FASTER_WHISPER_MAX_BUFFER_SEC=1.0..60.0
 _MAX_BUFFER_SEC_DEFAULT = 10.0
+try:
+    _MAX_BUFFER_SEC_ENV = float(os.getenv("REACHY_MINI_FASTER_WHISPER_MAX_BUFFER_SEC", str(_MAX_BUFFER_SEC_DEFAULT)))
+except (ValueError, TypeError):
+    logging.getLogger(__name__).warning(
+        "REACHY_MINI_FASTER_WHISPER_MAX_BUFFER_SEC=%r is not a valid float; falling back to default %.2f.",
+        os.getenv("REACHY_MINI_FASTER_WHISPER_MAX_BUFFER_SEC"),
+        _MAX_BUFFER_SEC_DEFAULT,
+    )
+    _MAX_BUFFER_SEC_ENV = _MAX_BUFFER_SEC_DEFAULT
+if not (1.0 <= _MAX_BUFFER_SEC_ENV <= 60.0):
+    logging.getLogger(__name__).warning(
+        "REACHY_MINI_FASTER_WHISPER_MAX_BUFFER_SEC=%.2f is out of range [1.0, 60.0]; falling back to default %.2f.",
+        _MAX_BUFFER_SEC_ENV,
+        _MAX_BUFFER_SEC_DEFAULT,
+    )
+    _MAX_BUFFER_SEC_ENV = _MAX_BUFFER_SEC_DEFAULT
+_MAX_BUFFER_SEC = _MAX_BUFFER_SEC_ENV
 
 # Number of intra-op threads passed to CTranslate2 via WhisperModel(cpu_threads=N).
 # CTranslate2 defaults to 4 (all cores), which over-subscribes a 4-core Pi CM4
@@ -309,7 +327,7 @@ class FasterWhisperSTTAdapter:
         compute_type: str = "int8",
         vad_aggressiveness: int = _VAD_AGGRESSIVENESS,
         no_speech_threshold: float = _NO_SPEECH_THRESHOLD_DEFAULT,
-        max_buffer_sec: float = _MAX_BUFFER_SEC_DEFAULT,
+        max_buffer_sec: float = _MAX_BUFFER_SEC,
         cpu_threads: int = _CPU_THREADS_DEFAULT,
     ) -> None:
         """Capture echo-guard + tuning knobs; defer all model loads to ``start()``.

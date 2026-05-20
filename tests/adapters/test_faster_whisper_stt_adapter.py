@@ -1397,6 +1397,103 @@ def test_vad_start_frames_out_of_range_falls_back(monkeypatch: pytest.MonkeyPatc
     importlib.reload(_mod)
 
 
+# ---------------------------------------------------------------------------
+# Max-buffer force-flush knob (issue #509)
+# ---------------------------------------------------------------------------
+
+
+def test_max_buffer_sec_default() -> None:
+    """Module-level default is 10.0s force-flush backstop."""
+    from robot_comic.adapters.faster_whisper_stt_adapter import _MAX_BUFFER_SEC, _MAX_BUFFER_SEC_DEFAULT
+
+    assert _MAX_BUFFER_SEC_DEFAULT == 10.0, f"_MAX_BUFFER_SEC_DEFAULT should be 10.0, got {_MAX_BUFFER_SEC_DEFAULT}"
+    assert _MAX_BUFFER_SEC == _MAX_BUFFER_SEC_DEFAULT, (
+        f"_MAX_BUFFER_SEC should equal _MAX_BUFFER_SEC_DEFAULT ({_MAX_BUFFER_SEC_DEFAULT}), got {_MAX_BUFFER_SEC}"
+    )
+
+
+def test_max_buffer_sec_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """REACHY_MINI_FASTER_WHISPER_MAX_BUFFER_SEC=5.0 overrides the module-level default."""
+    import importlib
+
+    import robot_comic.adapters.faster_whisper_stt_adapter as _mod
+
+    monkeypatch.setenv("REACHY_MINI_FASTER_WHISPER_MAX_BUFFER_SEC", "5.0")
+    importlib.reload(_mod)
+
+    from robot_comic.adapters.faster_whisper_stt_adapter import _MAX_BUFFER_SEC
+
+    assert _MAX_BUFFER_SEC == 5.0, f"Expected _MAX_BUFFER_SEC=5.0 after env override, got {_MAX_BUFFER_SEC}"
+
+    # Restore module to default state so subsequent tests are unaffected.
+    monkeypatch.delenv("REACHY_MINI_FASTER_WHISPER_MAX_BUFFER_SEC", raising=False)
+    importlib.reload(_mod)
+
+
+def test_max_buffer_sec_out_of_range_falls_back(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Out-of-range values (0.5, 120.0) fall back to _MAX_BUFFER_SEC_DEFAULT and log a warning."""
+    import logging
+    import importlib
+
+    import robot_comic.adapters.faster_whisper_stt_adapter as _mod
+
+    for bad_value in ("0.5", "120.0"):
+        with monkeypatch.context() as m:
+            m.setenv("REACHY_MINI_FASTER_WHISPER_MAX_BUFFER_SEC", bad_value)
+            with caplog.at_level(logging.WARNING, logger="robot_comic.adapters.faster_whisper_stt_adapter"):
+                caplog.clear()
+                importlib.reload(_mod)
+
+            from robot_comic.adapters.faster_whisper_stt_adapter import (
+                _MAX_BUFFER_SEC,
+                _MAX_BUFFER_SEC_DEFAULT,
+            )
+
+            assert _MAX_BUFFER_SEC == _MAX_BUFFER_SEC_DEFAULT, (
+                f"Bad value {bad_value!r} should fall back to {_MAX_BUFFER_SEC_DEFAULT}, got {_MAX_BUFFER_SEC}"
+            )
+            assert any("out of range" in r.getMessage() for r in caplog.records), (
+                f"Expected an out-of-range warning for {bad_value!r}; got {[r.getMessage() for r in caplog.records]}"
+            )
+
+    # Restore.
+    monkeypatch.delenv("REACHY_MINI_FASTER_WHISPER_MAX_BUFFER_SEC", raising=False)
+    importlib.reload(_mod)
+
+
+def test_max_buffer_sec_non_numeric_falls_back(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Non-numeric values (e.g. "abc") fall back to _MAX_BUFFER_SEC_DEFAULT and log a warning."""
+    import logging
+    import importlib
+
+    import robot_comic.adapters.faster_whisper_stt_adapter as _mod
+
+    monkeypatch.setenv("REACHY_MINI_FASTER_WHISPER_MAX_BUFFER_SEC", "abc")
+    with caplog.at_level(logging.WARNING, logger="robot_comic.adapters.faster_whisper_stt_adapter"):
+        caplog.clear()
+        importlib.reload(_mod)
+
+    from robot_comic.adapters.faster_whisper_stt_adapter import (
+        _MAX_BUFFER_SEC,
+        _MAX_BUFFER_SEC_DEFAULT,
+    )
+
+    assert _MAX_BUFFER_SEC == _MAX_BUFFER_SEC_DEFAULT, (
+        f"Non-numeric value should fall back to {_MAX_BUFFER_SEC_DEFAULT}, got {_MAX_BUFFER_SEC}"
+    )
+    assert any("not a valid float" in r.getMessage() for r in caplog.records), (
+        f"Expected an invalid-float warning; got {[r.getMessage() for r in caplog.records]}"
+    )
+
+    # Restore.
+    monkeypatch.delenv("REACHY_MINI_FASTER_WHISPER_MAX_BUFFER_SEC", raising=False)
+    importlib.reload(_mod)
+
+
 @pytest.mark.asyncio
 async def test_vad_gate_opens_only_after_threshold_frames(monkeypatch: pytest.MonkeyPatch) -> None:
     """``on_speech_started`` fires only after _VAD_START_FRAMES consecutive speech frames.
