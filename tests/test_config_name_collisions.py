@@ -67,10 +67,11 @@ def test_hf_default_session_url_uses_stable_space_proxy() -> None:
     assert ".aws.endpoints.huggingface.cloud" not in config_mod.HF_DEFAULTS.session_url
 
 
-def test_refresh_runtime_config_reloads_hf_runtime_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_refresh_runtime_config_reloads_hf_runtime_fields(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Instance-local .env reloads should update every env-backed Hugging Face runtime field."""
+    hf_home = str(tmp_path / "reachy-hf-cache")
     monkeypatch.setenv("HF_TOKEN", "hf-runtime-token")
-    monkeypatch.setenv("HF_HOME", "/tmp/reachy-hf-cache")
+    monkeypatch.setenv("HF_HOME", hf_home)
     monkeypatch.setenv("LOCAL_VISION_MODEL", "test/local-vision-model")
 
     monkeypatch.setattr(config_mod.config, "HF_TOKEN", None)
@@ -80,7 +81,7 @@ def test_refresh_runtime_config_reloads_hf_runtime_fields(monkeypatch: pytest.Mo
     config_mod.refresh_runtime_config_from_env()
 
     assert config_mod.config.HF_TOKEN == "hf-runtime-token"
-    assert config_mod.config.HF_HOME == "/tmp/reachy-hf-cache"
+    assert config_mod.config.HF_HOME == hf_home
     assert config_mod.config.LOCAL_VISION_MODEL == "test/local-vision-model"
 
 

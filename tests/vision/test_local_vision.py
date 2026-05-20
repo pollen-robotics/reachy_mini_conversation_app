@@ -1,6 +1,7 @@
 """Tests for the vision processing module."""
 
 from typing import Any
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -269,7 +270,7 @@ def test_vision_processor_process_image_retries_input_transfer_failure(
     assert batch_mock.to.call_count == 2
 
 
-def test_initialize_vision_processor_success(mock_torch: Any, mock_transformers: Any) -> None:
+def test_initialize_vision_processor_success(mock_torch: Any, mock_transformers: Any, tmp_path: Path) -> None:
     """Test initialize_vision_processor creates VisionProcessor successfully."""
     with (
         patch("robot_comic.vision.local_vision.snapshot_download") as mock_download,
@@ -277,7 +278,7 @@ def test_initialize_vision_processor_success(mock_torch: Any, mock_transformers:
         patch("robot_comic.vision.local_vision.config") as mock_config,
     ):
         mock_config.LOCAL_VISION_MODEL = "test/model"
-        mock_config.HF_HOME = "/tmp/hf_cache"
+        mock_config.HF_HOME = str(tmp_path / "hf_cache")
 
         result = initialize_vision_processor()
 
@@ -286,7 +287,7 @@ def test_initialize_vision_processor_success(mock_torch: Any, mock_transformers:
         mock_download.assert_called_once()
 
 
-def test_initialize_vision_processor_download_failure(mock_torch: Any) -> None:
+def test_initialize_vision_processor_download_failure(mock_torch: Any, tmp_path: Path) -> None:
     """Test initialize_vision_processor surfaces download failures."""
     with (
         patch("robot_comic.vision.local_vision.snapshot_download") as mock_download,
@@ -294,14 +295,14 @@ def test_initialize_vision_processor_download_failure(mock_torch: Any) -> None:
         patch("robot_comic.vision.local_vision.config") as mock_config,
     ):
         mock_config.LOCAL_VISION_MODEL = "test/model"
-        mock_config.HF_HOME = "/tmp/hf_cache"
+        mock_config.HF_HOME = str(tmp_path / "hf_cache")
         mock_download.side_effect = Exception("Network error")
 
         with pytest.raises(Exception, match="Network error"):
             initialize_vision_processor()
 
 
-def test_initialize_vision_processor_processor_failure(mock_torch: Any) -> None:
+def test_initialize_vision_processor_processor_failure(mock_torch: Any, tmp_path: Path) -> None:
     """Test initialize_vision_processor surfaces processor initialization failures."""
     with (
         patch("robot_comic.vision.local_vision.snapshot_download"),
@@ -310,7 +311,7 @@ def test_initialize_vision_processor_processor_failure(mock_torch: Any) -> None:
         patch("robot_comic.vision.local_vision.AutoProcessor") as mock_proc,
     ):
         mock_config.LOCAL_VISION_MODEL = "test/model"
-        mock_config.HF_HOME = "/tmp/hf_cache"
+        mock_config.HF_HOME = str(tmp_path / "hf_cache")
         mock_proc.from_pretrained.side_effect = Exception("Model load error")
 
         with pytest.raises(Exception, match="Model load error"):
