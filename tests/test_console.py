@@ -113,7 +113,13 @@ async def test_play_loop_feeds_head_wobbler_with_local_playback_delay() -> None:
 
     stopper = asyncio.create_task(stop_soon())
     try:
-        await asyncio.wait_for(stream.play_loop(), timeout=1.0)
+        # Issue #348: ``play_loop`` performs deferred ``fastrtc`` / ``scipy.signal``
+        # imports on its first call. On a cold interpreter those imports can take
+        # 10-20s, which dwarfs the test body itself (~2ms once warm). Bump the
+        # wait_for ceiling well above the worst observed cold-load wall time so
+        # the test is deterministic whether it runs first or after a sibling
+        # test has already warmed the import cache.
+        await asyncio.wait_for(stream.play_loop(), timeout=30.0)
     finally:
         await stopper
 
