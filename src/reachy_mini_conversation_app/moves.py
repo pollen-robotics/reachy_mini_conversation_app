@@ -527,12 +527,7 @@ class MovementManager:
         return primary_full_body_pose
 
     def _get_secondary_pose(self) -> FullBodyPose:
-        """Get the secondary full body pose from face tracking offsets.
-
-        Speech-induced offsets are now produced by the daemon's wobbler and
-        composed server-side via SetSpeechOffsetsCmd, so they no longer need
-        to be added here.
-        """
+        """Get the secondary full body pose from face tracking offsets."""
         current_offsets = self.state.face_tracking_offsets
 
         # Skip expensive create_head_pose if offsets unchanged since last tick

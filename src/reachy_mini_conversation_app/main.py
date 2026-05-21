@@ -10,11 +10,13 @@ from typing import Any, Dict, List, Optional
 from pathlib import Path
 
 import gradio as gr
+import requests
 from fastapi import FastAPI
 from fastrtc import Stream
 from gradio.utils import get_space
 
 from reachy_mini import ReachyMini, ReachyMiniApp
+from reachy_mini.io.protocol import SetVolumeCmd
 from reachy_mini_conversation_app.utils import (
     CameraVisionInitializationError,
     parse_args,
@@ -268,11 +270,35 @@ def run(
 
     # Each async service → its own thread/loop
     movement_manager.start()
-    # Audio-reactive head motion is driven by the daemon's wobbler. The
-    # conversation app's audio is pushed via push_audio_sample, which goes
-    # through the same media pipeline that the daemon's wobbler tees off,
-    # so enabling here is enough — no per-app DSP needed.
+    # Audio-reactive head motion is driven by the daemon's wobbler, which
+    # taps the media pipeline at push_audio_sample. In headless mode the
+    # console stream pushes assistant audio through that pipeline directly.
+    # In Gradio mode audio plays in the browser; the handler additionally
+    # taps the same call to keep the wobbler fed (see
+    # BaseRealtimeHandler._tap_audio_for_daemon_wobbler) — mute the robot
+    # speaker to avoid double playback.
     robot.enable_wobbling()
+    saved_speaker_volume: int | None = None
+    if args.gradio:
+        # LocalStream.launch() starts the playback pipeline in headless mode.
+        # In Gradio mode nothing else does, and push_audio_sample is a no-op
+        # until the pipeline is in PLAYING state — so the wobbler stays idle.
+        try:
+            robot.media.start_playing()
+        except Exception as exc:
+            logger.warning(f"Failed to start media playback for Gradio mode: {exc}")
+        # Audio plays in the browser; silence the robot speaker so we don't
+        # hear it twice. GET via REST to read the current level (no side
+        # effects), SET via the WS protocol so the daemon does not fire its
+        # "test sound" played by POST /api/volume/set on each call.
+        try:
+            volume_url = f"http://{robot.client.host}:{robot.client.port}/api/volume/current"
+            saved_speaker_volume = int(requests.get(volume_url, timeout=2).json()["volume"])
+            robot.client.send_command(SetVolumeCmd(volume=0))
+            logger.info(f"Muted robot speaker for Gradio mode (saved volume: {saved_speaker_volume})")
+        except Exception as exc:
+            logger.warning(f"Could not mute robot speaker: {exc}")
+            saved_speaker_volume = None
     if camera_worker:
         camera_worker.start()
 
@@ -300,6 +326,12 @@ def run(
             robot.disable_wobbling()
         except Exception as e:
             logger.debug(f"Error disabling wobbling during shutdown: {e}")
+        if saved_speaker_volume is not None:
+            try:
+                robot.client.send_command(SetVolumeCmd(volume=saved_speaker_volume))
+                logger.info(f"Restored robot speaker volume to {saved_speaker_volume}")
+            except Exception as e:
+                logger.debug(f"Error restoring speaker volume during shutdown: {e}")
         if camera_worker:
             camera_worker.stop()
 
