@@ -52,6 +52,19 @@ def parse_args() -> tuple[argparse.Namespace, list]:  # type: ignore
 
     add_parser = tool_spaces_subparsers.add_parser("add", help="Install one public Space tool source by slug")
     add_parser.add_argument("space_slug", help="Public Hugging Face Space slug in the form owner/space-name")
+    add_parser.add_argument(
+        "--install-only",
+        action="store_true",
+        default=False,
+        help="Install the Space without enabling its tools in any profile.",
+    )
+    add_parser.add_argument(
+        "--profile",
+        dest="profile",
+        default=None,
+        metavar="PROFILE",
+        help="Enable tools in this profile instead of the active profile.",
+    )
 
     remove_parser = tool_spaces_subparsers.add_parser("remove", help="Remove one installed Space tool source")
     remove_parser.add_argument("space_slug", help="Installed Hugging Face Space slug in the form owner/space-name")
