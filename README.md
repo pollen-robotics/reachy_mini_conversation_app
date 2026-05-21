@@ -365,7 +365,8 @@ You can install public MCP-compatible Hugging Face Spaces as remote tool sources
 reachy-mini-conversation-app tool-spaces add <owner/space-name>
 
 # enable in a specific profile
-reachy-mini-conversation-app tool-spaces add <owner/space-name> --profile NAME  
+reachy-mini-conversation-app tool-spaces add <owner/space-name> --profile NAME
+
 # install without enabling
 reachy-mini-conversation-app tool-spaces add <owner/space-name> --install-only
 
