@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import re
+import sys
 import json
 import asyncio
 import logging
@@ -96,6 +97,7 @@ def read_installed_tool_spaces(instance_path: str | Path | None) -> InstalledToo
 
     spaces: list[InstalledToolSpace] = []
     seen_slugs: set[str] = set()
+    seen_aliases: set[str] = set()
     for raw_space in raw_spaces:
         if not isinstance(raw_space, dict):
             raise RuntimeError(f"Invalid installed tool spaces entry in {manifest_path}: expected an object.")
@@ -104,7 +106,13 @@ def read_installed_tool_spaces(instance_path: str | Path | None) -> InstalledToo
         alias = normalize_space_alias(slug)
         if slug in seen_slugs:
             raise RuntimeError(f"Duplicate installed tool space '{slug}' found in {manifest_path}.")
+        if alias in seen_aliases:
+            raise RuntimeError(
+                f"Installed tool spaces manifest contains alias collision '{alias}' in {manifest_path}. "
+                "Remove one of the conflicting spaces with 'tool-spaces remove'."
+            )
         seen_slugs.add(slug)
+        seen_aliases.add(alias)
         spaces.append(InstalledToolSpace(slug=slug, alias=alias))
 
     version = payload.get("version", 1)
@@ -294,6 +302,17 @@ def handle_tool_spaces_command(args: argparse.Namespace, *, instance_path: str |
             print(format_space_tool_listing(resolved_space))
             print("Next step: add the tool IDs you want to use to the desired profile's tools.txt.")
             return 0
+
+        alias_conflict = next((s for s in manifest.spaces if s.alias == resolved_space.alias), None)
+        if alias_conflict:
+            print(
+                f"Cannot install '{resolved_space.slug}': its local alias "
+                f"'{resolved_space.alias}' conflicts with already-installed "
+                f"'{alias_conflict.slug}'. Rename one Space on Hugging Face "
+                "to get a distinct alias.",
+                file=sys.stderr,
+            )
+            return 1
 
         updated_spaces = sorted(
             [*manifest.spaces, InstalledToolSpace(slug=resolved_space.slug, alias=resolved_space.alias)],

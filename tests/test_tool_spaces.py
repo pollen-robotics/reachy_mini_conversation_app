@@ -186,6 +186,21 @@ def test_tool_spaces_manifest_uses_instance_path_when_provided(
     assert f"Manifest: {tmp_path / 'installed_tool_spaces.json'}" in output
 
 
+def test_read_installed_tool_spaces_raises_on_alias_collision_in_manifest(tmp_path: Path) -> None:
+    """A manifest with two slugs that normalize to the same alias must be rejected on read."""
+    payload = {
+        "version": 1,
+        "spaces": [
+            {"slug": "owner/my-tool", "alias": "owner_my_tool"},
+            {"slug": "owner/my_tool", "alias": "owner_my_tool"},
+        ],
+    }
+    (tmp_path / "installed_tool_spaces.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="alias collision"):
+        read_installed_tool_spaces(tmp_path)
+
+
 def test_write_and_read_installed_tool_spaces_round_trip_for_instance_path(tmp_path: Path) -> None:
     """Persisted manifests should round-trip through the instance-local path."""
     manifest = InstalledToolSpacesManifest(
@@ -196,3 +211,27 @@ def test_write_and_read_installed_tool_spaces_round_trip_for_instance_path(tmp_p
 
     assert manifest_path == tmp_path / "installed_tool_spaces.json"
     assert read_installed_tool_spaces(tmp_path) == manifest
+
+
+def test_tool_spaces_add_rejects_alias_collision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A second Space whose slug normalizes to the same alias must be rejected."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        lambda self, slug, **kwargs: _mock_public_space_info(slug),
+    )
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
+        _mock_list_tool_specs,
+    )
+
+    assert _run_cli(monkeypatch, ["app", "tool-spaces", "add", "alozowski/reachy-mini-search-tool"]) == 0
+
+    # alozowski/reachy_mini_search_tool normalizes to the same alias as alozowski/reachy-mini-search-tool
+    exit_code = _run_cli(monkeypatch, ["app", "tool-spaces", "add", "alozowski/reachy_mini_search_tool"])
+    assert exit_code == 1
+    assert "alias" in capsys.readouterr().err
