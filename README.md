@@ -75,7 +75,6 @@ uv sync
 uv sync --extra local_vision         # Local PyTorch/Transformers vision
 uv sync --extra yolo_vision          # YOLO face-detection backend for head tracking
 uv sync --extra mediapipe_vision     # MediaPipe-based head-tracking
-uv sync --extra remote_tools         # Hugging Face Space tools over MCP
 uv sync --extra all_vision           # All vision features
 ```
 
@@ -116,7 +115,6 @@ Some wheels (like PyTorch) are large and require compatible CUDA or CPU buildsâ€
 | `local_vision` | Run the local VLM (SmolVLM2) through PyTorch/Transformers | GPU recommended. Ensure compatible PyTorch builds for your platform. |
 | `yolo_vision` | YOLOv11n face detection via `ultralytics` and `supervision` | Used as the `yolo` head-tracking backend. Runs on CPU (default). GPU improves performance. |
 | `mediapipe_vision` | Lightweight landmark tracking with MediaPipe | Works on CPU. Enables `--head-tracker mediapipe`. |
-| `remote_tools` | Install MCP dependencies for public Hugging Face Space tools | Required for `tool-spaces` commands and installed remote Space tools. |
 | `all_vision` | Convenience alias installing every vision extra | Install when you want the flexibility to experiment with every provider. |
 | `dev` | Developer tooling (`pytest`, `ruff`, `mypy`) | Development-only dependencies. Use `--group dev` with uv or `[dev]` with pip. |
 
@@ -362,26 +360,26 @@ This supports both:
 
 You can install public MCP-compatible Hugging Face Spaces as remote tool sources for this app.
 
-Install the optional dependencies first:
-
 ```bash
-uv sync --extra remote_tools
-```
+# install + enable in active profile
+reachy-mini-conversation-app tool-spaces add <owner/space-name>
 
-Then add, list, or remove installed Space tool sources from the terminal:
+# enable in a specific profile
+reachy-mini-conversation-app tool-spaces add <owner/space-name> --profile NAME  
+# install without enabling
+reachy-mini-conversation-app tool-spaces add <owner/space-name> --install-only
 
-```bash
-reachy-mini-conversation-app tool-spaces add owner/space-name
+# list installed spaces
 reachy-mini-conversation-app tool-spaces list
+
+# remove an installed space
 reachy-mini-conversation-app tool-spaces remove owner/space-name
 ```
 
-The app validates the public Space slug through the Hugging Face Hub, probes the standard public MCP endpoint, and writes the installed Space to:
+The app validates the public Space slug through the Hugging Face Hub, probes the standard public MCP endpoint, discovers tools, enables them in the active profile's `tools.txt`, and writes the installed Space to:
 
 - `installed_tool_spaces.json` in the managed app instance directory
 - `external_content/installed_tool_spaces.json` in terminal mode
-
-After `tool-spaces add`, the command prints the discovered tool IDs. Add the ones you want to expose to a profile's `tools.txt` manually. Installing a Space does not auto-enable its tools.
 
 Recommended tags for discoverability on Hugging Face:
 
