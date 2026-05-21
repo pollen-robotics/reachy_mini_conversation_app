@@ -2518,7 +2518,7 @@ wheels = [
 
 [[package]]
 name = "mcp"
-version = "1.27.0"
+version = "1.27.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2536,9 +2536,9 @@ dependencies = [
     { name = "typing-inspection" },
     { name = "uvicorn", marker = "sys_platform != 'emscripten'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8b/eb/c0cfc62075dc6e1ec1c64d352ae09ac051d9334311ed226f1f425312848a/mcp-1.27.0.tar.gz", hash = "sha256:d3dc35a7eec0d458c1da4976a48f982097ddaab87e278c5511d5a4a56e852b83", size = 607509, upload-time = "2026-04-02T14:48:08.88Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/38/83/d1efe7c2980d8a3afa476f4e3d42d53dd54c0ab94c27bee5d755b45c8b73/mcp-1.27.1.tar.gz", hash = "sha256:0f47e1820f8f8f941466b39749eb1d1839a04caddca2bc60e9d46e8a99914924", size = 608458, upload-time = "2026-05-08T16:50:12.601Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9c/46/f6b4ad632c67ef35209a66127e4bddc95759649dd595f71f13fba11bdf9a/mcp-1.27.0-py3-none-any.whl", hash = "sha256:5ce1fa81614958e267b21fb2aa34e0aea8e2c6ede60d52aba45fd47246b4d741", size = 215967, upload-time = "2026-04-02T14:48:07.24Z" },
+    { url = "https://files.pythonhosted.org/packages/fd/73/42d9596facebdb533b7f0b86c1b0364ef350d1f8ba78b1052e8a58b48b65/mcp-1.27.1-py3-none-any.whl", hash = "sha256:1af3c4203b329430fde7a87b4fcb6392a041f5cb851fd68fc674016ab4e7c06f", size = 216260, upload-time = "2026-05-08T16:50:10.547Z" },
 ]
 
 [[package]]
@@ -4354,6 +4354,7 @@ dependencies = [
     { name = "gradio-client" },
     { name = "httpx" },
     { name = "huggingface-hub" },
+    { name = "mcp" },
     { name = "openai" },
     { name = "python-dotenv" },
     { name = "reachy-mini" },
@@ -4380,10 +4381,6 @@ local-vision = [
 ]
 mediapipe-vision = [
     { name = "mediapipe" },
-]
-remote-tools = [
-    { name = "httpx" },
-    { name = "mcp" },
 ]
 yolo-vision = [
     { name = "opencv-python" },
@@ -4412,10 +4409,9 @@ requires-dist = [
     { name = "google-genai", specifier = ">=1.0.0" },
     { name = "gradio", specifier = "==5.50.1.dev1" },
     { name = "gradio-client", specifier = ">=1.13.3" },
-    { name = "httpx" },
-    { name = "httpx", marker = "extra == 'remote-tools'", specifier = "==0.28.1" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "huggingface-hub", specifier = "==1.3.0" },
-    { name = "mcp", marker = "extra == 'remote-tools'", specifier = "==1.27.0" },
+    { name = "mcp", specifier = ">=1.27.1" },
     { name = "mediapipe", marker = "extra == 'all-vision'", specifier = "==0.10.14" },
     { name = "mediapipe", marker = "extra == 'mediapipe-vision'", specifier = "==0.10.14" },
     { name = "num2words", marker = "extra == 'all-vision'" },
@@ -4436,7 +4432,7 @@ requires-dist = [
     { name = "ultralytics", marker = "extra == 'all-vision'" },
     { name = "ultralytics", marker = "extra == 'yolo-vision'" },
 ]
-provides-extras = ["local-vision", "yolo-vision", "mediapipe-vision", "remote-tools", "all-vision"]
+provides-extras = ["local-vision", "yolo-vision", "mediapipe-vision", "all-vision"]
 
 [package.metadata.requires-dev]
 dev = [
