@@ -145,7 +145,7 @@ async def test_tool_spaces_install_enable_and_dispatch_remote_tool(
     monkeypatch.setattr(tool_spaces_mod, "resolve_public_tool_space_sync", lambda slug: _resolved_remote_space(client))
 
     exit_code = tool_spaces_mod.handle_tool_spaces_command(
-        Namespace(tool_spaces_command="add", space_slug="alozowski/reachy-mini-search-tool")
+        Namespace(tool_spaces_command="add", space_slug="alozowski/reachy-mini-search-tool", install_only=True, profile=None)
     )
     assert exit_code == 0
     assert read_installed_tool_spaces(None).spaces == [
