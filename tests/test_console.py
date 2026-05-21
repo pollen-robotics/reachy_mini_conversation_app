@@ -130,11 +130,11 @@ def test_backend_config_persists_gemini_selection_and_status(
 ) -> None:
     """Settings API should persist Gemini backend choice and token."""
     monkeypatch.setattr(config, "BACKEND_PROVIDER", "openai")
-    monkeypatch.setattr(config, "MODEL_NAME", "gpt-realtime")
+    monkeypatch.setattr(config, "MODEL_NAME", "gpt-realtime-2")
     monkeypatch.setattr(config, "OPENAI_API_KEY", None)
     monkeypatch.setattr(config, "GEMINI_API_KEY", None)
     monkeypatch.setenv("BACKEND_PROVIDER", "openai")
-    monkeypatch.setenv("MODEL_NAME", "gpt-realtime")
+    monkeypatch.setenv("MODEL_NAME", "gpt-realtime-2")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
@@ -215,7 +215,7 @@ def test_backend_config_preserves_explicit_model_override_when_saving_key(
     env_text = (tmp_path / ".env").read_text(encoding="utf-8")
     assert "BACKEND_PROVIDER=openai" in env_text
     assert f"MODEL_NAME={custom_model}" in env_text
-    assert "MODEL_NAME=gpt-realtime" not in env_text
+    assert "MODEL_NAME=gpt-realtime-2" not in env_text
     assert "OPENAI_API_KEY=openai-test-key" in env_text
 
 
@@ -225,12 +225,12 @@ def test_backend_config_persists_local_hf_selection_and_status(
 ) -> None:
     """Settings API should persist a direct Hugging Face websocket target."""
     monkeypatch.setattr(config, "BACKEND_PROVIDER", "openai")
-    monkeypatch.setattr(config, "MODEL_NAME", "gpt-realtime")
+    monkeypatch.setattr(config, "MODEL_NAME", "gpt-realtime-2")
     monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "deployed")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", None)
     monkeypatch.setattr(config, "HF_REALTIME_WS_URL", None)
     monkeypatch.setenv("BACKEND_PROVIDER", "openai")
-    monkeypatch.setenv("MODEL_NAME", "gpt-realtime")
+    monkeypatch.setenv("MODEL_NAME", "gpt-realtime-2")
     monkeypatch.delenv("HF_REALTIME_CONNECTION_MODE", raising=False)
     monkeypatch.delenv("HF_REALTIME_SESSION_URL", raising=False)
     monkeypatch.delenv("HF_REALTIME_WS_URL", raising=False)
@@ -285,12 +285,12 @@ def test_backend_config_persists_deployed_mode_without_clearing_local_hf_ws_url(
     )
 
     monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
-    monkeypatch.setattr(config, "MODEL_NAME", "gpt-realtime")
+    monkeypatch.setattr(config, "MODEL_NAME", "gpt-realtime-2")
     monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "deployed")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", "https://lb.example.test/session")
     monkeypatch.setattr(config, "HF_REALTIME_WS_URL", "ws://localhost:8765/v1/realtime")
     monkeypatch.setenv("BACKEND_PROVIDER", "huggingface")
-    monkeypatch.setenv("MODEL_NAME", "gpt-realtime")
+    monkeypatch.setenv("MODEL_NAME", "gpt-realtime-2")
     monkeypatch.delenv("HF_REALTIME_CONNECTION_MODE", raising=False)
     monkeypatch.setenv("HF_REALTIME_SESSION_URL", "https://lb.example.test/session")
     monkeypatch.setenv("HF_REALTIME_WS_URL", "ws://localhost:8765/v1/realtime")
@@ -330,19 +330,19 @@ def test_backend_config_switches_to_saved_local_hf_connection_without_payload_ta
     env_path = tmp_path / ".env"
     env_path.write_text(
         "BACKEND_PROVIDER=openai\n"
-        "MODEL_NAME=gpt-realtime\n"
+        "MODEL_NAME=gpt-realtime-2\n"
         "HF_REALTIME_CONNECTION_MODE=local\n"
         "HF_REALTIME_WS_URL=ws://192.168.1.42:8766/v1/realtime\n",
         encoding="utf-8",
     )
 
     monkeypatch.setattr(config, "BACKEND_PROVIDER", "openai")
-    monkeypatch.setattr(config, "MODEL_NAME", "gpt-realtime")
+    monkeypatch.setattr(config, "MODEL_NAME", "gpt-realtime-2")
     monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "local")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", None)
     monkeypatch.setattr(config, "HF_REALTIME_WS_URL", "ws://192.168.1.42:8766/v1/realtime")
     monkeypatch.setenv("BACKEND_PROVIDER", "openai")
-    monkeypatch.setenv("MODEL_NAME", "gpt-realtime")
+    monkeypatch.setenv("MODEL_NAME", "gpt-realtime-2")
     monkeypatch.setenv("HF_REALTIME_CONNECTION_MODE", "local")
     monkeypatch.setenv("HF_REALTIME_WS_URL", "ws://192.168.1.42:8766/v1/realtime")
 
