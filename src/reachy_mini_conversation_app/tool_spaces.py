@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 import re
-import sys
 import json
 import asyncio
 import logging
@@ -134,6 +133,31 @@ def write_installed_tool_spaces(
     }
     manifest_path.write_text(f"{json.dumps(payload, indent=2, sort_keys=True)}\n", encoding="utf-8")
     return manifest_path
+
+
+def _append_tools_to_profile(profile: str, tool_ids: list[str]) -> list[str]:
+    """Append tool IDs to a profile's tools.txt. Returns the IDs that were added."""
+    from reachy_mini_conversation_app.config import config
+
+    tools_txt = config.PROFILES_DIRECTORY / profile / "tools.txt"
+    if not tools_txt.parent.is_dir():
+        raise RuntimeError(
+            f"Profile '{profile}' not found at {tools_txt.parent}. Use --install-only to skip profile wiring."
+        )
+
+    existing: set[str] = set()
+    if tools_txt.exists():
+        for line in tools_txt.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                existing.add(stripped)
+
+    to_add = [tid for tid in tool_ids if tid not in existing]
+    if to_add:
+        with tools_txt.open("a", encoding="utf-8") as f:
+            for tid in to_add:
+                f.write(f"{tid}\n")
+    return to_add
 
 
 def validate_space_slug(slug: str) -> str:
@@ -297,35 +321,54 @@ def handle_tool_spaces_command(args: argparse.Namespace, *, instance_path: str |
     if command == "add":
         resolved_space = resolve_public_tool_space_sync(args.space_slug)
         manifest = read_installed_tool_spaces(instance_path)
-        if any(space.slug == resolved_space.slug for space in manifest.spaces):
-            print(f"Space already installed: {resolved_space.slug}")
-            print(format_space_tool_listing(resolved_space))
-            print("Next step: add the tool IDs you want to use to the desired profile's tools.txt.")
+        already_installed = any(space.slug == resolved_space.slug for space in manifest.spaces)
+        if already_installed:
+            logger.info("Space already installed: %s", resolved_space.slug)
+            logger.info("%s", format_space_tool_listing(resolved_space))
+        else:
+            alias_conflict = next((s for s in manifest.spaces if s.alias == resolved_space.alias), None)
+            if alias_conflict:
+                logger.error(
+                    "Cannot install '%s': its local alias '%s' conflicts with already-installed '%s'. "
+                    "Rename one Space on Hugging Face to get a distinct alias.",
+                    resolved_space.slug,
+                    resolved_space.alias,
+                    alias_conflict.slug,
+                )
+                return 1
+
+            updated_spaces = sorted(
+                [*manifest.spaces, InstalledToolSpace(slug=resolved_space.slug, alias=resolved_space.alias)],
+                key=lambda space: space.slug,
+            )
+            manifest_path = write_installed_tool_spaces(
+                instance_path,
+                InstalledToolSpacesManifest(version=manifest.version, spaces=updated_spaces),
+            )
+            logger.info("Installed Space tool source: %s", resolved_space.slug)
+            logger.info("Manifest: %s", manifest_path)
+            logger.info("%s", format_space_tool_listing(resolved_space))
+
+        if args.install_only:
+            logger.info("Tools installed. Add tool IDs to a profile's tools.txt to enable them.")
             return 0
 
-        alias_conflict = next((s for s in manifest.spaces if s.alias == resolved_space.alias), None)
-        if alias_conflict:
-            print(
-                f"Cannot install '{resolved_space.slug}': its local alias "
-                f"'{resolved_space.alias}' conflicts with already-installed "
-                f"'{alias_conflict.slug}'. Rename one Space on Hugging Face "
-                "to get a distinct alias.",
-                file=sys.stderr,
-            )
-            return 1
+        target_profile = args.profile
+        if target_profile is None:
+            from reachy_mini_conversation_app.config import config
 
-        updated_spaces = sorted(
-            [*manifest.spaces, InstalledToolSpace(slug=resolved_space.slug, alias=resolved_space.alias)],
-            key=lambda space: space.slug,
-        )
-        manifest_path = write_installed_tool_spaces(
-            instance_path,
-            InstalledToolSpacesManifest(version=manifest.version, spaces=updated_spaces),
-        )
-        print(f"Installed Space tool source: {resolved_space.slug}")
-        print(f"Manifest: {manifest_path}")
-        print(format_space_tool_listing(resolved_space))
-        print("Next step: add the tool IDs you want to use to the desired profile's tools.txt.")
+            target_profile = config.REACHY_MINI_CUSTOM_PROFILE or "default"
+
+        tool_ids = [tool.local_name for tool in resolved_space.tools]
+        try:
+            added = _append_tools_to_profile(target_profile, tool_ids)
+        except RuntimeError as exc:
+            logger.error("Cannot enable tools: %s", exc)
+            return 1
+        if added:
+            logger.info("Enabled in profile '%s': %s", target_profile, added)
+        else:
+            logger.info("All tool IDs already present in profile '%s'.", target_profile)
         return 0
 
     if command == "remove":
@@ -333,7 +376,7 @@ def handle_tool_spaces_command(args: argparse.Namespace, *, instance_path: str |
         manifest = read_installed_tool_spaces(instance_path)
         remaining_spaces = [space for space in manifest.spaces if space.slug != validated_slug]
         if len(remaining_spaces) == len(manifest.spaces):
-            print(f"Space not installed: {validated_slug}")
+            logger.warning("Space not installed: %s", validated_slug)
             return 1
 
         try:
@@ -346,27 +389,26 @@ def handle_tool_spaces_command(args: argparse.Namespace, *, instance_path: str |
             instance_path,
             InstalledToolSpacesManifest(version=manifest.version, spaces=remaining_spaces),
         )
-        print(f"Removed Space tool source: {validated_slug}")
+        logger.info("Removed Space tool source: %s", validated_slug)
         if removed_space is not None:
-            print(format_space_tool_listing(removed_space))
+            logger.info("%s", format_space_tool_listing(removed_space))
         return 0
 
     if command == "list":
         manifest = read_installed_tool_spaces(instance_path)
         manifest_path = get_installed_tool_spaces_path(instance_path)
-        print(f"Manifest: {manifest_path}")
+        logger.info("Manifest: %s", manifest_path)
         if not manifest.spaces:
-            print("No installed Space tool sources.")
+            logger.info("No installed Space tool sources.")
             return 0
 
         for installed_space in manifest.spaces:
             try:
                 resolved_space = resolve_public_tool_space_sync(installed_space.slug)
             except Exception as exc:
-                print(f"{installed_space.slug} ({installed_space.alias})")
-                print(f"  Unavailable: {exc}")
+                logger.warning("Space '%s' (%s) is unavailable: %s", installed_space.slug, installed_space.alias, exc)
                 continue
-            print(format_space_tool_listing(resolved_space))
+            logger.info("%s", format_space_tool_listing(resolved_space))
         return 0
 
     raise RuntimeError(f"Unknown tool-spaces command: {command}")

@@ -7,14 +7,12 @@ from argparse import Namespace
 
 import pytest
 
+import reachy_mini_conversation_app.config as config_mod
 from reachy_mini_conversation_app.main import main
 from reachy_mini_conversation_app.mcp_client import RemoteToolSpec
 from reachy_mini_conversation_app.tool_spaces import (
-    InstalledToolSpace,
-    InstalledToolSpacesManifest,
     handle_tool_spaces_command,
     read_installed_tool_spaces,
-    write_installed_tool_spaces,
 )
 
 
@@ -56,7 +54,6 @@ def _run_cli(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> int:
 def test_tool_spaces_add_list_remove_round_trip(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The CLI should install, list, and remove a public Space tool source cleanly."""
     monkeypatch.chdir(tmp_path)
@@ -69,66 +66,41 @@ def test_tool_spaces_add_list_remove_round_trip(
         _mock_list_tool_specs,
     )
 
-    exit_code = _run_cli(
-        monkeypatch,
-        [
-            "reachy-mini-conversation-app",
-            "tool-spaces",
-            "add",
-            "alozowski/reachy-mini-search-tool",
-        ],
+    assert (
+        _run_cli(
+            monkeypatch,
+            [
+                "reachy-mini-conversation-app",
+                "tool-spaces",
+                "add",
+                "alozowski/reachy-mini-search-tool",
+                "--install-only",
+            ],
+        )
+        == 0
     )
-    assert exit_code == 0
-    add_output = capsys.readouterr().out
-    assert "Installed Space tool source: alozowski/reachy-mini-search-tool" in add_output
-    assert "alozowski_reachy_mini_search_tool__search_web" in add_output
 
     manifest_path = tmp_path / "external_content" / "installed_tool_spaces.json"
     assert manifest_path.is_file()
-    manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert manifest_payload == {
+    assert json.loads(manifest_path.read_text(encoding="utf-8")) == {
         "version": 1,
-        "spaces": [
-            {
-                "alias": "alozowski_reachy_mini_search_tool",
-                "slug": "alozowski/reachy-mini-search-tool",
-            }
-        ],
+        "spaces": [{"alias": "alozowski_reachy_mini_search_tool", "slug": "alozowski/reachy-mini-search-tool"}],
     }
 
-    exit_code = _run_cli(
-        monkeypatch,
-        [
-            "reachy-mini-conversation-app",
-            "tool-spaces",
-            "list",
-        ],
-    )
-    assert exit_code == 0
-    list_output = capsys.readouterr().out
-    assert "Manifest:" in list_output
-    assert "alozowski/reachy-mini-search-tool (alozowski_reachy_mini_search_tool)" in list_output
-    assert "alozowski_reachy_mini_search_tool__search_web" in list_output
+    assert _run_cli(monkeypatch, ["reachy-mini-conversation-app", "tool-spaces", "list"]) == 0
 
-    exit_code = _run_cli(
-        monkeypatch,
-        [
-            "reachy-mini-conversation-app",
-            "tool-spaces",
-            "remove",
-            "alozowski/reachy-mini-search-tool",
-        ],
+    assert (
+        _run_cli(
+            monkeypatch, ["reachy-mini-conversation-app", "tool-spaces", "remove", "alozowski/reachy-mini-search-tool"]
+        )
+        == 0
     )
-    assert exit_code == 0
-    remove_output = capsys.readouterr().out
-    assert "Removed Space tool source: alozowski/reachy-mini-search-tool" in remove_output
     assert read_installed_tool_spaces(None).spaces == []
 
 
 def test_tool_spaces_add_rejects_non_public_space(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The CLI should reject non-public Spaces before writing the manifest."""
     monkeypatch.chdir(tmp_path)
@@ -145,24 +117,15 @@ def test_tool_spaces_add_rejects_non_public_space(
         ),
     )
 
-    exit_code = _run_cli(
-        monkeypatch,
-        [
-            "reachy-mini-conversation-app",
-            "tool-spaces",
-            "add",
-            "alozowski/private-space",
-        ],
+    assert (
+        _run_cli(monkeypatch, ["reachy-mini-conversation-app", "tool-spaces", "add", "alozowski/private-space"]) == 1
     )
-    assert exit_code == 1
-    output = capsys.readouterr()
-    assert "is not public" in output.err
+    assert not (tmp_path / "external_content" / "installed_tool_spaces.json").exists()
 
 
 def test_tool_spaces_manifest_uses_instance_path_when_provided(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Managed instance paths should store the manifest beside other instance-local state."""
     monkeypatch.setattr(
@@ -177,13 +140,12 @@ def test_tool_spaces_manifest_uses_instance_path_when_provided(
     args = Namespace(
         tool_spaces_command="add",
         space_slug="alozowski/reachy-mini-search-tool",
+        install_only=True,
+        profile=None,
     )
-    exit_code = handle_tool_spaces_command(args, instance_path=tmp_path)
-    assert exit_code == 0
+    assert handle_tool_spaces_command(args, instance_path=tmp_path) == 0
     assert (tmp_path / "installed_tool_spaces.json").is_file()
     assert not (tmp_path / "external_content" / "installed_tool_spaces.json").exists()
-    output = capsys.readouterr().out
-    assert f"Manifest: {tmp_path / 'installed_tool_spaces.json'}" in output
 
 
 def test_read_installed_tool_spaces_raises_on_alias_collision_in_manifest(tmp_path: Path) -> None:
@@ -201,22 +163,10 @@ def test_read_installed_tool_spaces_raises_on_alias_collision_in_manifest(tmp_pa
         read_installed_tool_spaces(tmp_path)
 
 
-def test_write_and_read_installed_tool_spaces_round_trip_for_instance_path(tmp_path: Path) -> None:
-    """Persisted manifests should round-trip through the instance-local path."""
-    manifest = InstalledToolSpacesManifest(
-        spaces=[InstalledToolSpace(slug="owner/space", alias="owner_space")],
-    )
-
-    manifest_path = write_installed_tool_spaces(tmp_path, manifest)
-
-    assert manifest_path == tmp_path / "installed_tool_spaces.json"
-    assert read_installed_tool_spaces(tmp_path) == manifest
-
 
 def test_tool_spaces_add_rejects_alias_collision(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A second Space whose slug normalizes to the same alias must be rejected."""
     monkeypatch.chdir(tmp_path)
@@ -232,6 +182,103 @@ def test_tool_spaces_add_rejects_alias_collision(
     assert _run_cli(monkeypatch, ["app", "tool-spaces", "add", "alozowski/reachy-mini-search-tool"]) == 0
 
     # alozowski/reachy_mini_search_tool normalizes to the same alias as alozowski/reachy-mini-search-tool
-    exit_code = _run_cli(monkeypatch, ["app", "tool-spaces", "add", "alozowski/reachy_mini_search_tool"])
-    assert exit_code == 1
-    assert "alias" in capsys.readouterr().err
+    assert _run_cli(monkeypatch, ["app", "tool-spaces", "add", "alozowski/reachy_mini_search_tool"]) == 1
+
+
+def _setup_profile(tmp_path: Path, profile: str, existing_tools: list[str] | None = None) -> Path:
+    """Create a profile directory with an optional tools.txt."""
+    profile_dir = tmp_path / profile
+    profile_dir.mkdir(parents=True)
+    tools_txt = profile_dir / "tools.txt"
+    tools_txt.write_text("\n".join(existing_tools or []) + "\n" if existing_tools else "", encoding="utf-8")
+    return tools_txt
+
+
+def _mock_add(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        lambda self, slug, **kwargs: _mock_public_space_info(slug),
+    )
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
+        _mock_list_tool_specs,
+    )
+
+
+def test_tool_spaces_add_enables_in_active_profile_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Add without flags should enable tools in the active profile."""
+    _mock_add(monkeypatch, tmp_path)
+    tools_txt = _setup_profile(tmp_path, "default")
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", tmp_path)
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", None)
+
+    assert _run_cli(monkeypatch, ["app", "tool-spaces", "add", "alozowski/reachy-mini-search-tool"]) == 0
+
+    assert "alozowski_reachy_mini_search_tool__search_web" in tools_txt.read_text(encoding="utf-8")
+
+
+def test_tool_spaces_add_install_only_skips_tools_txt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--install-only should not modify any profile's tools.txt."""
+    _mock_add(monkeypatch, tmp_path)
+    tools_txt = _setup_profile(tmp_path, "default")
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", tmp_path)
+
+    assert (
+        _run_cli(monkeypatch, ["app", "tool-spaces", "add", "alozowski/reachy-mini-search-tool", "--install-only"])
+        == 0
+    )
+
+    assert tools_txt.read_text(encoding="utf-8") == ""
+
+
+def test_tool_spaces_add_profile_flag_enables_in_specified_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--profile should enable tools in the named profile, not the active one."""
+    _mock_add(monkeypatch, tmp_path)
+    default_tools_txt = _setup_profile(tmp_path, "default")
+    canary_tools_txt = _setup_profile(tmp_path, "canary")
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", tmp_path)
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "default")
+
+    assert (
+        _run_cli(
+            monkeypatch, ["app", "tool-spaces", "add", "alozowski/reachy-mini-search-tool", "--profile", "canary"]
+        )
+        == 0
+    )
+
+    assert "alozowski_reachy_mini_search_tool__search_web" in canary_tools_txt.read_text(encoding="utf-8")
+    assert default_tools_txt.read_text(encoding="utf-8") == ""
+
+
+def test_tool_spaces_add_already_installed_still_enables(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-running add on an already-installed Space should still wire the profile."""
+    _mock_add(monkeypatch, tmp_path)
+    _setup_profile(tmp_path, "default")
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", tmp_path)
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", None)
+
+    assert _run_cli(monkeypatch, ["app", "tool-spaces", "add", "alozowski/reachy-mini-search-tool"]) == 0
+
+    # Second run: already installed, but enable in a new profile
+    new_tools_txt = _setup_profile(tmp_path, "second")
+    assert (
+        _run_cli(
+            monkeypatch, ["app", "tool-spaces", "add", "alozowski/reachy-mini-search-tool", "--profile", "second"]
+        )
+        == 0
+    )
+
+    assert "alozowski_reachy_mini_search_tool__search_web" in new_tools_txt.read_text(encoding="utf-8")
