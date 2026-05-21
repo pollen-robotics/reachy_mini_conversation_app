@@ -163,7 +163,6 @@ def test_read_installed_tool_spaces_raises_on_alias_collision_in_manifest(tmp_pa
         read_installed_tool_spaces(tmp_path)
 
 
-
 def test_tool_spaces_add_rejects_alias_collision(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
