@@ -12,6 +12,7 @@ from typing import List
 from pathlib import Path
 
 from .config import DEFAULT_PROFILES_DIRECTORY, get_default_voice_for_backend
+from .idle_tools import LLM_HIDDEN_TOOL_NAMES
 
 
 DEFAULT_OPTION = "(built-in default)"
@@ -91,7 +92,7 @@ def available_tools_for(selected: str) -> List[str]:
     shared: List[str] = []
     try:
         for py in _tools_dir().glob("*.py"):
-            if py.stem in {"__init__", "core_tools"}:
+            if py.stem in {"__init__", "core_tools", *LLM_HIDDEN_TOOL_NAMES}:
                 continue
             shared.append(py.stem)
     except Exception:

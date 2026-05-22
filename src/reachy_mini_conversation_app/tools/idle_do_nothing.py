@@ -8,19 +8,19 @@ logger = logging.getLogger(__name__)
 
 
 class IdleDoNothing(Tool):
-    """Explicitly choose no action during an idle turn."""
+    """Internal no-op selected by the local idle policy."""
 
     name = "idle_do_nothing"
     description = (
-        "Use only in response to an idle time update when you intentionally want Reachy to stay still and silent "
-        "instead of choosing another idle action."
+        "Internal idle action: keep Reachy still and silent for the current idle turn. "
+        "This tool is selected by app code rather than exposed for normal model tool calling."
     )
     parameters_schema = {
         "type": "object",
         "properties": {
             "reason": {
                 "type": "string",
-                "description": "Optional reason for staying idle during this idle turn.",
+                "description": "Optional internal reason for staying idle during this idle turn.",
             },
         },
         "required": [],

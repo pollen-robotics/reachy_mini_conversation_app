@@ -12,6 +12,7 @@ from fastrtc import AdditionalOutputs
 
 import reachy_mini_conversation_app.gemini_live as gemini_mod
 import reachy_mini_conversation_app.tools.core_tools as ct_mod
+from reachy_mini_conversation_app.idle_tools import IdleToolChoice
 from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.tool_constants import ToolState
@@ -239,6 +240,55 @@ async def test_gemini_camera_tool_sends_snapshot_and_returns_json_result() -> No
             "metadata": {"title": "🛠️ Used tool camera", "status": "done"},
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_gemini_idle_signal_starts_local_tool_without_model_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Gemini idle behavior should not send an idle text turn to the model."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = GeminiLiveHandler(deps)
+    session = _FakeSession([], handler._stop_event)
+    handler.session = session
+    monkeypatch.setattr(handler, "_available_idle_tool_names", lambda: {"idle_do_nothing"})
+    monkeypatch.setattr(
+        gemini_mod,
+        "choose_idle_tool",
+        lambda _available: IdleToolChoice("idle_do_nothing", {"reason": "test"}),
+    )
+    start_tool = AsyncMock(return_value=SimpleNamespace(tool_id="idle_do_nothing-idle-1"))
+    monkeypatch.setattr(type(handler.tool_manager), "start_tool", start_tool)
+
+    await handler.send_idle_signal(16.0)
+
+    assert session.realtime_inputs == []
+    assert session.tool_responses == []
+    start_tool.assert_awaited_once()
+    start_kwargs = start_tool.await_args.kwargs
+    assert start_kwargs["is_idle_tool_call"] is True
+    assert start_kwargs["tool_call_routine"].tool_name == "idle_do_nothing"
+    assert start_kwargs["tool_call_routine"].args_json_str == '{"reason": "test"}'
+
+
+@pytest.mark.asyncio
+async def test_gemini_idle_tool_result_is_not_sent_to_model() -> None:
+    """Locally selected Gemini idle tool completions should not send function responses."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = GeminiLiveHandler(deps)
+    session = _FakeSession([], handler._stop_event)
+    handler.session = session
+
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="idle-call",
+            tool_name="idle_do_nothing",
+            is_idle_tool_call=True,
+            status=ToolState.COMPLETED,
+            result={"status": "idle"},
+        )
+    )
+
+    assert session.realtime_inputs == []
+    assert session.tool_responses == []
 
 
 @pytest.mark.asyncio

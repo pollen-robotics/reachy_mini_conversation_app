@@ -32,9 +32,15 @@ from reachy_mini_conversation_app.config import (
     config,
 )
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
+from reachy_mini_conversation_app.idle_tools import (
+    IDLE_DO_NOTHING_TOOL_NAME,
+    IdleToolChoice,
+    choose_idle_tool,
+)
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_active_tool_specs,
+    get_loaded_tool_names,
 )
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.camera_frame_encoding import encode_bgr_frame_as_jpeg
@@ -462,7 +468,14 @@ class GeminiLiveHandler(ConversationHandler):
             return
 
         try:
-            if bg_tool.tool_name == "camera" and isinstance(tool_result, dict) and "b64_im" in tool_result:
+            send_result_to_model = not bg_tool.is_idle_tool_call
+
+            if (
+                send_result_to_model
+                and bg_tool.tool_name == "camera"
+                and isinstance(tool_result, dict)
+                and "b64_im" in tool_result
+            ):
                 b64_im = tool_result.pop("b64_im")
                 if not tool_result:
                     tool_result = {"status": "image_captured"}
@@ -479,12 +492,13 @@ class GeminiLiveHandler(ConversationHandler):
 
             console_content = json.dumps(tool_result)
 
-            function_response = types.FunctionResponse(
-                id=bg_tool.id if isinstance(bg_tool.id, str) else str(bg_tool.id),
-                name=bg_tool.tool_name,
-                response=tool_result,
-            )
-            await self.session.send_tool_response(function_responses=[function_response])
+            if send_result_to_model:
+                function_response = types.FunctionResponse(
+                    id=bg_tool.id if isinstance(bg_tool.id, str) else str(bg_tool.id),
+                    name=bg_tool.tool_name,
+                    response=tool_result,
+                )
+                await self.session.send_tool_response(function_responses=[function_response])
 
             await self.output_queue.put(
                 AdditionalOutputs(
@@ -499,7 +513,7 @@ class GeminiLiveHandler(ConversationHandler):
                 ),
             )
 
-            if bg_tool.tool_name == "camera" and self.deps.camera_worker is not None:
+            if send_result_to_model and bg_tool.tool_name == "camera" and self.deps.camera_worker is not None:
                 np_img = self.deps.camera_worker.get_latest_frame()
                 if np_img is not None:
                     rgb_frame = np.ascontiguousarray(np_img[..., ::-1])
@@ -690,7 +704,7 @@ class GeminiLiveHandler(ConversationHandler):
             try:
                 await self.send_idle_signal(idle_duration)
             except Exception as e:
-                logger.warning("Idle signal skipped: %s", e)
+                logger.warning("Idle tool skipped: %s", e)
                 return None
             self.last_activity_time = asyncio.get_event_loop().time()
 
@@ -724,20 +738,59 @@ class GeminiLiveHandler(ConversationHandler):
         dt = datetime.now()
         return f"[{dt.strftime('%Y-%m-%d %H:%M:%S')} | +{elapsed_seconds:.1f}s]"
 
-    async def send_idle_signal(self, idle_duration: float) -> None:
-        """Send an idle signal to Gemini."""
-        logger.debug("Sending idle signal")
-        self.is_idle_tool_call = True
-        timestamp_msg = (
-            f"[Idle time update: {self.format_timestamp()} - No activity for {idle_duration:.1f}s] "
-            "You've been idle for a while. Feel free to get creative - dance, show an emotion, "
-            "look around, call idle_do_nothing to stay still and silent, or just be yourself!"
+    def _available_idle_tool_names(self) -> set[str]:
+        """Return tool names that the local idle policy is allowed to invoke."""
+        conversation_tool_names = {
+            spec["name"] for spec in get_active_tool_specs(self.deps) if isinstance(spec.get("name"), str)
+        }
+        return (conversation_tool_names | {IDLE_DO_NOTHING_TOOL_NAME}) & get_loaded_tool_names()
+
+    async def _start_local_idle_tool(self, choice: IdleToolChoice, idle_duration: float) -> None:
+        """Start a locally selected idle tool without involving Gemini."""
+        args_json_str = json.dumps(choice.arguments)
+        call_id = f"idle-{uuid.uuid4()}"
+        bg_tool = await self.tool_manager.start_tool(
+            call_id=call_id,
+            tool_call_routine=ToolCallRoutine(
+                tool_name=choice.tool_name,
+                args_json_str=args_json_str,
+                deps=self.deps,
+            ),
+            is_idle_tool_call=True,
         )
+        await self.output_queue.put(
+            AdditionalOutputs(
+                {
+                    "role": "assistant",
+                    "content": (
+                        f"🛠️ Idle tool {choice.tool_name} with args {args_json_str}. "
+                        f"Tool ID: {bg_tool.tool_id}"
+                    ),
+                },
+            ),
+        )
+        logger.info(
+            "Started local Gemini idle tool after %.1fs idle: %s (id=%s, call_id=%s, args=%s)",
+            idle_duration,
+            choice.tool_name,
+            bg_tool.tool_id,
+            call_id,
+            args_json_str,
+        )
+
+    async def send_idle_signal(self, idle_duration: float) -> None:
+        """Run a locally selected idle tool without sending an idle turn to Gemini."""
+        logger.debug("Selecting local Gemini idle tool")
         if not self.session:
-            logger.debug("No session, cannot send idle signal")
+            logger.debug("No session, cannot run idle tool")
             return
 
-        await self.session.send_realtime_input(text=timestamp_msg)
+        choice = choose_idle_tool(self._available_idle_tool_names())
+        if choice is None:
+            logger.warning("No Gemini idle tools are available; idle action skipped")
+            return
+
+        await self._start_local_idle_tool(choice, idle_duration)
 
     async def get_available_voices(self) -> list[str]:
         """Return the list of available Gemini voices."""

@@ -32,7 +32,12 @@ from reachy_mini_conversation_app.config import (
     get_default_voice_for_backend,
     get_available_voices_for_backend,
 )
-from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.idle_tools import (
+    IDLE_DO_NOTHING_TOOL_NAME,
+    IdleToolChoice,
+    choose_idle_tool,
+)
+from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, get_loaded_tool_names
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolCallRoutine,
@@ -560,7 +565,8 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
         try:
             self._mark_activity("tool_result_ready")
-            if isinstance(bg_tool.id, str):
+            send_result_to_model = not bg_tool.is_idle_tool_call
+            if send_result_to_model and isinstance(bg_tool.id, str):
                 await self.connection.conversation.item.create(
                     item={
                         "type": "function_call_output",
@@ -583,7 +589,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 ),
             )
 
-            if bg_tool.tool_name == "camera" and "b64_im" in tool_result:
+            if send_result_to_model and bg_tool.tool_name == "camera" and "b64_im" in tool_result:
                 # use raw base64, don't json.dumps (which adds quotes)
                 b64_im = tool_result["b64_im"]
                 if not isinstance(b64_im, str):
@@ -636,9 +642,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         ),
                     )
 
-            # If this tool call was triggered by an idle signal, don't make the robot speak.
-            # For other tool calls, let the robot reply out loud.
-            if not bg_tool.is_idle_tool_call:
+            if send_result_to_model:
                 await self._safe_response_create(
                     response=RealtimeResponseCreateParamsParam(
                         instructions="Use the tool result just returned and answer concisely in speech.",
@@ -960,7 +964,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             try:
                 await self.send_idle_signal(idle_duration)
             except Exception as e:
-                logger.warning("Idle signal skipped (connection closed?): %s", e)
+                logger.warning("Idle tool skipped (connection closed?): %s", e)
                 return None
 
             self.last_activity_time = asyncio.get_event_loop().time()  # avoid repeated resets
@@ -1015,24 +1019,56 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
     async def _build_realtime_client(self) -> AsyncOpenAI:
         """Build the realtime SDK client for this backend."""
 
-    async def send_idle_signal(self, idle_duration: float) -> None:
-        """Send an idle signal to the realtime server."""
-        logger.debug("Sending idle signal")
-        self.is_idle_tool_call = True
-        timestamp_msg = f"[Idle time update: {self.format_timestamp()} - No activity for {idle_duration:.1f}s] You've been idle for a while. Feel free to get creative - dance, show an emotion, look around, call idle_do_nothing to stay still and silent, or just be yourself!"
-        if not self.connection:
-            logger.debug("No connection, cannot send idle signal")
-            return
-        await self.connection.conversation.item.create(
-            item={
-                "type": "message",
-                "role": "user",
-                "content": [{"type": "input_text", "text": timestamp_msg}],
-            },
+    def _available_idle_tool_names(self) -> set[str]:
+        """Return tool names that the local idle policy is allowed to invoke."""
+        conversation_tool_names = {
+            spec["name"] for spec in self._get_active_tool_specs() if isinstance(spec.get("name"), str)
+        }
+        return (conversation_tool_names | {IDLE_DO_NOTHING_TOOL_NAME}) & get_loaded_tool_names()
+
+    async def _start_local_idle_tool(self, choice: IdleToolChoice, idle_duration: float) -> None:
+        """Start a locally selected idle tool without involving the realtime model."""
+        args_json_str = json.dumps(choice.arguments)
+        call_id = f"idle-{uuid.uuid4()}"
+        bg_tool = await self.tool_manager.start_tool(
+            call_id=call_id,
+            tool_call_routine=ToolCallRoutine(
+                tool_name=choice.tool_name,
+                args_json_str=args_json_str,
+                deps=self.deps,
+            ),
+            is_idle_tool_call=True,
         )
-        await self._safe_response_create(
-            response=RealtimeResponseCreateParamsParam(
-                instructions="You MUST respond with function calls only - no speech or text. Choose appropriate actions for idle behavior. Use idle_do_nothing only if you intentionally want no movement or sound during this idle turn.",
-                tool_choice="required",
+        await self.output_queue.put(
+            AdditionalOutputs(
+                {
+                    "role": "assistant",
+                    "content": (
+                        f"🛠️ Idle tool {choice.tool_name} with args {args_json_str}. "
+                        f"The tool is now running. Tool ID: {bg_tool.tool_id}"
+                    ),
+                },
             ),
         )
+        logger.info(
+            "Started local idle tool after %.1fs idle: %s (id=%s, call_id=%s, args=%s)",
+            idle_duration,
+            choice.tool_name,
+            bg_tool.tool_id,
+            call_id,
+            args_json_str,
+        )
+
+    async def send_idle_signal(self, idle_duration: float) -> None:
+        """Run a locally selected idle tool without sending an idle turn to the model."""
+        logger.debug("Selecting local idle tool")
+        if not self.connection:
+            logger.debug("No connection, cannot run idle tool")
+            return
+
+        choice = choose_idle_tool(self._available_idle_tool_names())
+        if choice is None:
+            logger.warning("No idle tools are available; idle action skipped")
+            return
+
+        await self._start_local_idle_tool(choice, idle_duration)
