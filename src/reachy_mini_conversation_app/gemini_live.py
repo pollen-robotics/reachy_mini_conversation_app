@@ -763,8 +763,7 @@ class GeminiLiveHandler(ConversationHandler):
                 {
                     "role": "assistant",
                     "content": (
-                        f"🛠️ Idle tool {choice.tool_name} with args {args_json_str}. "
-                        f"Tool ID: {bg_tool.tool_id}"
+                        f"🛠️ Idle tool {choice.tool_name} with args {args_json_str}. Tool ID: {bg_tool.tool_id}"
                     ),
                 },
             ),
