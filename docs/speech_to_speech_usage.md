@@ -26,11 +26,11 @@ We will be opinionated about the pieces that should *just work* (VAD, STT, TTS) 
 
 ## Why run your own Speech-to-Speech server?
 
-Hosted realtime backends are convenient, but they come with three trade-offs that matter for a robot sitting on your desk:
+Hosted realtime backends are convenient, but running your own engine unlocks three things:
 
-- **Latency.** Audio round-trips to a cloud endpoint add a few hundred milliseconds to every turn. A local engine on the same Wi-Fi (or the same laptop) feels noticeably snappier.
-- **Privacy.** Audio never leaves your machine.
-- **Choice of brain.** With your own engine you can swap the LLM at will. A small MLX model for a quick demo, a vLLM-served 70B for a serious agent, or a hosted frontier model behind a Responses API for the hard prompts.
+- **Privacy.** Audio never leaves your network, the entire pipeline runs on hardware you control.
+- **No API costs.** No per-minute or per-token fees.
+- **Full control over the pipeline.** Swap any piece: VAD, STT, LLM, TTS. Whenever something better lands on the Hub 🤗.
 
 The `speech-to-speech` repo gives you all of that in a single CLI. It boots a WebSocket server at `/v1/realtime` that speaks the same protocol Reachy Mini already knows how to talk to.
 
@@ -46,7 +46,7 @@ That gives you the `speech-to-speech` entrypoint. Add `[mlx-lm]`, `[paraformer]`
 
 ## Our opinionated defaults: VAD, STT, TTS
 
-A voice pipeline has four moving parts. Three of them — *when the user is speaking*, *what they said*, and *how the robot says its answer* — are problems where good defaults exist and where you should not have to tune anything to get a great experience. We recommend the same trio we ship in production:
+A cascaded voice pipeline has four stages: VAD, STT, LLM, and TTS. For three of them, we pick solid defaults so you can focus on the LLM:
 
 | Stage | Choice | Why |
 |-------|--------|-----|
@@ -54,11 +54,11 @@ A voice pipeline has four moving parts. Three of them — *when the user is spea
 | STT | **Parakeet-TDT** | Streaming-friendly, very fast, great quality on English. |
 | TTS | **Qwen3-TTS** | Expressive, low-latency, multilingual, supports custom voices. |
 
-These match the defaults in the `speech-to-speech` repo, so the only thing you actually need to choose is the LLM.
+We are opinionated about these choices, feel free to swap them out for your own if you have a preference.
 
 ## Choosing your LLM
 
-This is where you have decisions to make. We group the options into two families: **run a model inside the engine** (MLX or Transformers), or **let the engine talk to a separate inference server over a Responses API** (vLLM, llama.cpp, HF Inference Endpoints, OpenAI).
+The LLM is the layer with the most impact on latency and overall performance of the system. We support two options: **run a model locally** (MLX or Transformers), or **let the engine talk to a separate inference server over a Responses API** (vLLM, llama.cpp, HF Inference Endpoints, OpenAI, ...).
 
 ### Option 1 — Local LLM on MLX (Apple Silicon)
 
@@ -92,13 +92,34 @@ speech-to-speech \
 
 ### The Responses API: decouple the brain from the voice loop
 
-The two options above bundle the LLM inside the `speech-to-speech` process. That is convenient, but it has a downside: every time you restart the voice loop, you reload the LLM weights. And you cannot easily share the same model with other apps.
+The main bottleneck in the system is LLM inference latency. To address that, we support external inference engines exposed through the Responses API protocol.
 
-The `speech-to-speech` engine therefore supports a second mode where the LLM lives in a separate process — any process — as long as it speaks the OpenAI Responses API protocol. You launch your model server in one terminal, you launch the voice loop in another terminal, and the two talk over HTTP.
+The `speech-to-speech` engine therefore supports a second mode where the LLM lives in a separate process as long as it speaks the Responses API protocol. You launch your model server in one terminal, you launch the voice loop in another terminal, and the two talk over HTTP.
 
-This is the layout that scales: you keep the heavy weights warm in their own server, and the voice loop becomes a thin client you can restart at will.
+#### Option 3 — llama.cpp in one terminal, speech-to-speech in the other
 
-#### Option 3 — vLLM in one terminal, speech-to-speech in the other
+**Terminal 1 — llama.cpp server:**
+
+```bash
+llama-server \
+  -hf unsloth/Qwen3-4B-Instruct-2507-GGUF \
+  --port 8000 \
+  --host 127.0.0.1
+```
+
+**Terminal 2 — speech-to-speech client:**
+
+```bash
+speech-to-speech \
+  --mode realtime \
+  --stt parakeet-tdt \
+  --tts qwen3 \
+  --llm_backend responses-api \
+  --model_name "unsloth/Qwen3-4B-Instruct-2507-GGUF" \
+  --responses_api_base_url "http://127.0.0.1:8000/v1"
+```
+
+#### Option 4 — vLLM in one terminal, speech-to-speech in the other
 
 **Terminal 1 — vLLM inference server:**
 
@@ -120,31 +141,6 @@ speech-to-speech \
   --responses_api_base_url "http://127.0.0.1:8000/v1"
 ```
 
-#### Option 4 — llama.cpp in one terminal, speech-to-speech in the other
-
-If you prefer GGUF weights or are running on a machine where vLLM is awkward, `llama-server` gives you the same OpenAI-compatible endpoint.
-
-**Terminal 1 — llama.cpp server:**
-
-```bash
-llama-server \
-  -hf bartowski/Qwen3-4B-Instruct-2507-GGUF \
-  --port 8000 \
-  --host 127.0.0.1
-```
-
-**Terminal 2 — speech-to-speech client:**
-
-```bash
-speech-to-speech \
-  --mode realtime \
-  --stt parakeet-tdt \
-  --tts qwen3 \
-  --llm_backend responses-api \
-  --model_name "qwen3-4b-instruct" \
-  --responses_api_base_url "http://127.0.0.1:8000/v1"
-```
-
 #### Option 5 — Hugging Face Inference Endpoints
 
 Same protocol, but the model runs on a managed GPU on Hugging Face. Deploy any chat model as an Inference Endpoint, then point the voice loop at the endpoint URL:
@@ -160,7 +156,22 @@ speech-to-speech \
   --responses_api_api_key "$HF_TOKEN"
 ```
 
-#### Option 6 — OpenAI (or any OpenAI-compatible provider)
+#### Option 6 — Hugging Face Inference Providers
+
+If you don't want to manage your own endpoint, use an [Inference Provider](https://huggingface.co/docs/inference-providers) — Hugging Face routes your request to a third-party backend (e.g. Together, Fireworks, Replicate) with a single URL:
+
+```bash
+speech-to-speech \
+  --mode realtime \
+  --stt parakeet-tdt \
+  --tts qwen3 \
+  --llm_backend responses-api \
+  --model_name "Qwen/Qwen3.6-35B-A3B:deepinfra" \
+  --responses_api_base_url "https://router.huggingface.co/v1" \
+  --responses_api_api_key "$HF_TOKEN"
+```
+
+#### Option 7 — OpenAI (or any OpenAI-compatible provider)
 
 When you want to test against a frontier model with zero infra, point the same flag at OpenAI:
 
@@ -170,7 +181,7 @@ speech-to-speech \
   --stt parakeet-tdt \
   --tts qwen3 \
   --llm_backend responses-api \
-  --model_name "gpt-4o-mini" \
+  --model_name "gpt-5.4" \
   --responses_api_api_key "$OPENAI_API_KEY"
 ```
 
@@ -227,6 +238,4 @@ You now have a fully local voice loop:
 - thinking with whichever LLM you picked — local MLX, local Transformers, a vLLM/llama.cpp server next door, or a hosted Responses API endpoint,
 - and answering with **Qwen3-TTS**.
 
-The defaults are opinionated on purpose: VAD/STT/TTS are solved problems and we want them out of your way. The LLM is the part of the stack that should keep changing as the open models keep getting better — and the Responses API is the seam that lets you swap it without ever touching the voice loop.
-
-Star [`huggingface/speech-to-speech`](https://github.com/huggingface/speech-to-speech) and [`pollen-robotics/reachy_mini_conversation_app`](https://github.com/pollen-robotics/reachy_mini_conversation_app), and come tell us in the discussions which LLM you ended up running on your robot.
+Star [`huggingface/speech-to-speech`](https://github.com/huggingface/speech-to-speech) and [`pollen-robotics/reachy_mini_conversation_app`](https://github.com/pollen-robotics/reachy_mini_conversation_app), and come tell us in the discussions which open-source cascade you ended up running on your robot.
