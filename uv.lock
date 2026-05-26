@@ -12,6 +12,17 @@ resolution-markers = [
     "python_full_version < '3.11' and sys_platform != 'win32'",
 ]
 
+[options]
+exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer-span = "P7D"
+
+[options.exclude-newer-package]
+reachy-mini = false
+gradio-client = false
+reachy-mini-dances-library = false
+huggingface-hub = false
+reachy-mini-toolbox = false
+
 [manifest]
 
 [[manifest.dependency-metadata]]
