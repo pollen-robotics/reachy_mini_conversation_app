@@ -1,26 +1,24 @@
 ---
-title: "Give Reachy Mini your own voice: running a local Speech-to-Speech engine"
+title: "Reachy Mini goes fully local"
 thumbnail: /blog/assets/reachy_mini_s2s/thumbnail.png
 authors:
 - user: A-Mahla
 - user: andito
 ---
 
-# Give Reachy Mini your own voice: running a local Speech-to-Speech engine
+# Reachy Mini goes fully local
 
-The [Reachy Mini conversation app](https://github.com/pollen-robotics/reachy_mini_conversation_app) ships with a hosted Hugging Face realtime backend, so you can plug in a robot and start talking out of the box. But the whole point of an open-source robot is that you get to choose what runs inside it. In this post we walk through pairing Reachy Mini with our open-source [`speech-to-speech`](https://github.com/huggingface/speech-to-speech) engine, a cascaded VAD → STT → LLM → TTS pipeline that exposes an Responses API-compatible `/v1/realtime` WebSocket, and we point the robot at it through two lines of `.env`.
+After building your Reachy Mini, you will probably install the [conversation app](https://github.com/pollen-robotics/reachy_mini_conversation_app) and start talking to it. Until now, you were stuck sending your audio to a server. Not anymore. Today we'll walk you through running the whole stack locally.
 
-We will be opinionated about the pieces that should *just work* (VAD, STT, TTS) and open about the piece where you actually want to experiment: the LLM.
+Meet [`speech-to-speech`](https://github.com/huggingface/speech-to-speech), our cascaded VAD → STT → LLM → TTS pipeline that exposes a Realtime API-compatible `/v1/realtime` WebSocket. Once you launch the backend, point the robot at it from the UI.
+
+Cascades are the most flexible option in the open-source landscape today, and with the right pieces they're also the fastest. We'll recommend the components we like best, but the whole point of a cascade is that you can swap them. New models drop every week.
 
 > **TL;DR**
-> - Defaults we recommend: **Silero VAD**, **Parakeet-TDT STT**, **Qwen3-TTS**.
-> - For the LLM, start local with **MLX** or **Transformers** running **Qwen3-4B-Instruct-2507**.
-> - Need more flexibility? Plug any **Responses API** server: vLLM, llama.cpp, a Hugging Face Inference Endpoint, or OpenAI.
-> - Point Reachy Mini at your engine with:
->   ```env
->   HF_REALTIME_CONNECTION_MODE="local"
->   HF_REALTIME_WS_URL="ws://127.0.0.1:8765/v1/realtime"
->   ```
+> - Deploy a local speech backend for your Reachy Mini.
+> - We use our `speech-to-speech` library, a cascade approach.
+> - Recommended: **Silero VAD**, **Parakeet-TDT STT**, **Qwen3-TTS**.
+> - LLM: local deployment or any major provider.
 
 ---
 
