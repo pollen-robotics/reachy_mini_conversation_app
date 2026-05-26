@@ -220,7 +220,7 @@ class GeminiLiveHandler(ConversationHandler):
         """Stop current playback and preserve any transcript already spoken."""
         logger.debug("Gemini: user interrupted")
         await self._flush_transcript_chunks("assistant", self._pending_assistant_transcript_chunks)
-        if hasattr(self, "_clear_queue") and callable(self._clear_queue):
+        if self._clear_queue:
             self._clear_queue()
         if self.deps.head_wobbler is not None:
             self.deps.head_wobbler.reset()

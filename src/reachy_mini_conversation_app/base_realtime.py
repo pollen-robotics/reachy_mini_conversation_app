@@ -231,9 +231,13 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
     def _get_session_config(self, tool_specs: list[dict[str, Any]]) -> RealtimeSessionCreateRequestParam:
         """Return the backend-specific realtime session config."""
 
-    async def _wait_for_output_item(self) -> Tuple[int, NDArray[np.int16]] | AdditionalOutputs | None:
-        """Wait for the next output item."""
-        return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
+    async def _cancel_partial_transcript_task(self) -> None:
+        if self.partial_transcript_task and not self.partial_transcript_task.done():
+            self.partial_transcript_task.cancel()
+            try:
+                await self.partial_transcript_task
+            except asyncio.CancelledError:
+                pass
 
     def _mark_activity(self, reason: str) -> None:
         """Record non-idle conversation activity for the idle timer."""
@@ -703,7 +707,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         self._turn_user_done_at = None
                         self._turn_response_created_at = None
                         self._turn_first_audio_at = None
-                        if hasattr(self, "_clear_queue") and callable(self._clear_queue):
+                        if self._clear_queue:
                             self._clear_queue()
                         if self.deps.head_wobbler is not None:
                             self.deps.head_wobbler.reset()
@@ -759,13 +763,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         current_partial = "".join(input_transcript.deltas)
                         sequence_counter = len(input_transcript.deltas) - 1
 
-                        # Cancel previous debounce task if it exists
-                        if self.partial_transcript_task and not self.partial_transcript_task.done():
-                            self.partial_transcript_task.cancel()
-                            try:
-                                await self.partial_transcript_task
-                            except asyncio.CancelledError:
-                                pass
+                        await self._cancel_partial_transcript_task()
 
                         # Start new debounce timer with the last delta
                         self.partial_transcript_task = asyncio.create_task(
@@ -780,13 +778,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         logger.debug("User transcript: %s", raw_transcript)
                         self.deps.movement_manager.set_listening(False)
 
-                        # Cancel any pending partial emission
-                        if self.partial_transcript_task and not self.partial_transcript_task.done():
-                            self.partial_transcript_task.cancel()
-                            try:
-                                await self.partial_transcript_task
-                            except asyncio.CancelledError:
-                                pass
+                        await self._cancel_partial_transcript_task()
 
                         if not transcript:
                             logger.debug("Ignoring empty user transcript")
@@ -965,7 +957,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
             self.last_activity_time = asyncio.get_event_loop().time()  # avoid repeated resets
 
-        return await self._wait_for_output_item()
+        return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
 
     async def shutdown(self) -> None:
         """Shutdown the handler."""
@@ -975,13 +967,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         # Stop background tool manager tasks (listener + cleanup)
         await self.tool_manager.shutdown()
 
-        # Cancel any pending debounce task
-        if self.partial_transcript_task and not self.partial_transcript_task.done():
-            self.partial_transcript_task.cancel()
-            try:
-                await self.partial_transcript_task
-            except asyncio.CancelledError:
-                pass
+        await self._cancel_partial_transcript_task()
 
         if self.connection:
             try:

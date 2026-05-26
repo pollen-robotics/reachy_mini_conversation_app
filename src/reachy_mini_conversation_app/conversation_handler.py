@@ -21,7 +21,7 @@ class ConversationHandler(AsyncStreamHandler, ABC):
 
     deps: ToolDependencies
     output_queue: asyncio.Queue[QueueItem]
-    _clear_queue: Callable[[], None] | None
+    _clear_queue: Callable[[], None] | None = None
 
     @abstractmethod
     def copy(self) -> ConversationHandler:
