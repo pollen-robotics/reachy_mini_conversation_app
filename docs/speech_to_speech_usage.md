@@ -121,13 +121,28 @@ speech-to-speech \
 
 #### Option 4 — vLLM in one terminal, speech-to-speech in the other
 
-**Terminal 1 — vLLM inference server:**
+> **Requires vLLM ≥ 0.21.0.** Full support for the Responses API protocol — including tool-call streaming used by the speech-to-speech backend — landed in vLLM 0.21.0. Older versions will boot but trip up as soon as the assistant tries to call a tool.
+
+When serving a model through vLLM for this pipeline, three flags are effectively required:
+
+- `--enable-auto-tool-choice`
+- `--tool-call-parser <tool_parser_name>` — picks the per-family parser that turns the model's raw output into structured tool calls (e.g. `qwen3_coder` for Qwen3 instruct models, `llama3_json` for Llama 3, `hermes` for Hermes-style models, ...).
+- `--default-chat-template-kwargs '{"enable_thinking":false}'` — disables the `<think>` reasoning channel for models that support it. For harder agentic tasks you can flip this to `true` and let the model reason, but for a natural-feeling conversation we strongly recommend keeping it off: every thinking token is latency the user hears as silence before the robot starts speaking.
+
+**Terminal 1 — vLLM inference server (`Qwen/Qwen3-4B-Instruct-2507`):**
 
 ```bash
 vllm serve Qwen/Qwen3-4B-Instruct-2507 \
   --port 8000 \
-  --host 127.0.0.1
+  --host 127.0.0.1 \
+  --max-model-len 32768 \
+  --enable-auto-tool-choice \
+  --tool-call-parser qwen3_coder \
+  --default-chat-template-kwargs '{"enable_thinking":false}' \
+  --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":1}'
 ```
+
+> The `--speculative-config` line enables Multi-Token Prediction (MTP). It is **optional**, but it has a great impact on end-to-end latency — leave it on whenever the model supports it.
 
 **Terminal 2 — speech-to-speech client:**
 
