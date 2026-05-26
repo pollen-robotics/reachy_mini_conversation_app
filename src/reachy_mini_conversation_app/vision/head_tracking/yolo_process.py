@@ -381,10 +381,7 @@ class YoloHeadTrackerProcess:
 def main() -> int:
     """CLI entrypoint for the head-tracker worker process."""
     if len(sys.argv) != 1:
-        print(
-            "usage: python -m reachy_mini_conversation_app.vision.head_tracking.yolo_process",
-            file=sys.stderr,
-        )
+        logger.error("usage: python -m reachy_mini_conversation_app.vision.head_tracking.yolo_process")
         return 2
     return _worker_main()
 
