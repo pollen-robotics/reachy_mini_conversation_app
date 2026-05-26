@@ -559,12 +559,10 @@ def set_custom_profile(profile: str | None) -> None:
     except Exception as e:
         logger.warning("Failed to update config profile: %s", e)
     try:
-        import os as _os
-
         if profile:
-            _os.environ["REACHY_MINI_CUSTOM_PROFILE"] = profile
+            os.environ["REACHY_MINI_CUSTOM_PROFILE"] = profile
         else:
             # Remove to reflect default
-            _os.environ.pop("REACHY_MINI_CUSTOM_PROFILE", None)
+            os.environ.pop("REACHY_MINI_CUSTOM_PROFILE", None)
     except Exception as e:
         logger.warning("Failed to sync profile to environment: %s", e)
