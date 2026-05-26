@@ -29,10 +29,7 @@ _SYSTEM_TOOL_NAMES: set[str] = {t.value for t in SystemTool}
 class ToolProgress(BaseModel):
     """Progress of a background tool."""
 
-    """the progress of the tool"""
     progress: float = Field(..., ge=0.0, le=1.0)
-
-    """the message of the tool"""
     message: Optional[str] = None
 
 
@@ -41,13 +38,8 @@ class ToolCallRoutine(BaseModel):
 
     model_config = {"arbitrary_types_allowed": True}
 
-    """the name of the tool"""
     tool_name: str
-
-    """the JSON arguments for the tool call"""
     args_json_str: str
-
-    """the dependencies for the tool call"""
     deps: "ToolDependencies"
 
     async def __call__(self, tool_manager: BackgroundToolManager) -> Any:
@@ -63,43 +55,25 @@ class ToolCallRoutine(BaseModel):
 class ToolNotification(BaseModel):
     """Notification payload for completed tools."""
 
-    """the ID of the tool"""
     id: str
-
-    """the name of the tool"""
     tool_name: str
-
-    """whether the tool call was triggered by an idle signal"""
     is_idle_tool_call: bool
-
-    """the status of the tool"""
     status: ToolState
-
-    """the result of the tool"""
     result: Optional[Dict[str, Any]] = None
-
-    """the error of the tool"""
     error: Optional[str] = None
 
 
 class BackgroundTool(ToolNotification):
     """Represents a background tool."""
 
-    """the progress of the tool"""
     progress: Optional[ToolProgress] = None
-
-    """the start time of the tool"""
     started_at: float = Field(default_factory=time.monotonic)
-
-    """the completion time of the tool"""
     completed_at: Optional[float] = None
-
-    """the async tool execution task"""
     _task: Optional[asyncio.Task[None]] = PrivateAttr(default=None)
 
     @property
     def tool_id(self) -> str:
-        """Get the name of the tool."""
+        """Return a unique composite identifier for this tool instance."""
         return f"{self.tool_name}-{self.id}-{self.started_at}"
 
     def get_notification(self) -> ToolNotification:
@@ -124,23 +98,12 @@ class BackgroundToolManager(BaseModel):
 
     """
 
-    """the dictionary of tools"""
     _tools: Dict[str, BackgroundTool] = PrivateAttr(default_factory=dict)
-
-    """the async queue for notifications"""
     _notification_queue: asyncio.Queue[ToolNotification] = PrivateAttr(default_factory=asyncio.Queue)
-
-    """the event loop"""
     _loop: Optional[asyncio.AbstractEventLoop] = PrivateAttr(default=None)
-
-    """internal lifecycle tasks (notification listener, periodic cleanup)"""
     _lifecycle_tasks: list[asyncio.Task[None]] = PrivateAttr(default_factory=list)
-
-    """the maximum duration of a tool execution in seconds (default: 1 day)"""
-    _max_tool_duration_seconds: float = PrivateAttr(default=86400)
-
-    """the maximum time to keep a completed/failed/cancelled tool in memory (default: 1 hour)"""
-    _max_tool_memory_seconds: float = PrivateAttr(default=3600)
+    _max_tool_duration_seconds: float = PrivateAttr(default=86400)  # 1 day
+    _max_tool_memory_seconds: float = PrivateAttr(default=3600)  # 1 hour
 
     def set_loop(
         self,
