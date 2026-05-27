@@ -8,7 +8,7 @@ import inspect
 import logging
 import importlib
 import importlib.util
-from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Sequence
+from typing import TYPE_CHECKING, Any, Dict, List, ClassVar, Sequence
 from pathlib import Path
 from dataclasses import dataclass
 
