@@ -8,7 +8,7 @@ import inspect
 import logging
 import importlib
 import importlib.util
-from typing import TYPE_CHECKING, Any, Dict, List, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Sequence
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -33,10 +33,10 @@ class MissingToolFileError(FileNotFoundError):
 
 
 def get_concrete_subclasses(base: type[Tool]) -> List[type[Tool]]:
-    """Recursively find all concrete (non-abstract) subclasses of a base class."""
+    """Recursively find all auto-registerable concrete subclasses of a base class."""
     result: List[type[Tool]] = []
     for cls in base.__subclasses__():
-        if not inspect.isabstract(cls):
+        if not inspect.isabstract(cls) and cls._auto_register:
             result.append(cls)
         result.extend(get_concrete_subclasses(cls))
     return result
@@ -64,6 +64,8 @@ class Tool(abc.ABC):
       - parameters_schema: Dict[str, Any]  # JSON Schema
     """
 
+    _auto_register: ClassVar[bool] = True
+
     name: str
     description: str
     parameters_schema: Dict[str, Any]
@@ -83,28 +85,15 @@ class Tool(abc.ABC):
         raise NotImplementedError
 
 
-class ToolLike(Protocol):
-    """Minimal typed surface shared by local and remote tools."""
-
-    name: str
-    description: str
-
-    def spec(self) -> Dict[str, Any]:
-        """Return the function spec for LLM consumption."""
-        ...
-
-    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
-        """Async tool execution entrypoint."""
-        ...
-
-
-ALL_TOOLS: Dict[str, ToolLike] = {}
+ALL_TOOLS: Dict[str, Tool] = {}
 ALL_TOOL_SPECS: List[Dict[str, Any]] = []
 _TOOLS_INITIALIZED = False
 
 
-class RemoteMcpTool:
+class RemoteMcpTool(Tool):
     """Adapter exposing one remote MCP tool through the local Tool interface."""
+
+    _auto_register: ClassVar[bool] = False
 
     def __init__(
         self,
@@ -124,15 +113,6 @@ class RemoteMcpTool:
         self._client_tool_name = client_tool_name
         self._client = client
         self._registry_source = f"space:{slug}:{client_tool_name}"
-
-    def spec(self) -> Dict[str, Any]:
-        """Return the function spec for LLM consumption."""
-        return {
-            "type": "function",
-            "name": self.name,
-            "description": self.description,
-            "parameters": self.parameters_schema,
-        }
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Invoke the underlying remote MCP tool."""
@@ -193,8 +173,8 @@ def _format_error(error: Exception) -> str:
 
 def _build_tool_registry(
     tool_classes: List[type[Tool]],
-    extra_tools: Sequence[ToolLike] | None = None,
-) -> Dict[str, ToolLike]:
+    extra_tools: Sequence[Tool] | None = None,
+) -> Dict[str, Tool]:
     """Instantiate tools and fail if duplicate Tool.name values are detected."""
     unique_classes: List[type[Tool]] = []
     seen_class_ids: set[int] = set()
@@ -205,7 +185,7 @@ def _build_tool_registry(
         seen_class_ids.add(cls_id)
         unique_classes.append(cls)
 
-    tool_instances: list[ToolLike] = []
+    tool_instances: list[Tool] = []
     tool_instances.extend(cls() for cls in unique_classes)
     if extra_tools:
         tool_instances.extend(extra_tools)
