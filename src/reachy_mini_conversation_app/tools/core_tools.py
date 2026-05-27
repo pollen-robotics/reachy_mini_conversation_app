@@ -317,18 +317,22 @@ def _resolve_remote_tools(tool_names: list[str], instance_path: str | Path | Non
         try:
             resolved_space = resolve_public_tool_space_sync(installed_space.slug)
         except Exception as exc:
-            raise RuntimeError(
-                f"Enabled remote tools from '{installed_space.slug}' are unavailable: {', '.join(enabled_space_tools)}. "
-                f"Details: {exc}"
-            ) from exc
+            logger.warning(
+                "Space '%s' is unavailable, skipping its tools (%s): %s",
+                installed_space.slug,
+                ", ".join(enabled_space_tools),
+                exc,
+            )
+            continue
 
         enabled_tool_names = set(enabled_space_tools)
         discovered_tool_names = {tool.local_name for tool in resolved_space.tools}
         missing_tool_names = sorted(enabled_tool_names - discovered_tool_names)
         if missing_tool_names:
-            raise RuntimeError(
-                f"Enabled remote tools from '{installed_space.slug}' are unavailable: {', '.join(missing_tool_names)}. "
-                "Details: the installed Space did not expose those tool IDs."
+            logger.warning(
+                "Enabled tools from '%s' not found in Space and will be skipped: %s",
+                installed_space.slug,
+                ", ".join(missing_tool_names),
             )
 
         for remote_tool in resolved_space.tools:

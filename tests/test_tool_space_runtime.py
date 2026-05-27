@@ -179,11 +179,12 @@ async def test_tool_spaces_install_enable_and_dispatch_remote_tool(
     )
 
 
-def test_initialize_tools_fails_when_enabled_remote_tool_is_unavailable(
+def test_initialize_tools_warns_when_enabled_remote_tool_is_unavailable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Startup should fail when the active profile enables a missing installed remote tool."""
+    """Startup should warn and skip tools from an unavailable Space, not crash."""
     monkeypatch.chdir(tmp_path)
     external_profiles_root = tmp_path / "external_profiles"
     profile_dir = external_profiles_root / "remote_profile"
@@ -209,10 +210,11 @@ def test_initialize_tools_fails_when_enabled_remote_tool_is_unavailable(
     )
 
     core_tools_mod = _reload_core_tools()
-    with pytest.raises(
-        RuntimeError, match="Enabled remote tools from 'alozowski/reachy-mini-search-tool' are unavailable"
-    ):
+    with caplog.at_level("WARNING"):
         core_tools_mod.initialize_tools()
+
+    assert any("alozowski/reachy-mini-search-tool" in record.message for record in caplog.records)
+    assert "alozowski_reachy_mini_search_tool__search_web" not in core_tools_mod.ALL_TOOLS
 
 
 def test_initialize_tools_skips_unused_installed_remote_tool_space(
