@@ -8,52 +8,68 @@ authors:
 
 # Reachy Mini goes fully local
 
-After building your Reachy Mini, you'll install the [conversation app](https://github.com/pollen-robotics/reachy_mini_conversation_app) and start talking to it. Until now, you were stuck sending your audio to a server. Not anymore. Today we'll walk you through running the whole stack locally.
+After building your Reachy Mini, you'll install the [conversation app](https://github.com/pollen-robotics/reachy_mini_conversation_app) and start talking to it. Until now, you had to send your audio to a server. But not anymore. Today we'll walk you through running the whole stack locally.
 
-This stack is supported by [`speech-to-speech`](https://github.com/huggingface/speech-to-speech), our cascaded VAD → STT → LLM → TTS pipeline that exposes a Realtime API-compatible `/v1/realtime` WebSocket. Once you launch the backend, point the robot at it from the UI.
+This stack is powered by [`speech-to-speech`](https://github.com/huggingface/speech-to-speech), our cascaded VAD → STT → LLM → TTS pipeline that exposes a Realtime API-compatible `/v1/realtime` WebSocket. Once you launch the backend, point the robot at it from the UI.
 
 Cascades are the most flexible option in the open-source landscape today, and with the right pieces they're also the fastest. We'll recommend the components we like best, but the whole point of a cascade is that you can swap them. New models drop every week.
 
 > **TL;DR**
 > - Deploy a local speech backend for your Reachy Mini.
 > - We use our `speech-to-speech` library, a cascade approach.
-> - Recommended: **Silero VAD**, **Parakeet-TDT STT**, **Qwen3-TTS**.
-> - LLM: local deployment or any major provider.
+> - Recommended: **llama.cpp** with **Gemma 4**, **Silero VAD**, **Parakeet-TDT STT**, **Qwen3-TTS**.
 
 ---
 
-## Demo time!
+## How to set local conversations with Reachy Mini quickly?
 
-This blog will show you how to run conversations fully locally, once we're done, you won't need to send any data to the cloud to chat with reachy, if you choose to do so. Here's a video showing this live with a macbook pro M3:
+This blog walks you through running conversations with Reachy Mini fully locally. No cloud, no API keys, no data leaving your machine. Here's a video showing this live:
 
-
+<video controls width="100%">
+  <source src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/blog/local_reachy_mini_conversation/Reachy mini local.mp4" type="video/mp4">
+</video>
 
 ### Locally serving the LLM
 
 To serve the LLM, we'll use Hugging Face's `llama.cpp`. If you need to install it, the simplest way is `brew install llama.cpp` or `winget install llama.cpp`, for more help, [check the docs](https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md).
-Then, to serve the LLM, we'll run:
+To serve the LLM, we'll run:
 ```bash
-llama-server   -hf ggml-org/gemma-4-E4B-it-GGUF   -np 2   -c 65536   -fa on   --swa-full
+llama-server -hf ggml-org/gemma-4-E4B-it-GGUF -np 2 -c 65536 -fa on --swa-full
 ```
 And done! The first time it will download the model, and after launching it will be very fast.
+
+<details>
+<summary>What do those flags do?</summary>
+
+- `-hf ggml-org/gemma-4-E4B-it-GGUF` — pulls the model straight from the Hub. First run downloads it, subsequent runs use the cache.
+- `-np 2` — two parallel slots. Lets the server handle a second request (e.g. a quick interruption) without blocking on the first.
+- `-c 65536` — 64k context window, shared across slots. Plenty of headroom for long conversations.
+- `-fa on` — flash attention. Faster and lower memory, basically free on modern hardware.
+- `--swa-full` — keeps the full sliding-window attention cache instead of recomputing it. Trades a bit of RAM for noticeably faster prompt processing on Gemma.
+
+</details>
 
 ### Setting up speech-to-speech
 
 We'll begin by simply installing the library
 
-``bash
+```bash
 uv pip install speech-to-speech
-``
+```
 
-Then, while we are serving the LLM on another tab, we can simply run:
+Then, while we are serving the LLM in another terminal, we can simply run:
 
-``bash
+```bash
 speech-to-speech --responses_api_base_url "http://127.0.0.1:8080" --responses_api_api_key "" --mode local
-``
+```
 
 And you can start talking to the model through your terminal! The first time it will need to download Parakeet and Qwen3TTS, but following runs will be fast as well
 
 Here's a video showing this section quickly. 
+
+<video controls width="100%">
+  <source src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/blog/local_reachy_mini_conversation/s2s-llamacpp.mp4" type="video/mp4">
+</video>
 
 Now, after you tried it in ``--mode local``, you can run again the command without that option to serve speech-to-speech to the robot.
 
@@ -61,10 +77,16 @@ Now, after you tried it in ``--mode local``, you can run again the command witho
 
 Once you have llama.cpp and speech-to-speech running, you can start the robot with the desktop app and launch the conversation app. In the UI from the conversation app, you need to choose the local mode by clicking on edit connection in the HF backend. Here's a video showing how to do it:
 
+<video controls width="100%">
+  <source src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/blog/local_reachy_mini_conversation/setting_up_conv_app.mp4" type="video/mp4">
+</video>
 
 
+And you're done! You can start talking to your robot. Feel free to explore speech-to-speech to understand how to switch models! For the TTS, there are several faster models that are lower quality. For the STT, there are several slower models that are lower quality. Everything is a trade-off. The best model for you might be different than ours, we care about multilingual models, but you might want to optimize for a given language! The rest of the blog will go into more details of how to customize your experience!
 
-## Why run your own Speech-to-Speech server?
+## Going deeper
+
+### Why run your own Speech-to-Speech server?
 
 Hosted realtime backends are convenient, but running your own engine unlocks three things:
 
@@ -74,17 +96,7 @@ Hosted realtime backends are convenient, but running your own engine unlocks thr
 
 The `speech-to-speech` repo gives you all of that in a single CLI. It boots a WebSocket server at `/v1/realtime` that speaks the same protocol Reachy Mini already knows how to talk to.
 
-## Install the engine
-
-```bash
-git clone https://github.com/huggingface/speech-to-speech.git
-cd speech-to-speech
-uv sync
-```
-
-That gives you the `speech-to-speech` entrypoint. Add `[mlx-lm]`, `[paraformer]`, `[faster-whisper]`, etc. as extras if you want to swap any of the default backends later.
-
-## Our opinionated defaults: VAD, STT, TTS
+### Our opinionated defaults: VAD, STT, TTS
 
 A cascaded voice pipeline has four stages: VAD, STT, LLM, and TTS. For three of them, we pick solid defaults so you can focus on the LLM:
 
@@ -96,55 +108,16 @@ A cascaded voice pipeline has four stages: VAD, STT, LLM, and TTS. For three of 
 
 We are opinionated about these choices, feel free to swap them out for your own if you have a preference.
 
-## Choosing your LLM
+### Choosing your LLM
 
-The LLM is the layer with the most impact on latency and overall performance of the system. We support two options: **run a model locally** (MLX or Transformers), or **let the engine talk to a separate inference server over a Responses API** (vLLM, llama.cpp, HF Inference Endpoints, OpenAI, ...).
+The LLM is the layer with the most impact on latency and overall performance of the system. We support two options: **run a model locally** (llama.cpp, MLX, Transformers, vLLM), or **use a server with a Responses API** (OpenAI, Gemini, HF Inference Endpoints, llama.cpp, vLLM, etc).
 
-### Option 1 — Local LLM on MLX (Apple Silicon)
-
-If you are on a Mac, MLX is the lowest-friction way to run a real model with sane latency. We recommend **Qwen3-4B-Instruct-2507**, which is small enough to feel instant on M-series chips and capable enough to hold a conversation.
-
-```bash
-speech-to-speech \
-  --mode realtime \
-  --stt parakeet-tdt \
-  --tts qwen3 \
-  --llm_backend mlx-lm \
-  --model_name "mlx-community/Qwen3-4B-Instruct-2507-bf16"
-```
-
-The server listens on `ws://127.0.0.1:8765/v1/realtime` by default. Leave it running, jump to the [Connecting Reachy Mini](#connect-reachy-mini-to-your-engine) section, and you are talking to your robot.
-
-### Option 2 — Local LLM on Transformers (CUDA / CPU / MPS)
-
-Same idea, but using vanilla `transformers`. Use this if you are on a CUDA box, on Linux, or if you want to swap models freely without re-converting weights for MLX.
-
-```bash
-speech-to-speech \
-  --mode realtime \
-  --stt parakeet-tdt \
-  --tts qwen3 \
-  --llm_backend transformers \
-  --model_name "Qwen/Qwen3-4B-Instruct-2507"
-```
-
-> **Tip.** `Qwen3-4B-Instruct-2507` is our default recommendation because it gives a good speed/quality balance on a single consumer GPU. You can point `--model_name` at any HF model the backend supports — for example a larger Qwen, a Llama, or a Mistral.
-
-### The Responses API: decouple the brain from the voice loop
-
-The main bottleneck in the system is LLM inference latency. To address that, we support external inference engines exposed through the Responses API protocol.
-
-The `speech-to-speech` engine therefore supports a second mode where the LLM lives in a separate process as long as it speaks the Responses API protocol. You launch your model server in one terminal, you launch the voice loop in another terminal, and the two talk over HTTP.
-
-#### Option 3 — llama.cpp in one terminal, speech-to-speech in the other
+##### Option 1 — llama.cpp in one terminal, speech-to-speech in the other
 
 **Terminal 1 — llama.cpp server:**
 
 ```bash
-llama-server \
-  -hf unsloth/Qwen3-4B-Instruct-2507-GGUF \
-  --port 8000 \
-  --host 127.0.0.1
+llama-server -hf ggml-org/gemma-4-E4B-it-GGUF -np 2 -c 65536 -fa on --swa-full
 ```
 
 **Terminal 2 — speech-to-speech client:**
@@ -158,8 +131,36 @@ speech-to-speech \
   --model_name "unsloth/Qwen3-4B-Instruct-2507-GGUF" \
   --responses_api_base_url "http://127.0.0.1:8000/v1"
 ```
+#### Option 1 — Local LLM on MLX (Apple Silicon)
 
-#### Option 4 — vLLM in one terminal, speech-to-speech in the other
+If you are on a Mac, MLX is the lowest-friction way to run a real model with sane latency. We recommend **Qwen3-4B-Instruct-2507**, which is small enough to feel instant on M-series chips and capable enough to hold a conversation.
+
+```bash
+speech-to-speech --responses_api_base_url "http://127.0.0.1:8080" --responses_api_api_key "" 
+```
+
+The server listens on `ws://127.0.0.1:8765/v1/realtime` by default. Leave it running, connect the conversation app to the local backend, and you are talking to your robot.
+
+### Option 2 — Local LLM on Transformers (CUDA / CPU / MPS)
+
+Same idea, but using vanilla `transformers`. Use this if you are on a CUDA box, on Linux, or if you want to swap models freely without re-converting weights for MLX.
+
+```bash
+speech-to-speech \
+  --llm_backend transformers \
+  --model_name "Qwen/Qwen3-4B-Instruct-2507"
+```
+
+> **Tip.** `Qwen3-4B-Instruct-2507` is another good option for LLM because it gives a good speed/quality balance on a single consumer GPU. You can point `--model_name` at any HF model the backend supports — for example a larger Gemma, Qwen, or a Mistral.
+
+#### The Responses API: decouple the brain from the voice loop
+
+The main bottleneck in the system is LLM inference latency. To address that, we support external inference engines exposed through the Responses API protocol.
+
+The `speech-to-speech` engine therefore supports a second mode where the LLM lives in a separate process as long as it speaks the Responses API protocol. You launch your model server in one terminal, you launch the voice loop in another terminal, and the two talk over HTTP.
+
+
+##### Option 4 — vLLM in one terminal, speech-to-speech in the other
 
 > **Requires vLLM ≥ 0.21.0.** Full support for the Responses API protocol — including tool-call streaming used by the speech-to-speech backend — landed in vLLM 0.21.0. Older versions will boot but trip up as soon as the assistant tries to call a tool.
 
@@ -196,7 +197,7 @@ speech-to-speech \
   --responses_api_base_url "http://127.0.0.1:8000/v1"
 ```
 
-#### Option 5 — Hugging Face Inference Endpoints
+##### Option 5 — Hugging Face Inference Endpoints
 
 Same protocol, but the model runs on a managed GPU on Hugging Face. Deploy any chat model as an Inference Endpoint, then point the voice loop at the endpoint URL:
 
@@ -211,7 +212,7 @@ speech-to-speech \
   --responses_api_api_key "$HF_TOKEN"
 ```
 
-#### Option 6 — Hugging Face Inference Providers
+##### Option 6 — Hugging Face Inference Providers
 
 If you don't want to manage your own endpoint, use an [Inference Provider](https://huggingface.co/docs/inference-providers) — Hugging Face routes your request to a third-party backend (e.g. Together, Fireworks, Replicate) with a single URL:
 
@@ -226,7 +227,7 @@ speech-to-speech \
   --responses_api_api_key "$HF_TOKEN"
 ```
 
-#### Option 7 — OpenAI (or any OpenAI-compatible provider)
+##### Option 7 — OpenAI (or any OpenAI-compatible provider)
 
 When you want to test against a frontier model with zero infra, point the same flag at OpenAI:
 
@@ -244,43 +245,43 @@ The `--responses_api_*` flags work the same for any provider that implements the
 
 ---
 
-## Connect Reachy Mini to your engine
+#### Running the engine on your laptop, the app on the robot
 
-Once `speech-to-speech` is running and printing something like `Realtime server listening on ws://127.0.0.1:8765/v1/realtime`, all that is left is to tell the conversation app to talk to it instead of the hosted backend.
+If you are running the voice engine on your laptop and the conversation app on a Reachy Mini Wireless, the only thing that changes is the URL. Make sure the engine binds to a LAN address (not just `127.0.0.1`) and use the laptop's IP from the robot when you select the IP in the UI.
 
-In the root of the `reachy_mini_conversation_app` checkout, copy `.env.example` to `.env` and set:
+If you don't know your IP, here's how to find it:
 
-```env
-BACKEND_PROVIDER="huggingface"
-HF_REALTIME_CONNECTION_MODE="local"
-HF_REALTIME_WS_URL="ws://127.0.0.1:8765/v1/realtime"
-```
+<details>
+<summary>macOS</summary>
 
-Then launch the app as usual:
+​```bash
+ipconfig getifaddr en0    # wifi
+ipconfig getifaddr en1    # ethernet (sometimes en0, varies)
+​```
 
-```bash
-reachy-mini-conversation-app
-```
+</details>
 
-That is the entire integration. The `HF_REALTIME_CONNECTION_MODE="local"` flag flips the app from the hosted Space proxy to a direct WebSocket; `HF_REALTIME_WS_URL` says *where* that WebSocket lives.
+<details>
+<summary>Linux</summary>
 
-### Running the engine on your laptop, the app on the robot
+​```bash
+hostname -I
+​```
 
-If you are running the voice engine on your laptop and the conversation app on a Reachy Mini Wireless, the only thing that changes is the URL — make sure the engine binds to a LAN address (not just `127.0.0.1`) and use the laptop's IP from the robot:
+</details>
 
-```env
-BACKEND_PROVIDER="huggingface"
-HF_REALTIME_CONNECTION_MODE="local"
-HF_REALTIME_WS_URL="ws://<your-laptop-lan-ip>:8765/v1/realtime"
-```
+<details>
+<summary>Windows</summary>
 
-If the engine has to stay bound to loopback for any reason, an SSH reverse tunnel from your laptop into the robot works just as well:
+​```powershell
+ipconfig
+​```
 
-```bash
-ssh -N -R 8765:127.0.0.1:8765 <robot-user>@<robot-host>
-```
+Look for "IPv4 Address" under your active adapter.
 
-…and then keep the original loopback URL on the robot.
+</details>
+
+You want the `192.168.x.x` or `10.x.x.x` one. If you see `169.254.x.x`, you're not actually on the network.
 
 ---
 
