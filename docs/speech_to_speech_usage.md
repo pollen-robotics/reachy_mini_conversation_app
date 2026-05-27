@@ -82,7 +82,7 @@ Once you have llama.cpp and speech-to-speech running, you can start the robot wi
 </video>
 
 
-And you're done! You can start talking to your robot. Feel free to explore speech-to-speech to understand how to switch models! For the TTS, there are several faster models that are lower quality. For the STT, there are several slower models that are lower quality. Everything is a trade-off. The best model for you might be different than ours, we care about multilingual models, but you might want to optimize for a given language! The rest of the blog will go into more details of how to customize your experience!
+And you're done. You can start talking to your robot. Every stage of the pipeline is a trade-off: there are faster TTS models with lower quality, slower STT models with higher quality. We optimized for multilingual, you might want to optimize for a single language. The rest of the blog covers how to customize.
 
 ## Going deeper
 
@@ -119,15 +119,15 @@ The main bottleneck in the system is LLM inference latency. To address that, we 
 The `speech-to-speech` engine therefore supports a second mode where the LLM lives in a separate process as long as it speaks the Responses API protocol. You launch your model server in one terminal, you launch the voice loop in another terminal, and the two talk over HTTP.
 
 
-##### Option 1 — llama.cpp in one terminal, speech-to-speech in the other
+##### Option 1: llama.cpp in one terminal, speech-to-speech in the other
 
-**Terminal 1 — llama.cpp server:**
+**Terminal 1: llama.cpp server:**
 
 ```bash
 llama-server -hf ggml-org/gemma-4-E4B-it-GGUF -np 2 -c 65536 -fa on --swa-full
 ```
 
-**Terminal 2 — speech-to-speech client:**
+**Terminal 2: speech-to-speech client:**
 
 ```bash
 speech-to-speech \
@@ -136,20 +136,20 @@ speech-to-speech \
   --tts qwen3 \
   --llm_backend responses-api \
   --model_name "unsloth/Qwen3-4B-Instruct-2507-GGUF" \
-  --responses_api_base_url "http://127.0.0.1:8000/v1"
+  --responses_api_base_url "http://127.0.0.1:8080/v1"
 ```
 
-##### Option 2 — vLLM in one terminal, speech-to-speech in the other
+##### Option 2: vLLM in one terminal, speech-to-speech in the other
 
-> **Requires vLLM ≥ 0.21.0.** Full support for the Responses API protocol — including tool-call streaming used by the speech-to-speech backend — landed in vLLM 0.21.0. Older versions will boot but trip up as soon as the assistant tries to call a tool.
+> **Requires vLLM ≥ 0.21.0.** Full support for the Responses API protocol, including tool-call streaming used by the speech-to-speech backend, landed in vLLM 0.21.0. Older versions will boot but trip up as soon as the assistant tries to call a tool.
 
 When serving a model through vLLM for this pipeline, three flags are effectively required:
 
 - `--enable-auto-tool-choice`
 - `--tool-call-parser <tool_parser_name>` — picks the per-family parser that turns the model's raw output into structured tool calls (e.g. `qwen3_coder` for Qwen3 instruct models, `llama3_json` for Llama 3, `hermes` for Hermes-style models, ...).
-- `--default-chat-template-kwargs '{"enable_thinking":false}'` — disables the `<think>` reasoning channel for models that support it. For harder agentic tasks you can flip this to `true` and let the model reason, but for a natural-feeling conversation we strongly recommend keeping it off: every thinking token is latency the user hears as silence before the robot starts speaking.
+- `--default-chat-template-kwargs '{"enable_thinking":false}'` : disables the `<think>` reasoning channel for models that support it. For harder agentic tasks you can flip this to `true` and let the model reason, but for a natural-feeling conversation we strongly recommend keeping it off: every thinking token is latency the user hears as silence before the robot starts speaking.
 
-**Terminal 1 — vLLM inference server (`Qwen/Qwen3-4B-Instruct-2507`):**
+**Terminal 1: vLLM inference server (`Qwen/Qwen3-4B-Instruct-2507`):**
 
 ```bash
 vllm serve Qwen/Qwen3-4B-Instruct-2507 \
@@ -162,9 +162,9 @@ vllm serve Qwen/Qwen3-4B-Instruct-2507 \
   --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":1}'
 ```
 
-> The `--speculative-config` line enables Multi-Token Prediction (MTP). It is **optional**, but it has a great impact on end-to-end latency — leave it on whenever the model supports it.
+> The `--speculative-config` line enables Multi-Token Prediction (MTP). It is **optional**, but it has a great impact on end-to-end latency. Leave it on whenever the model supports it.
 
-**Terminal 2 — speech-to-speech client:**
+**Terminal 2: speech-to-speech client:**
 
 ```bash
 speech-to-speech \
@@ -176,7 +176,7 @@ speech-to-speech \
   --responses_api_base_url "http://127.0.0.1:8000/v1"
 ```
 
-##### Option 3 — Hugging Face Inference Endpoints
+##### Option 3: Hugging Face Inference Endpoints
 
 Same protocol, but the model runs on a managed GPU on Hugging Face. Deploy any chat model as an Inference Endpoint, then point the voice loop at the endpoint URL:
 
@@ -191,7 +191,7 @@ speech-to-speech \
   --responses_api_api_key "$HF_TOKEN"
 ```
 
-##### Option 4 — Hugging Face Inference Providers
+##### Option 4: Hugging Face Inference Providers
 
 If you don't want to manage your own endpoint, use an [Inference Provider](https://huggingface.co/docs/inference-providers). Hugging Face routes your request to a third-party backend (e.g. Together, Fireworks, Replicate) with a single URL:
 
@@ -206,7 +206,7 @@ speech-to-speech \
   --responses_api_api_key "$HF_TOKEN"
 ```
 
-##### Option 5 — OpenAI (or any OpenAI-compatible provider)
+##### Option 5: OpenAI (or any OpenAI-compatible provider)
 
 When you want to test against a frontier model with zero infra, point the same flag at OpenAI:
 
@@ -224,20 +224,21 @@ The `--responses_api_*` flags work the same for any provider that implements the
 
 ---
 
-#### Running the LLM in speech to speech
+#### Running the LLM in-process
 
-##### Option 1 — Local LLM on MLX (Apple Silicon)
+##### Option 1: Local LLM on MLX (Apple Silicon)
 
 If you are on a Mac, MLX is the lowest-friction way to run a real model with sane latency. We recommend **Qwen3-4B-Instruct-2507**, which is small enough to feel instant on M-series chips and capable enough to hold a conversation.
 
 ```bash
 speech-to-speech \
   --llm_backend mlx-lm \
-  --model_name "mlx-community/Qwen3-4B-Instruct-2507-bf16"```
+  --model_name "mlx-community/Qwen3-4B-Instruct-2507-bf16"
+```
 
 The server listens on `ws://127.0.0.1:8765/v1/realtime` by default. Leave it running, connect the conversation app to the local backend, and you are talking to your robot.
 
-##### Option 2 — Local LLM on Transformers (CUDA / CPU / MPS)
+##### Option 2: Local LLM on Transformers (CUDA / CPU / MPS)
 
 Same idea, but using vanilla `transformers`. Use this if you are on a CUDA box, on Linux, or if you want to swap models freely without re-converting weights for MLX.
 
@@ -295,7 +296,7 @@ You now have a fully local voice loop:
 
 - A robot listening with **Silero**,
 - transcribing with **Parakeet-TDT**,
-- thinking with whichever LLM you picked — local MLX, local Transformers, a vLLM/llama.cpp server next door, or a hosted Responses API endpoint,
+- thinking with whichever LLM you picked, whether that's local MLX, local Transformers, a vLLM or llama.cpp server next door, or a hosted Responses API endpoint,
 - and answering with **Qwen3-TTS**.
 
 Star [`huggingface/speech-to-speech`](https://github.com/huggingface/speech-to-speech) and [`pollen-robotics/reachy_mini_conversation_app`](https://github.com/pollen-robotics/reachy_mini_conversation_app), and come tell us in the discussions which open-source cascade you ended up running on your robot.
