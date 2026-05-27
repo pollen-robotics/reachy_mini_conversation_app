@@ -13,10 +13,10 @@ from pathlib import Path
 from dataclasses import dataclass
 
 from reachy_mini import ReachyMini
-from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY as DEFAULT_PROFILES_PATH  # noqa: F401
+from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY as DEFAULT_PROFILES_PATH
 
 # Import config to ensure .env is loaded before reading REACHY_MINI_CUSTOM_PROFILE
-from reachy_mini_conversation_app.config import config  # noqa: F401
+from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.tool_constants import SystemTool
 
 
@@ -38,7 +38,6 @@ def get_concrete_subclasses(base: type[Tool]) -> List[type[Tool]]:
     for cls in base.__subclasses__():
         if not inspect.isabstract(cls):
             result.append(cls)
-        # recurse into subclasses
         result.extend(get_concrete_subclasses(cls))
     return result
 
@@ -56,7 +55,6 @@ class ToolDependencies:
     motion_duration_s: float = 1.0
 
 
-# Tool base class
 class Tool(abc.ABC):
     """Base abstraction for tools used in function-calling.
 

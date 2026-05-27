@@ -17,10 +17,6 @@ from .config import DEFAULT_PROFILES_DIRECTORY, get_default_voice_for_backend
 DEFAULT_OPTION = "(built-in default)"
 
 
-def _profiles_root() -> Path:
-    return DEFAULT_PROFILES_DIRECTORY
-
-
 def _prompts_dir() -> Path:
     return Path(__file__).parent / "prompts"
 
@@ -41,7 +37,7 @@ def _sanitize_name(name: str) -> str:
 def list_personalities() -> List[str]:
     """List available personality profile names."""
     names: List[str] = []
-    root = _profiles_root()
+    root = DEFAULT_PROFILES_DIRECTORY
     try:
         if root.exists():
             for p in sorted(root.iterdir()):
@@ -61,7 +57,7 @@ def list_personalities() -> List[str]:
 
 def resolve_profile_dir(selection: str) -> Path:
     """Resolve the directory path for the given profile selection."""
-    return _profiles_root() / selection
+    return DEFAULT_PROFILES_DIRECTORY / selection
 
 
 def read_instructions_for(name: str) -> str:
@@ -108,7 +104,7 @@ def available_tools_for(selected: str) -> List[str]:
 
 def _write_profile(name_s: str, instructions: str, tools_text: str, voice: str | None = None) -> None:
     default_voice = get_default_voice_for_backend()
-    target_dir = _profiles_root() / "user_personalities" / name_s
+    target_dir = DEFAULT_PROFILES_DIRECTORY / "user_personalities" / name_s
     target_dir.mkdir(parents=True, exist_ok=True)
     (target_dir / "instructions.txt").write_text(instructions.strip() + "\n", encoding="utf-8")
     (target_dir / "tools.txt").write_text((tools_text or "").strip() + "\n", encoding="utf-8")

@@ -24,7 +24,7 @@ def get_available_dances_and_descriptions() -> str:
     if not DANCE_AVAILABLE:
         return "Moves not available."
 
-    if not AVAILABLE_MOVES:  # if AVAILABLE_MOVES is empty
+    if not AVAILABLE_MOVES:
         return "Moves not available."
 
     output = ""
@@ -63,7 +63,7 @@ class Dance(Tool):
         if not DANCE_AVAILABLE:
             return {"error": "Dance system not available"}
 
-        if not AVAILABLE_MOVES:  # if AVAILABLE_MOVES is empty
+        if not AVAILABLE_MOVES:
             return {"error": "No moves currently available"}
 
         move_name = kwargs.get("move")
@@ -77,7 +77,6 @@ class Dance(Tool):
         if move_name not in AVAILABLE_MOVES:
             return {"error": f"Unknown dance move '{move_name}'. Available: {list(AVAILABLE_MOVES.keys())}"}
 
-        # Add dance moves to queue
         movement_manager = deps.movement_manager
         for _ in range(repeat):
             dance_move = DanceQueueMove(move_name)

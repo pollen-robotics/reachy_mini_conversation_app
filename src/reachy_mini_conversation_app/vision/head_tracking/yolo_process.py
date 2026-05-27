@@ -381,10 +381,7 @@ class YoloHeadTrackerProcess:
 def main() -> int:
     """CLI entrypoint for the head-tracker worker process."""
     if len(sys.argv) != 1:
-        print(
-            "usage: python -m reachy_mini_conversation_app.vision.head_tracking.yolo_process",
-            file=sys.stderr,
-        )
+        logger.error("unexpected arguments: this process takes no arguments")
         return 2
     return _worker_main()
 

@@ -69,7 +69,6 @@ class PlayEmotion(Tool):
 
         logger.info("Tool call: play_emotion emotion=%s", emotion_name)
 
-        # Check if emotion exists
         try:
             emotion_names = RECORDED_MOVES.list_moves()
             if not emotion_names:
@@ -81,7 +80,6 @@ class PlayEmotion(Tool):
             if emotion_name not in emotion_names:
                 return {"error": f"Unknown emotion '{emotion_name}'. Available: {emotion_names}"}
 
-            # Add emotion to queue
             movement_manager = deps.movement_manager
             emotion_move = EmotionQueueMove(emotion_name, RECORDED_MOVES)
             movement_manager.queue_move(emotion_move)
