@@ -8,9 +8,9 @@ authors:
 
 # Reachy Mini goes fully local
 
-After building your Reachy Mini, you will probably install the [conversation app](https://github.com/pollen-robotics/reachy_mini_conversation_app) and start talking to it. Until now, you were stuck sending your audio to a server. Not anymore. Today we'll walk you through running the whole stack locally.
+After building your Reachy Mini, you'll install the [conversation app](https://github.com/pollen-robotics/reachy_mini_conversation_app) and start talking to it. Until now, you were stuck sending your audio to a server. Not anymore. Today we'll walk you through running the whole stack locally.
 
-Meet [`speech-to-speech`](https://github.com/huggingface/speech-to-speech), our cascaded VAD → STT → LLM → TTS pipeline that exposes a Realtime API-compatible `/v1/realtime` WebSocket. Once you launch the backend, point the robot at it from the UI.
+This stack is supported by [`speech-to-speech`](https://github.com/huggingface/speech-to-speech), our cascaded VAD → STT → LLM → TTS pipeline that exposes a Realtime API-compatible `/v1/realtime` WebSocket. Once you launch the backend, point the robot at it from the UI.
 
 Cascades are the most flexible option in the open-source landscape today, and with the right pieces they're also the fastest. We'll recommend the components we like best, but the whole point of a cascade is that you can swap them. New models drop every week.
 
@@ -21,6 +21,48 @@ Cascades are the most flexible option in the open-source landscape today, and wi
 > - LLM: local deployment or any major provider.
 
 ---
+
+## Demo time!
+
+This blog will show you how to run conversations fully locally, once we're done, you won't need to send any data to the cloud to chat with reachy, if you choose to do so. Here's a video showing this live with a macbook pro M3:
+
+
+
+### Locally serving the LLM
+
+To serve the LLM, we'll use Hugging Face's `llama.cpp`. If you need to install it, the simplest way is `brew install llama.cpp` or `winget install llama.cpp`, for more help, [check the docs](https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md).
+Then, to serve the LLM, we'll run:
+```bash
+llama-server   -hf ggml-org/gemma-4-E4B-it-GGUF   -np 2   -c 65536   -fa on   --swa-full
+```
+And done! The first time it will download the model, and after launching it will be very fast.
+
+### Setting up speech-to-speech
+
+We'll begin by simply installing the library
+
+``bash
+uv pip install speech-to-speech
+``
+
+Then, while we are serving the LLM on another tab, we can simply run:
+
+``bash
+speech-to-speech --responses_api_base_url "http://127.0.0.1:8080" --responses_api_api_key "" --mode local
+``
+
+And you can start talking to the model through your terminal! The first time it will need to download Parakeet and Qwen3TTS, but following runs will be fast as well
+
+Here's a video showing this section quickly. 
+
+Now, after you tried it in ``--mode local``, you can run again the command without that option to serve speech-to-speech to the robot.
+
+### Connecting Reachy Mini to speech-to-speech
+
+Once you have llama.cpp and speech-to-speech running, you can start the robot with the desktop app and launch the conversation app. In the UI from the conversation app, you need to choose the local mode by clicking on edit connection in the HF backend. Here's a video showing how to do it:
+
+
+
 
 ## Why run your own Speech-to-Speech server?
 
