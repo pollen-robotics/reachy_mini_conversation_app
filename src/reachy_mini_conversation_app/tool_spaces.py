@@ -283,22 +283,7 @@ async def resolve_public_tool_space(slug: str) -> ResolvedInstalledToolSpace:
 
 def resolve_public_tool_space_sync(slug: str) -> ResolvedInstalledToolSpace:
     """Resolve one public Space synchronously."""
-    try:
-        previous_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        previous_loop = None
-
-    loop = asyncio.new_event_loop()
-    try:
-        asyncio.set_event_loop(loop)
-        return loop.run_until_complete(resolve_public_tool_space(slug))
-    finally:
-        loop.run_until_complete(loop.shutdown_asyncgens())
-        loop.close()
-        if previous_loop is not None and not previous_loop.is_closed():
-            asyncio.set_event_loop(previous_loop)
-        else:
-            asyncio.set_event_loop(None)
+    return asyncio.run(resolve_public_tool_space(slug))
 
 
 def format_space_tool_listing(space: ResolvedInstalledToolSpace) -> str:
