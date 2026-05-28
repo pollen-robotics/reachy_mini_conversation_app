@@ -145,16 +145,18 @@ def _append_tools_to_profile(profile: str, tool_ids: list[str]) -> list[str]:
             f"Profile '{profile}' not found at {tools_txt.parent}. Use --install-only to skip profile wiring."
         )
 
+    existing_content = tools_txt.read_text(encoding="utf-8") if tools_txt.exists() else ""
     existing: set[str] = set()
-    if tools_txt.exists():
-        for line in tools_txt.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#"):
-                existing.add(stripped)
+    for line in existing_content.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            existing.add(stripped)
 
     to_add = [tid for tid in tool_ids if tid not in existing]
     if to_add:
         with tools_txt.open("a", encoding="utf-8") as f:
+            if existing_content and not existing_content.endswith("\n"):
+                f.write("\n")
             for tid in to_add:
                 f.write(f"{tid}\n")
     return to_add
