@@ -633,6 +633,36 @@ def test_launch_waits_for_slow_handler_owned_restart(
     handler.start_up.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_wait_for_handler_owned_connection_times_out_pending_reconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hung handler-owned reconnect task should not block the outer retry loop forever."""
+    monkeypatch.setattr("reachy_mini_conversation_app.console.get_backend_choice", lambda: "huggingface")
+
+    pending_reconnect = asyncio.create_task(asyncio.Event().wait())
+    handler = SimpleNamespace(connection=None, _handler_owned_startup_task=pending_reconnect)
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(handler, robot)
+    stream._backend_retry_delay = 0.01
+    stream._handler_owned_reconnect_wait = 0.01
+
+    try:
+        connected = await asyncio.wait_for(
+            stream._wait_for_handler_owned_connection("huggingface"),
+            timeout=0.2,
+        )
+    finally:
+        pending_reconnect.cancel()
+        try:
+            await pending_reconnect
+        except asyncio.CancelledError:
+            pass
+
+    assert connected is False
+    assert stream._backend_connection_state == "connecting"
+
+
 def test_headless_personality_routes_return_gemini_voices_when_backend_selected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

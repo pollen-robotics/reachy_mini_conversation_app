@@ -76,6 +76,7 @@ LEGACY_STARTUP_ENV_NAMES = (
     "REACHY_MINI_VOICE_OVERRIDE",
 )
 BACKEND_RETRY_DELAY_SECONDS = 5.0
+HANDLER_OWNED_RECONNECT_WAIT_SECONDS = 30.0
 BACKEND_ERROR_CONFIG_MISSING = "backend_config_missing"
 BACKEND_ERROR_STARTUP_FAILED = "backend_startup_failed"
 SAFE_BACKEND_ERROR_CODES = {
@@ -134,6 +135,7 @@ class LocalStream:
         self._backend_connection_state = "not_started"
         self._backend_error: str | None = None
         self._backend_retry_delay = BACKEND_RETRY_DELAY_SECONDS
+        self._handler_owned_reconnect_wait = HANDLER_OWNED_RECONNECT_WAIT_SECONDS
 
     # ---- Settings UI ----
     def _read_env_lines(self, env_path: Path) -> list[str]:
@@ -215,15 +217,22 @@ class LocalStream:
 
     async def _wait_for_handler_owned_connection(self, active_backend: str) -> bool:
         """Wait for a handler-owned restart to reconnect before the outer loop retries."""
-        deadline = asyncio.get_running_loop().time() + self._backend_retry_delay
+        loop = asyncio.get_running_loop()
+        retry_deadline = loop.time() + self._backend_retry_delay
+        handler_owned_deadline: float | None = None
         while not self._stop_event.is_set() and get_backend_choice() == active_backend:
             if self._backend_connected():
                 return True
             if self._handler_owned_startup_pending():
+                if handler_owned_deadline is None:
+                    handler_owned_deadline = loop.time() + self._handler_owned_reconnect_wait
+                remaining = handler_owned_deadline - loop.time()
+                if remaining <= 0:
+                    return False
                 self._set_backend_connection_state("connecting")
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(min(0.1, remaining))
                 continue
-            remaining = deadline - asyncio.get_running_loop().time()
+            remaining = retry_deadline - loop.time()
             if remaining <= 0:
                 return False
             await asyncio.sleep(min(0.1, remaining))
