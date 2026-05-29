@@ -261,64 +261,6 @@ async def test_apply_personality_preserves_manual_voice_override(monkeypatch) ->
     restart.assert_awaited_once()
 
 
-@pytest.mark.asyncio
-async def test_gemini_live_session_clears_own_session_on_exit(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Gemini live sessions should clear their own connected state when they exit."""
-    monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda: "test")
-    monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
-    monkeypatch.setattr(gemini_mod, "get_active_tool_specs", lambda _: [])
-
-    handler = GeminiLiveHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
-    monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
-    monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
-
-    stop_event = asyncio.Event()
-    session = _FakeSession(batches=[], stop_event=stop_event)
-    handler.client = _FakeLiveClient(session)
-
-    live_task = asyncio.create_task(handler._run_live_session())
-    await _wait_for(lambda: handler.session is session)
-
-    handler._stop_event.set()
-    stop_event.set()
-    await live_task
-
-    assert handler.session is None
-    assert not handler._connected_event.is_set()
-
-
-@pytest.mark.asyncio
-async def test_gemini_start_up_preserves_replacement_session_when_old_task_unwinds(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The exiting Gemini startup task should not clear a replacement session."""
-    monkeypatch.setattr(gemini_mod.config, "GEMINI_API_KEY", "gemini-test-key")
-    monkeypatch.setattr(gemini_mod.genai, "Client", lambda **_kwargs: MagicMock())
-
-    handler = GeminiLiveHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
-    old_session = object()
-    replacement_session = object()
-    release_session = asyncio.Event()
-
-    async def run_live_session() -> None:
-        handler.session = old_session
-        handler._connected_event.set()
-        await release_session.wait()
-
-    monkeypatch.setattr(handler, "_run_live_session", run_live_session)
-
-    startup_task = asyncio.create_task(handler.start_up())
-    await asyncio.wait_for(handler._connected_event.wait(), timeout=1.0)
-
-    handler.session = replacement_session
-    handler._connected_event.set()
-    release_session.set()
-    await startup_task
-
-    assert handler.session is replacement_session
-    assert handler._connected_event.is_set()
-
-
 def test_handler_uses_startup_voice_at_startup() -> None:
     """Gemini handler startup should restore a persisted startup voice."""
     handler = GeminiLiveHandler(

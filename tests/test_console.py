@@ -460,33 +460,6 @@ def test_status_reports_backend_connection_failure(
     assert data["can_proceed_with_hf"] is True
 
 
-def test_status_reports_gemini_session_as_connected(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Settings API should treat Gemini's live session as a backend connection."""
-    monkeypatch.setattr(config, "BACKEND_PROVIDER", "gemini")
-    monkeypatch.setattr(config, "MODEL_NAME", "gemini-3.1-flash-live-preview")
-    monkeypatch.setattr(config, "GEMINI_API_KEY", "gemini-test-key")
-
-    app = FastAPI()
-    handler = SimpleNamespace(session=object(), connection=None)
-    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
-    stream = LocalStream(handler, robot, settings_app=app, instance_path=str(tmp_path))
-    stream._set_backend_connection_state("connecting")
-    stream._init_settings_ui_if_needed()
-
-    client = TestClient(app)
-    response = client.get("/status")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["backend_provider"] == "gemini"
-    assert data["backend_connected"] is True
-    assert data["backend_connection_state"] == "connected"
-    assert data["backend_error"] is None
-
-
 def test_backend_startup_failure_is_recorded_without_raising(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -534,102 +507,6 @@ def test_backend_startup_failure_is_recorded_without_raising(
     assert data["backend_connected"] is False
     assert data["backend_connection_state"] == "disconnected"
     assert data["backend_error"] == "RuntimeError: local server unavailable"
-
-
-def test_launch_does_not_duplicate_handler_owned_restart(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A handler-owned reconnect after start_up returns should not trigger a second outer startup."""
-    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
-    monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "local")
-    monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", None)
-    monkeypatch.setattr(config, "HF_REALTIME_WS_URL", "ws://127.0.0.1:8765/v1/realtime")
-
-    handler = SimpleNamespace(connection=None)
-    handler.shutdown = AsyncMock()
-    media = SimpleNamespace(
-        audio=None,
-        backend=None,
-        start_recording=MagicMock(),
-        start_playing=MagicMock(),
-    )
-    robot = SimpleNamespace(media=media)
-    stream = LocalStream(handler, robot, settings_app=FastAPI(), instance_path=str(tmp_path))
-    stream._backend_retry_delay = 0.2
-    stream.record_loop = AsyncMock(return_value=None)  # type: ignore[method-assign]
-    stream.play_loop = AsyncMock(return_value=None)  # type: ignore[method-assign]
-    monkeypatch.setattr("reachy_mini_conversation_app.console.apply_audio_startup_config", MagicMock())
-
-    async def start_up() -> None:
-        async def reconnect_then_stop() -> None:
-            await asyncio.sleep(0.01)
-            handler.connection = object()
-            await asyncio.sleep(0.01)
-            stream._stop_event.set()
-            handler.connection = None
-
-        asyncio.create_task(reconnect_then_stop())
-
-    handler.start_up = AsyncMock(side_effect=start_up)
-
-    try:
-        stream.launch()
-    finally:
-        asyncio.set_event_loop(asyncio.new_event_loop())
-
-    handler.start_up.assert_awaited_once()
-
-
-def test_launch_waits_for_slow_handler_owned_restart(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A slow handler-owned reconnect should not race a second outer startup."""
-    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
-    monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "local")
-    monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", None)
-    monkeypatch.setattr(config, "HF_REALTIME_WS_URL", "ws://127.0.0.1:8765/v1/realtime")
-
-    handler = SimpleNamespace(connection=None, _handler_owned_startup_task=None)
-    handler.shutdown = AsyncMock()
-    media = SimpleNamespace(
-        audio=None,
-        backend=None,
-        start_recording=MagicMock(),
-        start_playing=MagicMock(),
-    )
-    robot = SimpleNamespace(media=media)
-    stream = LocalStream(handler, robot, settings_app=FastAPI(), instance_path=str(tmp_path))
-    stream._backend_retry_delay = 0.01
-    stream.record_loop = AsyncMock(return_value=None)  # type: ignore[method-assign]
-    stream.play_loop = AsyncMock(return_value=None)  # type: ignore[method-assign]
-    monkeypatch.setattr("reachy_mini_conversation_app.console.apply_audio_startup_config", MagicMock())
-
-    start_up_calls = 0
-
-    async def start_up() -> None:
-        nonlocal start_up_calls
-        start_up_calls += 1
-
-        async def reconnect_then_stop() -> None:
-            await asyncio.sleep(0.05)
-            handler.connection = object()
-            await asyncio.sleep(0.01)
-            stream._stop_event.set()
-            handler.connection = None
-
-        handler._handler_owned_startup_task = asyncio.create_task(reconnect_then_stop())
-
-    handler.start_up = AsyncMock(side_effect=start_up)
-
-    try:
-        stream.launch()
-    finally:
-        asyncio.set_event_loop(asyncio.new_event_loop())
-
-    assert start_up_calls == 1
-    handler.start_up.assert_awaited_once()
 
 
 def test_headless_personality_routes_return_gemini_voices_when_backend_selected(
