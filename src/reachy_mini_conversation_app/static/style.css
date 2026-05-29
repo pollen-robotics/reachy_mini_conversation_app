@@ -194,12 +194,6 @@ body {
   color: var(--error);
 }
 
-.connection-alert.ok {
-  border-color: rgba(76, 224, 179, 0.35);
-  background: rgba(76, 224, 179, 0.1);
-  color: var(--ok);
-}
-
 .backend-note code,
 .backend-choice-copy code {
   padding: 2px 6px;

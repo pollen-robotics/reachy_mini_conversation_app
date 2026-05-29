@@ -187,7 +187,7 @@ class LocalStream:
         self._backend_connection_state = state
         if error is not None:
             self._backend_error = self._format_backend_error(error)
-        elif state in {"not_started", "waiting_for_config", "connecting", "connected", "restart_required"}:
+        elif state != "disconnected":
             self._backend_error = None
 
     def _backend_connection_status(self) -> dict[str, object]:
@@ -584,8 +584,8 @@ class LocalStream:
             else:
                 if self._stop_event.is_set():
                     return
-                self._set_backend_connection_state("disconnected", "Realtime session ended.")
-                logger.warning(
+                self._set_backend_connection_state("disconnected")
+                logger.info(
                     "%s backend session ended. Settings UI remains available; retrying in %.1f seconds.",
                     active_backend,
                     self._backend_retry_delay,
@@ -635,11 +635,6 @@ class LocalStream:
                 while not self._stop_event.is_set() and not self._has_required_key(active_backend):
                     if get_backend_choice() != active_backend:
                         self._set_backend_connection_state("restart_required")
-                    else:
-                        self._set_backend_connection_state(
-                            "waiting_for_config",
-                            f"{requirement_name} is not configured.",
-                        )
                     time.sleep(0.2)
             except KeyboardInterrupt:
                 logger.info("Interrupted while waiting for API key.")

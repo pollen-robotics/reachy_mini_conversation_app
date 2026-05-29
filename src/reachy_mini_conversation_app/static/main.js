@@ -545,7 +545,7 @@ async function init() {
     backend_provider: DEFAULT_BACKEND,
     backend_connected: false,
     backend_connection_state: "unknown",
-    backend_error: "",
+    backend_error: null,
     has_key: false,
     has_openai_key: false,
     has_gemini_key: false,
