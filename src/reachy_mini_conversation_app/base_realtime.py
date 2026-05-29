@@ -707,9 +707,10 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 pass
 
             response_sender_task: asyncio.Task[None] | None = None
+            tool_manager_owner: object | None = None
             try:
                 # Start the background tool manager
-                self.tool_manager.start_up(tool_callbacks=[self._handle_tool_result])
+                tool_manager_owner = self.tool_manager.start_up(tool_callbacks=[self._handle_tool_result])
 
                 # Start the response sender worker
                 response_sender_task = asyncio.create_task(self._response_sender_loop(), name="response-sender")
@@ -925,7 +926,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                             pass
 
                     # Stop background tool manager tasks (listener + cleanup) in all paths.
-                    await self.tool_manager.shutdown()
+                    await self.tool_manager.shutdown(tool_manager_owner)
                 finally:
                     self._clear_realtime_connection_state(conn)
 

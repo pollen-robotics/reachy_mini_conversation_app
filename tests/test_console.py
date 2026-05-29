@@ -444,7 +444,7 @@ def test_status_reports_backend_connection_failure(
     handler.connection = None
     robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
     stream = LocalStream(handler, robot, settings_app=app, instance_path=str(tmp_path))
-    stream._set_backend_connection_state("disconnected", RuntimeError("connect failed"))
+    stream._set_backend_connection_state("disconnected", RuntimeError("connect failed with token=secret"))
     stream._init_settings_ui_if_needed()
 
     client = TestClient(app)
@@ -455,7 +455,8 @@ def test_status_reports_backend_connection_failure(
     assert data["backend_provider"] == "huggingface"
     assert data["backend_connected"] is False
     assert data["backend_connection_state"] == "disconnected"
-    assert data["backend_error"] == "RuntimeError: connect failed"
+    assert data["backend_error"] == "backend_startup_failed"
+    assert "secret" not in str(data)
     assert data["can_proceed"] is True
     assert data["can_proceed_with_hf"] is True
 
@@ -533,7 +534,7 @@ def test_backend_startup_failure_is_recorded_without_raising(
     data = response.json()
     assert data["backend_connected"] is False
     assert data["backend_connection_state"] == "disconnected"
-    assert data["backend_error"] == "RuntimeError: local server unavailable"
+    assert data["backend_error"] == "backend_startup_failed"
 
 
 def test_launch_does_not_duplicate_handler_owned_restart(

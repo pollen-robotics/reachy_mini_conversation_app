@@ -136,6 +136,15 @@ class BackgroundToolManager(BaseModel):
     """internal lifecycle tasks (notification listener, periodic cleanup)"""
     _lifecycle_tasks: list[asyncio.Task[None]] = PrivateAttr(default_factory=list)
 
+    """internal lifecycle tasks grouped by owner token"""
+    _lifecycle_tasks_by_owner: Dict[object, list[asyncio.Task[None]]] = PrivateAttr(default_factory=dict)
+
+    """current lifecycle owner token"""
+    _lifecycle_owner: object | None = PrivateAttr(default=None)
+
+    """tool owner token by tool id"""
+    _tool_owners: Dict[str, object | None] = PrivateAttr(default_factory=dict)
+
     """the maximum duration of a tool execution in seconds (default: 1 day)"""
     _max_tool_duration_seconds: float = PrivateAttr(default=86400)
 
@@ -190,6 +199,7 @@ class BackgroundToolManager(BaseModel):
             status=ToolState.RUNNING,
         )
         self._tools[bg_tool.tool_id] = bg_tool
+        self._tool_owners[bg_tool.tool_id] = self._lifecycle_owner
 
         async_task = asyncio.create_task(
             self._run_tool(bg_tool, tool_call_routine),
@@ -287,7 +297,7 @@ class BackgroundToolManager(BaseModel):
 
         return False
 
-    def start_up(self, tool_callbacks: list[Callable[[ToolNotification], Coroutine[Any, Any, None]]]) -> None:
+    def start_up(self, tool_callbacks: list[Callable[[ToolNotification], Coroutine[Any, Any, None]]]) -> object:
         """Start the background tool manager.
 
         This method starts two concurrent tasks:
@@ -299,6 +309,8 @@ class BackgroundToolManager(BaseModel):
 
         """
         self.set_loop()
+        owner = object()
+        self._lifecycle_owner = owner
 
         async def _listener() -> None:
             while True:
@@ -312,10 +324,12 @@ class BackgroundToolManager(BaseModel):
                 await self.cleanup_tools()
                 await self.timeout_tools()
 
-        self._lifecycle_tasks = [
+        lifecycle_tasks = [
             asyncio.create_task(_cleanup(), name="bg-tool-cleanup"),
             asyncio.create_task(_listener(), name="bg-tool-listener-callback"),
         ]
+        self._lifecycle_tasks = lifecycle_tasks
+        self._lifecycle_tasks_by_owner[owner] = lifecycle_tasks
 
         logger.info(
             "BackgroundToolManager started. "
@@ -324,19 +338,36 @@ class BackgroundToolManager(BaseModel):
             self._max_tool_duration_seconds,
             self._max_tool_memory_seconds,
         )
+        return owner
 
-    async def shutdown(self) -> None:
-        """Cancel all background tasks (listener, cleanup) and running tools."""
-        for task in self._lifecycle_tasks:
+    async def shutdown(self, owner: object | None = None) -> None:
+        """Cancel background tasks and running tools for an owner, or all owners."""
+        if owner is None:
+            task_groups = list(self._lifecycle_tasks_by_owner.values())
+            self._lifecycle_tasks_by_owner.clear()
+            self._lifecycle_tasks.clear()
+            self._lifecycle_owner = None
+        else:
+            task_groups = [self._lifecycle_tasks_by_owner.pop(owner, [])]
+            if self._lifecycle_owner is owner:
+                self._lifecycle_owner = None
+                self._lifecycle_tasks.clear()
+
+        lifecycle_tasks = [task for tasks in task_groups for task in tasks]
+        for task in lifecycle_tasks:
             task.cancel()
-        for task in self._lifecycle_tasks:
+        for task in lifecycle_tasks:
             try:
                 await task
             except asyncio.CancelledError:
                 pass
-        self._lifecycle_tasks.clear()
 
-        for tool_id in list(self._tools):
+        if owner is None:
+            tool_ids = list(self._tools)
+        else:
+            tool_ids = [tool_id for tool_id in self._tools if self._tool_owners.get(tool_id) is owner]
+
+        for tool_id in tool_ids:
             await self.cancel_tool(tool_id, log=False)
 
         logger.info("BackgroundToolManager shut down")
@@ -381,6 +412,7 @@ class BackgroundToolManager(BaseModel):
 
         for tool_id in to_remove:
             del self._tools[tool_id]
+            self._tool_owners.pop(tool_id, None)
 
         if to_remove:
             logger.debug(f"Cleaned up {len(to_remove)} old tools")

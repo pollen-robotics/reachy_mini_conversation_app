@@ -561,9 +561,10 @@ class GeminiLiveHandler(ConversationHandler):
             logger.info("Gemini Live session connected successfully")
 
             video_task: asyncio.Task[None] | None = None
+            tool_manager_owner: object | None = None
             try:
                 # Start the background tool manager
-                self.tool_manager.start_up(tool_callbacks=[self._handle_tool_result])
+                tool_manager_owner = self.tool_manager.start_up(tool_callbacks=[self._handle_tool_result])
 
                 # Start video sender if camera is available
                 if self.deps.camera_worker is not None:
@@ -655,7 +656,7 @@ class GeminiLiveHandler(ConversationHandler):
                             await video_task
                         except asyncio.CancelledError:
                             pass
-                    await self.tool_manager.shutdown()
+                    await self.tool_manager.shutdown(tool_manager_owner)
                 finally:
                     self._clear_live_session_state(session)
 

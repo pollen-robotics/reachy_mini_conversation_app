@@ -517,6 +517,25 @@ class TestStartUp:
         assert cb1.call_count == 1
         assert cb2.call_count == 1
 
+    @pytest.mark.asyncio
+    async def test_owner_shutdown_preserves_replacement_lifecycle(self, manager: BackgroundToolManager) -> None:
+        """Shutting down an old owner must not cancel replacement lifecycle tasks or tools."""
+        old_owner = manager.start_up(tool_callbacks=[AsyncMock()])
+        old_tool = await manager.start_tool("old", _make_routine("old", delay=10.0), is_idle_tool_call=False)
+
+        new_owner = manager.start_up(tool_callbacks=[AsyncMock()])
+        new_tool = await manager.start_tool("new", _make_routine("new", delay=10.0), is_idle_tool_call=False)
+
+        await manager.shutdown(old_owner)
+        await asyncio.sleep(0.05)
+
+        assert old_tool.status == ToolState.CANCELLED
+        assert new_tool.status == ToolState.RUNNING
+        assert new_owner in manager._lifecycle_tasks_by_owner
+        assert all(not task.done() for task in manager._lifecycle_tasks_by_owner[new_owner])
+
+        await manager.shutdown(new_owner)
+
 
 class TestNotificationQueue:
     """Verify notifications are enqueued on tool completion or failure."""
