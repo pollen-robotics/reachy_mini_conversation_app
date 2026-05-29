@@ -170,7 +170,11 @@ class LocalStream:
 
     def _backend_connected(self) -> bool:
         """Return whether the active handler currently has a realtime connection."""
-        return getattr(self.handler, "connection", None) is not None
+        try:
+            handler_state = vars(self.handler)
+        except TypeError:
+            handler_state = {}
+        return any(handler_state.get(attr) is not None for attr in ("connection", "session"))
 
     @staticmethod
     def _format_backend_error(error: BaseException | str) -> str:
@@ -199,6 +203,28 @@ class LocalStream:
             "backend_connection_state": state,
             "backend_error": None if connected else self._backend_error,
         }
+
+    async def _wait_for_handler_owned_connection(self, active_backend: str) -> bool:
+        """Wait during the retry window for a handler-owned restart to reconnect."""
+        deadline = asyncio.get_running_loop().time() + self._backend_retry_delay
+        while not self._stop_event.is_set() and get_backend_choice() == active_backend:
+            if self._backend_connected():
+                return True
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                return False
+            await asyncio.sleep(min(0.1, remaining))
+        return False
+
+    async def _monitor_handler_owned_connection(self, active_backend: str) -> None:
+        """Keep the outer runner alive while a handler-owned restart is connected."""
+        self._set_backend_connection_state("connected")
+        while (
+            not self._stop_event.is_set()
+            and get_backend_choice() == active_backend
+            and self._backend_connected()
+        ):
+            await asyncio.sleep(0.5)
 
     @staticmethod
     def _has_key(value: Optional[str]) -> bool:
@@ -585,11 +611,12 @@ class LocalStream:
                 if self._stop_event.is_set():
                     return
                 self._set_backend_connection_state("disconnected")
-                logger.info(
-                    "%s backend session ended. Settings UI remains available; retrying in %.1f seconds.",
-                    active_backend,
-                    self._backend_retry_delay,
-                )
+                if await self._wait_for_handler_owned_connection(active_backend):
+                    logger.info("%s backend reconnected through handler-owned restart.", active_backend)
+                    await self._monitor_handler_owned_connection(active_backend)
+                    continue
+                logger.info("%s backend session ended. Settings UI remains available; retrying.", active_backend)
+                continue
 
             await asyncio.sleep(self._backend_retry_delay)
 
