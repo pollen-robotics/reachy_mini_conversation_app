@@ -75,7 +75,7 @@ dev = [
 reachy-mini-conversation-app = "reachy_mini_conversation_app.main:main"
 
 [tool.uv]
-exclude-newer = "3 days"
+exclude-newer = "7 days"
 dependency-metadata = [
     # Upstream metadata currently marks `gstreamer-msvc-runtime` as unconditional.
     # It should only be required on Windows. Temp fix.
