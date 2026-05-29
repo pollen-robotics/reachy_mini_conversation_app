@@ -248,7 +248,9 @@ async def test_gemini_idle_signal_starts_local_tool_without_model_input(monkeypa
     handler = GeminiLiveHandler(deps)
     session = _FakeSession([], handler._stop_event)
     handler.session = session
-    monkeypatch.setattr(gemini_mod, "choose_idle_tool_call", lambda _available: ("idle_do_nothing", {"reason": "test"}))
+    monkeypatch.setattr(
+        gemini_mod, "choose_idle_tool_call", lambda _available: ("idle_do_nothing", {"reason": "test"})
+    )
     start_tool = AsyncMock(return_value=SimpleNamespace(tool_id="idle_do_nothing-idle-1"))
     monkeypatch.setattr(type(handler.tool_manager), "start_tool", start_tool)
 
