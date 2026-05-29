@@ -6,10 +6,10 @@ from typing import Any, Final, Iterable
 
 
 _IDLE_TOOL_WEIGHTS: Final[tuple[tuple[str, float], ...]] = (
-    ("idle_do_nothing", 0.80),
-    ("dance", 0.08),
-    ("play_emotion", 0.08),
-    ("move_head", 0.04),
+    ("idle_do_nothing", 0.60),
+    ("dance", 0.16),
+    ("play_emotion", 0.16),
+    ("move_head", 0.08),
 )
 _IDLE_MOVE_HEAD_DIRECTIONS: Final[tuple[str, ...]] = ("left", "right", "up", "down", "front")
 
