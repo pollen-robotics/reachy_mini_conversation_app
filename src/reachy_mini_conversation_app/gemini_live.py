@@ -14,7 +14,7 @@ import base64
 import random
 import asyncio
 import logging
-from typing import Any, Dict, List, Final, Tuple, Literal, Optional
+from typing import Any, Dict, List, Final, Tuple, Literal, Optional, Coroutine
 from datetime import datetime
 
 import numpy as np
@@ -174,6 +174,7 @@ class GeminiLiveHandler(ConversationHandler):
         # Internal lifecycle flags
         self._connected_event: asyncio.Event = asyncio.Event()
         self._handler_owned_startup_task: asyncio.Task[None] | None = None
+        self._handler_owned_startup_lock = asyncio.Lock()
 
         # Background tool manager
         self.tool_manager = BackgroundToolManager()
@@ -295,8 +296,8 @@ class GeminiLiveHandler(ConversationHandler):
         except Exception:
             pass
 
-    async def _cancel_handler_owned_startup_task(self) -> None:
-        """Cancel a pending handler-owned restart before handler shutdown completes."""
+    async def _cancel_handler_owned_startup_task_locked(self) -> None:
+        """Cancel a pending handler-owned restart while holding the startup lock."""
         startup_task = self._handler_owned_startup_task
         if startup_task is None:
             return
@@ -310,6 +311,17 @@ class GeminiLiveHandler(ConversationHandler):
                 pass
         if self._handler_owned_startup_task is startup_task:
             self._handler_owned_startup_task = None
+
+    async def _cancel_handler_owned_startup_task(self) -> None:
+        """Cancel a pending handler-owned restart before handler shutdown completes."""
+        async with self._handler_owned_startup_lock:
+            await self._cancel_handler_owned_startup_task_locked()
+
+    async def _replace_handler_owned_startup_task(self, coro: Coroutine[Any, Any, None], *, name: str) -> None:
+        """Replace any pending handler-owned restart task with a new one."""
+        async with self._handler_owned_startup_lock:
+            await self._cancel_handler_owned_startup_task_locked()
+            self._handler_owned_startup_task = asyncio.create_task(coro, name=name)
 
     async def start_up(self) -> None:
         """Start the handler with retries on unexpected closure."""
@@ -375,7 +387,7 @@ class GeminiLiveHandler(ConversationHandler):
             self._stop_event.set()  # Signal the old receive loop to stop
             await asyncio.sleep(0.1)
             self._stop_event.clear()
-            self._handler_owned_startup_task = asyncio.create_task(self.start_up(), name="gemini-live-restart")
+            await self._replace_handler_owned_startup_task(self.start_up(), name="gemini-live-restart")
             try:
                 await asyncio.wait_for(self._connected_event.wait(), timeout=5.0)
                 logger.info("Gemini Live session restarted and connected.")
@@ -467,7 +479,7 @@ class GeminiLiveHandler(ConversationHandler):
 
             logger.info("Started background tool: %s (id=%s, call_id=%s)", tool_name, bg_tool.tool_id, call_id)
 
-    async def _handle_tool_result(self, bg_tool: ToolNotification) -> None:
+    async def _handle_tool_result(self, bg_tool: ToolNotification, session: Any = None) -> None:
         """Process the result of a completed tool and send it back to Gemini."""
         if bg_tool.error is not None:
             logger.error("Tool '%s' (id=%s) failed: %s", bg_tool.tool_name, bg_tool.id, bg_tool.error)
@@ -479,7 +491,15 @@ class GeminiLiveHandler(ConversationHandler):
             logger.warning("Tool '%s' (id=%s) returned no result and no error", bg_tool.tool_name, bg_tool.id)
             tool_result = {"error": "No result returned from tool execution"}
 
-        if not self.session:
+        if session is not None and self.session is not session:
+            logger.warning(
+                "Dropping stale tool '%s' (id=%s) result for a replaced Gemini session",
+                bg_tool.tool_name,
+                bg_tool.id,
+            )
+            return
+        session = session or self.session
+        if not session:
             logger.warning("Connection closed during tool '%s' execution", bg_tool.tool_name)
             return
 
@@ -494,7 +514,7 @@ class GeminiLiveHandler(ConversationHandler):
                         image_bytes = base64.b64decode(b64_im)
                     else:
                         image_bytes = bytes(b64_im)
-                    await self.session.send_realtime_input(video=types.Blob(data=image_bytes, mime_type="image/jpeg"))
+                    await session.send_realtime_input(video=types.Blob(data=image_bytes, mime_type="image/jpeg"))
                     logger.info("Pushed camera snapshot to Gemini via realtime video input")
                 except Exception as ve:
                     logger.warning("Failed to push camera snapshot to Gemini: %s", ve)
@@ -506,7 +526,7 @@ class GeminiLiveHandler(ConversationHandler):
                 name=bg_tool.tool_name,
                 response=tool_result,
             )
-            await self.session.send_tool_response(function_responses=[function_response])
+            await session.send_tool_response(function_responses=[function_response])
 
             await self.output_queue.put(
                 AdditionalOutputs(
@@ -580,7 +600,10 @@ class GeminiLiveHandler(ConversationHandler):
             tool_manager_owner: object | None = None
             try:
                 # Start the background tool manager
-                tool_manager_owner = self.tool_manager.start_up(tool_callbacks=[self._handle_tool_result])
+                async def handle_tool_result_for_session(bg_tool: ToolNotification) -> None:
+                    await self._handle_tool_result(bg_tool, session=session)
+
+                tool_manager_owner = self.tool_manager.start_up(tool_callbacks=[handle_tool_result_for_session])
 
                 # Start video sender if camera is available
                 if self.deps.camera_worker is not None:
