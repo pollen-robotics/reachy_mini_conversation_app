@@ -176,6 +176,12 @@ class LocalStream:
             handler_state = {}
         return any(handler_state.get(attr) is not None for attr in ("connection", "session"))
 
+    def _handler_owned_startup_pending(self) -> bool:
+        """Return whether the handler has a background startup/reconnect task still running."""
+        startup_task = getattr(self.handler, "_handler_owned_startup_task", None)
+        done = getattr(startup_task, "done", None)
+        return callable(done) and not done()
+
     @staticmethod
     def _format_backend_error(error: BaseException | str) -> str:
         """Return a compact user-facing backend error string."""
@@ -205,11 +211,15 @@ class LocalStream:
         }
 
     async def _wait_for_handler_owned_connection(self, active_backend: str) -> bool:
-        """Wait during the retry window for a handler-owned restart to reconnect."""
+        """Wait for a handler-owned restart to reconnect before the outer loop retries."""
         deadline = asyncio.get_running_loop().time() + self._backend_retry_delay
         while not self._stop_event.is_set() and get_backend_choice() == active_backend:
             if self._backend_connected():
                 return True
+            if self._handler_owned_startup_pending():
+                self._set_backend_connection_state("connecting")
+                await asyncio.sleep(0.1)
+                continue
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
                 return False
@@ -217,10 +227,18 @@ class LocalStream:
         return False
 
     async def _monitor_handler_owned_connection(self, active_backend: str) -> None:
-        """Keep the outer runner alive while a handler-owned restart is connected."""
+        """Keep the outer runner idle while a handler-owned restart is active."""
         self._set_backend_connection_state("connected")
-        while not self._stop_event.is_set() and get_backend_choice() == active_backend and self._backend_connected():
-            await asyncio.sleep(0.5)
+        while not self._stop_event.is_set() and get_backend_choice() == active_backend:
+            if self._backend_connected():
+                self._set_backend_connection_state("connected")
+                await asyncio.sleep(0.5)
+                continue
+            if self._handler_owned_startup_pending():
+                self._set_backend_connection_state("connecting")
+                await asyncio.sleep(0.5)
+                continue
+            break
 
     @staticmethod
     def _has_key(value: Optional[str]) -> bool:

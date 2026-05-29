@@ -173,6 +173,7 @@ class GeminiLiveHandler(ConversationHandler):
 
         # Internal lifecycle flags
         self._connected_event: asyncio.Event = asyncio.Event()
+        self._handler_owned_startup_task: asyncio.Task[None] | None = None
 
         # Background tool manager
         self.tool_manager = BackgroundToolManager()
@@ -353,7 +354,7 @@ class GeminiLiveHandler(ConversationHandler):
             self._stop_event.set()  # Signal the old receive loop to stop
             await asyncio.sleep(0.1)
             self._stop_event.clear()
-            asyncio.create_task(self.start_up(), name="gemini-live-restart")
+            self._handler_owned_startup_task = asyncio.create_task(self.start_up(), name="gemini-live-restart")
             try:
                 await asyncio.wait_for(self._connected_event.wait(), timeout=5.0)
                 logger.info("Gemini Live session restarted and connected.")

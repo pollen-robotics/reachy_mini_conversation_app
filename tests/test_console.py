@@ -581,6 +581,57 @@ def test_launch_does_not_duplicate_handler_owned_restart(
     handler.start_up.assert_awaited_once()
 
 
+def test_launch_waits_for_slow_handler_owned_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A slow handler-owned reconnect should not race a second outer startup."""
+    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
+    monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "local")
+    monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", None)
+    monkeypatch.setattr(config, "HF_REALTIME_WS_URL", "ws://127.0.0.1:8765/v1/realtime")
+
+    handler = SimpleNamespace(connection=None, _handler_owned_startup_task=None)
+    handler.shutdown = AsyncMock()
+    media = SimpleNamespace(
+        audio=None,
+        backend=None,
+        start_recording=MagicMock(),
+        start_playing=MagicMock(),
+    )
+    robot = SimpleNamespace(media=media)
+    stream = LocalStream(handler, robot, settings_app=FastAPI(), instance_path=str(tmp_path))
+    stream._backend_retry_delay = 0.01
+    stream.record_loop = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    stream.play_loop = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    monkeypatch.setattr("reachy_mini_conversation_app.console.apply_audio_startup_config", MagicMock())
+
+    start_up_calls = 0
+
+    async def start_up() -> None:
+        nonlocal start_up_calls
+        start_up_calls += 1
+
+        async def reconnect_then_stop() -> None:
+            await asyncio.sleep(0.05)
+            handler.connection = object()
+            await asyncio.sleep(0.01)
+            stream._stop_event.set()
+            handler.connection = None
+
+        handler._handler_owned_startup_task = asyncio.create_task(reconnect_then_stop())
+
+    handler.start_up = AsyncMock(side_effect=start_up)
+
+    try:
+        stream.launch()
+    finally:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
+    assert start_up_calls == 1
+    handler.start_up.assert_awaited_once()
+
+
 def test_headless_personality_routes_return_gemini_voices_when_backend_selected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

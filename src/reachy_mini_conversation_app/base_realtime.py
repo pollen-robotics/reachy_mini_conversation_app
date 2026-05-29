@@ -146,6 +146,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
         # Internal lifecycle flags
         self._connected_event: asyncio.Event = asyncio.Event()
+        self._handler_owned_startup_task: asyncio.Task[None] | None = None
 
         # Background tool manager
         self.tool_manager = BackgroundToolManager()
@@ -435,7 +436,10 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 pass
             if self.REFRESH_CLIENT_ON_RECONNECT:
                 self.client = await self._build_realtime_client()
-            asyncio.create_task(self._run_realtime_session(), name="realtime-session-restart")
+            self._handler_owned_startup_task = asyncio.create_task(
+                self._run_realtime_session(),
+                name="realtime-session-restart",
+            )
             try:
                 await asyncio.wait_for(self._connected_event.wait(), timeout=5.0)
                 logger.info("Realtime session restarted and connected.")
