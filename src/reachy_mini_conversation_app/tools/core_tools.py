@@ -13,10 +13,10 @@ from pathlib import Path
 from dataclasses import dataclass
 
 from reachy_mini import ReachyMini
-from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY as DEFAULT_PROFILES_PATH  # noqa: F401
+from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY as DEFAULT_PROFILES_PATH
 
 # Import config to ensure .env is loaded before reading REACHY_MINI_CUSTOM_PROFILE
-from reachy_mini_conversation_app.config import config  # noqa: F401
+from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.tools.tool_constants import SystemTool
 
 
@@ -42,7 +42,6 @@ def get_concrete_subclasses(base: type[Tool]) -> List[type[Tool]]:
     for cls in base.__subclasses__():
         if not inspect.isabstract(cls):
             result.append(cls)
-        # recurse into subclasses
         result.extend(get_concrete_subclasses(cls))
     return result
 
@@ -60,7 +59,6 @@ class ToolDependencies:
     motion_duration_s: float = 1.0
 
 
-# Tool base class
 class Tool(abc.ABC):
     """Base abstraction for tools used in function-calling.
 
@@ -139,12 +137,9 @@ def _format_error(error: Exception) -> str:
 # Registry & specs (dynamic)
 def _load_profile_tools() -> None:
     """Load tools based on profile's tools.txt file."""
-    # Determine which profile to use
     profile = config.REACHY_MINI_CUSTOM_PROFILE or "default"
     logger.info(f"Loading tools for profile: {profile}")
 
-    # Build path to tools.txt
-    # Get the profile directory path
     profile_dir = config.PROFILES_DIRECTORY / profile
     tools_txt_path = profile_dir / "tools.txt"
     default_tools_txt_path = DEFAULT_PROFILES_PATH / "default" / "tools.txt"
@@ -169,7 +164,6 @@ def _load_profile_tools() -> None:
             logger.error(f"✗ tools.txt not found at {tools_txt_path}")
             sys.exit(1)
 
-    # Read and parse tools.txt
     try:
         with open(tools_txt_path, "r") as f:
             lines = f.readlines()
@@ -177,16 +171,13 @@ def _load_profile_tools() -> None:
         logger.error(f"✗ Failed to read tools.txt: {e}")
         sys.exit(1)
 
-    # Parse tool names (skip comments and blank lines)
     tool_names = []
     for line in lines:
         line = line.strip()
-        # Skip blank lines and comments
         if not line or line.startswith("#"):
             continue
         tool_names.append(line)
 
-    # Add system tools
     tool_names.extend({tool.value for tool in SystemTool})
 
     logger.info(f"Found {len(tool_names)} tools to load: {tool_names}")

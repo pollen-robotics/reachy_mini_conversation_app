@@ -322,10 +322,10 @@ if LOCKED_PROFILE is not None:
     _profile_path = _profiles_dir / LOCKED_PROFILE
     _instructions_file = _profile_path / "instructions.txt"
     if not _profile_path.is_dir():
-        print(f"Error: LOCKED_PROFILE '{LOCKED_PROFILE}' does not exist in {_profiles_dir}", file=sys.stderr)
+        logger.critical("LOCKED_PROFILE %r does not exist in %s", LOCKED_PROFILE, _profiles_dir)
         sys.exit(1)
     if not _instructions_file.is_file():
-        print(f"Error: LOCKED_PROFILE '{LOCKED_PROFILE}' has no instructions.txt", file=sys.stderr)
+        logger.critical("LOCKED_PROFILE %r has no instructions.txt", LOCKED_PROFILE)
         sys.exit(1)
 
 _skip_dotenv = _env_flag("REACHY_MINI_SKIP_DOTENV", default=False)
@@ -556,15 +556,13 @@ def set_custom_profile(profile: str | None) -> None:
         return
     try:
         config.REACHY_MINI_CUSTOM_PROFILE = profile
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to update config profile: %s", e)
     try:
-        import os as _os
-
         if profile:
-            _os.environ["REACHY_MINI_CUSTOM_PROFILE"] = profile
+            os.environ["REACHY_MINI_CUSTOM_PROFILE"] = profile
         else:
             # Remove to reflect default
-            _os.environ.pop("REACHY_MINI_CUSTOM_PROFILE", None)
-    except Exception:
-        pass
+            os.environ.pop("REACHY_MINI_CUSTOM_PROFILE", None)
+    except Exception as e:
+        logger.warning("Failed to sync profile to environment: %s", e)

@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Install system dependencies
-        uses: awalsh128/cache-apt-pkgs-action@latest
+        uses: awalsh128/cache-apt-pkgs-action@acb598e5ddbc6f68a970c5da0688d2f3a9f04d05 # v1.6.0
         with:
           packages: libcairo2-dev libgirepository1.0-dev
           version: 1.0
