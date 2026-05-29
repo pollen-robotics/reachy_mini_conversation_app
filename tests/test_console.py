@@ -444,7 +444,7 @@ def test_status_reports_backend_connection_failure(
     handler.connection = None
     robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
     stream = LocalStream(handler, robot, settings_app=app, instance_path=str(tmp_path))
-    stream._set_backend_connection_state("disconnected", RuntimeError("connect failed with token=secret"))
+    stream._set_backend_connection_state("disconnected", RuntimeError("connect failed"))
     stream._init_settings_ui_if_needed()
 
     client = TestClient(app)
@@ -455,8 +455,7 @@ def test_status_reports_backend_connection_failure(
     assert data["backend_provider"] == "huggingface"
     assert data["backend_connected"] is False
     assert data["backend_connection_state"] == "disconnected"
-    assert data["backend_error"] == "backend_startup_failed"
-    assert "secret" not in str(data)
+    assert data["backend_error"] == "RuntimeError: connect failed"
     assert data["can_proceed"] is True
     assert data["can_proceed_with_hf"] is True
 
@@ -534,7 +533,7 @@ def test_backend_startup_failure_is_recorded_without_raising(
     data = response.json()
     assert data["backend_connected"] is False
     assert data["backend_connection_state"] == "disconnected"
-    assert data["backend_error"] == "backend_startup_failed"
+    assert data["backend_error"] == "RuntimeError: local server unavailable"
 
 
 def test_launch_does_not_duplicate_handler_owned_restart(
@@ -631,36 +630,6 @@ def test_launch_waits_for_slow_handler_owned_restart(
 
     assert start_up_calls == 1
     handler.start_up.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_wait_for_handler_owned_connection_times_out_pending_reconnect(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A hung handler-owned reconnect task should not block the outer retry loop forever."""
-    monkeypatch.setattr("reachy_mini_conversation_app.console.get_backend_choice", lambda: "huggingface")
-
-    pending_reconnect = asyncio.create_task(asyncio.Event().wait())
-    handler = SimpleNamespace(connection=None, _handler_owned_startup_task=pending_reconnect)
-    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
-    stream = LocalStream(handler, robot)
-    stream._backend_retry_delay = 0.01
-    stream._handler_owned_reconnect_wait = 0.01
-
-    try:
-        connected = await asyncio.wait_for(
-            stream._wait_for_handler_owned_connection("huggingface"),
-            timeout=0.2,
-        )
-    finally:
-        pending_reconnect.cancel()
-        try:
-            await pending_reconnect
-        except asyncio.CancelledError:
-            pass
-
-    assert connected is False
-    assert stream._backend_connection_state == "connecting"
 
 
 def test_headless_personality_routes_return_gemini_voices_when_backend_selected(

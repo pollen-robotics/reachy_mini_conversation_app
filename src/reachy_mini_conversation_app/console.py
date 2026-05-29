@@ -76,13 +76,6 @@ LEGACY_STARTUP_ENV_NAMES = (
     "REACHY_MINI_VOICE_OVERRIDE",
 )
 BACKEND_RETRY_DELAY_SECONDS = 5.0
-HANDLER_OWNED_RECONNECT_WAIT_SECONDS = 30.0
-BACKEND_ERROR_CONFIG_MISSING = "backend_config_missing"
-BACKEND_ERROR_STARTUP_FAILED = "backend_startup_failed"
-SAFE_BACKEND_ERROR_CODES = {
-    BACKEND_ERROR_CONFIG_MISSING,
-    BACKEND_ERROR_STARTUP_FAILED,
-}
 
 
 def _estimate_pending_playback_seconds(robot: ReachyMini) -> float:
@@ -135,7 +128,6 @@ class LocalStream:
         self._backend_connection_state = "not_started"
         self._backend_error: str | None = None
         self._backend_retry_delay = BACKEND_RETRY_DELAY_SECONDS
-        self._handler_owned_reconnect_wait = HANDLER_OWNED_RECONNECT_WAIT_SECONDS
 
     # ---- Settings UI ----
     def _read_env_lines(self, env_path: Path) -> list[str]:
@@ -191,17 +183,20 @@ class LocalStream:
         return callable(done) and not done()
 
     @staticmethod
-    def _backend_error_code(error: BaseException | str) -> str:
-        """Return a safe backend error code for the settings API."""
-        if isinstance(error, str) and error in SAFE_BACKEND_ERROR_CODES:
+    def _format_backend_error(error: BaseException | str) -> str:
+        """Return a compact user-facing backend error string."""
+        if isinstance(error, str):
             return error
-        return BACKEND_ERROR_STARTUP_FAILED
+        message = str(error).strip()
+        if message:
+            return f"{type(error).__name__}: {message}"
+        return type(error).__name__
 
     def _set_backend_connection_state(self, state: str, error: BaseException | str | None = None) -> None:
         """Update backend connection status exposed through the settings UI."""
         self._backend_connection_state = state
         if error is not None:
-            self._backend_error = self._backend_error_code(error)
+            self._backend_error = self._format_backend_error(error)
         elif state != "disconnected":
             self._backend_error = None
 
@@ -217,22 +212,15 @@ class LocalStream:
 
     async def _wait_for_handler_owned_connection(self, active_backend: str) -> bool:
         """Wait for a handler-owned restart to reconnect before the outer loop retries."""
-        loop = asyncio.get_running_loop()
-        retry_deadline = loop.time() + self._backend_retry_delay
-        handler_owned_deadline: float | None = None
+        deadline = asyncio.get_running_loop().time() + self._backend_retry_delay
         while not self._stop_event.is_set() and get_backend_choice() == active_backend:
             if self._backend_connected():
                 return True
             if self._handler_owned_startup_pending():
-                if handler_owned_deadline is None:
-                    handler_owned_deadline = loop.time() + self._handler_owned_reconnect_wait
-                remaining = handler_owned_deadline - loop.time()
-                if remaining <= 0:
-                    return False
                 self._set_backend_connection_state("connecting")
-                await asyncio.sleep(min(0.1, remaining))
+                await asyncio.sleep(0.1)
                 continue
-            remaining = retry_deadline - loop.time()
+            remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
                 return False
             await asyncio.sleep(min(0.1, remaining))
@@ -614,7 +602,8 @@ class LocalStream:
                 continue
 
             if not self._has_required_key(active_backend):
-                self._set_backend_connection_state("waiting_for_config", BACKEND_ERROR_CONFIG_MISSING)
+                requirement_name = self._requirement_name(active_backend)
+                self._set_backend_connection_state("waiting_for_config", f"{requirement_name} is not configured.")
                 await asyncio.sleep(0.5)
                 continue
 
@@ -675,7 +664,7 @@ class LocalStream:
         # If key is still missing -> wait until provided via the settings UI
         if not self._has_required_key(active_backend):
             requirement_name = self._requirement_name(active_backend)
-            self._set_backend_connection_state("waiting_for_config", BACKEND_ERROR_CONFIG_MISSING)
+            self._set_backend_connection_state("waiting_for_config", f"{requirement_name} is not configured.")
             if active_backend == HF_BACKEND and self._settings_app is None:
                 logger.error(
                     "%s not found. Set it in the app .env before starting the Hugging Face backend.", requirement_name

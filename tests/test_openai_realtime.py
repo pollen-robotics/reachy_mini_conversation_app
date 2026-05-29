@@ -16,8 +16,7 @@ import reachy_mini_conversation_app.tools.background_tool_manager as btm_mod
 from reachy_mini_conversation_app.config import OPENAI_BACKEND, config, get_default_voice_for_backend
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
-from reachy_mini_conversation_app.tools.tool_constants import ToolState
-from reachy_mini_conversation_app.tools.background_tool_manager import ToolCallRoutine, ToolNotification
+from reachy_mini_conversation_app.tools.background_tool_manager import ToolCallRoutine
 
 
 OPENAI_DEFAULT_VOICE = get_default_voice_for_backend(OPENAI_BACKEND)
@@ -691,90 +690,6 @@ async def test_handler_owned_realtime_session_preserves_replacement_connection(m
 
     assert handler.connection is replacement_connection
     assert handler._connected_event.is_set()
-
-
-@pytest.mark.asyncio
-async def test_shutdown_cancels_pending_handler_owned_reconnect() -> None:
-    """Shutdown should not leave a handler-owned reconnect task running."""
-    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
-    handler = rt_mod.OpenaiRealtimeHandler(deps)
-    started = asyncio.Event()
-    cancelled = asyncio.Event()
-
-    async def pending_reconnect() -> None:
-        started.set()
-        try:
-            await asyncio.Event().wait()
-        finally:
-            cancelled.set()
-
-    reconnect_task = asyncio.create_task(pending_reconnect())
-    handler._handler_owned_startup_task = reconnect_task
-    await started.wait()
-
-    await handler.shutdown()
-
-    assert reconnect_task.cancelled()
-    assert cancelled.is_set()
-    assert handler._handler_owned_startup_task is None
-
-
-@pytest.mark.asyncio
-async def test_restart_cancels_previous_handler_owned_reconnect(monkeypatch: Any) -> None:
-    """A second restart should not orphan the first handler-owned reconnect task."""
-    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
-    handler = rt_mod.OpenaiRealtimeHandler(deps)
-    handler.client = MagicMock()
-    cancelled_tasks: list[asyncio.Task[Any] | None] = []
-
-    async def pending_handler_owned_session() -> None:
-        task = asyncio.current_task()
-        handler._connected_event.set()
-        try:
-            await asyncio.Event().wait()
-        finally:
-            cancelled_tasks.append(task)
-
-    monkeypatch.setattr(handler, "_run_handler_owned_realtime_session", pending_handler_owned_session)
-
-    await handler._restart_session()
-    first_task = handler._handler_owned_startup_task
-    assert first_task is not None
-
-    await handler._restart_session()
-    second_task = handler._handler_owned_startup_task
-
-    assert second_task is not None
-    assert second_task is not first_task
-    assert first_task.cancelled()
-    assert first_task in cancelled_tasks
-
-    await handler.shutdown()
-
-
-@pytest.mark.asyncio
-async def test_bound_tool_result_drops_stale_connection() -> None:
-    """A tool result from an old lifecycle should not be sent to the replacement connection."""
-    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
-    handler = rt_mod.OpenaiRealtimeHandler(deps)
-    replacement_item = SimpleNamespace(create=AsyncMock())
-    replacement_connection = SimpleNamespace(conversation=SimpleNamespace(item=replacement_item))
-    stale_connection = SimpleNamespace()
-    handler.connection = replacement_connection
-
-    await handler._handle_tool_result(
-        ToolNotification(
-            id="call_old",
-            tool_name="old_tool",
-            is_idle_tool_call=False,
-            status=ToolState.COMPLETED,
-            result={"ok": True},
-        ),
-        connection=stale_connection,
-    )
-
-    replacement_item.create.assert_not_awaited()
-    assert handler.output_queue.empty()
 
 
 @pytest.mark.asyncio

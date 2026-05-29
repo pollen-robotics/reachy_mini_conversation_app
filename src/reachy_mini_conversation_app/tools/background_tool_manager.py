@@ -102,10 +102,6 @@ class BackgroundToolManager(BaseModel):
     _notification_queue: asyncio.Queue[ToolNotification] = PrivateAttr(default_factory=asyncio.Queue)
     _loop: Optional[asyncio.AbstractEventLoop] = PrivateAttr(default=None)
     _lifecycle_tasks: list[asyncio.Task[None]] = PrivateAttr(default_factory=list)
-    _lifecycle_tasks_by_owner: Dict[object, list[asyncio.Task[None]]] = PrivateAttr(default_factory=dict)
-    _notification_queues_by_owner: Dict[object, asyncio.Queue[ToolNotification]] = PrivateAttr(default_factory=dict)
-    _lifecycle_owner: object | None = PrivateAttr(default=None)
-    _tool_owners: Dict[str, object | None] = PrivateAttr(default_factory=dict)
     _max_tool_duration_seconds: float = PrivateAttr(default=86400)  # 1 day
     _max_tool_memory_seconds: float = PrivateAttr(default=3600)  # 1 hour
 
@@ -157,7 +153,6 @@ class BackgroundToolManager(BaseModel):
             status=ToolState.RUNNING,
         )
         self._tools[bg_tool.tool_id] = bg_tool
-        self._tool_owners[bg_tool.tool_id] = self._lifecycle_owner
 
         async_task = asyncio.create_task(
             self._run_tool(bg_tool, tool_call_routine),
@@ -193,24 +188,8 @@ class BackgroundToolManager(BaseModel):
             bg_tool.status = ToolState.COMPLETED
             logger.debug(f"Background tool completed: {bg_tool.tool_name} (id={bg_tool.id})")
 
-        await self._queue_notification(bg_tool)
+        await self._notification_queue.put(bg_tool.get_notification())
         logger.debug(f"Queued notification for tool: {bg_tool.tool_name} (id={bg_tool.id})")
-
-    async def _queue_notification(self, bg_tool: BackgroundTool) -> None:
-        """Queue a notification only for the lifecycle owner that started the tool."""
-        notification = bg_tool.get_notification()
-        owner = self._tool_owners.get(bg_tool.tool_id)
-        if owner is None:
-            owner = self._lifecycle_owner
-            if owner is None:
-                await self._notification_queue.put(notification)
-                return
-
-        notification_queue = self._notification_queues_by_owner.get(owner)
-        if notification_queue is None:
-            logger.debug("Dropping stale tool notification for owner %r: %s", owner, bg_tool.tool_id)
-            return
-        await notification_queue.put(notification)
 
     async def update_progress(
         self,
@@ -271,7 +250,7 @@ class BackgroundToolManager(BaseModel):
 
         return False
 
-    def start_up(self, tool_callbacks: list[Callable[[ToolNotification], Coroutine[Any, Any, None]]]) -> object:
+    def start_up(self, tool_callbacks: list[Callable[[ToolNotification], Coroutine[Any, Any, None]]]) -> None:
         """Start the background tool manager.
 
         This method starts two concurrent tasks:
@@ -283,13 +262,10 @@ class BackgroundToolManager(BaseModel):
 
         """
         self.set_loop()
-        owner = object()
-        self._lifecycle_owner = owner
-        notification_queue: asyncio.Queue[ToolNotification] = asyncio.Queue()
 
         async def _listener() -> None:
             while True:
-                bg_tool = await notification_queue.get()
+                bg_tool = await self._notification_queue.get()
                 for callback in tool_callbacks:
                     await callback(bg_tool)
 
@@ -299,13 +275,10 @@ class BackgroundToolManager(BaseModel):
                 await self.cleanup_tools()
                 await self.timeout_tools()
 
-        lifecycle_tasks = [
+        self._lifecycle_tasks = [
             asyncio.create_task(_cleanup(), name="bg-tool-cleanup"),
             asyncio.create_task(_listener(), name="bg-tool-listener-callback"),
         ]
-        self._lifecycle_tasks = lifecycle_tasks
-        self._lifecycle_tasks_by_owner[owner] = lifecycle_tasks
-        self._notification_queues_by_owner[owner] = notification_queue
 
         logger.info(
             "BackgroundToolManager started. "
@@ -314,38 +287,19 @@ class BackgroundToolManager(BaseModel):
             self._max_tool_duration_seconds,
             self._max_tool_memory_seconds,
         )
-        return owner
 
-    async def shutdown(self, owner: object | None = None) -> None:
-        """Cancel background tasks and running tools for an owner, or all owners."""
-        if owner is None:
-            task_groups = list(self._lifecycle_tasks_by_owner.values())
-            self._lifecycle_tasks_by_owner.clear()
-            self._notification_queues_by_owner.clear()
-            self._lifecycle_tasks.clear()
-            self._lifecycle_owner = None
-        else:
-            task_groups = [self._lifecycle_tasks_by_owner.pop(owner, [])]
-            self._notification_queues_by_owner.pop(owner, None)
-            if self._lifecycle_owner is owner:
-                self._lifecycle_owner = None
-                self._lifecycle_tasks.clear()
-
-        lifecycle_tasks = [task for tasks in task_groups for task in tasks]
-        for task in lifecycle_tasks:
+    async def shutdown(self) -> None:
+        """Cancel all background tasks (listener, cleanup) and running tools."""
+        for task in self._lifecycle_tasks:
             task.cancel()
-        for task in lifecycle_tasks:
+        for task in self._lifecycle_tasks:
             try:
                 await task
             except asyncio.CancelledError:
                 pass
+        self._lifecycle_tasks.clear()
 
-        if owner is None:
-            tool_ids = list(self._tools)
-        else:
-            tool_ids = [tool_id for tool_id in self._tools if self._tool_owners.get(tool_id) is owner]
-
-        for tool_id in tool_ids:
+        for tool_id in list(self._tools):
             await self.cancel_tool(tool_id, log=False)
 
         logger.info("BackgroundToolManager shut down")
@@ -390,7 +344,6 @@ class BackgroundToolManager(BaseModel):
 
         for tool_id in to_remove:
             del self._tools[tool_id]
-            self._tool_owners.pop(tool_id, None)
 
         if to_remove:
             logger.debug(f"Cleaned up {len(to_remove)} old tools")

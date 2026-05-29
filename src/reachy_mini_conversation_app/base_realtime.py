@@ -6,7 +6,7 @@ import random
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Final, Tuple, ClassVar, Optional, Coroutine
+from typing import Any, Final, Tuple, ClassVar, Optional
 from datetime import datetime
 
 import numpy as np
@@ -147,7 +147,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         # Internal lifecycle flags
         self._connected_event: asyncio.Event = asyncio.Event()
         self._handler_owned_startup_task: asyncio.Task[None] | None = None
-        self._handler_owned_startup_lock = asyncio.Lock()
 
         # Background tool manager
         self.tool_manager = BackgroundToolManager()
@@ -397,33 +396,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         except Exception as e:
             logger.warning("Handler-owned realtime session ended unexpectedly: %s", e)
 
-    async def _cancel_handler_owned_startup_task_locked(self) -> None:
-        """Cancel a pending handler-owned restart while holding the startup lock."""
-        startup_task = self._handler_owned_startup_task
-        if startup_task is None:
-            return
-        if startup_task is asyncio.current_task():
-            return
-        if not startup_task.done():
-            startup_task.cancel()
-            try:
-                await startup_task
-            except asyncio.CancelledError:
-                pass
-        if self._handler_owned_startup_task is startup_task:
-            self._handler_owned_startup_task = None
-
-    async def _cancel_handler_owned_startup_task(self) -> None:
-        """Cancel a pending handler-owned restart before handler shutdown completes."""
-        async with self._handler_owned_startup_lock:
-            await self._cancel_handler_owned_startup_task_locked()
-
-    async def _replace_handler_owned_startup_task(self, coro: Coroutine[Any, Any, None], *, name: str) -> None:
-        """Replace any pending handler-owned restart task with a new one."""
-        async with self._handler_owned_startup_lock:
-            await self._cancel_handler_owned_startup_task_locked()
-            self._handler_owned_startup_task = asyncio.create_task(coro, name=name)
-
     async def start_up(self) -> None:
         """Start the handler with minimal retries on unexpected websocket closure."""
         await self._prepare_startup_credentials()
@@ -477,7 +449,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 pass
             if self.REFRESH_CLIENT_ON_RECONNECT:
                 self.client = await self._build_realtime_client()
-            await self._replace_handler_owned_startup_task(
+            self._handler_owned_startup_task = asyncio.create_task(
                 self._run_handler_owned_realtime_session(),
                 name="realtime-session-restart",
             )
@@ -570,11 +542,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
                 sent = True
 
-    async def _handle_tool_result(
-        self,
-        bg_tool: ToolNotification,
-        connection: AsyncRealtimeConnection | None = None,
-    ) -> None:
+    async def _handle_tool_result(self, bg_tool: ToolNotification) -> None:
         """Process the result of a tool call."""
         if bg_tool.error is not None:
             logger.error("Tool '%s' (id=%s) failed with error: %s", bg_tool.tool_name, bg_tool.id, bg_tool.error)
@@ -599,14 +567,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             tool_result_for_model = tool_result
 
         # Connection may have closed while tool was running
-        if connection is not None and self.connection is not connection:
-            logger.warning(
-                "Dropping stale tool '%s' (id=%s) result for a replaced realtime session",
-                bg_tool.tool_name,
-                bg_tool.id,
-            )
-            return
-        connection = connection or self.connection
+        connection = self.connection
         if not connection:
             logger.warning(
                 "Connection closed during tool '%s' (id=%s) execution; cannot send result back",
@@ -746,13 +707,9 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 pass
 
             response_sender_task: asyncio.Task[None] | None = None
-            tool_manager_owner: object | None = None
             try:
                 # Start the background tool manager
-                async def handle_tool_result_for_connection(bg_tool: ToolNotification) -> None:
-                    await self._handle_tool_result(bg_tool, connection=conn)
-
-                tool_manager_owner = self.tool_manager.start_up(tool_callbacks=[handle_tool_result_for_connection])
+                self.tool_manager.start_up(tool_callbacks=[self._handle_tool_result])
 
                 # Start the response sender worker
                 response_sender_task = asyncio.create_task(self._response_sender_loop(), name="response-sender")
@@ -968,7 +925,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                             pass
 
                     # Stop background tool manager tasks (listener + cleanup) in all paths.
-                    await self.tool_manager.shutdown(tool_manager_owner)
+                    await self.tool_manager.shutdown()
                 finally:
                     self._clear_realtime_connection_state(conn)
 
@@ -1035,8 +992,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         """Shutdown the handler."""
         # Unblock the response sender worker so it can exit
         self._response_done_event.set()
-
-        await self._cancel_handler_owned_startup_task()
 
         # Stop background tool manager tasks (listener + cleanup)
         await self.tool_manager.shutdown()

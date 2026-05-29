@@ -429,6 +429,7 @@ async function init() {
     const activeBackend = status.active_backend || status.backend_provider || DEFAULT_BACKEND;
     const activeLabel = backendMeta(activeBackend).label;
     const target = describeActiveBackendTarget(status);
+    const errorDetails = status.backend_error ? ` Last error: ${status.backend_error}` : "";
 
     connectionAlert.className = "connection-alert hidden";
     connectionAlert.setAttribute("role", "status");
@@ -455,9 +456,9 @@ async function init() {
       title = "Backend disconnected";
       tone = "error";
       if (activeBackend === HF_BACKEND && status.hf_connection_mode === "local") {
-        copy = `The ${target} is not reachable. Start it, switch to the built-in server, or update the target below.`;
+        copy = `The ${target} is not reachable. Start it, switch to the built-in server, or update the target below.${errorDetails}`;
       } else {
-        copy = `${activeLabel} failed to connect. Settings remain available so you can change backend or credentials.`;
+        copy = `${activeLabel} failed to connect. Settings remain available so you can change backend or credentials.${errorDetails}`;
       }
     }
 
