@@ -17,7 +17,6 @@ from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY as DE
 
 # Import config to ensure .env is loaded before reading REACHY_MINI_CUSTOM_PROFILE
 from reachy_mini_conversation_app.config import config  # noqa: F401
-from reachy_mini_conversation_app.idle_tools import LLM_HIDDEN_TOOL_NAMES
 from reachy_mini_conversation_app.tools.tool_constants import SystemTool
 
 
@@ -187,10 +186,8 @@ def _load_profile_tools() -> None:
             continue
         tool_names.append(line)
 
-    # Add tools required by app internals even when a profile does not list them.
+    # Add system tools
     tool_names.extend({tool.value for tool in SystemTool})
-    tool_names.extend(LLM_HIDDEN_TOOL_NAMES)
-    tool_names = list(dict.fromkeys(tool_names))
 
     logger.info(f"Found {len(tool_names)} tools to load: {tool_names}")
 
@@ -280,33 +277,17 @@ def _initialize_tools() -> None:
 _initialize_tools()
 
 
-def get_tool_specs(
-    exclusion_list: list[str] | None = None,
-    *,
-    include_llm_hidden: bool = False,
-) -> list[Dict[str, Any]]:
+def get_tool_specs(exclusion_list: list[str] = []) -> list[Dict[str, Any]]:
     """Get tool specs, optionally excluding some tools."""
-    excluded = set(exclusion_list or [])
-    if not include_llm_hidden:
-        excluded.update(LLM_HIDDEN_TOOL_NAMES)
-    return [spec for spec in ALL_TOOL_SPECS if spec.get("name") not in excluded]
+    return [spec for spec in ALL_TOOL_SPECS if spec.get("name") not in exclusion_list]
 
 
-def get_active_tool_specs(
-    deps: ToolDependencies,
-    *,
-    include_llm_hidden: bool = False,
-) -> list[Dict[str, Any]]:
+def get_active_tool_specs(deps: ToolDependencies) -> list[Dict[str, Any]]:
     """Get tool specs filtered by what the current session deps support."""
     exclusion_list: list[str] = []
     if not (deps.camera_worker and deps.camera_worker.head_tracker):
         exclusion_list.append("head_tracking")
-    return get_tool_specs(exclusion_list, include_llm_hidden=include_llm_hidden)
-
-
-def get_loaded_tool_names() -> set[str]:
-    """Return the names of all loaded tools, including app-internal tools."""
-    return set(ALL_TOOLS)
+    return get_tool_specs(exclusion_list)
 
 
 # Dispatcher

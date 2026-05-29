@@ -14,7 +14,6 @@ import reachy_mini_conversation_app.openai_realtime as rt_mod
 import reachy_mini_conversation_app.tools.core_tools as ct_mod
 import reachy_mini_conversation_app.tools.background_tool_manager as btm_mod
 from reachy_mini_conversation_app.config import OPENAI_BACKEND, config, get_default_voice_for_backend
-from reachy_mini_conversation_app.idle_tools import IdleToolChoice
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.tool_constants import ToolState
@@ -323,12 +322,7 @@ async def test_idle_signal_starts_local_tool_without_model_turn(monkeypatch: Any
 
     fake_item = SimpleNamespace(create=AsyncMock())
     handler.connection = SimpleNamespace(conversation=SimpleNamespace(item=fake_item))
-    monkeypatch.setattr(handler, "_available_idle_tool_names", lambda: {"idle_do_nothing"})
-    monkeypatch.setattr(
-        base_rt_mod,
-        "choose_idle_tool",
-        lambda _available: IdleToolChoice("idle_do_nothing", {"reason": "test"}),
-    )
+    monkeypatch.setattr(handler, "_choose_idle_tool_call", lambda: ("idle_do_nothing", {"reason": "test"}))
     safe_response_create = AsyncMock()
     monkeypatch.setattr(handler, "_safe_response_create", safe_response_create)
     start_tool = AsyncMock(return_value=SimpleNamespace(tool_id="idle_do_nothing-idle-1"))
@@ -368,14 +362,6 @@ async def test_idle_tool_result_is_not_sent_to_realtime_model(monkeypatch: Any) 
 
     fake_item.create.assert_not_awaited()
     safe_response_create.assert_not_awaited()
-
-
-def test_idle_do_nothing_is_hidden_from_llm_tool_specs() -> None:
-    """The no-op idle tool is loaded internally but omitted from normal session tools."""
-    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
-
-    assert "idle_do_nothing" in ct_mod.get_loaded_tool_names()
-    assert "idle_do_nothing" not in {spec["name"] for spec in ct_mod.get_active_tool_specs(deps)}
 
 
 @pytest.mark.asyncio

@@ -3,4 +3,5 @@ stop_dance
 play_emotion
 stop_emotion
 camera
+idle_do_nothing
 move_head

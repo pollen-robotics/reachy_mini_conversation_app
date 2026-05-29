@@ -69,7 +69,7 @@ class ToolNotification(BaseModel):
     """the name of the tool"""
     tool_name: str
 
-    """whether the tool call was triggered by the local idle policy"""
+    """whether the tool call was triggered by an idle signal"""
     is_idle_tool_call: bool
 
     """the status of the tool"""
@@ -174,7 +174,7 @@ class BackgroundToolManager(BaseModel):
             call_id: The ID of the tool
             tool_call_routine: The ToolCallRoutine containing the callable and its arguments
             with_progress: Whether to track progress (0.0-1.0)
-            is_idle_tool_call: Whether the tool call was triggered by the local idle policy
+            is_idle_tool_call: Whether the tool call was triggered by an idle signal
 
         Returns:
             BackgroundTool object with tool ID

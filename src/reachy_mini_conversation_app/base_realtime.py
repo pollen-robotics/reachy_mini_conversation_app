@@ -32,12 +32,7 @@ from reachy_mini_conversation_app.config import (
     get_default_voice_for_backend,
     get_available_voices_for_backend,
 )
-from reachy_mini_conversation_app.idle_tools import (
-    IDLE_DO_NOTHING_TOOL_NAME,
-    IdleToolChoice,
-    choose_idle_tool,
-)
-from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, get_loaded_tool_names
+from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolCallRoutine,
@@ -50,6 +45,13 @@ logger = logging.getLogger(__name__)
 
 _RESPONSE_DONE_TIMEOUT: Final[float] = 30.0
 _RESPONSE_REJECTION_RETRY_DELAY: Final[float] = 0.5
+_IDLE_TOOL_WEIGHTS: Final[tuple[tuple[str, float], ...]] = (
+    ("idle_do_nothing", 0.80),
+    ("dance", 0.08),
+    ("play_emotion", 0.08),
+    ("move_head", 0.04),
+)
+_IDLE_MOVE_HEAD_DIRECTIONS: Final[tuple[str, ...]] = ("left", "right", "up", "down", "front")
 
 
 class InputTranscriptChunksByItem(BaseModel):
@@ -1019,21 +1021,42 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
     async def _build_realtime_client(self) -> AsyncOpenAI:
         """Build the realtime SDK client for this backend."""
 
-    def _available_idle_tool_names(self) -> set[str]:
-        """Return tool names that the local idle policy is allowed to invoke."""
-        conversation_tool_names = {
+    def _choose_idle_tool_call(self) -> tuple[str, dict[str, Any]] | None:
+        """Choose an idle tool from the tools already available to this session."""
+        available_tool_names = {
             spec["name"] for spec in self._get_active_tool_specs() if isinstance(spec.get("name"), str)
         }
-        return (conversation_tool_names | {IDLE_DO_NOTHING_TOOL_NAME}) & get_loaded_tool_names()
+        candidates = [(name, weight) for name, weight in _IDLE_TOOL_WEIGHTS if name in available_tool_names]
+        if not candidates:
+            return None
 
-    async def _start_local_idle_tool(self, choice: IdleToolChoice, idle_duration: float) -> None:
-        """Start a locally selected idle tool without involving the realtime model."""
-        args_json_str = json.dumps(choice.arguments)
+        names, weights = zip(*candidates)
+        tool_name = random.choices(names, weights=weights, k=1)[0]
+        if tool_name == "move_head":
+            return tool_name, {"direction": random.choice(_IDLE_MOVE_HEAD_DIRECTIONS)}
+        if tool_name == "idle_do_nothing":
+            return tool_name, {"reason": "random idle policy selected stillness"}
+        return tool_name, {}
+
+    async def send_idle_signal(self, idle_duration: float) -> None:
+        """Run a locally selected idle tool without sending an idle turn to the model."""
+        logger.debug("Selecting local idle tool")
+        if not self.connection:
+            logger.debug("No connection, cannot run idle tool")
+            return
+
+        selected_tool = self._choose_idle_tool_call()
+        if selected_tool is None:
+            logger.warning("No idle tools are available; idle action skipped")
+            return
+
+        tool_name, arguments = selected_tool
+        args_json_str = json.dumps(arguments)
         call_id = f"idle-{uuid.uuid4()}"
         bg_tool = await self.tool_manager.start_tool(
             call_id=call_id,
             tool_call_routine=ToolCallRoutine(
-                tool_name=choice.tool_name,
+                tool_name=tool_name,
                 args_json_str=args_json_str,
                 deps=self.deps,
             ),
@@ -1044,7 +1067,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 {
                     "role": "assistant",
                     "content": (
-                        f"🛠️ Idle tool {choice.tool_name} with args {args_json_str}. "
+                        f"🛠️ Idle tool {tool_name} with args {args_json_str}. "
                         f"The tool is now running. Tool ID: {bg_tool.tool_id}"
                     ),
                 },
@@ -1053,22 +1076,8 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         logger.info(
             "Started local idle tool after %.1fs idle: %s (id=%s, call_id=%s, args=%s)",
             idle_duration,
-            choice.tool_name,
+            tool_name,
             bg_tool.tool_id,
             call_id,
             args_json_str,
         )
-
-    async def send_idle_signal(self, idle_duration: float) -> None:
-        """Run a locally selected idle tool without sending an idle turn to the model."""
-        logger.debug("Selecting local idle tool")
-        if not self.connection:
-            logger.debug("No connection, cannot run idle tool")
-            return
-
-        choice = choose_idle_tool(self._available_idle_tool_names())
-        if choice is None:
-            logger.warning("No idle tools are available; idle action skipped")
-            return
-
-        await self._start_local_idle_tool(choice, idle_duration)

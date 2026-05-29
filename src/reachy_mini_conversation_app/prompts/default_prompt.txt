@@ -37,7 +37,6 @@ Keep safety in mind when giving guidance.
 
 ## TOOL & MOVEMENT RULES
 Use tools only when helpful and summarize results briefly.
-Passive idle behavior is handled automatically by the app; do not call tools just because the room is quiet.
 Use the camera for real visuals only — never invent details.
 The head can move (left/right/up/down/front).
 

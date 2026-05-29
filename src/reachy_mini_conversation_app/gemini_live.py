@@ -32,15 +32,9 @@ from reachy_mini_conversation_app.config import (
     config,
 )
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
-from reachy_mini_conversation_app.idle_tools import (
-    IDLE_DO_NOTHING_TOOL_NAME,
-    IdleToolChoice,
-    choose_idle_tool,
-)
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_active_tool_specs,
-    get_loaded_tool_names,
 )
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.camera_frame_encoding import encode_bgr_frame_as_jpeg
@@ -55,6 +49,13 @@ logger = logging.getLogger(__name__)
 
 GEMINI_INPUT_SAMPLE_RATE: Final[int] = 16000
 GEMINI_OUTPUT_SAMPLE_RATE: Final[int] = 24000
+_IDLE_TOOL_WEIGHTS: Final[tuple[tuple[str, float], ...]] = (
+    ("idle_do_nothing", 0.80),
+    ("dance", 0.08),
+    ("play_emotion", 0.08),
+    ("move_head", 0.04),
+)
+_IDLE_MOVE_HEAD_DIRECTIONS: Final[tuple[str, ...]] = ("left", "right", "up", "down", "front")
 
 
 def _openai_tool_specs_to_gemini(specs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -738,21 +739,42 @@ class GeminiLiveHandler(ConversationHandler):
         dt = datetime.now()
         return f"[{dt.strftime('%Y-%m-%d %H:%M:%S')} | +{elapsed_seconds:.1f}s]"
 
-    def _available_idle_tool_names(self) -> set[str]:
-        """Return tool names that the local idle policy is allowed to invoke."""
-        conversation_tool_names = {
+    def _choose_idle_tool_call(self) -> tuple[str, dict[str, Any]] | None:
+        """Choose an idle tool from the tools already available to this session."""
+        available_tool_names = {
             spec["name"] for spec in get_active_tool_specs(self.deps) if isinstance(spec.get("name"), str)
         }
-        return (conversation_tool_names | {IDLE_DO_NOTHING_TOOL_NAME}) & get_loaded_tool_names()
+        candidates = [(name, weight) for name, weight in _IDLE_TOOL_WEIGHTS if name in available_tool_names]
+        if not candidates:
+            return None
 
-    async def _start_local_idle_tool(self, choice: IdleToolChoice, idle_duration: float) -> None:
-        """Start a locally selected idle tool without involving Gemini."""
-        args_json_str = json.dumps(choice.arguments)
+        names, weights = zip(*candidates)
+        tool_name = random.choices(names, weights=weights, k=1)[0]
+        if tool_name == "move_head":
+            return tool_name, {"direction": random.choice(_IDLE_MOVE_HEAD_DIRECTIONS)}
+        if tool_name == "idle_do_nothing":
+            return tool_name, {"reason": "random idle policy selected stillness"}
+        return tool_name, {}
+
+    async def send_idle_signal(self, idle_duration: float) -> None:
+        """Run a locally selected idle tool without sending an idle turn to Gemini."""
+        logger.debug("Selecting local Gemini idle tool")
+        if not self.session:
+            logger.debug("No session, cannot run idle tool")
+            return
+
+        selected_tool = self._choose_idle_tool_call()
+        if selected_tool is None:
+            logger.warning("No Gemini idle tools are available; idle action skipped")
+            return
+
+        tool_name, arguments = selected_tool
+        args_json_str = json.dumps(arguments)
         call_id = f"idle-{uuid.uuid4()}"
         bg_tool = await self.tool_manager.start_tool(
             call_id=call_id,
             tool_call_routine=ToolCallRoutine(
-                tool_name=choice.tool_name,
+                tool_name=tool_name,
                 args_json_str=args_json_str,
                 deps=self.deps,
             ),
@@ -762,34 +784,18 @@ class GeminiLiveHandler(ConversationHandler):
             AdditionalOutputs(
                 {
                     "role": "assistant",
-                    "content": (
-                        f"🛠️ Idle tool {choice.tool_name} with args {args_json_str}. Tool ID: {bg_tool.tool_id}"
-                    ),
+                    "content": f"🛠️ Idle tool {tool_name} with args {args_json_str}. Tool ID: {bg_tool.tool_id}",
                 },
             ),
         )
         logger.info(
             "Started local Gemini idle tool after %.1fs idle: %s (id=%s, call_id=%s, args=%s)",
             idle_duration,
-            choice.tool_name,
+            tool_name,
             bg_tool.tool_id,
             call_id,
             args_json_str,
         )
-
-    async def send_idle_signal(self, idle_duration: float) -> None:
-        """Run a locally selected idle tool without sending an idle turn to Gemini."""
-        logger.debug("Selecting local Gemini idle tool")
-        if not self.session:
-            logger.debug("No session, cannot run idle tool")
-            return
-
-        choice = choose_idle_tool(self._available_idle_tool_names())
-        if choice is None:
-            logger.warning("No Gemini idle tools are available; idle action skipped")
-            return
-
-        await self._start_local_idle_tool(choice, idle_duration)
 
     async def get_available_voices(self) -> list[str]:
         """Return the list of available Gemini voices."""

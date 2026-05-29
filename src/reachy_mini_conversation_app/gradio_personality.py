@@ -17,7 +17,6 @@ from reachy_mini_conversation_app.config import (
     get_default_voice_for_backend,
     get_available_voices_for_backend,
 )
-from reachy_mini_conversation_app.idle_tools import LLM_HIDDEN_TOOL_NAMES
 
 
 class PersonalityUI:
@@ -94,7 +93,7 @@ class PersonalityUI:
         shared: list[str] = []
         try:
             for py in self._tools_dir.glob("*.py"):
-                if py.stem in {"__init__", "core_tools", *LLM_HIDDEN_TOOL_NAMES}:
+                if py.stem in {"__init__", "core_tools"}:
                     continue
                 shared.append(py.stem)
         except Exception:

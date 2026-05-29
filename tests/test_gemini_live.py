@@ -12,7 +12,6 @@ from fastrtc import AdditionalOutputs
 
 import reachy_mini_conversation_app.gemini_live as gemini_mod
 import reachy_mini_conversation_app.tools.core_tools as ct_mod
-from reachy_mini_conversation_app.idle_tools import IdleToolChoice
 from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.tool_constants import ToolState
@@ -249,12 +248,7 @@ async def test_gemini_idle_signal_starts_local_tool_without_model_input(monkeypa
     handler = GeminiLiveHandler(deps)
     session = _FakeSession([], handler._stop_event)
     handler.session = session
-    monkeypatch.setattr(handler, "_available_idle_tool_names", lambda: {"idle_do_nothing"})
-    monkeypatch.setattr(
-        gemini_mod,
-        "choose_idle_tool",
-        lambda _available: IdleToolChoice("idle_do_nothing", {"reason": "test"}),
-    )
+    monkeypatch.setattr(handler, "_choose_idle_tool_call", lambda: ("idle_do_nothing", {"reason": "test"}))
     start_tool = AsyncMock(return_value=SimpleNamespace(tool_id="idle_do_nothing-idle-1"))
     monkeypatch.setattr(type(handler.tool_manager), "start_tool", start_tool)
 
