@@ -219,11 +219,7 @@ class LocalStream:
     async def _monitor_handler_owned_connection(self, active_backend: str) -> None:
         """Keep the outer runner alive while a handler-owned restart is connected."""
         self._set_backend_connection_state("connected")
-        while (
-            not self._stop_event.is_set()
-            and get_backend_choice() == active_backend
-            and self._backend_connected()
-        ):
+        while not self._stop_event.is_set() and get_backend_choice() == active_backend and self._backend_connected():
             await asyncio.sleep(0.5)
 
     @staticmethod
