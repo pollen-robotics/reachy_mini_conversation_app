@@ -319,6 +319,31 @@ async def test_gemini_start_up_preserves_replacement_session_when_old_task_unwin
     assert handler._connected_event.is_set()
 
 
+@pytest.mark.asyncio
+async def test_gemini_shutdown_cancels_pending_handler_owned_reconnect() -> None:
+    """Shutdown should not leave a Gemini handler-owned reconnect task running."""
+    handler = GeminiLiveHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def pending_reconnect() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    reconnect_task = asyncio.create_task(pending_reconnect())
+    handler._handler_owned_startup_task = reconnect_task
+    await started.wait()
+
+    await handler.shutdown()
+
+    assert reconnect_task.cancelled()
+    assert cancelled.is_set()
+    assert handler._handler_owned_startup_task is None
+
+
 def test_handler_uses_startup_voice_at_startup() -> None:
     """Gemini handler startup should restore a persisted startup voice."""
     handler = GeminiLiveHandler(

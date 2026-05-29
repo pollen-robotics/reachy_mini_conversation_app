@@ -693,6 +693,32 @@ async def test_handler_owned_realtime_session_preserves_replacement_connection(m
 
 
 @pytest.mark.asyncio
+async def test_shutdown_cancels_pending_handler_owned_reconnect() -> None:
+    """Shutdown should not leave a handler-owned reconnect task running."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = rt_mod.OpenaiRealtimeHandler(deps)
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def pending_reconnect() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    reconnect_task = asyncio.create_task(pending_reconnect())
+    handler._handler_owned_startup_task = reconnect_task
+    await started.wait()
+
+    await handler.shutdown()
+
+    assert reconnect_task.cancelled()
+    assert cancelled.is_set()
+    assert handler._handler_owned_startup_task is None
+
+
+@pytest.mark.asyncio
 async def test_start_up_openai_gradio_collects_textbox_api_key(monkeypatch: Any) -> None:
     """OpenAI should own Gradio textbox credential collection."""
     monkeypatch.setattr(config, "BACKEND_PROVIDER", "openai")

@@ -396,6 +396,22 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         except Exception as e:
             logger.warning("Handler-owned realtime session ended unexpectedly: %s", e)
 
+    async def _cancel_handler_owned_startup_task(self) -> None:
+        """Cancel a pending handler-owned restart before handler shutdown completes."""
+        startup_task = self._handler_owned_startup_task
+        if startup_task is None:
+            return
+        if startup_task is asyncio.current_task():
+            return
+        if not startup_task.done():
+            startup_task.cancel()
+            try:
+                await startup_task
+            except asyncio.CancelledError:
+                pass
+        if self._handler_owned_startup_task is startup_task:
+            self._handler_owned_startup_task = None
+
     async def start_up(self) -> None:
         """Start the handler with minimal retries on unexpected websocket closure."""
         await self._prepare_startup_credentials()
@@ -993,6 +1009,8 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         """Shutdown the handler."""
         # Unblock the response sender worker so it can exit
         self._response_done_event.set()
+
+        await self._cancel_handler_owned_startup_task()
 
         # Stop background tool manager tasks (listener + cleanup)
         await self.tool_manager.shutdown()

@@ -520,10 +520,12 @@ class TestStartUp:
     @pytest.mark.asyncio
     async def test_owner_shutdown_preserves_replacement_lifecycle(self, manager: BackgroundToolManager) -> None:
         """Shutting down an old owner must not cancel replacement lifecycle tasks or tools."""
-        old_owner = manager.start_up(tool_callbacks=[AsyncMock()])
+        old_cb = AsyncMock()
+        new_cb = AsyncMock()
+        old_owner = manager.start_up(tool_callbacks=[old_cb])
         old_tool = await manager.start_tool("old", _make_routine("old", delay=10.0), is_idle_tool_call=False)
 
-        new_owner = manager.start_up(tool_callbacks=[AsyncMock()])
+        new_owner = manager.start_up(tool_callbacks=[new_cb])
         new_tool = await manager.start_tool("new", _make_routine("new", delay=10.0), is_idle_tool_call=False)
 
         await manager.shutdown(old_owner)
@@ -533,6 +535,8 @@ class TestStartUp:
         assert new_tool.status == ToolState.RUNNING
         assert new_owner in manager._lifecycle_tasks_by_owner
         assert all(not task.done() for task in manager._lifecycle_tasks_by_owner[new_owner])
+        old_cb.assert_not_called()
+        new_cb.assert_not_called()
 
         await manager.shutdown(new_owner)
 

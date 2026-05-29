@@ -295,6 +295,22 @@ class GeminiLiveHandler(ConversationHandler):
         except Exception:
             pass
 
+    async def _cancel_handler_owned_startup_task(self) -> None:
+        """Cancel a pending handler-owned restart before handler shutdown completes."""
+        startup_task = self._handler_owned_startup_task
+        if startup_task is None:
+            return
+        if startup_task is asyncio.current_task():
+            return
+        if not startup_task.done():
+            startup_task.cancel()
+            try:
+                await startup_task
+            except asyncio.CancelledError:
+                pass
+        if self._handler_owned_startup_task is startup_task:
+            self._handler_owned_startup_task = None
+
     async def start_up(self) -> None:
         """Start the handler with retries on unexpected closure."""
         gemini_api_key = config.GEMINI_API_KEY
@@ -709,6 +725,7 @@ class GeminiLiveHandler(ConversationHandler):
     async def shutdown(self) -> None:
         """Shutdown the handler."""
         self._stop_event.set()
+        await self._cancel_handler_owned_startup_task()
 
         await self.tool_manager.shutdown()
 
