@@ -93,29 +93,98 @@ _SPAN_ATTRS_TO_KEEP = frozenset(
 )
 
 
+def _span_to_line(span: Any) -> dict[str, Any]:
+    """Serialize a span to the compact dict shared by the line + JSONL exporters.
+
+    Keeping a single source of truth means the on-disk event log (read by the
+    closing-the-loop observer, ``docs/closing-the-loop.md``) and the stdout
+    RCSPAN monitor stream never drift apart.
+    """
+    dur_ms = (span.end_time - span.start_time) / 1_000_000
+    attrs = {k: v for k, v in (span.attributes or {}).items() if k in _SPAN_ATTRS_TO_KEEP}
+    return {
+        "name": span.name,
+        "trace": format(span.context.trace_id, "032x"),
+        "span": format(span.context.span_id, "016x"),
+        "parent": format(span.parent.span_id, "016x") if span.parent else None,
+        "dur_ms": round(dur_ms, 1),
+        "status": span.status.status_code.name,
+        "ts": span.end_time // 1_000_000,
+        "attrs": attrs,
+    }
+
+
 class CompactLineExporter(SpanExporter):
     """Writes one RCSPAN JSON line per span to stdout for live monitoring."""
 
     def export(self, spans: Any) -> SpanExportResult:
         """Serialize each span to a compact JSON line prefixed with RCSPAN."""
         for span in spans:
-            dur_ms = (span.end_time - span.start_time) / 1_000_000
-            attrs = {k: v for k, v in (span.attributes or {}).items() if k in _SPAN_ATTRS_TO_KEEP}
-            line = {
-                "name": span.name,
-                "trace": format(span.context.trace_id, "032x"),
-                "span": format(span.context.span_id, "016x"),
-                "parent": format(span.parent.span_id, "016x") if span.parent else None,
-                "dur_ms": round(dur_ms, 1),
-                "status": span.status.status_code.name,
-                "ts": span.end_time // 1_000_000,
-                "attrs": attrs,
-            }
+            line = _span_to_line(span)
             print(f"RCSPAN {json.dumps(line, separators=(',', ':'))}", flush=True)
         return SpanExportResult.SUCCESS
 
     def shutdown(self) -> None:
         """No-op shutdown."""
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        """No-op flush — output is written synchronously."""
+        return True
+
+
+class JsonlEventExporter(SpanExporter):
+    """Appends one JSON line per span to a rolling file for the observer loop.
+
+    Tier 0 of "closing the loop" (``docs/closing-the-loop.md``): an autonomous
+    agent reads this file to answer *"did the robot speak / move recently, and
+    what did it do?"* without any new sensors — it reuses the spans the app
+    already emits.
+
+    Enable by setting ``ROBOT_EVENT_LOG=/path/to/events.jsonl`` alongside
+    ``ROBOT_INSTRUMENTATION=trace`` (or ``remote``). The file is rotated to a
+    single ``.1`` backup once it exceeds ``max_bytes`` so it can't grow
+    unbounded on the robot's small disk.
+    """
+
+    def __init__(self, path: str, *, max_bytes: int = 5_000_000) -> None:
+        """Write spans to ``path``, rotating to ``<path>.1`` past ``max_bytes``."""
+        self._path = path
+        self._max_bytes = max_bytes
+        self._lock = threading.Lock()
+
+    def export(self, spans: Any) -> SpanExportResult:
+        """Append the serialized spans as newline-delimited JSON."""
+        try:
+            lines = [json.dumps(_span_to_line(s), separators=(",", ":")) for s in spans]
+        except Exception:  # serialization should never take down the app
+            logger.warning("event log: failed to serialize spans", exc_info=True)
+            return SpanExportResult.FAILURE
+        if not lines:
+            return SpanExportResult.SUCCESS
+        with self._lock:
+            try:
+                self._rotate_if_needed()
+                with open(self._path, "a", encoding="utf-8") as fh:
+                    fh.write("\n".join(lines) + "\n")
+            except OSError:
+                logger.warning("event log: write failed (%s)", self._path, exc_info=True)
+                return SpanExportResult.FAILURE
+        return SpanExportResult.SUCCESS
+
+    def _rotate_if_needed(self) -> None:
+        """Move the log aside to ``<path>.1`` once it passes ``max_bytes``."""
+        try:
+            if os.path.getsize(self._path) < self._max_bytes:
+                return
+        except OSError:
+            return  # file doesn't exist yet, or can't stat — nothing to rotate
+        try:
+            os.replace(self._path, self._path + ".1")
+        except OSError:
+            logger.warning("event log: rotation failed (%s)", self._path, exc_info=True)
+
+    def shutdown(self) -> None:
+        """No-op shutdown — each export flushes synchronously."""
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:
         """No-op flush — output is written synchronously."""
@@ -129,6 +198,13 @@ def _init_otel() -> None:
     # --- Tracing ---
     tracer_provider = TracerProvider(resource=resource)
     tracer_provider.add_span_processor(SimpleSpanProcessor(CompactLineExporter()))
+
+    # Tier-0 closing-the-loop event log (docs/closing-the-loop.md). Opt-in via
+    # ROBOT_EVENT_LOG so the default path keeps zero extra IO.
+    _event_log = os.getenv("ROBOT_EVENT_LOG", "").strip()
+    if _event_log:
+        tracer_provider.add_span_processor(SimpleSpanProcessor(JsonlEventExporter(_event_log)))
+        logger.info("OTel: JSONL event log -> %s", _event_log)
 
     if _REMOTE:
         try:
