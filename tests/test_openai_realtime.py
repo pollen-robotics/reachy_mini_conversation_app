@@ -322,7 +322,7 @@ async def test_idle_signal_starts_local_tool_without_model_turn(monkeypatch: Any
 
     fake_item = SimpleNamespace(create=AsyncMock())
     handler.connection = SimpleNamespace(conversation=SimpleNamespace(item=fake_item))
-    monkeypatch.setattr(handler, "_choose_idle_tool_call", lambda: ("idle_do_nothing", {"reason": "test"}))
+    monkeypatch.setattr(base_rt_mod, "choose_idle_tool_call", lambda _available: ("idle_do_nothing", {"reason": "test"}))
     safe_response_create = AsyncMock()
     monkeypatch.setattr(handler, "_safe_response_create", safe_response_create)
     start_tool = AsyncMock(return_value=SimpleNamespace(tool_id="idle_do_nothing-idle-1"))
