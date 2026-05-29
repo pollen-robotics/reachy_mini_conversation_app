@@ -1,0 +1,93 @@
+name: Dashboard bootstrap
+
+# One-shot, idempotent setup for the issue dashboard. Run it from the Actions
+# tab (Run workflow) whenever the config under .github/dashboard/ changes.
+#
+#   1. Sync repo labels from .github/dashboard/labels.yml
+#   2. Create milestones from .github/dashboard/milestones.yml (matched by title)
+#   3. (optional) Apply lane/area/type/priority labels + milestones to issues
+#      from .github/dashboard/triage.yml
+#
+# Uses the default GITHUB_TOKEN (issues: write) + the preinstalled gh CLI — no
+# PAT and no third-party actions. Labels are ADDED, never removed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_triage:
+        description: "Apply labels + milestones to issues from triage.yml"
+        type: boolean
+        default: true
+
+permissions:
+  issues: write
+
+concurrency:
+  group: dashboard-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Install PyYAML
+        run: python3 -m pip install --quiet pyyaml
+
+      - name: Sync labels
+        run: |
+          python3 - <<'PY'
+          import subprocess, yaml
+          labels = yaml.safe_load(open(".github/dashboard/labels.yml"))["labels"]
+          for l in labels:
+              subprocess.run(
+                  ["gh", "label", "create", l["name"],
+                   "--color", l["color"].lstrip("#"),
+                   "--description", l.get("description", ""),
+                   "--force"],
+                  check=True,
+              )
+              print("label:", l["name"])
+          PY
+
+      - name: Create milestones
+        run: |
+          python3 - <<'PY'
+          import json, subprocess, yaml
+          existing = json.loads(subprocess.check_output(
+              ["gh", "api", "--paginate", "/repos/{owner}/{repo}/milestones?state=all"]))
+          have = {m["title"] for m in existing}
+          for m in yaml.safe_load(open(".github/dashboard/milestones.yml"))["milestones"]:
+              if m["title"] in have:
+                  print("milestone exists:", m["title"])
+                  continue
+              subprocess.run(
+                  ["gh", "api", "-X", "POST", "/repos/{owner}/{repo}/milestones",
+                   "-f", f"title={m['title']}",
+                   "-f", f"description={m.get('description', '')}"],
+                  check=True,
+              )
+              print("milestone created:", m["title"])
+          PY
+
+      - name: Apply triage
+        if: ${{ inputs.apply_triage }}
+        run: |
+          python3 - <<'PY'
+          import subprocess, yaml
+          data = yaml.safe_load(open(".github/dashboard/triage.yml"))
+          for it in data["issues"]:
+              n = str(it["number"])
+              cmd = ["gh", "issue", "edit", n]
+              labels = it.get("add_labels", [])
+              if labels:
+                  cmd += ["--add-label", ",".join(labels)]
+              if it.get("milestone"):
+                  cmd += ["--milestone", it["milestone"]]
+              subprocess.run(cmd, check=True)
+              print("updated #" + n)
+          PY

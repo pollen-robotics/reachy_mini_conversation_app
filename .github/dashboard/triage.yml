@@ -1,0 +1,97 @@
+# Per-issue triage: lane/area/type/priority labels to ADD, plus the milestone.
+#
+# Applied by .github/workflows/dashboard-bootstrap.yml (gh issue edit
+# --add-label / --milestone). Labels are ADDED, never removed, so the six
+# issues that were already partially labelled keep what they had and just gain
+# their lane (and a milestone where one applies).
+#
+# Lane definitions:
+#   lane/functional  - features delivering the comic/persona/chat/voice experience
+#   lane/technical   - infra / non-functional (boot, services, perf, tests, refactors)
+#   lane/improvement - known defects / polish in existing behavior
+#
+# milestone: "" means intentionally unassigned (pure maintenance/investigation
+# that doesn't ladder up to one of the four product goals) so the milestone
+# progress bars stay meaningful.
+
+issues:
+  # ---------- lane/functional ----------
+  - number: 441   # feat(tools): api_vision_client for autonomous vision mid-tool
+    add_labels: ["lane/functional", "area/vision", "type/feature", "priority/p3"]
+    milestone: ""
+  - number: 440   # feat(audio): scaffold static prompts/messages for the interaction lifecycle
+    add_labels: ["lane/functional", "area/audio", "type/feature", "priority/p2"]
+    milestone: "Gemini chat MVP"
+  - number: 439   # bookmark: persona -> xtts voice mapping (per-comic voice clones)
+    add_labels: ["lane/functional", "area/voice", "type/feature", "priority/p2"]
+    milestone: "Local voice clone + STT"
+  - number: 240   # feat(gemini-live): enable presence-backoff by default
+    add_labels: ["lane/functional", "area/vision", "type/feature", "priority/p3"]
+    milestone: "Gemini chat MVP"
+
+  # ---------- lane/technical ----------
+  - number: 490   # camera/video device handshake: daemon holds /dev/video0
+    add_labels: ["lane/technical", "area/vision", "type/bug", "priority/p2"]
+    milestone: ""
+  - number: 483   # root disk at 92% on ricci — audit + cleanup
+    add_labels: ["lane/technical", "area/platform", "type/chore", "priority/p2"]
+    milestone: ""
+  - number: 472   # cold-start: defer av and mediapipe HeadTracker construction
+    add_labels: ["lane/technical", "area/platform", "type/feature", "priority/p2"]
+    milestone: "Fast boot"
+  - number: 471   # persistent on-device STT service (reachy-stt)
+    add_labels: ["lane/technical", "area/voice", "type/feature", "priority/p2"]
+    milestone: "Local voice clone + STT"
+  - number: 448   # investigate: llama-server inside WSL perf wins?
+    add_labels: ["lane/technical", "area/platform", "type/chore", "priority/p3"]
+    milestone: ""
+  - number: 437   # investigate: llama-server (Qwen3-14B) + xtts-v2 coexist on 12 GB GPU?
+    add_labels: ["lane/technical", "area/platform", "type/chore", "priority/p2"]
+    milestone: "Local voice clone + STT"
+  - number: 436   # xtts: start/stop helper scripts for the LAN xtts-v2 service
+    add_labels: ["lane/technical", "area/voice", "type/feature", "priority/p3"]
+    milestone: "Local voice clone + STT"
+  - number: 391   # Phase 5: post-pipeline-refactor cleanup (epic)
+    add_labels: ["lane/technical", "area/platform", "type/chore", "priority/p3"]
+    milestone: ""
+  - number: 339   # test suite audit (already: area/instrumentation, priority/p3, type/chore)
+    add_labels: ["lane/technical"]
+    milestone: ""
+  - number: 323   # cold-start sequence: gstreamer camera + serial tool load
+    add_labels: ["lane/technical", "area/platform", "type/feature", "priority/p2"]
+    milestone: "Fast boot"
+
+  # ---------- lane/improvement ----------
+  - number: 493   # audit + per-emotion chassis-safety review (chin-down envelope)
+    add_labels: ["lane/improvement", "area/hardware", "type/chore", "priority/p2"]
+    milestone: "Smooth & safe movement"
+  - number: 479   # continuously re-assert last-commanded antenna target during idle
+    add_labels: ["lane/improvement", "area/hardware", "type/feature", "priority/p3"]
+    milestone: "Smooth & safe movement"
+  - number: 476   # STT stall: 60-100s stt.infer spans, empty transcripts, VAD never ends
+    add_labels: ["lane/improvement", "area/voice", "type/bug", "priority/p1"]
+    milestone: "Local voice clone + STT"
+  - number: 428   # daemon antenna-sleep gesture self-triggers from robot's own motion
+    add_labels: ["lane/improvement", "area/hardware", "type/bug", "priority/p2"]
+    milestone: "Smooth & safe movement"
+  - number: 371   # head slams during shutdown when systemd SIGKILL fires
+    add_labels: ["lane/improvement", "area/hardware", "type/bug", "priority/p2"]
+    milestone: "Smooth & safe movement"
+  - number: 310   # daemon wake_up animation too violent at boot; smoother path (already: hw/p3/bug)
+    add_labels: ["lane/improvement"]
+    milestone: "Smooth & safe movement"
+  - number: 308   # continuous head tracker IK-invalid poses -> cowling impacts (already: hw/p1/bug)
+    add_labels: ["lane/improvement"]
+    milestone: "Smooth & safe movement"
+  - number: 272   # play_emotion keyframes swing head into cowling; global velocity clamp (already: hw/p1/feature)
+    add_labels: ["lane/improvement"]
+    milestone: "Smooth & safe movement"
+  - number: 271   # audio playback latency ~10s between text and TTS heard (already: hw/p2/bug)
+    add_labels: ["lane/improvement"]
+    milestone: "Gemini chat MVP"
+  - number: 269   # MediaPipe face detection misses user square-on (already: vision/p2/bug)
+    add_labels: ["lane/improvement"]
+    milestone: ""
+  - number: 264   # head sweep jerky/too fast — interpolate move_head transitions
+    add_labels: ["lane/improvement", "area/hardware", "type/bug", "priority/p1"]
+    milestone: "Smooth & safe movement"

@@ -1,0 +1,27 @@
+# Milestones = the project's goals (from the maintainer's own framing).
+#
+# Created (idempotently, matched by title) by
+# .github/workflows/dashboard-bootstrap.yml. A milestone cuts across lanes:
+# it may contain functional, technical, and improvement issues alike.
+#
+# These mirror the narrative goals in FORK_STATUS.md / NOW.md; that prose stays
+# the source of *context*, while these Milestones give the dashboard its
+# progress bars.
+
+milestones:
+  - title: "Gemini chat MVP"
+    description: >-
+      End-to-end cloud chat works with a suitable voice and a convincing comic
+      persona. The baseline "it talks back like a comedian" experience.
+  - title: "Smooth & safe movement"
+    description: >-
+      Head tracking is flawless and motion is seamless: no chassis/cowling
+      impacts, no jerky or violent moves, safe boot/idle/shutdown poses.
+  - title: "Fast boot"
+    description: >-
+      The robot powers up and is into the robot_comic app quickly; cold-start
+      latency levers (camera, serial, heavy imports) are trimmed.
+  - title: "Local voice clone + STT"
+    description: >-
+      The laptop voice clone runs efficiently and sounds suitably like a comic,
+      paired with reliable, fast on-device speech-to-text.

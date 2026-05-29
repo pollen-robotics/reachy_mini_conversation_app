@@ -1,0 +1,66 @@
+# Label taxonomy for the robot_comic issue dashboard.
+#
+# Source of truth for the repo's labels. Applied (idempotently) by
+# .github/workflows/dashboard-bootstrap.yml via `gh label create --force`.
+#
+# Three orthogonal dimensions drive the Projects v2 board + filtering:
+#   lane/*     -> nature of the work  (board swimlanes, via the "Lane" field)
+#   area/*     -> subsystem
+#   type/*     -> kind of change
+#   priority/* -> urgency
+#
+# Milestones (the *goals*) are tracked as real GitHub Milestones, not labels.
+
+labels:
+  # --- Lanes (swimlanes) ---
+  - name: "lane/functional"
+    color: "0E8A16"
+    description: "User-facing capability: the comic/persona/chat/voice experience"
+  - name: "lane/technical"
+    color: "1D76DB"
+    description: "Infrastructure / non-functional: boot, services, perf, tests, refactors"
+  - name: "lane/improvement"
+    color: "5319E7"
+    description: "Known defect or polish in existing behavior"
+
+  # --- Areas (subsystems) ---
+  - name: "area/hardware"
+    color: "FEF2C0"
+    description: "Robot chassis, servos, motion safety"
+  - name: "area/vision"
+    color: "C5DEF5"
+    description: "Camera, head tracking, face/presence detection"
+  - name: "area/voice"
+    color: "BFDADC"
+    description: "STT / TTS / voice cloning pipeline"
+  - name: "area/audio"
+    color: "D4C5F9"
+    description: "Audio I/O, playback, echo, prompts/messages"
+  - name: "area/platform"
+    color: "C2E0C6"
+    description: "Boot, services, disk, OS/WSL, packaging, perf"
+  - name: "area/instrumentation"
+    color: "BFD4F2"
+    description: "Telemetry, metrics, tests, monitoring"
+
+  # --- Types ---
+  - name: "type/bug"
+    color: "D73A4A"
+    description: "Something is broken"
+  - name: "type/feature"
+    color: "A2EEEF"
+    description: "New capability"
+  - name: "type/chore"
+    color: "CFD3D7"
+    description: "Maintenance, cleanup, investigation"
+
+  # --- Priority ---
+  - name: "priority/p1"
+    color: "B60205"
+    description: "Urgent / blocking"
+  - name: "priority/p2"
+    color: "D93F0B"
+    description: "Important"
+  - name: "priority/p3"
+    color: "FBCA04"
+    description: "Nice to have"

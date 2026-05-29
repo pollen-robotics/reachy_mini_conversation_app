@@ -9,6 +9,11 @@ Authoritative status documents this rolls up: `NOW.md` (30-day window),
 `PIPELINE_REFACTOR.md` (Phase 4/5 epic), `plan.md` (install), `VOICE_CLONE.md`,
 `LOCAL_LLM.md`, `FUTURE_RESEARCH.md` (hardware-blocked parking lot).
 
+For the *live* view of open work, see the issue dashboard (`docs/dashboard.md`):
+issues are sorted into **lanes** (functional / technical / improvement) and
+**milestones** (the goals below) and rendered as a Projects v2 board. This
+document remains the narrative context behind those milestones.
+
 *Last updated: 2026-05-19 (HEAD `172c6f5`).*
 
 ---
