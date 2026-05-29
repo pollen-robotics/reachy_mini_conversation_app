@@ -285,6 +285,16 @@ class GeminiLiveHandler(ConversationHandler):
         """Return the resolved Gemini voice currently selected for this handler."""
         return _resolve_gemini_voice(self._voice_override or get_session_voice())
 
+    def _clear_live_session_state(self, owned_session: object) -> None:
+        """Clear live session state if the exiting task still owns it."""
+        if self.session is not owned_session:
+            return
+        self.session = None
+        try:
+            self._connected_event.clear()
+        except Exception:
+            pass
+
     async def start_up(self) -> None:
         """Start the handler with retries on unexpected closure."""
         gemini_api_key = config.GEMINI_API_KEY
@@ -325,23 +335,18 @@ class GeminiLiveHandler(ConversationHandler):
                     await asyncio.sleep(delay)
                     continue
                 raise
-            finally:
-                self.session = None
-                try:
-                    self._connected_event.clear()
-                except Exception:
-                    pass
 
     async def _restart_session(self) -> None:
         """Force-close the current session and start a fresh one."""
         try:
-            if self.session is not None:
+            current_session = self.session
+            if current_session is not None:
                 try:
-                    await self.session.close()
+                    await current_session.close()
                 except Exception:
                     pass
                 finally:
-                    self.session = None
+                    self._clear_live_session_state(current_session)
 
             if getattr(self, "client", None) is None:
                 logger.warning("Cannot restart: Gemini client not initialized yet.")
@@ -643,13 +648,16 @@ class GeminiLiveHandler(ConversationHandler):
                         raise
 
             finally:
-                if video_task is not None:
-                    video_task.cancel()
-                    try:
-                        await video_task
-                    except asyncio.CancelledError:
-                        pass
-                await self.tool_manager.shutdown()
+                try:
+                    if video_task is not None:
+                        video_task.cancel()
+                        try:
+                            await video_task
+                        except asyncio.CancelledError:
+                            pass
+                    await self.tool_manager.shutdown()
+                finally:
+                    self._clear_live_session_state(session)
 
     async def receive(self, frame: Tuple[int, NDArray[np.int16]]) -> None:
         """Receive audio frame from microphone and send to Gemini."""

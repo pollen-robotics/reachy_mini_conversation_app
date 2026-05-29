@@ -377,8 +377,10 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
     def _persist_credentials_if_needed(self) -> None:
         """Let providers persist credentials after a successful session update."""
 
-    def _clear_realtime_connection_state(self) -> None:
-        """Clear connection state after a realtime session exits."""
+    def _clear_realtime_connection_state(self, owned_connection: object) -> None:
+        """Clear connection state if the exiting task still owns it."""
+        if self.connection is not owned_connection:
+            return
         self.connection = None
         try:
             self._connected_event.clear()
@@ -393,8 +395,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             raise
         except Exception as e:
             logger.warning("Handler-owned realtime session ended unexpectedly: %s", e)
-        finally:
-            self._clear_realtime_connection_state()
 
     async def start_up(self) -> None:
         """Start the handler with minimal retries on unexpected websocket closure."""
@@ -421,9 +421,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                     await asyncio.sleep(delay)
                     continue
                 raise
-            finally:
-                # never keep a stale reference
-                self._clear_realtime_connection_state()
 
     async def _restart_session(self) -> None:
         """Force-close the current session and start a fresh one in background.
@@ -431,13 +428,14 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         Does not block the caller while the new session is establishing.
         """
         try:
-            if self.connection is not None:
+            current_connection = self.connection
+            if current_connection is not None:
                 try:
-                    await self.connection.close()
+                    await current_connection.close()
                 except Exception:
                     pass
                 finally:
-                    self.connection = None
+                    self._clear_realtime_connection_state(current_connection)
 
             # Ensure we have a client (start_up must have run once)
             if getattr(self, "client", None) is None:
@@ -569,7 +567,8 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             tool_result_for_model = tool_result
 
         # Connection may have closed while tool was running
-        if not self.connection:
+        connection = self.connection
+        if not connection:
             logger.warning(
                 "Connection closed during tool '%s' (id=%s) execution; cannot send result back",
                 bg_tool.tool_name,
@@ -580,7 +579,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         try:
             self._mark_activity("tool_result_ready")
             if isinstance(bg_tool.id, str):
-                await self.connection.conversation.item.create(
+                await connection.conversation.item.create(
                     item={
                         "type": "function_call_output",
                         "call_id": bg_tool.id,
@@ -612,7 +611,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 image_height = tool_result.get("image_height")
                 jpeg_bytes_value = tool_result.get("jpeg_bytes")
                 jpeg_bytes = jpeg_bytes_value if isinstance(jpeg_bytes_value, int) else (len(b64_im) * 3) // 4
-                await self.connection.conversation.item.create(
+                await connection.conversation.item.create(
                     item={
                         "type": "message",
                         "role": "user",
@@ -666,7 +665,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
         except self._connection_closed_errors():
             logger.warning("Connection closed while sending tool result")
-            self.connection = None
+            self._clear_realtime_connection_state(connection)
             self._response_done_event.set()
 
     async def _run_realtime_session(self) -> None:
@@ -715,7 +714,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 # Start the response sender worker
                 response_sender_task = asyncio.create_task(self._response_sender_loop(), name="response-sender")
 
-                async for event in self.connection:
+                async for event in conn:
                     logger.debug("Realtime event: %s", event.type)
                     if event.type == "input_audio_buffer.speech_started":
                         self._mark_activity("user_speech_started")
@@ -916,16 +915,19 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                                 AdditionalOutputs({"role": "assistant", "content": f"[error] {msg}"})
                             )
             finally:
-                # Stop the response sender worker.
-                if response_sender_task is not None:
-                    response_sender_task.cancel()
-                    try:
-                        await response_sender_task
-                    except asyncio.CancelledError:
-                        pass
+                try:
+                    # Stop the response sender worker.
+                    if response_sender_task is not None:
+                        response_sender_task.cancel()
+                        try:
+                            await response_sender_task
+                        except asyncio.CancelledError:
+                            pass
 
-                # Stop background tool manager tasks (listener + cleanup) in all paths.
-                await self.tool_manager.shutdown()
+                    # Stop background tool manager tasks (listener + cleanup) in all paths.
+                    await self.tool_manager.shutdown()
+                finally:
+                    self._clear_realtime_connection_state(conn)
 
     # Microphone receive
     async def receive(self, frame: Tuple[int, NDArray[np.int16]]) -> None:

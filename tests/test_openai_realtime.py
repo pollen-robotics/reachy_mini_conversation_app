@@ -626,32 +626,70 @@ async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -
 
 
 @pytest.mark.asyncio
-async def test_handler_owned_realtime_session_clears_connection_on_exit(monkeypatch: Any) -> None:
-    """Background handler-owned sessions should not leave stale connected state."""
+async def test_run_realtime_session_clears_connection_on_exit(monkeypatch: Any) -> None:
+    """Realtime sessions should clear their own connected state when they exit."""
+    handler = await _run_openai_handler_with_events(monkeypatch, [])
+
+    assert handler.connection is None
+    assert not handler._connected_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_start_up_preserves_replacement_connection_when_old_task_unwinds(monkeypatch: Any) -> None:
+    """The normal startup task should not clear a replacement session it does not own."""
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
     handler = rt_mod.OpenaiRealtimeHandler(deps)
-    handler.client = MagicMock()
+    old_connection = MagicMock()
+    replacement_connection = MagicMock()
     release_session = asyncio.Event()
 
     async def run_realtime_session() -> None:
-        handler.connection = MagicMock()
+        handler.connection = old_connection
+        handler._connected_event.set()
+        await release_session.wait()
+
+    monkeypatch.setattr(handler, "_build_realtime_client", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(handler, "_run_realtime_session", run_realtime_session)
+
+    startup_task = asyncio.create_task(handler.start_up())
+    await asyncio.wait_for(handler._connected_event.wait(), timeout=1.0)
+
+    handler.connection = replacement_connection
+    handler._connected_event.set()
+    release_session.set()
+
+    await startup_task
+
+    assert handler.connection is replacement_connection
+    assert handler._connected_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_handler_owned_realtime_session_preserves_replacement_connection(monkeypatch: Any) -> None:
+    """A handler-owned task should not clear a replacement session it does not own."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = rt_mod.OpenaiRealtimeHandler(deps)
+    old_connection = MagicMock()
+    replacement_connection = MagicMock()
+    release_session = asyncio.Event()
+
+    async def run_realtime_session() -> None:
+        handler.connection = old_connection
         handler._connected_event.set()
         await release_session.wait()
 
     monkeypatch.setattr(handler, "_run_realtime_session", run_realtime_session)
 
-    restart_task = asyncio.create_task(handler._restart_session())
+    handler_owned_task = asyncio.create_task(handler._run_handler_owned_realtime_session())
     await asyncio.wait_for(handler._connected_event.wait(), timeout=1.0)
-    await restart_task
 
-    assert handler.connection is not None
-    assert handler._handler_owned_startup_task is not None
-
+    handler.connection = replacement_connection
+    handler._connected_event.set()
     release_session.set()
-    await handler._handler_owned_startup_task
+    await handler_owned_task
 
-    assert handler.connection is None
-    assert not handler._connected_event.is_set()
+    assert handler.connection is replacement_connection
+    assert handler._connected_event.is_set()
 
 
 @pytest.mark.asyncio
