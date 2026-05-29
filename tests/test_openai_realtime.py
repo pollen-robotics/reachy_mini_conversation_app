@@ -626,6 +626,35 @@ async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -
 
 
 @pytest.mark.asyncio
+async def test_handler_owned_realtime_session_clears_connection_on_exit(monkeypatch: Any) -> None:
+    """Background handler-owned sessions should not leave stale connected state."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = rt_mod.OpenaiRealtimeHandler(deps)
+    handler.client = MagicMock()
+    release_session = asyncio.Event()
+
+    async def run_realtime_session() -> None:
+        handler.connection = MagicMock()
+        handler._connected_event.set()
+        await release_session.wait()
+
+    monkeypatch.setattr(handler, "_run_realtime_session", run_realtime_session)
+
+    restart_task = asyncio.create_task(handler._restart_session())
+    await asyncio.wait_for(handler._connected_event.wait(), timeout=1.0)
+    await restart_task
+
+    assert handler.connection is not None
+    assert handler._handler_owned_startup_task is not None
+
+    release_session.set()
+    await handler._handler_owned_startup_task
+
+    assert handler.connection is None
+    assert not handler._connected_event.is_set()
+
+
+@pytest.mark.asyncio
 async def test_start_up_openai_gradio_collects_textbox_api_key(monkeypatch: Any) -> None:
     """OpenAI should own Gradio textbox credential collection."""
     monkeypatch.setattr(config, "BACKEND_PROVIDER", "openai")

@@ -377,6 +377,25 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
     def _persist_credentials_if_needed(self) -> None:
         """Let providers persist credentials after a successful session update."""
 
+    def _clear_realtime_connection_state(self) -> None:
+        """Clear connection state after a realtime session exits."""
+        self.connection = None
+        try:
+            self._connected_event.clear()
+        except Exception:
+            pass
+
+    async def _run_handler_owned_realtime_session(self) -> None:
+        """Run a background handler-owned session with normal connection cleanup."""
+        try:
+            await self._run_realtime_session()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning("Handler-owned realtime session ended unexpectedly: %s", e)
+        finally:
+            self._clear_realtime_connection_state()
+
     async def start_up(self) -> None:
         """Start the handler with minimal retries on unexpected websocket closure."""
         await self._prepare_startup_credentials()
@@ -404,11 +423,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 raise
             finally:
                 # never keep a stale reference
-                self.connection = None
-                try:
-                    self._connected_event.clear()
-                except Exception:
-                    pass
+                self._clear_realtime_connection_state()
 
     async def _restart_session(self) -> None:
         """Force-close the current session and start a fresh one in background.
@@ -437,7 +452,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             if self.REFRESH_CLIENT_ON_RECONNECT:
                 self.client = await self._build_realtime_client()
             self._handler_owned_startup_task = asyncio.create_task(
-                self._run_realtime_session(),
+                self._run_handler_owned_realtime_session(),
                 name="realtime-session-restart",
             )
             try:
