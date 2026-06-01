@@ -30,8 +30,7 @@ dependencies = [
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
-    "reachy-mini>=1.7.1",
-    "gradio_client>=1.13.3",
+    "reachy-mini>=1.8.0",
 ]
 
 [project.optional-dependencies]
@@ -39,7 +38,6 @@ local_vision = [
   "accelerate>=1.13.0",
   "torch>=2.1",
   "transformers==5.3.0",
-  "num2words",
 ]
 yolo_vision = [
   "ultralytics",
@@ -53,7 +51,6 @@ all_vision = [
   "accelerate>=1.13.0",
   "torch>=2.1",
   "transformers==5.3.0",
-  "num2words",
   "ultralytics",
   "supervision",
   "opencv-python>=4.13.0.92",
@@ -67,8 +64,6 @@ dev = [
   "ruff==0.12.0",
   "mypy==1.18.2",
   "pre-commit",
-  "types-requests",
-  "python-semantic-release>=10.5.3",
 ]
 
 [project.scripts]
@@ -76,18 +71,11 @@ reachy-mini-conversation-app = "reachy_mini_conversation_app.main:main"
 
 [tool.uv]
 exclude-newer = "7 days"
-dependency-metadata = [
-    # Upstream metadata currently marks `gstreamer-msvc-runtime` as unconditional.
-    # It should only be required on Windows. Temp fix.
-    { name = "gstreamer-libs", version = "1.28.1", requires-dist = ["gstreamer-msvc-runtime; sys_platform == 'win32'", "setuptools"] },
-]
 
 [tool.uv.exclude-newer-package]
 "reachy-mini" = false
 "reachy-mini-dances-library" = false
 "reachy-mini-toolbox" = false
-"gradio-client" = false
-"huggingface-hub" = false
 
 [project.entry-points."reachy_mini_apps"]
 reachy_mini_conversation_app = "reachy_mini_conversation_app.main:ReachyMiniConversationApp"
