@@ -166,7 +166,6 @@ class GeminiLiveHandler(ConversationHandler):
 
         self.last_activity_time = asyncio.get_event_loop().time()
         self.start_time = asyncio.get_event_loop().time()
-        self.is_idle_tool_call = False
 
         # Track API key source (env vs textbox)
         self._key_source: Literal["env", "textbox"] = "env"
@@ -415,10 +414,9 @@ class GeminiLiveHandler(ConversationHandler):
             args_json_str = json.dumps(args_dict)
 
             logger.info(
-                "Gemini tool call: tool_name=%r, call_id=%s, is_idle=%s, args=%s",
+                "Gemini tool call: tool_name=%r, call_id=%s, args=%s",
                 tool_name,
                 call_id,
-                self.is_idle_tool_call,
                 args_json_str,
             )
 
@@ -429,7 +427,7 @@ class GeminiLiveHandler(ConversationHandler):
                     args_json_str=args_json_str,
                     deps=self.deps,
                 ),
-                is_idle_tool_call=self.is_idle_tool_call,
+                is_idle_tool_call=False,
             )
 
             await self.output_queue.put(
@@ -440,9 +438,6 @@ class GeminiLiveHandler(ConversationHandler):
                     },
                 ),
             )
-
-            if self.is_idle_tool_call:
-                self.is_idle_tool_call = False
 
             logger.info("Started background tool: %s (id=%s, call_id=%s)", tool_name, bg_tool.tool_id, call_id)
 

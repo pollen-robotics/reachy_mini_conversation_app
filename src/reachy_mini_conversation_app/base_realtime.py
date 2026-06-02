@@ -134,7 +134,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
         self.last_activity_time = asyncio.get_event_loop().time()
         self.start_time = asyncio.get_event_loop().time()
-        self.is_idle_tool_call = False
         self.gradio_mode = gradio_mode
         self.instance_path = instance_path
         self._voice_override: str | None = self._normalize_startup_voice(startup_voice)
@@ -734,7 +733,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         # Doesn't mean the audio is done playing
                         self._response_done_event.set()
                         self._response_started_or_rejected_event.set()
-                        self.is_idle_tool_call = False
                         logger.debug("Response done")
 
                         response = getattr(event, "response", None)
@@ -831,10 +829,9 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         call_id: str = str(getattr(event, "call_id", uuid.uuid4()))
 
                         logger.info(
-                            "Tool call received — tool_name=%r, call_id=%s, is_idle=%s, args=%s",
+                            "Tool call received — tool_name=%r, call_id=%s, args=%s",
                             tool_name,
                             call_id,
-                            self.is_idle_tool_call,
                             args_json_str,
                         )
 
@@ -856,7 +853,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                                 args_json_str=args_json_str,
                                 deps=self.deps,
                             ),
-                            is_idle_tool_call=self.is_idle_tool_call,
+                            is_idle_tool_call=False,
                         )
 
                         await self.output_queue.put(
