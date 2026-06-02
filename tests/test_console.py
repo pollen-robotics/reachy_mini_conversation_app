@@ -14,9 +14,8 @@ from fastapi import FastAPI
 from numpy.typing import NDArray
 from fastapi.testclient import TestClient
 
-from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.config import GEMINI_AVAILABLE_VOICES, config
-from reachy_mini_conversation_app.console import LOCAL_PLAYER_BACKEND, LocalStream
+from reachy_mini_conversation_app.console import LocalStream
 from reachy_mini_conversation_app.startup_settings import (
     StartupSettings,
     load_startup_settings_into_runtime,
@@ -34,54 +33,54 @@ async def _wait_until(predicate: Any, timeout: float = 1.0) -> None:
     raise AssertionError("Timed out waiting for condition")
 
 
-def test_clear_audio_queue_prefers_clear_player_when_available() -> None:
-    """Local GStreamer audio should use the lower-level player flush when available."""
+def test_clear_audio_queue_prefers_clear_player() -> None:
+    """clear_player() is the canonical flush and is used whenever available."""
     handler = MagicMock()
+    handler.output_queue = asyncio.Queue()
+    handler.output_queue.put_nowait((24000, np.zeros(4, dtype=np.int16)))
     audio = SimpleNamespace(
         clear_player=MagicMock(),
         clear_output_buffer=MagicMock(),
     )
-    robot = SimpleNamespace(media=SimpleNamespace(audio=audio, backend=LOCAL_PLAYER_BACKEND))
+    robot = SimpleNamespace(media=SimpleNamespace(audio=audio))
     stream = LocalStream(handler, robot)
 
     stream.clear_audio_queue()
 
     audio.clear_player.assert_called_once()
     audio.clear_output_buffer.assert_not_called()
-    assert isinstance(handler.output_queue, asyncio.Queue)
     assert handler.output_queue.empty()
 
 
-def test_clear_audio_queue_uses_output_buffer_for_webrtc() -> None:
-    """WebRTC audio should flush queued playback via the output buffer API."""
+def test_clear_audio_queue_falls_back_to_output_buffer() -> None:
+    """Older SDKs without clear_player() still flush via clear_output_buffer()."""
     handler = MagicMock()
-    audio = SimpleNamespace(
-        clear_player=MagicMock(),
-        clear_output_buffer=MagicMock(),
-    )
-    robot = SimpleNamespace(media=SimpleNamespace(audio=audio, backend=MediaBackend.WEBRTC))
+    handler.output_queue = asyncio.Queue()
+    audio = SimpleNamespace(clear_output_buffer=MagicMock())  # no clear_player
+    robot = SimpleNamespace(media=SimpleNamespace(audio=audio))
     stream = LocalStream(handler, robot)
 
     stream.clear_audio_queue()
 
     audio.clear_output_buffer.assert_called_once()
-    audio.clear_player.assert_not_called()
-    assert isinstance(handler.output_queue, asyncio.Queue)
     assert handler.output_queue.empty()
 
 
-def test_clear_audio_queue_falls_back_when_backend_is_unknown() -> None:
-    """Unknown backends should still best-effort flush pending playback."""
+def test_clear_audio_queue_drains_queue_in_place() -> None:
+    """The output queue is drained in place, not replaced with a new object."""
     handler = MagicMock()
-    audio = SimpleNamespace(clear_output_buffer=MagicMock())
-    robot = SimpleNamespace(media=SimpleNamespace(audio=audio, backend=None))
+    queue: asyncio.Queue[Any] = asyncio.Queue()
+    queue.put_nowait((24000, np.zeros(4, dtype=np.int16)))
+    queue.put_nowait((24000, np.zeros(4, dtype=np.int16)))
+    handler.output_queue = queue
+    audio = SimpleNamespace(clear_player=MagicMock())
+    robot = SimpleNamespace(media=SimpleNamespace(audio=audio))
     stream = LocalStream(handler, robot)
 
     stream.clear_audio_queue()
 
-    audio.clear_output_buffer.assert_called_once()
-    assert isinstance(handler.output_queue, asyncio.Queue)
-    assert handler.output_queue.empty()
+    assert handler.output_queue is queue  # same object, not replaced
+    assert queue.empty()
 
 
 @pytest.mark.asyncio
@@ -108,7 +107,7 @@ async def test_play_loop_feeds_head_wobbler_with_local_playback_delay() -> None:
     )
     media = SimpleNamespace(
         audio=audio,
-        backend=LOCAL_PLAYER_BACKEND,
+        backend=None,
         get_output_audio_samplerate=lambda: 24000,
         push_audio_sample=MagicMock(),
     )

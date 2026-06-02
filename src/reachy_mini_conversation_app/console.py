@@ -870,9 +870,7 @@ class LocalStream:
         if audio is not None:
             if hasattr(audio, "clear_player") and callable(audio.clear_player):
                 audio.clear_player()
-            elif hasattr(audio, "clear_output_buffer") and callable(
-                audio.clear_output_buffer
-            ):
+            elif hasattr(audio, "clear_output_buffer") and callable(audio.clear_output_buffer):
                 # Older SDK without clear_player(); best-effort.
                 audio.clear_output_buffer()
         # Drain the handler's pending output in place — do NOT replace the
