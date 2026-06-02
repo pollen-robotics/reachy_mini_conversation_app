@@ -32,7 +32,7 @@ from reachy_mini_conversation_app.config import (
     get_default_voice_for_backend,
     get_available_voices_for_backend,
 )
-from reachy_mini_conversation_app.idle_policy import choose_idle_tool_call
+from reachy_mini_conversation_app.idle_policy import start_idle_tool_call
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.tools.background_tool_manager import (
@@ -1025,39 +1025,10 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         available_tool_names = {
             spec["name"] for spec in self._get_active_tool_specs() if isinstance(spec.get("name"), str)
         }
-        selected_tool = choose_idle_tool_call(available_tool_names)
-        if selected_tool is None:
-            logger.warning("No idle tools are available; idle action skipped")
-            return
-
-        tool_name, arguments = selected_tool
-        args_json_str = json.dumps(arguments)
-        call_id = f"idle-{uuid.uuid4()}"
-        bg_tool = await self.tool_manager.start_tool(
-            call_id=call_id,
-            tool_call_routine=ToolCallRoutine(
-                tool_name=tool_name,
-                args_json_str=args_json_str,
-                deps=self.deps,
-            ),
-            is_idle_tool_call=True,
-        )
-        await self.output_queue.put(
-            AdditionalOutputs(
-                {
-                    "role": "assistant",
-                    "content": (
-                        f"🛠️ Idle tool {tool_name} with args {args_json_str}. "
-                        f"The tool is now running. Tool ID: {bg_tool.tool_id}"
-                    ),
-                },
-            ),
-        )
-        logger.info(
-            "Started local idle tool after %.1fs idle: %s (id=%s, call_id=%s, args=%s)",
-            idle_duration,
-            tool_name,
-            bg_tool.tool_id,
-            call_id,
-            args_json_str,
+        await start_idle_tool_call(
+            deps=self.deps,
+            tool_manager=self.tool_manager,
+            output_queue=self.output_queue,
+            available_tool_names=available_tool_names,
+            idle_duration=idle_duration,
         )

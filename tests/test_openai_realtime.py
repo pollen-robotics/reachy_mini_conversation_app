@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastrtc import AdditionalOutputs
 
+import reachy_mini_conversation_app.idle_policy as idle_policy_mod
 import reachy_mini_conversation_app.base_realtime as base_rt_mod
 import reachy_mini_conversation_app.openai_realtime as rt_mod
 import reachy_mini_conversation_app.tools.core_tools as ct_mod
@@ -323,7 +324,7 @@ async def test_idle_signal_starts_local_tool_without_model_turn(monkeypatch: Any
     fake_item = SimpleNamespace(create=AsyncMock())
     handler.connection = SimpleNamespace(conversation=SimpleNamespace(item=fake_item))
     monkeypatch.setattr(
-        base_rt_mod, "choose_idle_tool_call", lambda _available: ("idle_do_nothing", {"reason": "test"})
+        idle_policy_mod, "choose_idle_tool_call", lambda _available: ("idle_do_nothing", {"reason": "test"})
     )
     safe_response_create = AsyncMock()
     monkeypatch.setattr(handler, "_safe_response_create", safe_response_create)
@@ -339,6 +340,25 @@ async def test_idle_signal_starts_local_tool_without_model_turn(monkeypatch: Any
     assert start_kwargs["is_idle_tool_call"] is True
     assert start_kwargs["tool_call_routine"].tool_name == "idle_do_nothing"
     assert start_kwargs["tool_call_routine"].args_json_str == '{"reason": "test"}'
+    outputs = []
+    while not handler.output_queue.empty():
+        outputs.append(handler.output_queue.get_nowait())
+    tool_messages = [
+        message
+        for output in outputs
+        if isinstance(output, AdditionalOutputs)
+        for message in output.args
+        if isinstance(message.get("content"), str)
+    ]
+    assert tool_messages == [
+        {
+            "role": "assistant",
+            "content": (
+                '🛠️ Idle tool idle_do_nothing with args {"reason": "test"}. '
+                "The tool is now running. Tool ID: idle_do_nothing-idle-1"
+            ),
+        }
+    ]
 
 
 @pytest.mark.asyncio

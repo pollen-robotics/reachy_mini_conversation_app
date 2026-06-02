@@ -11,6 +11,7 @@ import pytest
 from fastrtc import AdditionalOutputs
 
 import reachy_mini_conversation_app.gemini_live as gemini_mod
+import reachy_mini_conversation_app.idle_policy as idle_policy_mod
 import reachy_mini_conversation_app.tools.core_tools as ct_mod
 from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
@@ -249,7 +250,7 @@ async def test_gemini_idle_signal_starts_local_tool_without_model_input(monkeypa
     session = _FakeSession([], handler._stop_event)
     handler.session = session
     monkeypatch.setattr(
-        gemini_mod, "choose_idle_tool_call", lambda _available: ("idle_do_nothing", {"reason": "test"})
+        idle_policy_mod, "choose_idle_tool_call", lambda _available: ("idle_do_nothing", {"reason": "test"})
     )
     start_tool = AsyncMock(return_value=SimpleNamespace(tool_id="idle_do_nothing-idle-1"))
     monkeypatch.setattr(type(handler.tool_manager), "start_tool", start_tool)
@@ -263,6 +264,25 @@ async def test_gemini_idle_signal_starts_local_tool_without_model_input(monkeypa
     assert start_kwargs["is_idle_tool_call"] is True
     assert start_kwargs["tool_call_routine"].tool_name == "idle_do_nothing"
     assert start_kwargs["tool_call_routine"].args_json_str == '{"reason": "test"}'
+    outputs = []
+    while not handler.output_queue.empty():
+        outputs.append(handler.output_queue.get_nowait())
+    tool_messages = [
+        message
+        for output in outputs
+        if isinstance(output, AdditionalOutputs)
+        for message in output.args
+        if isinstance(message.get("content"), str)
+    ]
+    assert tool_messages == [
+        {
+            "role": "assistant",
+            "content": (
+                '🛠️ Idle tool idle_do_nothing with args {"reason": "test"}. '
+                "The tool is now running. Tool ID: idle_do_nothing-idle-1"
+            ),
+        }
+    ]
 
 
 @pytest.mark.asyncio

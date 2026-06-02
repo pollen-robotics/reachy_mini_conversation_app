@@ -32,7 +32,7 @@ from reachy_mini_conversation_app.config import (
     config,
 )
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
-from reachy_mini_conversation_app.idle_policy import choose_idle_tool_call
+from reachy_mini_conversation_app.idle_policy import start_idle_tool_call
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_active_tool_specs,
@@ -743,38 +743,12 @@ class GeminiLiveHandler(ConversationHandler):
         available_tool_names = {
             spec["name"] for spec in get_active_tool_specs(self.deps) if isinstance(spec.get("name"), str)
         }
-        selected_tool = choose_idle_tool_call(available_tool_names)
-        if selected_tool is None:
-            logger.warning("No Gemini idle tools are available; idle action skipped")
-            return
-
-        tool_name, arguments = selected_tool
-        args_json_str = json.dumps(arguments)
-        call_id = f"idle-{uuid.uuid4()}"
-        bg_tool = await self.tool_manager.start_tool(
-            call_id=call_id,
-            tool_call_routine=ToolCallRoutine(
-                tool_name=tool_name,
-                args_json_str=args_json_str,
-                deps=self.deps,
-            ),
-            is_idle_tool_call=True,
-        )
-        await self.output_queue.put(
-            AdditionalOutputs(
-                {
-                    "role": "assistant",
-                    "content": f"🛠️ Idle tool {tool_name} with args {args_json_str}. Tool ID: {bg_tool.tool_id}",
-                },
-            ),
-        )
-        logger.info(
-            "Started local Gemini idle tool after %.1fs idle: %s (id=%s, call_id=%s, args=%s)",
-            idle_duration,
-            tool_name,
-            bg_tool.tool_id,
-            call_id,
-            args_json_str,
+        await start_idle_tool_call(
+            deps=self.deps,
+            tool_manager=self.tool_manager,
+            output_queue=self.output_queue,
+            available_tool_names=available_tool_names,
+            idle_duration=idle_duration,
         )
 
     async def get_available_voices(self) -> list[str]:
