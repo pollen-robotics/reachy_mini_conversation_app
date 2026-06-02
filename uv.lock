@@ -4294,7 +4294,6 @@ requires-dist = [
     { name = "fastrtc", specifier = ">=0.0.34" },
     { name = "google-genai", specifier = ">=1.0.0" },
     { name = "gradio", specifier = "==5.50.1.dev1" },
-    { name = "httpx" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "huggingface-hub", specifier = "==1.3.0" },
     { name = "mcp", specifier = ">=1.27.1" },
