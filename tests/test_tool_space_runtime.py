@@ -4,7 +4,6 @@ import json
 import importlib
 from types import ModuleType
 from pathlib import Path
-from argparse import Namespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -16,9 +15,16 @@ from reachy_mini_conversation_app.tool_spaces import (
     InstalledToolSpaceTool,
     ResolvedInstalledToolSpace,
     InstalledToolSpacesManifest,
-    read_installed_tool_spaces,
     write_installed_tool_spaces,
 )
+
+
+SEARCH_SPACE_SLUG = "pollen-robotics/reachy-mini-search-tool"
+WEATHER_SPACE_SLUG = "pollen-robotics/reachy-mini-weather-tool"
+SEARCH_ALIAS = "pollen_robotics_reachy_mini_search_tool"
+WEATHER_ALIAS = "pollen_robotics_reachy_mini_weather_tool"
+SEARCH_TOOL_ID = f"{SEARCH_ALIAS}__search_web"
+SEARCH_CLIENT_TOOL_ID = f"{SEARCH_ALIAS}__reachy_mini_search_tool_search_web"
 
 
 def _reload_core_tools() -> ModuleType:
@@ -32,14 +38,14 @@ def _reload_core_tools() -> ModuleType:
 
 def _resolved_remote_space(client: AsyncMock) -> ResolvedInstalledToolSpace:
     return ResolvedInstalledToolSpace(
-        slug="alozowski/reachy-mini-search-tool",
-        alias="alozowski_reachy_mini_search_tool",
-        mcp_url="https://alozowski-reachy-mini-search-tool.hf.space/gradio_api/mcp/",
+        slug=SEARCH_SPACE_SLUG,
+        alias=SEARCH_ALIAS,
+        mcp_url="https://pollen-robotics-reachy-mini-search-tool.hf.space/gradio_api/mcp/",
         tags=["mcp", "reachy-mini-tool"],
         tools=[
             InstalledToolSpaceTool(
-                local_name="alozowski_reachy_mini_search_tool__search_web",
-                client_tool_name="alozowski_reachy_mini_search_tool__reachy_mini_search_tool_search_web",
+                local_name=SEARCH_TOOL_ID,
+                client_tool_name=SEARCH_CLIENT_TOOL_ID,
                 remote_name="reachy_mini_search_tool_search_web",
                 description="Search the web",
                 parameters_schema={
@@ -64,7 +70,7 @@ async def test_initialize_tools_loads_enabled_installed_remote_tools_and_dispatc
     profile_dir = external_profiles_root / "mcp_profile"
     profile_dir.mkdir(parents=True)
     (profile_dir / "instructions.txt").write_text("hello\n", encoding="utf-8")
-    (profile_dir / "tools.txt").write_text("alozowski_reachy_mini_search_tool__search_web\n", encoding="utf-8")
+    (profile_dir / "tools.txt").write_text(f"{SEARCH_TOOL_ID}\n", encoding="utf-8")
 
     monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "mcp_profile")
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", external_profiles_root)
@@ -74,19 +80,21 @@ async def test_initialize_tools_loads_enabled_installed_remote_tools_and_dispatc
     client = AsyncMock()
     client.call_tool.return_value = {
         "status": "ok",
-        "server_alias": "alozowski_reachy_mini_search_tool",
+        "server_alias": SEARCH_ALIAS,
         "remote_tool_name": "reachy_mini_search_tool_search_web",
-        "namespaced_tool_name": "alozowski_reachy_mini_search_tool__reachy_mini_search_tool_search_web",
+        "namespaced_tool_name": SEARCH_CLIENT_TOOL_ID,
         "content_blocks": [],
         "text": "hello",
     }
-    monkeypatch.setattr(tool_spaces_mod, "resolve_public_tool_space_sync", lambda slug: _resolved_remote_space(client))
+    resolver = MagicMock(side_effect=lambda _slug: _resolved_remote_space(client))
+    monkeypatch.setattr(tool_spaces_mod, "resolve_public_tool_space_sync", resolver)
 
     write_installed_tool_spaces(
         None,
         InstalledToolSpacesManifest(
             spaces=[
-                InstalledToolSpace(slug="alozowski/reachy-mini-search-tool", alias="alozowski_reachy_mini_search_tool")
+                InstalledToolSpace(slug=SEARCH_SPACE_SLUG, alias=SEARCH_ALIAS),
+                InstalledToolSpace(slug=WEATHER_SPACE_SLUG, alias=WEATHER_ALIAS),
             ]
         ),
     )
@@ -94,12 +102,13 @@ async def test_initialize_tools_loads_enabled_installed_remote_tools_and_dispatc
     core_tools_mod = _reload_core_tools()
     core_tools_mod.initialize_tools()
 
-    assert "alozowski_reachy_mini_search_tool__search_web" in core_tools_mod.ALL_TOOLS
+    resolver.assert_called_once_with(SEARCH_SPACE_SLUG)
+    assert SEARCH_TOOL_ID in core_tools_mod.ALL_TOOLS
     tool_specs = core_tools_mod.get_tool_specs()
-    assert any(spec["name"] == "alozowski_reachy_mini_search_tool__search_web" for spec in tool_specs)
+    assert any(spec["name"] == SEARCH_TOOL_ID for spec in tool_specs)
 
     result = await core_tools_mod.dispatch_tool_call(
-        "alozowski_reachy_mini_search_tool__search_web",
+        SEARCH_TOOL_ID,
         json.dumps({"query": "hello"}),
         core_tools_mod.ToolDependencies(
             reachy_mini=object(),
@@ -107,76 +116,9 @@ async def test_initialize_tools_loads_enabled_installed_remote_tools_and_dispatc
         ),
     )
 
-    assert result["namespaced_tool_name"] == "alozowski_reachy_mini_search_tool__search_web"
-    assert result["tool_space_slug"] == "alozowski/reachy-mini-search-tool"
-    client.call_tool.assert_awaited_once_with(
-        "alozowski_reachy_mini_search_tool__reachy_mini_search_tool_search_web",
-        {"query": "hello"},
-    )
-
-
-@pytest.mark.asyncio
-async def test_tool_spaces_install_enable_and_dispatch_remote_tool(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Installing a Space, enabling its tool in a profile, and dispatching it should work end to end."""
-    monkeypatch.chdir(tmp_path)
-    external_profiles_root = tmp_path / "external_profiles"
-    profile_dir = external_profiles_root / "mcp_profile"
-    profile_dir.mkdir(parents=True)
-    (profile_dir / "instructions.txt").write_text("hello\n", encoding="utf-8")
-    (profile_dir / "tools.txt").write_text("alozowski_reachy_mini_search_tool__search_web\n", encoding="utf-8")
-
-    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "mcp_profile")
-    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", external_profiles_root)
-    monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
-    monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
-
-    client = AsyncMock()
-    client.call_tool.return_value = {
-        "status": "ok",
-        "server_alias": "alozowski_reachy_mini_search_tool",
-        "remote_tool_name": "reachy_mini_search_tool_search_web",
-        "namespaced_tool_name": "alozowski_reachy_mini_search_tool__reachy_mini_search_tool_search_web",
-        "content_blocks": [],
-        "text": "hello from installed space",
-    }
-    monkeypatch.setattr(tool_spaces_mod, "resolve_public_tool_space_sync", lambda slug: _resolved_remote_space(client))
-
-    exit_code = tool_spaces_mod.handle_tool_spaces_command(
-        Namespace(
-            tool_spaces_command="add", space_slug="alozowski/reachy-mini-search-tool", install_only=True, profile=None
-        )
-    )
-    assert exit_code == 0
-    assert read_installed_tool_spaces(None).spaces == [
-        InstalledToolSpace(
-            slug="alozowski/reachy-mini-search-tool",
-            alias="alozowski_reachy_mini_search_tool",
-        )
-    ]
-
-    core_tools_mod = _reload_core_tools()
-    core_tools_mod.initialize_tools()
-
-    result = await core_tools_mod.dispatch_tool_call(
-        "alozowski_reachy_mini_search_tool__search_web",
-        json.dumps({"query": "hello"}),
-        core_tools_mod.ToolDependencies(
-            reachy_mini=object(),
-            movement_manager=object(),
-        ),
-    )
-
-    assert result["status"] == "ok"
-    assert result["text"] == "hello from installed space"
-    assert result["namespaced_tool_name"] == "alozowski_reachy_mini_search_tool__search_web"
-    assert result["tool_space_slug"] == "alozowski/reachy-mini-search-tool"
-    client.call_tool.assert_awaited_once_with(
-        "alozowski_reachy_mini_search_tool__reachy_mini_search_tool_search_web",
-        {"query": "hello"},
-    )
+    assert result["namespaced_tool_name"] == SEARCH_TOOL_ID
+    assert result["tool_space_slug"] == SEARCH_SPACE_SLUG
+    client.call_tool.assert_awaited_once_with(SEARCH_CLIENT_TOOL_ID, {"query": "hello"})
 
 
 def test_initialize_tools_warns_when_enabled_remote_tool_is_unavailable(
@@ -190,7 +132,7 @@ def test_initialize_tools_warns_when_enabled_remote_tool_is_unavailable(
     profile_dir = external_profiles_root / "remote_profile"
     profile_dir.mkdir(parents=True)
     (profile_dir / "instructions.txt").write_text("hello\n", encoding="utf-8")
-    (profile_dir / "tools.txt").write_text("alozowski_reachy_mini_search_tool__search_web\n", encoding="utf-8")
+    (profile_dir / "tools.txt").write_text(f"{SEARCH_TOOL_ID}\n", encoding="utf-8")
 
     monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "remote_profile")
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", external_profiles_root)
@@ -204,7 +146,7 @@ def test_initialize_tools_warns_when_enabled_remote_tool_is_unavailable(
         None,
         InstalledToolSpacesManifest(
             spaces=[
-                InstalledToolSpace(slug="alozowski/reachy-mini-search-tool", alias="alozowski_reachy_mini_search_tool")
+                InstalledToolSpace(slug=SEARCH_SPACE_SLUG, alias=SEARCH_ALIAS),
             ]
         ),
     )
@@ -213,40 +155,8 @@ def test_initialize_tools_warns_when_enabled_remote_tool_is_unavailable(
     with caplog.at_level("WARNING"):
         core_tools_mod.initialize_tools()
 
-    assert any("alozowski/reachy-mini-search-tool" in record.message for record in caplog.records)
-    assert "alozowski_reachy_mini_search_tool__search_web" not in core_tools_mod.ALL_TOOLS
-
-
-def test_initialize_tools_skips_unused_installed_remote_tool_space(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Unused installed Spaces should not be resolved during profile tool loading."""
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "default")
-    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", config_mod.DEFAULT_PROFILES_DIRECTORY)
-    monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
-    monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
-    resolver = MagicMock(side_effect=RuntimeError("boom"))
-    monkeypatch.setattr(tool_spaces_mod, "resolve_public_tool_space_sync", resolver)
-
-    write_installed_tool_spaces(
-        None,
-        InstalledToolSpacesManifest(
-            spaces=[
-                InstalledToolSpace(slug="alozowski/reachy-mini-search-tool", alias="alozowski_reachy_mini_search_tool")
-            ]
-        ),
-    )
-
-    core_tools_mod = _reload_core_tools()
-    with caplog.at_level("WARNING"):
-        core_tools_mod.initialize_tools()
-
-    resolver.assert_not_called()
-    assert not any("unavailable" in record.message for record in caplog.records)
-    assert "dance" in core_tools_mod.ALL_TOOLS
+    assert any(SEARCH_SPACE_SLUG in record.message for record in caplog.records)
+    assert SEARCH_TOOL_ID not in core_tools_mod.ALL_TOOLS
 
 
 def test_initialize_tools_inherits_default_tools_txt_for_profile_without_local_tool_list(

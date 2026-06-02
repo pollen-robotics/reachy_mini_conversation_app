@@ -92,6 +92,7 @@ async def local_mcp_server(unused_tcp_port: int) -> AsyncIterator[tuple[str, str
             port=unused_tcp_port,
             log_level="error",
             access_log=False,
+            ws="none",
         )
     )
 
