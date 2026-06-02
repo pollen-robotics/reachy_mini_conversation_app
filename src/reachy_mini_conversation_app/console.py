@@ -22,7 +22,6 @@ from fastrtc import AdditionalOutputs, audio_to_float32
 from scipy.signal import resample
 
 from reachy_mini import ReachyMini
-from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.config import (
     HF_BACKEND,
     GEMINI_BACKEND,
@@ -67,12 +66,6 @@ except Exception:  # pragma: no cover - only loaded when settings_app is used
 
 logger = logging.getLogger(__name__)
 HandlerFactory = Callable[[Optional[str]], ConversationHandler]
-
-LOCAL_PLAYER_BACKEND = (
-    getattr(MediaBackend, "LOCAL", None)
-    or getattr(MediaBackend, "GSTREAMER", None)
-    or getattr(MediaBackend, "DEFAULT", None)
-)
 
 LEGACY_STARTUP_ENV_NAMES = (
     "REACHY_MINI_CUSTOM_PROFILE",
@@ -865,29 +858,37 @@ class LocalStream:
                 task.cancel()
 
     def clear_audio_queue(self) -> None:
-        """Flush the player's appsrc to drop any queued audio immediately."""
+        """Flush queued playback audio immediately on user barge-in.
+
+        Calls the SDK's ``clear_player()`` — now a first-class flush on both
+        the local GStreamer and WebRTC backends (the WebRTC one also tells the
+        daemon to drop audio already queued for the speaker). Falls back to the
+        deprecated ``clear_output_buffer()`` only for older SDKs.
+        """
         logger.info("User intervention: flushing player queue")
-        backend = getattr(self._robot.media, "backend", None)
         audio = getattr(self._robot.media, "audio", None)
         if audio is not None:
-            if (
-                LOCAL_PLAYER_BACKEND is not None
-                and backend == LOCAL_PLAYER_BACKEND
-                and hasattr(audio, "clear_player")
-                and callable(audio.clear_player)
-            ):
+            if hasattr(audio, "clear_player") and callable(audio.clear_player):
                 audio.clear_player()
-            elif (
-                backend == MediaBackend.WEBRTC
-                and hasattr(audio, "clear_output_buffer")
-                and callable(audio.clear_output_buffer)
+            elif hasattr(audio, "clear_output_buffer") and callable(
+                audio.clear_output_buffer
             ):
+                # Older SDK without clear_player(); best-effort.
                 audio.clear_output_buffer()
-            elif hasattr(audio, "clear_output_buffer") and callable(audio.clear_output_buffer):
-                audio.clear_output_buffer()
-            elif hasattr(audio, "clear_player") and callable(audio.clear_player):
-                audio.clear_player()
-        self.handler.output_queue = asyncio.Queue()
+        # Drain the handler's pending output in place — do NOT replace the
+        # queue object, since emit() may be awaiting it (wait_for_item).
+        self._drain_output_queue()
+
+    def _drain_output_queue(self) -> None:
+        """Empty the handler's output queue in place without replacing it."""
+        queue = getattr(self.handler, "output_queue", None)
+        if queue is None:
+            return
+        while not queue.empty():
+            try:
+                queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
 
     async def record_loop(self) -> None:
         """Read mic frames from the recorder and forward them to the handler."""
