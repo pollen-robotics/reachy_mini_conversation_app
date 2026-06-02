@@ -120,7 +120,6 @@ class LocalStream:
         - ``instance_path``: directory where per-instance ``.env`` should be stored.
         - ``handler_factory``: builds a fresh handler for the currently selected backend.
         """
-        self.handler = handler
         self._robot = robot
         self._stop_event = asyncio.Event()
         self._restart_requested = asyncio.Event()
@@ -223,7 +222,6 @@ class LocalStream:
 
     async def request_backend_restart(self, reason: str) -> None:
         """Ask the startup loop to rebuild the backend and stop the current handler."""
-        logger.info("Backend restart requested: %s", reason)
         self._set_backend_connection_state("connecting")
         self._restart_requested.set()
         await self._shutdown_active_handler()
@@ -449,14 +447,14 @@ class LocalStream:
             except BaseException:
                 set_custom_profile(previous_profile)
                 raise
-            await self.request_backend_restart("personality_changed")
-            return "Applied personality and restarting backend."
         except Exception as e:
             logger.error("Error applying personality '%s': %s", profile, e)
             return f"Failed to apply personality: {e}"
         except BaseException as e:
             logger.error("Failed to resolve personality content: %s", e)
             return f"Failed to apply personality: {e}"
+        await self.request_backend_restart("personality_changed")
+        return "Applied personality and restarting backend."
 
     async def get_available_voices(self) -> list[str]:
         """Return voices available for the currently selected backend."""

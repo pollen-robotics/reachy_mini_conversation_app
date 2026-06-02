@@ -781,6 +781,24 @@ def test_headless_personality_routes_can_use_stream_callbacks() -> None:
         loop.close()
 
 
+@pytest.mark.asyncio
+async def test_apply_personality_propagates_restart_cancellation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cancellation during backend restart should not be converted into a status string."""
+    monkeypatch.setattr("reachy_mini_conversation_app.config.set_custom_profile", lambda _profile: None)
+    monkeypatch.setattr("reachy_mini_conversation_app.prompts.get_session_instructions", lambda: "instructions")
+    monkeypatch.setattr("reachy_mini_conversation_app.prompts.get_session_voice", lambda default: default)
+
+    stream = LocalStream(MagicMock(), MagicMock())
+
+    async def cancel_restart(_reason: str) -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(stream, "request_backend_restart", cancel_restart)
+
+    with pytest.raises(asyncio.CancelledError):
+        await stream.apply_personality("sorry_bro")
+
+
 def test_local_stream_persist_personality_stores_voice_override(tmp_path) -> None:
     """Persisting startup settings should write both profile and voice override."""
     stream = LocalStream(MagicMock(), MagicMock(), instance_path=str(tmp_path))
