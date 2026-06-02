@@ -36,8 +36,6 @@ from reachy_mini_conversation_app.tools.background_tool_manager import (
 
 logger = logging.getLogger(__name__)
 
-_IDLE_MOVE_HEAD_DIRECTIONS: Final[tuple[str, ...]] = ("left", "right", "up", "down", "front")
-
 
 @dataclass(frozen=True)
 class IdleToolCandidate:
@@ -57,7 +55,7 @@ def _idle_do_nothing_args() -> dict[str, Any]:
 
 
 def _move_head_args() -> dict[str, Any]:
-    return {"direction": random.choice(_IDLE_MOVE_HEAD_DIRECTIONS)}
+    return {"direction": random.choice(tuple(MoveHead.DELTAS))}
 
 
 _IDLE_TOOL_CANDIDATES: Final[tuple[IdleToolCandidate, ...]] = (
