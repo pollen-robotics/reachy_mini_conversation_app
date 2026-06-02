@@ -429,6 +429,86 @@ def test_status_reports_direct_hf_ws_url_as_ready(
     assert data["can_proceed_with_hf"] is True
 
 
+def test_status_reports_backend_connection_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Settings API should expose backend connection failures without hiding controls."""
+    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
+    monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "local")
+    monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", None)
+    monkeypatch.setattr(config, "HF_REALTIME_WS_URL", "ws://127.0.0.1:8765/v1/realtime")
+
+    app = FastAPI()
+    handler = MagicMock()
+    handler.connection = None
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(handler, robot, settings_app=app, instance_path=str(tmp_path))
+    stream._set_backend_connection_state("disconnected", RuntimeError("connect failed"))
+    stream._init_settings_ui_if_needed()
+
+    client = TestClient(app)
+    response = client.get("/status")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["backend_provider"] == "huggingface"
+    assert data["backend_connected"] is False
+    assert data["backend_connection_state"] == "disconnected"
+    assert data["backend_error"] == "RuntimeError: connect failed"
+    assert data["can_proceed"] is True
+    assert data["can_proceed_with_hf"] is True
+
+
+def test_backend_startup_failure_is_recorded_without_raising(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Backend startup failures should become status state instead of killing LocalStream."""
+    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
+    monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "local")
+    monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", None)
+    monkeypatch.setattr(config, "HF_REALTIME_WS_URL", "ws://127.0.0.1:8765/v1/realtime")
+
+    app = FastAPI()
+    handler = MagicMock()
+    handler.connection = None
+    handler.shutdown = AsyncMock()
+    media = SimpleNamespace(
+        audio=None,
+        backend=None,
+        start_recording=MagicMock(),
+        start_playing=MagicMock(),
+    )
+    robot = SimpleNamespace(media=media)
+    stream = LocalStream(handler, robot, settings_app=app, instance_path=str(tmp_path))
+    stream._backend_retry_delay = 0
+    stream.record_loop = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    stream.play_loop = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    monkeypatch.setattr("reachy_mini_conversation_app.console.apply_audio_startup_config", MagicMock())
+
+    async def fail_and_stop() -> None:
+        stream._stop_event.set()
+        raise RuntimeError("local server unavailable")
+
+    handler.start_up = AsyncMock(side_effect=fail_and_stop)
+
+    try:
+        stream.launch()
+    finally:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
+    handler.start_up.assert_awaited_once()
+    client = TestClient(app)
+    response = client.get("/status")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["backend_connected"] is False
+    assert data["backend_connection_state"] == "disconnected"
+    assert data["backend_error"] == "RuntimeError: local server unavailable"
+
+
 def test_headless_personality_routes_return_gemini_voices_when_backend_selected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

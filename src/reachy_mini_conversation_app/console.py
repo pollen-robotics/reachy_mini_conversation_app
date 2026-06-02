@@ -75,6 +75,7 @@ LEGACY_STARTUP_ENV_NAMES = (
     "REACHY_MINI_CUSTOM_PROFILE",
     "REACHY_MINI_VOICE_OVERRIDE",
 )
+BACKEND_RETRY_DELAY_SECONDS = 5.0
 
 
 def _estimate_pending_playback_seconds(robot: ReachyMini) -> float:
@@ -124,6 +125,9 @@ class LocalStream:
         self._settings_initialized = False
         self._asyncio_loop = None
         self._active_backend_name = get_backend_choice()
+        self._backend_connection_state = "not_started"
+        self._backend_error: str | None = None
+        self._backend_retry_delay = BACKEND_RETRY_DELAY_SECONDS
 
     # ---- Settings UI ----
     def _read_env_lines(self, env_path: Path) -> list[str]:
@@ -163,6 +167,38 @@ class LocalStream:
     def _active_backend(self) -> str:
         """Return the backend family of the currently running handler."""
         return self._active_backend_name
+
+    def _backend_connected(self) -> bool:
+        """Return whether the active handler currently has a realtime connection."""
+        return getattr(self.handler, "connection", None) is not None
+
+    @staticmethod
+    def _format_backend_error(error: BaseException | str) -> str:
+        """Return a compact user-facing backend error string."""
+        if isinstance(error, str):
+            return error
+        message = str(error).strip()
+        if message:
+            return f"{type(error).__name__}: {message}"
+        return type(error).__name__
+
+    def _set_backend_connection_state(self, state: str, error: BaseException | str | None = None) -> None:
+        """Update backend connection status exposed through the settings UI."""
+        self._backend_connection_state = state
+        if error is not None:
+            self._backend_error = self._format_backend_error(error)
+        elif state != "disconnected":
+            self._backend_error = None
+
+    def _backend_connection_status(self) -> dict[str, object]:
+        """Return the backend connection state exposed in /status."""
+        connected = self._backend_connected()
+        state = "connected" if connected else self._backend_connection_state
+        return {
+            "backend_connected": connected,
+            "backend_connection_state": state,
+            "backend_error": None if connected else self._backend_error,
+        }
 
     @staticmethod
     def _has_key(value: Optional[str]) -> bool:
@@ -383,6 +419,7 @@ class LocalStream:
             can_proceed_with_hf = has_hf_connection
             can_proceed = self._has_required_key(active_backend)
             requires_restart = backend_provider != active_backend
+            backend_connection = self._backend_connection_status()
             return {
                 "active_backend": active_backend,
                 "backend_provider": backend_provider,
@@ -400,6 +437,7 @@ class LocalStream:
                 "can_proceed_with_gemini": can_proceed_with_gemini,
                 "can_proceed_with_hf": can_proceed_with_hf,
                 "requires_restart": requires_restart,
+                **backend_connection,
             }
 
         # GET / -> index.html
@@ -514,6 +552,47 @@ class LocalStream:
 
         self._settings_initialized = True
 
+    async def _run_handler_startup_loop(self) -> None:
+        """Start the realtime handler and keep settings UI alive after backend failures."""
+        while not self._stop_event.is_set():
+            active_backend = self._active_backend()
+            if get_backend_choice() != active_backend:
+                self._set_backend_connection_state("restart_required")
+                await asyncio.sleep(0.5)
+                continue
+
+            if not self._has_required_key(active_backend):
+                requirement_name = self._requirement_name(active_backend)
+                self._set_backend_connection_state("waiting_for_config", f"{requirement_name} is not configured.")
+                await asyncio.sleep(0.5)
+                continue
+
+            self._set_backend_connection_state("connecting")
+            try:
+                await self.handler.start_up()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self._set_backend_connection_state("disconnected", e)
+                logger.warning(
+                    "%s backend failed to start: %s. Settings UI remains available; retrying in %.1f seconds.",
+                    active_backend,
+                    e,
+                    self._backend_retry_delay,
+                    exc_info=logger.isEnabledFor(logging.DEBUG),
+                )
+            else:
+                if self._stop_event.is_set():
+                    return
+                self._set_backend_connection_state("disconnected")
+                logger.info(
+                    "%s backend session ended. Settings UI remains available; retrying in %.1f seconds.",
+                    active_backend,
+                    self._backend_retry_delay,
+                )
+
+            await asyncio.sleep(self._backend_retry_delay)
+
     def launch(self) -> None:
         """Start the recorder/player and run the async processing loops.
 
@@ -544,20 +623,25 @@ class LocalStream:
         # If key is still missing -> wait until provided via the settings UI
         if not self._has_required_key(active_backend):
             requirement_name = self._requirement_name(active_backend)
-            if active_backend == HF_BACKEND:
+            self._set_backend_connection_state("waiting_for_config", f"{requirement_name} is not configured.")
+            if active_backend == HF_BACKEND and self._settings_app is None:
                 logger.error(
                     "%s not found. Set it in the app .env before starting the Hugging Face backend.", requirement_name
                 )
                 return
-            else:
-                logger.warning("%s not found. Open the app settings page to enter it.", requirement_name)
+            logger.warning("%s not found. Open the app settings page to configure it.", requirement_name)
             # Poll until the key becomes available (set via the settings UI)
             try:
-                while not self._has_required_key(active_backend):
+                while not self._stop_event.is_set() and not self._has_required_key(active_backend):
+                    if get_backend_choice() != active_backend:
+                        self._set_backend_connection_state("restart_required")
                     time.sleep(0.2)
             except KeyboardInterrupt:
                 logger.info("Interrupted while waiting for API key.")
                 return
+            if self._stop_event.is_set():
+                return
+            self._set_backend_connection_state("not_started")
 
         # Start media after key is set/available
         self._robot.media.start_recording()
@@ -582,7 +666,7 @@ class LocalStream:
             except Exception:
                 pass
             self._tasks = [
-                asyncio.create_task(self.handler.start_up(), name="openai-handler"),
+                asyncio.create_task(self._run_handler_startup_loop(), name="realtime-handler"),
                 asyncio.create_task(self.record_loop(), name="stream-record-loop"),
                 asyncio.create_task(self.play_loop(), name="stream-play-loop"),
             ]

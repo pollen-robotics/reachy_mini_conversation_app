@@ -62,6 +62,10 @@
         <p class="muted backend-note">
           Backend changes are saved here, then applied after you restart Reachy Mini Conversation from the dashboard or desktop app.
         </p>
+        <div id="connection-alert" class="connection-alert hidden" role="status" aria-live="polite" aria-atomic="true">
+          <strong id="connection-alert-title">Backend disconnected</strong>
+          <p id="connection-alert-copy"></p>
+        </div>
         <div class="backend-choice-grid" role="radiogroup" aria-label="Conversation backend">
           <label class="backend-choice" data-backend-card="huggingface">
             <input type="radio" name="backend" value="huggingface" />
@@ -97,7 +101,7 @@
             <p class="eyebrow">Credentials</p>
             <h2 id="configured-title">API key ready</h2>
           </div>
-          <span class="chip chip-ok">Connected</span>
+          <span id="configured-chip" class="chip chip-ok">Configured</span>
         </div>
         <p id="configured-copy" class="muted">OpenAI API key is already configured. You can jump straight to personalities.</p>
         <button id="change-key-btn" class="ghost">Change API key</button>

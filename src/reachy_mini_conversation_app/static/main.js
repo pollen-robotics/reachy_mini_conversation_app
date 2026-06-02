@@ -93,15 +93,21 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 2000) {
 async function waitForStatus(timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
   while (true) {
-    try {
-      const url = new URL("/status", window.location.origin);
-      url.searchParams.set("_", Date.now().toString());
-      const resp = await fetchWithTimeout(url, {}, 2000);
-      if (resp.ok) return await resp.json();
-    } catch (e) {}
+    const status = await fetchStatusSnapshot();
+    if (status) return status;
     if (Date.now() >= deadline) return null;
     await sleep(500);
   }
+}
+
+async function fetchStatusSnapshot(timeoutMs = 2000) {
+  try {
+    const url = new URL("/status", window.location.origin);
+    url.searchParams.set("_", Date.now().toString());
+    const resp = await fetchWithTimeout(url, {}, timeoutMs);
+    if (resp.ok) return await resp.json();
+  } catch (e) {}
+  return null;
 }
 
 async function waitForPersonalityData(timeoutMs = 15000) {
@@ -289,6 +295,24 @@ function describeHFConfiguration(status) {
   return "Choose the Hugging Face server or a local realtime endpoint.";
 }
 
+function describeActiveBackendTarget(status) {
+  const activeBackend = status.active_backend || status.backend_provider || DEFAULT_BACKEND;
+  if (activeBackend === HF_BACKEND) {
+    if (status.hf_connection_mode === "local") {
+      const host = status.hf_direct_host || HF_DEFAULT_HOST;
+      const port = status.hf_direct_port || HF_DEFAULT_PORT;
+      return `local Hugging Face server at ${host}:${port}`;
+    }
+    return "built-in Hugging Face server";
+  }
+  return backendMeta(activeBackend).label;
+}
+
+function backendConnectionState(status) {
+  if (status.backend_connected) return "connected";
+  return status.backend_connection_state || "unknown";
+}
+
 function isLocalHFHost(host) {
   return !host || host === "localhost" || host === "127.0.0.1";
 }
@@ -299,6 +323,9 @@ async function init() {
   const backendChip = document.getElementById("backend-chip");
   const backendNote = document.getElementById("backend-note");
   const backendStatusEl = document.getElementById("backend-status");
+  const connectionAlert = document.getElementById("connection-alert");
+  const connectionAlertTitle = document.getElementById("connection-alert-title");
+  const connectionAlertCopy = document.getElementById("connection-alert-copy");
   const backendSaveBtn = document.getElementById("save-backend-btn");
   const backendInputs = Array.from(document.querySelectorAll('input[name="backend"]'));
   const backendCards = Array.from(document.querySelectorAll("[data-backend-card]"));
@@ -307,6 +334,7 @@ async function init() {
   const configuredPanel = document.getElementById("configured");
   const configuredTitle = document.getElementById("configured-title");
   const configuredCopy = document.getElementById("configured-copy");
+  const configuredChip = document.getElementById("configured-chip");
   const personalityPanel = document.getElementById("personality-panel");
   const formTitle = document.getElementById("form-title");
   const formCopy = document.getElementById("form-copy");
@@ -396,6 +424,53 @@ async function init() {
     });
   }
 
+  function renderBackendConnectionStatus(status) {
+    const state = backendConnectionState(status);
+    const activeBackend = status.active_backend || status.backend_provider || DEFAULT_BACKEND;
+    const activeLabel = backendMeta(activeBackend).label;
+    const target = describeActiveBackendTarget(status);
+    const errorDetails = status.backend_error ? ` Last error: ${status.backend_error}` : "";
+
+    connectionAlert.className = "connection-alert hidden";
+    connectionAlert.setAttribute("role", "status");
+    connectionAlert.setAttribute("aria-live", "polite");
+
+    if (state === "connected" || state === "unknown") {
+      return;
+    }
+
+    let title = "Backend not connected";
+    let copy = `${activeLabel} is not connected yet. Settings remain available.`;
+    let tone = "warn";
+
+    if (state === "connecting" || state === "not_started") {
+      title = "Connecting to backend";
+      copy = `Trying to connect to the ${target}. Settings remain available while this starts.`;
+    } else if (state === "waiting_for_config") {
+      title = "Backend waiting for configuration";
+      copy = `${activeLabel} is missing required configuration. Update the backend settings below.`;
+    } else if (state === "restart_required") {
+      title = "Restart required";
+      copy = "A backend change is saved. Restart Reachy Mini Conversation from the dashboard or desktop app to connect with it.";
+    } else {
+      title = "Backend disconnected";
+      tone = "error";
+      if (activeBackend === HF_BACKEND && status.hf_connection_mode === "local") {
+        copy = `The ${target} is not reachable. Start it, switch to the built-in server, or update the target below.${errorDetails}`;
+      } else {
+        copy = `${activeLabel} failed to connect. Settings remain available so you can change backend or credentials.${errorDetails}`;
+      }
+    }
+
+    connectionAlertTitle.textContent = title;
+    connectionAlertCopy.textContent = copy;
+    connectionAlert.className = tone === "error" ? "connection-alert error" : "connection-alert";
+    if (tone === "error") {
+      connectionAlert.setAttribute("role", "alert");
+      connectionAlert.setAttribute("aria-live", "assertive");
+    }
+  }
+
   function renderCredentialPanels(status) {
     const persistedBackend = status.backend_provider || DEFAULT_BACKEND;
     const activeBackend = status.active_backend || persistedBackend;
@@ -410,9 +485,12 @@ async function init() {
 
     backendChip.textContent = selectedBackend === persistedBackend ? "Saved" : "Selected";
     backendNote.innerHTML = formatBackendNote(meta.note);
+    renderBackendConnectionStatus(status);
 
     configuredTitle.textContent = meta.readyTitle;
     configuredCopy.textContent = usesHFForm ? describeHFConfiguration(status) : meta.readyCopy;
+    configuredChip.textContent = selectedMatchesActive && status.backend_connected ? "Connected" : "Configured";
+    configuredChip.classList.toggle("chip-ok", selectedMatchesActive && !!status.backend_connected);
     formTitle.textContent = meta.formTitle;
     formCopy.textContent = usesHFForm
       ? meta.formCopy
@@ -462,9 +540,12 @@ async function init() {
   show(configuredPanel, false);
   show(personalityPanel, false);
 
-  const st = (await waitForStatus()) || {
+  let st = (await waitForStatus()) || {
     active_backend: DEFAULT_BACKEND,
     backend_provider: DEFAULT_BACKEND,
+    backend_connected: false,
+    backend_connection_state: "unknown",
+    backend_error: null,
     has_key: false,
     has_openai_key: false,
     has_gemini_key: false,
@@ -484,6 +565,13 @@ async function init() {
   setSelectedBackend(st.backend_provider || DEFAULT_BACKEND);
   statusEl.textContent = "";
   renderCredentialPanels(st);
+
+  window.setInterval(async () => {
+    const latest = await fetchStatusSnapshot();
+    if (!latest) return;
+    st = latest;
+    renderCredentialPanels(st);
+  }, 3000);
 
   // Handler for "Change API key" button
   changeKeyBtn.addEventListener("click", () => {
