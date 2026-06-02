@@ -24,6 +24,16 @@ from reachy_mini_conversation_app.startup_settings import (
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
 
 
+async def _wait_until(predicate: Any, timeout: float = 1.0) -> None:
+    """Wait until a test predicate becomes true."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while asyncio.get_running_loop().time() < deadline:
+        if predicate():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("Timed out waiting for condition")
+
+
 def test_clear_audio_queue_prefers_clear_player_when_available() -> None:
     """Local GStreamer audio should use the lower-level player flush when available."""
     handler = MagicMock()
@@ -176,6 +186,49 @@ def test_backend_config_persists_gemini_selection_and_status(
     assert "BACKEND_PROVIDER=gemini" in env_text
     assert "MODEL_NAME=gemini-3.1-flash-live-preview" in env_text
     assert "GEMINI_API_KEY=gem-test-token" in env_text
+
+
+def test_backend_config_requests_in_process_restart_with_handler_factory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rebuild-capable LocalStream should reconnect in process after backend changes."""
+    monkeypatch.setattr(config, "BACKEND_PROVIDER", "openai")
+    monkeypatch.setattr(config, "MODEL_NAME", "gpt-realtime-2")
+    monkeypatch.setattr(config, "OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setattr(config, "GEMINI_API_KEY", None)
+    monkeypatch.setenv("BACKEND_PROVIDER", "openai")
+    monkeypatch.setenv("MODEL_NAME", "gpt-realtime-2")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    app = FastAPI()
+    handler = MagicMock()
+    handler.shutdown = AsyncMock()
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(
+        handler,
+        robot,
+        settings_app=app,
+        instance_path=str(tmp_path),
+        handler_factory=lambda _voice: handler,
+    )
+    stream._init_settings_ui_if_needed()
+
+    response = TestClient(app).post(
+        "/backend_config",
+        json={"backend": "gemini", "api_key": "gem-test-token"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["message"] == "Backend saved. Reconnecting backend."
+    assert data["backend_provider"] == "gemini"
+    assert data["requires_restart"] is False
+    assert data["can_proceed"] is True
+    assert data["backend_connection_state"] == "connecting"
+    assert stream._restart_requested.is_set()
 
 
 def test_backend_config_preserves_explicit_model_override_when_saving_key(
@@ -509,6 +562,81 @@ def test_backend_startup_failure_is_recorded_without_raising(
     assert data["backend_error"] == "RuntimeError: local server unavailable"
 
 
+@pytest.mark.asyncio
+async def test_startup_loop_rebuilds_handler_for_backend_change(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LocalStream should own backend swaps by shutting down and rebuilding the handler."""
+    monkeypatch.setattr(config, "BACKEND_PROVIDER", "openai")
+    monkeypatch.setattr(config, "MODEL_NAME", "gpt-realtime-2")
+    monkeypatch.setattr(config, "OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "gem-test-key")
+
+    class FakeHandler:
+        def __init__(self, backend: str) -> None:
+            self.backend = backend
+            self.connection = None
+            self.session = None
+            self.output_queue = asyncio.Queue()
+            self.started = asyncio.Event()
+            self.stopped = asyncio.Event()
+            self.shutdown_calls = 0
+
+        async def start_up(self) -> None:
+            if self.backend == "gemini":
+                self.session = object()
+            else:
+                self.connection = object()
+            self.started.set()
+            await self.stopped.wait()
+            self.connection = None
+            self.session = None
+
+        async def shutdown(self) -> None:
+            self.shutdown_calls += 1
+            self.stopped.set()
+
+        async def receive(self, _frame: Any) -> None:
+            return None
+
+        async def emit(self) -> None:
+            return None
+
+    handlers: list[FakeHandler] = []
+
+    def handler_factory(_voice: str | None) -> FakeHandler:
+        handler = FakeHandler(config.BACKEND_PROVIDER)
+        handlers.append(handler)
+        return handler
+
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    initial_handler = handler_factory(None)
+    stream = LocalStream(initial_handler, robot, handler_factory=handler_factory)
+    stream._backend_retry_delay = 0.01
+
+    startup_task = asyncio.create_task(stream._run_handler_startup_loop())
+    try:
+        await _wait_until(lambda: initial_handler.started.is_set())
+
+        monkeypatch.setattr(config, "BACKEND_PROVIDER", "gemini")
+        monkeypatch.setattr(config, "MODEL_NAME", "gemini-3.1-flash-live-preview")
+        await stream.request_backend_restart("backend_config_changed")
+
+        await _wait_until(lambda: len(handlers) == 2 and handlers[1].started.is_set())
+
+        assert initial_handler.shutdown_calls >= 1
+        assert handlers[1].backend == "gemini"
+        assert stream.handler is handlers[1]
+        assert stream._active_backend_name == "gemini"
+        assert stream._backend_connected() is True
+    finally:
+        stream._stop_event.set()
+        await stream._shutdown_active_handler()
+        startup_task.cancel()
+        try:
+            await startup_task
+        except asyncio.CancelledError:
+            pass
+
+
 def test_headless_personality_routes_return_gemini_voices_when_backend_selected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -610,6 +738,65 @@ def test_headless_personality_routes_persist_startup_with_voice_override() -> No
         loop.call_soon_threadsafe(loop.stop)
         thread.join(timeout=1.0)
         loop.close()
+
+
+def test_headless_personality_routes_can_use_stream_callbacks() -> None:
+    """Headless personality routes can delegate apply/restart ownership to LocalStream."""
+    app = FastAPI()
+    handler = MagicMock()
+    handler.apply_personality = AsyncMock(return_value="handler should not be called")
+    apply_personality = AsyncMock(return_value="Applied personality and restarting backend.")
+    get_current_voice = MagicMock(return_value="cedar")
+
+    loop = asyncio.new_event_loop()
+    started = threading.Event()
+
+    def _run_loop() -> None:
+        asyncio.set_event_loop(loop)
+        started.set()
+        loop.run_forever()
+
+    thread = threading.Thread(target=_run_loop, daemon=True)
+    thread.start()
+    started.wait(timeout=1.0)
+
+    try:
+        mount_personality_routes(
+            app,
+            handler,
+            lambda: loop,
+            apply_personality=apply_personality,
+            get_current_voice=get_current_voice,
+        )
+
+        response = TestClient(app).post("/personalities/apply?name=sorry_bro")
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "Applied personality and restarting backend."
+        apply_personality.assert_awaited_once_with("sorry_bro")
+        handler.apply_personality.assert_not_awaited()
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(timeout=1.0)
+        loop.close()
+
+
+@pytest.mark.asyncio
+async def test_apply_personality_propagates_restart_cancellation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cancellation during backend restart should not be converted into a status string."""
+    monkeypatch.setattr("reachy_mini_conversation_app.config.set_custom_profile", lambda _profile: None)
+    monkeypatch.setattr("reachy_mini_conversation_app.prompts.get_session_instructions", lambda: "instructions")
+    monkeypatch.setattr("reachy_mini_conversation_app.prompts.get_session_voice", lambda default: default)
+
+    stream = LocalStream(MagicMock(), MagicMock())
+
+    async def cancel_restart(_reason: str) -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(stream, "request_backend_restart", cancel_restart)
+
+    with pytest.raises(asyncio.CancelledError):
+        await stream.apply_personality("sorry_bro")
 
 
 def test_local_stream_persist_personality_stores_voice_override(tmp_path) -> None:

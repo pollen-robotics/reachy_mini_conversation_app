@@ -9,7 +9,7 @@ callable to avoid cross-thread issues.
 from __future__ import annotations
 import asyncio
 import logging
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Awaitable
 
 from fastapi import Query, FastAPI, Request
 
@@ -42,6 +42,10 @@ def mount_personality_routes(
     *,
     persist_personality: Callable[[Optional[str], Optional[str]], None] | None = None,
     get_persisted_personality: Callable[[], Optional[str]] | None = None,
+    apply_personality: Callable[[Optional[str]], Awaitable[str]] | None = None,
+    get_available_voices: Callable[[], Awaitable[list[str]]] | None = None,
+    get_current_voice: Callable[[], str] | None = None,
+    change_voice: Callable[[str], Awaitable[str]] | None = None,
 ) -> None:
     """Register personality management endpoints on a FastAPI app."""
     try:
@@ -254,9 +258,12 @@ def mount_personality_routes(
 
         async def _do_apply() -> tuple[str, Optional[str]]:
             sel = None if sel_name == DEFAULT_OPTION else sel_name
-            status = await handler.apply_personality(sel)
-            get_current_voice = getattr(handler, "get_current_voice", None)
-            voice_override = get_current_voice() if callable(get_current_voice) else None
+            if apply_personality is not None:
+                status = await apply_personality(sel)
+            else:
+                status = await handler.apply_personality(sel)
+            current_voice_callback = get_current_voice or getattr(handler, "get_current_voice", None)
+            voice_override = current_voice_callback() if callable(current_voice_callback) else None
             return status, voice_override
 
         try:
@@ -282,6 +289,8 @@ def mount_personality_routes(
 
         async def _get_v() -> list[str]:
             try:
+                if get_available_voices is not None:
+                    return await get_available_voices()
                 return await handler.get_available_voices()
             except Exception:
                 return get_available_voices_for_backend()
@@ -301,6 +310,8 @@ def mount_personality_routes(
 
         def _get_current() -> str:
             try:
+                if get_current_voice is not None:
+                    return get_current_voice()
                 return handler.get_current_voice()
             except Exception:
                 return fallback_voice
@@ -327,6 +338,8 @@ def mount_personality_routes(
             return JSONResponse({"ok": False, "error": "loop_unavailable"}, status_code=503)  # type: ignore
 
         async def _do() -> str:
+            if change_voice is not None:
+                return await change_voice(voice)
             return await handler.change_voice(voice)
 
         try:

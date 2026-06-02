@@ -32,6 +32,7 @@ from reachy_mini_conversation_app.config import (
     get_default_voice_for_backend,
     get_available_voices_for_backend,
 )
+from reachy_mini_conversation_app.idle_policy import start_idle_tool_call
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.tools.background_tool_manager import (
@@ -564,7 +565,8 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
         try:
             self._mark_activity("tool_result_ready")
-            if isinstance(bg_tool.id, str):
+            send_result_to_model = not bg_tool.is_idle_tool_call
+            if send_result_to_model and isinstance(bg_tool.id, str):
                 await self.connection.conversation.item.create(
                     item={
                         "type": "function_call_output",
@@ -587,7 +589,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 ),
             )
 
-            if bg_tool.tool_name == "camera" and "b64_im" in tool_result:
+            if send_result_to_model and bg_tool.tool_name == "camera" and "b64_im" in tool_result:
                 # use raw base64, don't json.dumps (which adds quotes)
                 b64_im = tool_result["b64_im"]
                 if not isinstance(b64_im, str):
@@ -640,9 +642,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         ),
                     )
 
-            # If this tool call was triggered by an idle signal, don't make the robot speak.
-            # For other tool calls, let the robot reply out loud.
-            if not bg_tool.is_idle_tool_call:
+            if send_result_to_model:
                 await self._safe_response_create(
                     response=RealtimeResponseCreateParamsParam(
                         instructions="Use the tool result just returned and answer concisely in speech.",
@@ -739,7 +739,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         # Doesn't mean the audio is done playing
                         self._response_done_event.set()
                         self._response_started_or_rejected_event.set()
-                        self.is_idle_tool_call = False
                         logger.debug("Response done")
 
                         response = getattr(event, "response", None)
@@ -825,10 +824,9 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         call_id: str = str(getattr(event, "call_id", uuid.uuid4()))
 
                         logger.info(
-                            "Tool call received — tool_name=%r, call_id=%s, is_idle=%s, args=%s",
+                            "Tool call received — tool_name=%r, call_id=%s, args=%s",
                             tool_name,
                             call_id,
-                            self.is_idle_tool_call,
                             args_json_str,
                         )
 
@@ -850,7 +848,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                                 args_json_str=args_json_str,
                                 deps=self.deps,
                             ),
-                            is_idle_tool_call=self.is_idle_tool_call,
+                            is_idle_tool_call=False,
                         )
 
                         await self.output_queue.put(
@@ -954,7 +952,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             try:
                 await self.send_idle_signal(idle_duration)
             except Exception as e:
-                logger.warning("Idle signal skipped (connection closed?): %s", e)
+                logger.warning("Idle tool skipped (connection closed?): %s", e)
                 return None
 
             self.last_activity_time = time.monotonic()  # avoid repeated resets
@@ -1004,23 +1002,19 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         """Build the realtime SDK client for this backend."""
 
     async def send_idle_signal(self, idle_duration: float) -> None:
-        """Send an idle signal to the realtime server."""
-        logger.debug("Sending idle signal")
-        self.is_idle_tool_call = True
-        timestamp_msg = f"[Idle time update: {self.format_timestamp()} - No activity for {idle_duration:.1f}s] You've been idle for a while. Feel free to get creative - dance, show an emotion, look around, call idle_do_nothing to stay still and silent, or just be yourself!"
+        """Run a locally selected idle tool without sending an idle turn to the model."""
+        logger.debug("Selecting local idle tool")
         if not self.connection:
-            logger.debug("No connection, cannot send idle signal")
+            logger.debug("No connection, cannot run idle tool")
             return
-        await self.connection.conversation.item.create(
-            item={
-                "type": "message",
-                "role": "user",
-                "content": [{"type": "input_text", "text": timestamp_msg}],
-            },
-        )
-        await self._safe_response_create(
-            response=RealtimeResponseCreateParamsParam(
-                instructions="You MUST respond with function calls only - no speech or text. Choose appropriate actions for idle behavior. Use idle_do_nothing only if you intentionally want no movement or sound during this idle turn.",
-                tool_choice="required",
-            ),
+
+        available_tool_names = {
+            spec["name"] for spec in self._get_active_tool_specs() if isinstance(spec.get("name"), str)
+        }
+        await start_idle_tool_call(
+            deps=self.deps,
+            tool_manager=self.tool_manager,
+            output_queue=self.output_queue,
+            available_tool_names=available_tool_names,
+            idle_duration=idle_duration,
         )
