@@ -38,6 +38,9 @@ coverage.xml
 *.swp
 *.swo
 
+# AI tooling
+.claude/
+
 # Security
 *.key
 *.pem
