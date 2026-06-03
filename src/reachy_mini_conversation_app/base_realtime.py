@@ -28,6 +28,9 @@ from websockets.exceptions import ConnectionClosedError
 from openai.resources.realtime.realtime import AsyncRealtimeConnection
 
 from reachy_mini_conversation_app.config import (
+    AVAILABLE_VOICES,
+    GEMINI_AVAILABLE_VOICES,
+    HF_BACKEND,
     config,
     get_default_voice_for_backend,
     get_available_voices_for_backend,
@@ -43,6 +46,8 @@ from reachy_mini_conversation_app.tools.background_tool_manager import (
 
 
 logger = logging.getLogger(__name__)
+
+_HF_RESERVED_CROSS_BACKEND_VOICES = {voice.lower() for voice in [*AVAILABLE_VOICES, *GEMINI_AVAILABLE_VOICES]}
 
 _RESPONSE_DONE_TIMEOUT: Final[float] = 30.0
 _RESPONSE_REJECTION_RETRY_DELAY: Final[float] = 0.5
@@ -196,6 +201,23 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         normalized_voice = voice_by_lowercase.get(voice_value.lower())
         if normalized_voice is not None:
             return normalized_voice
+
+        # Hugging Face backends can expose dynamic/custom speaker names
+        # (e.g. custom Kokoro/Qwen3-TTS voices) that are not part of the
+        # app's curated defaults. Keep cross-backend reserved names blocked
+        # so accidentally reused OpenAI/Gemini voices still fall back safely.
+        if self.BACKEND_PROVIDER == HF_BACKEND:
+            if voice_value.lower() in _HF_RESERVED_CROSS_BACKEND_VOICES:
+                if voice:
+                    logger.warning(
+                        "Ignoring unsupported %s %r for backend=%r; expected one of %s",
+                        source,
+                        voice,
+                        self.BACKEND_PROVIDER,
+                        available_voices,
+                    )
+                return fallback
+            return voice_value
 
         if voice:
             logger.warning(

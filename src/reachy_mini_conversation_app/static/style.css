@@ -419,7 +419,7 @@ button.ghost:hover { border-color: rgba(94, 240, 193, 0.4); }
   grid-template-columns: 160px 1fr auto auto auto;
 }
 #personality-panel .row-voice {
-  grid-template-columns: 160px 1fr auto;
+  grid-template-columns: 160px minmax(160px, 1fr) minmax(180px, 1fr) auto;
 }
 
 #tools-available {

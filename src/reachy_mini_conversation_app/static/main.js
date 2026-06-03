@@ -366,6 +366,7 @@ async function init() {
   const pTools = document.getElementById("tools-ta");
   const pStatus = document.getElementById("personality-status");
   const pVoice = document.getElementById("voice-select");
+  const pVoiceCustom = document.getElementById("voice-custom");
   const pApplyVoice = document.getElementById("apply-voice");
   const pAvail = document.getElementById("tools-available");
 
@@ -378,6 +379,12 @@ async function init() {
 
   function resolveHFHost() {
     return hfHostPreset.value === "custom" ? hfHostCustom.value.trim() : HF_DEFAULT_HOST;
+  }
+
+  function getEffectiveVoice() {
+    const customVoice = (pVoiceCustom.value || "").trim();
+    if (customVoice) return customVoice;
+    return pVoice.value || pVoice.options[0]?.value || "";
   }
 
   function updateHFControls() {
@@ -588,6 +595,9 @@ async function init() {
   // Remove error styling when user starts typing
   input.addEventListener("input", () => {
     input.classList.remove("error");
+  });
+  pVoiceCustom.addEventListener("input", () => {
+    pVoiceCustom.classList.remove("error");
   });
   hfHostCustom.addEventListener("input", () => {
     hfHostCustom.classList.remove("error");
@@ -849,9 +859,20 @@ async function init() {
       pInstr.value = data.instructions || "";
       pTools.value = data.tools_text || "";
       const fallbackVoice = pVoice.options[0]?.value || "";
-      const loadedVoice = voices.includes(data.voice) ? data.voice : fallbackVoice;
-      const activeVoice = voices.includes(currentVoice) ? currentVoice : loadedVoice;
-      pVoice.value = data.uses_default_voice ? activeVoice : loadedVoice;
+      const loadedVoice = typeof data.voice === "string" ? data.voice.trim() : "";
+      const loadedVoiceInList = voices.includes(loadedVoice);
+      const activeVoice = voices.includes(currentVoice) ? currentVoice : (loadedVoiceInList ? loadedVoice : fallbackVoice);
+
+      if (data.uses_default_voice) {
+        pVoice.value = activeVoice;
+        pVoiceCustom.value = "";
+      } else if (loadedVoiceInList) {
+        pVoice.value = loadedVoice;
+        pVoiceCustom.value = "";
+      } else {
+        pVoice.value = activeVoice;
+        pVoiceCustom.value = loadedVoice;
+      }
       // Available tools as checkboxes
       renderToolCheckboxes(data.available_tools, data.enabled_tools);
       // Default name field to last segment of selection
@@ -868,13 +889,21 @@ async function init() {
     show(personalityPanel, true);
 
     pApplyVoice.addEventListener("click", async () => {
-      const voice = pVoice.value;
-      if (!voice) return;
+      const voice = getEffectiveVoice();
+      if (!voice) {
+        pVoiceCustom.classList.add("error");
+        setStatusMessage(pStatus, "Enter a voice name or select one from the list.", "warn");
+        return;
+      }
       setStatusMessage(pStatus, "Applying voice...");
       try {
         const res = await applyVoice(voice);
         currentVoice = voice;
-        pVoice.value = voice;
+        if (voices.includes(voice)) {
+          pVoice.value = voice;
+        } else {
+          pVoiceCustom.value = voice;
+        }
         setStatusMessage(pStatus, res.status || `Voice changed to ${voice}.`, "ok");
       } catch (e) {
         setStatusMessage(pStatus, `Failed to apply voice${e.message ? ": " + e.message : ""}`, "error");
@@ -914,6 +943,7 @@ async function init() {
         el.checked = false;
       });
       pVoice.value = pVoice.options[0]?.value || "";
+      pVoiceCustom.value = "";
       setStatusMessage(pStatus, "Fill fields and click Save.");
     });
 
@@ -931,7 +961,7 @@ async function init() {
           name,
           instructions: pInstr.value || "",
           tools_text: pTools.value || "",
-          voice: pVoice.value || pVoice.options[0]?.value || "",
+          voice: getEffectiveVoice(),
         });
         // Refresh select choices
         pSelect.innerHTML = "";

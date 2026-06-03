@@ -282,6 +282,30 @@ def test_handler_ignores_unsupported_hf_profile_voice(monkeypatch: Any) -> None:
     assert session["audio"]["output"]["voice"] == HF_DEFAULT_VOICE
 
 
+def test_handler_accepts_custom_hf_profile_voice(monkeypatch: Any) -> None:
+    """Custom Hugging Face profile voices should pass through unchanged."""
+    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
+    monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "af_sky")
+
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+
+    assert handler.get_current_voice() == "af_sky"
+    session = handler._get_session_config([])
+    assert session["audio"]["output"]["voice"] == "af_sky"
+
+
+def test_handler_accepts_custom_hf_startup_voice(monkeypatch: Any) -> None:
+    """Custom Hugging Face startup voices should remain available at runtime."""
+    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
+
+    handler = HuggingFaceRealtimeHandler(
+        ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()),
+        startup_voice="af_sky",
+    )
+
+    assert handler.get_current_voice() == "af_sky"
+
+
 def test_handler_normalizes_hf_voice_case(monkeypatch: Any) -> None:
     """Lowercase Hugging Face speaker names should resolve to the curated UI value."""
     monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
