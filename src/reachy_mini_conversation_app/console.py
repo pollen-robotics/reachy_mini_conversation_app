@@ -15,7 +15,7 @@ import sys
 import time
 import asyncio
 import logging
-from typing import List, Optional
+from typing import List, Callable, Optional
 from pathlib import Path
 
 from fastrtc import AdditionalOutputs, audio_to_float32
@@ -41,7 +41,9 @@ from reachy_mini_conversation_app.config import (
     parse_hf_direct_target,
     get_model_name_for_backend,
     get_hf_connection_selection,
+    get_default_voice_for_backend,
     refresh_runtime_config_from_env,
+    get_available_voices_for_backend,
 )
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
 from reachy_mini_conversation_app.audio.startup_config import apply_audio_startup_config
@@ -64,6 +66,7 @@ except Exception:  # pragma: no cover - only loaded when settings_app is used
 
 
 logger = logging.getLogger(__name__)
+HandlerFactory = Callable[[Optional[str]], ConversationHandler]
 
 LOCAL_PLAYER_BACKEND = (
     getattr(MediaBackend, "LOCAL", None)
@@ -108,18 +111,21 @@ class LocalStream:
         *,
         settings_app: Optional[FastAPI] = None,
         instance_path: Optional[str] = None,
+        handler_factory: HandlerFactory | None = None,
+        startup_voice: Optional[str] = None,
     ):
         """Initialize the stream with a realtime handler and pipelines.
 
         - ``settings_app``: the Reachy Mini Apps FastAPI to attach settings endpoints.
         - ``instance_path``: directory where per-instance ``.env`` should be stored.
+        - ``handler_factory``: builds a fresh handler for the currently selected backend.
         """
-        self.handler = handler
         self._robot = robot
         self._stop_event = asyncio.Event()
+        self._restart_requested = asyncio.Event()
         self._tasks: List[asyncio.Task[None]] = []
-        # Allow the handler to flush the player queue when appropriate.
-        self.handler._clear_queue = self.clear_audio_queue
+        self._handler_factory = handler_factory
+        self._voice_override = startup_voice
         self._settings_app: Optional[FastAPI] = settings_app
         self._instance_path: Optional[str] = instance_path
         self._settings_initialized = False
@@ -128,6 +134,12 @@ class LocalStream:
         self._backend_connection_state = "not_started"
         self._backend_error: str | None = None
         self._backend_retry_delay = BACKEND_RETRY_DELAY_SECONDS
+        self._install_handler(handler)
+
+    def _install_handler(self, handler: ConversationHandler) -> None:
+        """Set the active handler and wire LocalStream-owned helpers into it."""
+        self.handler = handler
+        self.handler._clear_queue = self.clear_audio_queue
 
     # ---- Settings UI ----
     def _read_env_lines(self, env_path: Path) -> list[str]:
@@ -170,7 +182,58 @@ class LocalStream:
 
     def _backend_connected(self) -> bool:
         """Return whether the active handler currently has a realtime connection."""
-        return getattr(self.handler, "connection", None) is not None
+        try:
+            handler_state = vars(self.handler)
+        except TypeError:
+            handler_state = {}
+        return any(handler_state.get(attr) is not None for attr in ("connection", "session"))
+
+    def _can_rebuild_handler(self) -> bool:
+        """Return whether LocalStream can construct handlers for backend changes."""
+        return self._handler_factory is not None
+
+    def _build_handler_for_current_backend(self) -> ConversationHandler:
+        """Create and install a fresh handler for the current runtime backend config."""
+        if self._handler_factory is None:
+            return self.handler
+        handler = self._handler_factory(self._voice_override)
+        self._install_handler(handler)
+        self._active_backend_name = get_backend_choice()
+        return handler
+
+    async def _shutdown_active_handler(self) -> None:
+        """Best-effort shutdown for the currently active handler."""
+        try:
+            await self.handler.shutdown()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.debug("Active handler shutdown ignored during restart: %s", e)
+
+    def _mark_restart_requested(self, reason: str) -> None:
+        """Request a backend restart from a synchronous route handler."""
+        logger.info("Backend restart requested: %s", reason)
+        self._set_backend_connection_state("connecting")
+        loop = self._asyncio_loop
+        if loop is not None and loop.is_running():
+            asyncio.run_coroutine_threadsafe(self.request_backend_restart(reason), loop)
+            return
+        self._restart_requested.set()
+
+    async def request_backend_restart(self, reason: str) -> None:
+        """Ask the startup loop to rebuild the backend and stop the current handler."""
+        self._set_backend_connection_state("connecting")
+        self._restart_requested.set()
+        await self._shutdown_active_handler()
+
+    async def _sleep_or_restart_requested(self, delay: float) -> None:
+        """Sleep for a retry interval, waking early if a restart is requested."""
+        if self._restart_requested.is_set():
+            return
+        try:
+            await asyncio.wait_for(self._restart_requested.wait(), timeout=delay)
+        except asyncio.TimeoutError:
+            pass
 
     @staticmethod
     def _format_backend_error(error: BaseException | str) -> str:
@@ -370,6 +433,60 @@ class LocalStream:
         """Read the saved startup personality from instance-local UI settings."""
         return read_startup_settings(self._instance_path).profile
 
+    async def apply_personality(self, profile: Optional[str]) -> str:
+        """Apply a personality by updating config and restarting the active backend."""
+        try:
+            from reachy_mini_conversation_app.config import set_custom_profile
+            from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
+
+            previous_profile = getattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
+            set_custom_profile(profile)
+            try:
+                get_session_instructions()
+                get_session_voice(default=get_default_voice_for_backend(get_backend_choice()))
+            except BaseException:
+                set_custom_profile(previous_profile)
+                raise
+        except Exception as e:
+            logger.error("Error applying personality '%s': %s", profile, e)
+            return f"Failed to apply personality: {e}"
+        except BaseException as e:
+            logger.error("Failed to resolve personality content: %s", e)
+            return f"Failed to apply personality: {e}"
+        await self.request_backend_restart("personality_changed")
+        return "Applied personality and restarting backend."
+
+    async def get_available_voices(self) -> list[str]:
+        """Return voices available for the currently selected backend."""
+        return get_available_voices_for_backend(get_backend_choice())
+
+    def get_current_voice(self) -> str:
+        """Return the currently selected voice override or backend profile voice."""
+        if self._voice_override:
+            return self._voice_override
+        try:
+            from reachy_mini_conversation_app.prompts import get_session_voice
+
+            return get_session_voice(default=get_default_voice_for_backend(get_backend_choice()))
+        except Exception:
+            return get_default_voice_for_backend(get_backend_choice())
+
+    async def change_voice(self, voice: str) -> str:
+        """Change the voice by rebuilding the active backend from LocalStream."""
+        available_voices = get_available_voices_for_backend(get_backend_choice())
+        default_voice = get_default_voice_for_backend(get_backend_choice())
+        resolved_voice = voice if voice in available_voices else default_voice
+        if resolved_voice != voice:
+            logger.warning(
+                "Ignoring unsupported voice %r for backend=%r; using %r",
+                voice,
+                get_backend_choice(),
+                resolved_voice,
+            )
+        self._voice_override = resolved_voice
+        await self.request_backend_restart("voice_changed")
+        return f"Voice changed to {resolved_voice}."
+
     def _init_settings_ui_if_needed(self) -> None:
         """Attach minimal settings UI to the settings app.
 
@@ -417,8 +534,9 @@ class LocalStream:
             can_proceed_with_openai = has_openai_key
             can_proceed_with_gemini = has_gemini_key
             can_proceed_with_hf = has_hf_connection
-            can_proceed = self._has_required_key(active_backend)
-            requires_restart = backend_provider != active_backend
+            readiness_backend = backend_provider if self._can_rebuild_handler() else active_backend
+            can_proceed = self._has_required_key(readiness_backend)
+            requires_restart = backend_provider != active_backend and not self._can_rebuild_handler()
             backend_connection = self._backend_connection_status()
             return {
                 "active_backend": active_backend,
@@ -512,10 +630,14 @@ class LocalStream:
                     return JSONResponse({"ok": False, "error": "invalid_hf_mode"}, status_code=400)
 
             self._persist_backend_choice(backend)
+            if self._can_rebuild_handler():
+                self._mark_restart_requested("backend_config_changed")
             payload_data = _status_payload()
             message = "Backend saved."
             if payload_data["requires_restart"]:
                 message = "Backend saved. Restart Reachy Mini Conversation from the desktop app to apply it."
+            elif self._can_rebuild_handler():
+                message = "Backend saved. Reconnecting backend."
             return JSONResponse(
                 {
                     "ok": True,
@@ -555,16 +677,34 @@ class LocalStream:
     async def _run_handler_startup_loop(self) -> None:
         """Start the realtime handler and keep settings UI alive after backend failures."""
         while not self._stop_event.is_set():
-            active_backend = self._active_backend()
-            if get_backend_choice() != active_backend:
-                self._set_backend_connection_state("restart_required")
-                await asyncio.sleep(0.5)
-                continue
+            selected_backend = get_backend_choice()
+            if selected_backend != self._active_backend() or self._restart_requested.is_set():
+                await self._shutdown_active_handler()
+                if not self._can_rebuild_handler():
+                    self._restart_requested.clear()
+                    self._set_backend_connection_state("restart_required")
+                    await self._sleep_or_restart_requested(0.5)
+                    continue
+                self._restart_requested.clear()
+                try:
+                    self._build_handler_for_current_backend()
+                except Exception as e:
+                    self._set_backend_connection_state("disconnected", e)
+                    logger.warning(
+                        "%s backend handler failed to initialize: %s. Retrying in %.1f seconds.",
+                        selected_backend,
+                        e,
+                        self._backend_retry_delay,
+                        exc_info=logger.isEnabledFor(logging.DEBUG),
+                    )
+                    await self._sleep_or_restart_requested(self._backend_retry_delay)
+                    continue
 
+            active_backend = self._active_backend()
             if not self._has_required_key(active_backend):
                 requirement_name = self._requirement_name(active_backend)
                 self._set_backend_connection_state("waiting_for_config", f"{requirement_name} is not configured.")
-                await asyncio.sleep(0.5)
+                await self._sleep_or_restart_requested(0.5)
                 continue
 
             self._set_backend_connection_state("connecting")
@@ -585,13 +725,16 @@ class LocalStream:
                 if self._stop_event.is_set():
                     return
                 self._set_backend_connection_state("disconnected")
+                if self._restart_requested.is_set():
+                    logger.info("%s backend stopped for requested restart.", active_backend)
+                    continue
                 logger.info(
                     "%s backend session ended. Settings UI remains available; retrying in %.1f seconds.",
                     active_backend,
                     self._backend_retry_delay,
                 )
 
-            await asyncio.sleep(self._backend_retry_delay)
+            await self._sleep_or_restart_requested(self._backend_retry_delay)
 
     def launch(self) -> None:
         """Start the recorder/player and run the async processing loops.
@@ -633,8 +776,15 @@ class LocalStream:
             # Poll until the key becomes available (set via the settings UI)
             try:
                 while not self._stop_event.is_set() and not self._has_required_key(active_backend):
-                    if get_backend_choice() != active_backend:
-                        self._set_backend_connection_state("restart_required")
+                    selected_backend = get_backend_choice()
+                    if selected_backend != active_backend:
+                        if self._can_rebuild_handler():
+                            active_backend = selected_backend
+                            self._active_backend_name = selected_backend
+                            self._restart_requested.set()
+                            self._set_backend_connection_state("waiting_for_config")
+                        else:
+                            self._set_backend_connection_state("restart_required")
                     time.sleep(0.2)
             except KeyboardInterrupt:
                 logger.info("Interrupted while waiting for API key.")
@@ -662,6 +812,10 @@ class LocalStream:
                         lambda: self._asyncio_loop,
                         persist_personality=self._persist_personality,
                         get_persisted_personality=self._read_persisted_personality,
+                        apply_personality=self.apply_personality,
+                        get_available_voices=self.get_available_voices,
+                        get_current_voice=self.get_current_voice,
+                        change_voice=self.change_voice,
                     )
             except Exception:
                 pass
@@ -749,7 +903,11 @@ class LocalStream:
     async def play_loop(self) -> None:
         """Fetch outputs from the handler: log text and play audio frames."""
         while not self._stop_event.is_set():
-            handler_output = await self.handler.emit()
+            handler = self.handler
+            try:
+                handler_output = await asyncio.wait_for(handler.emit(), timeout=0.5)
+            except asyncio.TimeoutError:
+                continue
 
             if isinstance(handler_output, AdditionalOutputs):
                 for msg in handler_output.args:

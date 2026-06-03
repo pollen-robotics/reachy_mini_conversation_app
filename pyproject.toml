@@ -15,8 +15,8 @@ dependencies = [
     "av",
     "fastrtc>=0.0.34",
     "gradio==5.50.1.dev1",
-    "httpx",
     "huggingface-hub==1.3.0",
+    "httpx>=0.28.1",
 
     #Environment variables
     "python-dotenv",
@@ -31,6 +31,7 @@ dependencies = [
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
     "reachy-mini>=1.8.0",
+    "mcp>=1.27.1",
 ]
 
 [project.optional-dependencies]

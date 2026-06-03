@@ -296,7 +296,9 @@ function describeHFConfiguration(status) {
 }
 
 function describeActiveBackendTarget(status) {
-  const activeBackend = status.active_backend || status.backend_provider || DEFAULT_BACKEND;
+  const activeBackend = status.backend_connected
+    ? (status.active_backend || status.backend_provider || DEFAULT_BACKEND)
+    : (status.backend_provider || status.active_backend || DEFAULT_BACKEND);
   if (activeBackend === HF_BACKEND) {
     if (status.hf_connection_mode === "local") {
       const host = status.hf_direct_host || HF_DEFAULT_HOST;
@@ -426,7 +428,9 @@ async function init() {
 
   function renderBackendConnectionStatus(status) {
     const state = backendConnectionState(status);
-    const activeBackend = status.active_backend || status.backend_provider || DEFAULT_BACKEND;
+    const activeBackend = status.backend_connected
+      ? (status.active_backend || status.backend_provider || DEFAULT_BACKEND)
+      : (status.backend_provider || status.active_backend || DEFAULT_BACKEND);
     const activeLabel = backendMeta(activeBackend).label;
     const target = describeActiveBackendTarget(status);
     const errorDetails = status.backend_error ? ` Last error: ${status.backend_error}` : "";
@@ -645,18 +649,23 @@ async function init() {
             return;
           }
 
-          await saveBackendConfig(selectedBackend, {
+          const saved = await saveBackendConfig(selectedBackend, {
             hfMode: "local",
             hfHost: host,
             hfPort: port,
           });
+          setStatusMessage(statusEl, saved.message || "Saved. Reconnecting…", "ok");
         } else {
-          await saveBackendConfig(selectedBackend, {
+          const saved = await saveBackendConfig(selectedBackend, {
             hfMode: "deployed",
           });
+          setStatusMessage(statusEl, saved.message || "Saved. Reconnecting…", "ok");
         }
-        setStatusMessage(statusEl, "Saved. Reloading…", "ok");
-        window.location.reload();
+        const latest = await fetchStatusSnapshot();
+        if (latest) {
+          st = latest;
+          renderCredentialPanels(st);
+        }
       } catch (e) {
         if (e.message === "missing_hf_session_url") {
           setStatusMessage(
@@ -697,9 +706,13 @@ async function init() {
       } else {
         setStatusMessage(statusEl, "Saving Gemini token...", "ok");
       }
-      await saveBackendConfig(selectedBackend, { key });
-      setStatusMessage(statusEl, "Saved. Reloading…", "ok");
-      window.location.reload();
+      const saved = await saveBackendConfig(selectedBackend, { key });
+      setStatusMessage(statusEl, saved.message || "Saved. Reconnecting…", "ok");
+      const latest = await fetchStatusSnapshot();
+      if (latest) {
+        st = latest;
+        renderCredentialPanels(st);
+      }
     } catch (e) {
       input.classList.add("error");
       if (selectedBackend === OPENAI_BACKEND && e.message === "invalid_api_key") {

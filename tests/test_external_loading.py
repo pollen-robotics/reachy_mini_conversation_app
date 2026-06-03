@@ -16,9 +16,12 @@ def _reload_core_tools() -> ModuleType:
     # External file-loaded modules are registered by bare tool name.
     sys.modules.pop("ext_ping", None)
     sys.modules.pop("sweep_look", None)
+    sys.modules.pop("ext_dup_a", None)
+    sys.modules.pop("ext_dup_b", None)
 
     sys.modules.pop("reachy_mini_conversation_app.tools.core_tools", None)
     core_tools_mod = importlib.import_module("reachy_mini_conversation_app.tools.core_tools")
+    core_tools_mod.initialize_tools()
     return core_tools_mod
 
 
@@ -76,6 +79,38 @@ def test_external_tools_can_be_loaded_without_external_profile(
     core_tools_mod = _reload_core_tools()
 
     assert "ext_ping" in core_tools_mod.ALL_TOOLS
+
+
+def test_external_tools_fail_on_duplicate_tool_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Loading must fail if multiple tools declare the same Tool.name."""
+    external_tools_root = tmp_path / "external_tools"
+    external_tools_root.mkdir(parents=True)
+
+    duplicate_tool_source = "\n".join(
+        [
+            "from typing import Any, Dict",
+            "from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies",
+            "",
+            "class DupTool(Tool):",
+            '    name = "dup_tool"',
+            '    description = "Duplicate tool name"',
+            '    parameters_schema = {"type": "object", "properties": {}, "required": []}',
+            "",
+            "    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:",
+            '        return {"status": "ok"}',
+            "",
+        ]
+    )
+    (external_tools_root / "ext_dup_a.py").write_text(duplicate_tool_source, encoding="utf-8")
+    (external_tools_root / "ext_dup_b.py").write_text(duplicate_tool_source, encoding="utf-8")
+
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "default")
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", config_mod.DEFAULT_PROFILES_DIRECTORY)
+    monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", external_tools_root)
+    monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", True)
+
+    with pytest.raises(RuntimeError, match="Duplicate Tool.name values detected"):
+        _reload_core_tools()
 
 
 def test_builtin_profile_can_load_profile_local_tools(
