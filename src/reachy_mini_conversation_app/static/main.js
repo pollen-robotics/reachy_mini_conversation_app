@@ -596,8 +596,19 @@ async function init() {
   input.addEventListener("input", () => {
     input.classList.remove("error");
   });
+  function syncVoiceUI() {
+    const hasCustom = !!(pVoiceCustom.value || "").trim();
+    pVoice.disabled = hasCustom;
+  }
+
+  pVoice.addEventListener("change", () => {
+    pVoiceCustom.value = "";
+    syncVoiceUI();
+  });
+
   pVoiceCustom.addEventListener("input", () => {
     pVoiceCustom.classList.remove("error");
+    syncVoiceUI();
   });
   hfHostCustom.addEventListener("input", () => {
     hfHostCustom.classList.remove("error");
@@ -861,28 +872,37 @@ async function init() {
       const fallbackVoice = pVoice.options[0]?.value || "";
       const loadedVoice = typeof data.voice === "string" ? data.voice.trim() : "";
       const loadedVoiceInList = voices.includes(loadedVoice);
-      const activeVoice = voices.includes(currentVoice) ? currentVoice : (loadedVoiceInList ? loadedVoice : fallbackVoice);
+      const currentInList = voices.includes(currentVoice);
 
-      if (data.uses_default_voice) {
-        pVoice.value = activeVoice;
-        pVoiceCustom.value = "";
+      if (loadedVoice && !loadedVoiceInList) {
+        // Personality profile has a custom voice saved — show it
+        pVoice.value = fallbackVoice;
+        pVoiceCustom.value = loadedVoice;
+      } else if (data.uses_default_voice && !currentInList && currentVoice) {
+        // No profile voice, but a global custom voice is active (persisted startup voice)
+        pVoice.value = fallbackVoice;
+        pVoiceCustom.value = currentVoice;
       } else if (loadedVoiceInList) {
+        // Personality profile has a known voice saved
         pVoice.value = loadedVoice;
         pVoiceCustom.value = "";
       } else {
-        pVoice.value = activeVoice;
-        pVoiceCustom.value = loadedVoice;
+        // Fallback to active known voice or first dropdown option
+        pVoice.value = currentInList ? currentVoice : fallbackVoice;
+        pVoiceCustom.value = "";
       }
       // Available tools as checkboxes
       renderToolCheckboxes(data.available_tools, data.enabled_tools);
       // Default name field to last segment of selection
       const idx = selected.lastIndexOf("/");
       pName.value = idx >= 0 ? selected.slice(idx + 1) : "";
+      syncVoiceUI();
       setStatusMessage(pStatus, `Loaded ${selected}`);
     }
 
     pSelect.addEventListener("change", loadSelected);
     await loadSelected();
+    syncVoiceUI();
     if (!voices.length) {
       setStatusMessage(pStatus, "Voices unavailable. The backend default voice will be used.", "warn");
     }
@@ -901,9 +921,11 @@ async function init() {
         currentVoice = voice;
         if (voices.includes(voice)) {
           pVoice.value = voice;
+          pVoiceCustom.value = "";
         } else {
           pVoiceCustom.value = voice;
         }
+        syncVoiceUI();
         setStatusMessage(pStatus, res.status || `Voice changed to ${voice}.`, "ok");
       } catch (e) {
         setStatusMessage(pStatus, `Failed to apply voice${e.message ? ": " + e.message : ""}`, "error");
@@ -944,6 +966,7 @@ async function init() {
       });
       pVoice.value = pVoice.options[0]?.value || "";
       pVoiceCustom.value = "";
+      syncVoiceUI();
       setStatusMessage(pStatus, "Fill fields and click Save.");
     });
 

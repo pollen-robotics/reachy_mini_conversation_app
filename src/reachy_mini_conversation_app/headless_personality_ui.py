@@ -345,6 +345,13 @@ def mount_personality_routes(
         try:
             fut = asyncio.run_coroutine_threadsafe(_do(), loop)
             status = fut.result(timeout=10)
+            # Persist the voice to startup_settings.json so it survives restarts
+            if persist_personality is not None:
+                try:
+                    current_voice = get_current_voice() if callable(get_current_voice) else None
+                    persist_personality(None, current_voice)
+                except Exception as e:
+                    logger.warning("Failed to persist voice: %s", e)
             return {"ok": True, "status": status}
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore

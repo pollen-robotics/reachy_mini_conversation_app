@@ -418,6 +418,16 @@ class LocalStream:
 
         if not self._instance_path:
             return
+
+        # When only one field is updated, merge with existing settings on disk
+        # so that a voice-only persist doesn't drop a previously saved profile
+        if selection is None or normalized_voice_override is None:
+            existing = read_startup_settings(self._instance_path)
+            if selection is None and normalized_voice_override:
+                selection = existing.profile
+            elif normalized_voice_override is None and selection:
+                normalized_voice_override = existing.voice
+
         try:
             write_startup_settings(
                 self._instance_path,
@@ -462,27 +472,74 @@ class LocalStream:
 
     def get_current_voice(self) -> str:
         """Return the currently selected voice override or backend profile voice."""
-        if self._voice_override:
-            return self._voice_override
+        default_voice = get_default_voice_for_backend(get_backend_choice())
+        raw_voice = self._voice_override
+        if raw_voice:
+            resolved = self._resolve_backend_voice(raw_voice, fallback=None)
+            if resolved is not None:
+                return resolved
         try:
             from reachy_mini_conversation_app.prompts import get_session_voice
 
-            return get_session_voice(default=get_default_voice_for_backend(get_backend_choice()))
+            return get_session_voice(default=default_voice)
         except Exception:
-            return get_default_voice_for_backend(get_backend_choice())
+            return default_voice
+
+    def _resolve_backend_voice(
+        self,
+        voice: str | None,
+        *,
+        fallback: str | None = None,
+    ) -> str | None:
+        """Return a backend-supported voice, optionally falling back when unsupported.
+
+        Mirrors BaseRealtimeHandler._resolve_backend_voice logic so that
+        Hugging Face backends can accept custom/dynamic speaker names while
+        blocking reserved cross-backend voices.  Other backends only accept
+        voices from their curated list.
+        """
+        available_voices = get_available_voices_for_backend(get_backend_choice())
+        voice_value = (voice or "").strip()
+        if not voice_value:
+            return fallback
+
+        voice_by_lowercase = {candidate.lower(): candidate for candidate in available_voices}
+        normalized_voice = voice_by_lowercase.get(voice_value.lower())
+        if normalized_voice is not None:
+            return normalized_voice
+
+        # Hugging Face backends can expose dynamic/custom speaker names
+        # (e.g. custom Kokoro/Qwen3-TTS voices) that are not part of the
+        # app's curated defaults. Keep cross-backend reserved names blocked
+        # so accidentally reused OpenAI/Gemini voices still fall back safely.
+        if get_backend_choice() == HF_BACKEND:
+            from reachy_mini_conversation_app.config import AVAILABLE_VOICES, GEMINI_AVAILABLE_VOICES
+
+            _HF_RESERVED = {v.lower() for v in [*AVAILABLE_VOICES, *GEMINI_AVAILABLE_VOICES]}
+            if voice_value.lower() in _HF_RESERVED:
+                if voice:
+                    logger.warning(
+                        "Ignoring unsupported voice %r for backend=%r; expected one of %s",
+                        voice,
+                        get_backend_choice(),
+                        available_voices,
+                    )
+                return fallback
+            return voice_value
+
+        if voice:
+            logger.warning(
+                "Ignoring unsupported voice %r for backend=%r; expected one of %s",
+                voice,
+                get_backend_choice(),
+                available_voices,
+            )
+        return fallback
 
     async def change_voice(self, voice: str) -> str:
         """Change the voice by rebuilding the active backend from LocalStream."""
-        available_voices = get_available_voices_for_backend(get_backend_choice())
         default_voice = get_default_voice_for_backend(get_backend_choice())
-        resolved_voice = voice if voice in available_voices else default_voice
-        if resolved_voice != voice:
-            logger.warning(
-                "Ignoring unsupported voice %r for backend=%r; using %r",
-                voice,
-                get_backend_choice(),
-                resolved_voice,
-            )
+        resolved_voice = self._resolve_backend_voice(voice, fallback=default_voice)
         self._voice_override = resolved_voice
         await self.request_backend_restart("voice_changed")
         return f"Voice changed to {resolved_voice}."
