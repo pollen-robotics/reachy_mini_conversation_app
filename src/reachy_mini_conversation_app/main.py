@@ -9,8 +9,8 @@ import threading
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
+import httpx
 import gradio as gr
-import requests
 from fastapi import FastAPI
 from fastrtc import Stream
 from gradio.utils import get_space
@@ -315,7 +315,7 @@ def run(
         # "test sound" played by POST /api/volume/set on each call.
         try:
             volume_url = f"http://{robot.client.host}:{robot.client.port}/api/volume/current"
-            saved_speaker_volume = int(requests.get(volume_url, timeout=2).json()["volume"])
+            saved_speaker_volume = int(httpx.get(volume_url, timeout=2).json()["volume"])
             robot.client.send_command(SetVolumeCmd(volume=0))
             logger.info(f"Muted robot speaker for Gradio mode (saved volume: {saved_speaker_volume})")
         except Exception as exc:
