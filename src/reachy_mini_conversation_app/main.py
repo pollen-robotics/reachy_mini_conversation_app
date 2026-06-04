@@ -110,7 +110,7 @@ def run(
         )
 
     from reachy_mini_conversation_app.console import LocalStream
-    from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+    from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, initialize_tools
     from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 
     try:
