@@ -13,7 +13,10 @@ from io import BytesIO
 from typing import Any
 from datetime import datetime, timezone
 
+import httpx
 from openai import AsyncOpenAI
+
+from reachy_mini_conversation_app.config import HF_REALTIME_SESSION_PROXY_URL, parse_hf_realtime_url
 
 
 POST_TOOL_RESPONSE_PROMPT = (
@@ -89,36 +92,27 @@ def _tools() -> list[dict[str, Any]]:
 
 
 def _user_text_item(text: str, *, item_id: str | None = None) -> dict[str, Any]:
-    item: dict[str, Any] = {
+    return {
         "type": "message",
         "role": "user",
         "content": [{"type": "input_text", "text": text}],
     }
-    if item_id:
-        item["id"] = item_id
-    return item
 
 
 def _assistant_text_item(text: str, *, item_id: str | None = None) -> dict[str, Any]:
-    item: dict[str, Any] = {
+    return {
         "type": "message",
         "role": "assistant",
         "content": [{"type": "output_text", "text": text}],
     }
-    if item_id:
-        item["id"] = item_id
-    return item
 
 
 def _system_text_item(text: str, *, item_id: str | None = None) -> dict[str, Any]:
-    item: dict[str, Any] = {
+    return {
         "type": "message",
         "role": "system",
         "content": [{"type": "input_text", "text": text}],
     }
-    if item_id:
-        item["id"] = item_id
-    return item
 
 
 async def _seed_history(conn: Any, turns: int) -> None:
@@ -164,7 +158,6 @@ async def _add_tool_context(
     await conn.conversation.item.create(
         item={
             "type": "function_call",
-            "id": _short_id("tc"),
             "call_id": call_id,
             "name": "camera",
             "arguments": json.dumps({"question": "What does the picture show?"}),
@@ -179,7 +172,6 @@ async def _add_tool_context(
     await conn.conversation.item.create(
         item={
             "type": "function_call_output",
-            "id": _short_id("to"),
             "call_id": call_id,
             "output": json.dumps(tool_result),
         }
@@ -198,7 +190,6 @@ async def _add_tool_context(
         await conn.conversation.item.create(
             item={
                 "type": "message",
-                "id": _short_id("ti"),
                 "role": "user",
                 "content": content,
             }
@@ -274,6 +265,7 @@ async def _drain_response(conn: Any, *, sent_at: float, timeout_s: float) -> dic
     done_at: float | None = None
     text_parts: list[str] = []
     final_text = ""
+    final_audio_transcript = ""
     response_status = ""
     status_details: dict[str, Any] = {}
     usage: dict[str, Any] = {}
@@ -298,6 +290,12 @@ async def _drain_response(conn: Any, *, sent_at: float, timeout_s: float) -> dic
             text_parts.append(getattr(event, "delta", ""))
         elif event_type == "response.output_text.done":
             final_text = getattr(event, "text", "")
+        elif event_type == "response.output_audio_transcript.delta":
+            if first_delta_at is None:
+                first_delta_at = now
+            text_parts.append(getattr(event, "delta", ""))
+        elif event_type == "response.output_audio_transcript.done":
+            final_audio_transcript = getattr(event, "transcript", "")
         elif event_type == "response.done":
             done_at = now
             response = getattr(event, "response", None)
@@ -309,7 +307,7 @@ async def _drain_response(conn: Any, *, sent_at: float, timeout_s: float) -> dic
     if done_at is None:
         raise TimeoutError("Timed out waiting for response.done")
 
-    text = final_text or "".join(text_parts)
+    text = final_text or final_audio_transcript or "".join(text_parts)
     return {
         "created_ms": round(((first_created_at or done_at) - sent_at) * 1000, 1),
         "first_delta_ms": round(((first_delta_at or done_at) - sent_at) * 1000, 1),
@@ -341,12 +339,8 @@ async def _warmup(conn: Any, *, max_output_tokens: int, timeout_s: float) -> Non
 
 
 async def _run_trial(args: argparse.Namespace, *, variant: str, iteration: int) -> dict[str, Any]:
-    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY")
-    if not api_key:
-        raise RuntimeError("Set OPENAI_API_KEY or OPENAI_KEY before running this benchmark.")
-
-    client = AsyncOpenAI(api_key=api_key)
-    async with client.realtime.connect(model=args.model) as conn:
+    client, connect_kwargs = await _build_realtime_client(args)
+    async with client.realtime.connect(**connect_kwargs) as conn:
         await conn.session.update(
             session={
                 "type": "realtime",
@@ -382,6 +376,7 @@ async def _run_trial(args: argparse.Namespace, *, variant: str, iteration: int) 
             "variant": variant,
             "iteration": iteration,
             "model": args.model,
+            "backend": args.backend,
             "include_image": args.include_image,
             "history_turns": args.history_turns,
             "instruction_repeat": args.instruction_repeat,
@@ -391,6 +386,37 @@ async def _run_trial(args: argparse.Namespace, *, variant: str, iteration: int) 
         }
     )
     return result
+
+
+async def _build_realtime_client(args: argparse.Namespace) -> tuple[AsyncOpenAI, dict[str, Any]]:
+    if args.backend == "openai":
+        api_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY")
+        if not api_key:
+            raise RuntimeError("Set OPENAI_API_KEY or OPENAI_KEY before running this benchmark.")
+        connect_kwargs: dict[str, Any] = {}
+        if args.model:
+            connect_kwargs["model"] = args.model
+        return AsyncOpenAI(api_key=api_key), connect_kwargs
+
+    realtime_url = args.hf_realtime_url
+    if not realtime_url:
+        headers = {"Authorization": f"Bearer {args.hf_token}"} if args.hf_token else None
+        async with httpx.AsyncClient(timeout=20.0) as http_client:
+            response = await http_client.post(args.hf_session_url, headers=headers)
+            response.raise_for_status()
+            payload = response.json()
+        realtime_url = payload.get("connect_url")
+        if not isinstance(realtime_url, str) or not realtime_url:
+            raise RuntimeError(f"HF session response did not include a connect_url: {payload!r}")
+
+    parsed = parse_hf_realtime_url(realtime_url)
+    client = AsyncOpenAI(
+        api_key=args.hf_token or "DUMMY",
+        base_url=parsed.base_url,
+        websocket_base_url=parsed.websocket_base_url,
+    )
+    connect_kwargs = {"extra_query": parsed.connect_query} if parsed.connect_query else {}
+    return client, connect_kwargs
 
 
 def _summarize(rows: list[dict[str, Any]], variants: tuple[str, ...]) -> dict[str, Any]:
@@ -415,7 +441,13 @@ def _summarize(rows: list[dict[str, Any]], variants: tuple[str, ...]) -> dict[st
 
 async def _main() -> None:
     parser = argparse.ArgumentParser(description="Benchmark Realtime post-tool prompt placement.")
+    parser.add_argument("--backend", choices=("openai", "hf"), default="openai")
     parser.add_argument("--model", default=os.getenv("MODEL_NAME", "gpt-realtime-2"))
+    parser.add_argument(
+        "--hf-session-url", default=os.getenv("HF_REALTIME_SESSION_URL", HF_REALTIME_SESSION_PROXY_URL)
+    )
+    parser.add_argument("--hf-realtime-url", default=os.getenv("HF_REALTIME_WS_URL", ""))
+    parser.add_argument("--hf-token", default=os.getenv("HF_TOKEN", ""))
     parser.add_argument("--iterations", type=int, default=3)
     parser.add_argument("--history-turns", type=int, default=8)
     parser.add_argument("--instruction-repeat", type=int, default=24)
