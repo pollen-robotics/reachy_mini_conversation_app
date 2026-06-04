@@ -21,7 +21,6 @@ from openai.types.realtime import (
     RealtimeToolsConfigParam,
     RealtimeFunctionToolParam,
     RealtimeAudioConfigOutputParam,
-    RealtimeResponseCreateParamsParam,
     RealtimeSessionCreateRequestParam,
 )
 from websockets.exceptions import ConnectionClosedError
@@ -46,6 +45,13 @@ logger = logging.getLogger(__name__)
 
 _RESPONSE_DONE_TIMEOUT: Final[float] = 30.0
 _RESPONSE_REJECTION_RETRY_DELAY: Final[float] = 0.5
+_POST_TOOL_RESPONSE_PROMPT: Final[str] = (
+    "Use the tool result just returned to answer the user's request. Keep it concise and natural for speech."
+)
+_POST_CAMERA_TOOL_RESPONSE_PROMPT: Final[str] = (
+    "Use the camera image and tool result just returned to answer the user's request. "
+    "Keep it concise and natural for speech."
+)
 
 
 class InputTranscriptChunksByItem(BaseModel):
@@ -175,6 +181,13 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             sanitized["image_attached"] = True
             return sanitized
         return tool_result
+
+    @staticmethod
+    def _post_tool_response_prompt(tool_name: str, *, image_attached: bool) -> str:
+        """Return user-level follow-up text for a model response after tool completion."""
+        if tool_name == "camera" and image_attached:
+            return _POST_CAMERA_TOOL_RESPONSE_PROMPT
+        return _POST_TOOL_RESPONSE_PROMPT
 
     def _normalize_startup_voice(self, voice: str | None) -> str | None:
         """Return a valid persisted startup voice for this backend, or None."""
@@ -605,6 +618,10 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         "role": "user",
                         "content": [
                             {
+                                "type": "input_text",
+                                "text": self._post_tool_response_prompt(bg_tool.tool_name, image_attached=True),
+                            },
+                            {
                                 "type": "input_image",
                                 "image_url": f"data:image/jpeg;base64,{b64_im}",
                             },
@@ -643,11 +660,20 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                     )
 
             if send_result_to_model:
-                await self._safe_response_create(
-                    response=RealtimeResponseCreateParamsParam(
-                        instructions="Use the tool result just returned and answer concisely in speech.",
-                    ),
-                )
+                if bg_tool.tool_name != "camera" or "b64_im" not in tool_result:
+                    await self.connection.conversation.item.create(
+                        item={
+                            "type": "message",
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "input_text",
+                                    "text": self._post_tool_response_prompt(bg_tool.tool_name, image_attached=False),
+                                },
+                            ],
+                        },
+                    )
+                await self._safe_response_create()
 
         except self._connection_closed_errors():
             logger.warning("Connection closed while sending tool result")

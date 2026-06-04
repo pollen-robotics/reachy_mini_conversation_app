@@ -1,3 +1,4 @@
+import json
 import base64
 import random
 import asyncio
@@ -440,6 +441,93 @@ async def test_idle_tool_result_is_not_sent_to_realtime_model(monkeypatch: Any) 
 
     fake_item.create.assert_not_awaited()
     safe_response_create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tool_result_followup_uses_user_message_not_response_instructions(monkeypatch: Any) -> None:
+    """Post-tool guidance should not override response/session instructions."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = OpenaiRealtimeHandler(deps)
+
+    fake_item = SimpleNamespace(create=AsyncMock())
+    handler.connection = SimpleNamespace(conversation=SimpleNamespace(item=fake_item))
+    safe_response_create = AsyncMock()
+    monkeypatch.setattr(handler, "_safe_response_create", safe_response_create)
+
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="call_weather",
+            tool_name="weather",
+            is_idle_tool_call=False,
+            status=ToolState.COMPLETED,
+            result={"forecast": "sunny"},
+        )
+    )
+
+    assert fake_item.create.await_count == 2
+    function_output = fake_item.create.await_args_list[0].kwargs["item"]
+    assert function_output == {
+        "type": "function_call_output",
+        "call_id": "call_weather",
+        "output": '{"forecast": "sunny"}',
+    }
+    followup_message = fake_item.create.await_args_list[1].kwargs["item"]
+    assert followup_message["role"] == "user"
+    assert followup_message["content"] == [
+        {
+            "type": "input_text",
+            "text": (
+                "Use the tool result just returned to answer the user's request. "
+                "Keep it concise and natural for speech."
+            ),
+        }
+    ]
+    safe_response_create.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_camera_tool_result_followup_keeps_image_with_user_message(monkeypatch: Any) -> None:
+    """Camera follow-up text should be attached to the image message, not response instructions."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = OpenaiRealtimeHandler(deps)
+
+    fake_item = SimpleNamespace(create=AsyncMock())
+    handler.connection = SimpleNamespace(conversation=SimpleNamespace(item=fake_item))
+    safe_response_create = AsyncMock()
+    monkeypatch.setattr(handler, "_safe_response_create", safe_response_create)
+
+    b64_im = base64.b64encode(b"jpeg-bytes").decode("ascii")
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="call_camera",
+            tool_name="camera",
+            is_idle_tool_call=False,
+            status=ToolState.COMPLETED,
+            result={"b64_im": b64_im, "image_width": 32, "image_height": 24},
+        )
+    )
+
+    assert fake_item.create.await_count == 2
+    function_output = fake_item.create.await_args_list[0].kwargs["item"]
+    assert json.loads(function_output["output"]) == {
+        "image_attached": True,
+        "image_width": 32,
+        "image_height": 24,
+    }
+    image_message = fake_item.create.await_args_list[1].kwargs["item"]
+    assert image_message["role"] == "user"
+    assert image_message["content"][0] == {
+        "type": "input_text",
+        "text": (
+            "Use the camera image and tool result just returned to answer the user's request. "
+            "Keep it concise and natural for speech."
+        ),
+    }
+    assert image_message["content"][1] == {
+        "type": "input_image",
+        "image_url": f"data:image/jpeg;base64,{b64_im}",
+    }
+    safe_response_create.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio
