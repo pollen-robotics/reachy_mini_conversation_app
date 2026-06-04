@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
+import reachy_mini_conversation_app.tools.camera as camera_mod
 from reachy_mini_conversation_app.tools.camera import Camera
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 
@@ -75,8 +76,10 @@ async def test_camera_tool_uses_local_vision_processor_when_available() -> None:
 
 
 @pytest.mark.asyncio
-async def test_camera_tool_plays_snapshot_sound_after_frame_capture() -> None:
+async def test_camera_tool_plays_snapshot_sound_after_frame_capture(monkeypatch: pytest.MonkeyPatch) -> None:
     """Capturing a frame should play the packaged camera snapshot sound."""
+    monkeypatch.delenv("REACHY_MINI_CAMERA_SNAPSHOT_SOUND", raising=False)
+    monkeypatch.setattr(camera_mod, "_MACOS_SCREENSHOT_SOUND_PATHS", ())
     play_sound = MagicMock()
     reachy_mini = SimpleNamespace(media=SimpleNamespace(play_sound=play_sound))
     deps, _camera_worker = _deps_with_camera(reachy_mini=reachy_mini)
@@ -92,6 +95,25 @@ async def test_camera_tool_plays_snapshot_sound_after_frame_capture() -> None:
         assert wav.getsampwidth() == 2
         assert wav.getframerate() == 44100
         assert wav.getnframes() / wav.getframerate() < 0.4
+
+
+@pytest.mark.asyncio
+async def test_camera_tool_prefers_local_macos_screenshot_sound(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The real macOS screenshot sound should be used when available locally."""
+    monkeypatch.delenv("REACHY_MINI_CAMERA_SNAPSHOT_SOUND", raising=False)
+    macos_sound = tmp_path / "Grab.aif"
+    macos_sound.write_bytes(b"local macOS screenshot sound")
+    monkeypatch.setattr(camera_mod, "_MACOS_SCREENSHOT_SOUND_PATHS", (macos_sound,))
+    play_sound = MagicMock()
+    reachy_mini = SimpleNamespace(media=SimpleNamespace(play_sound=play_sound))
+    deps, _camera_worker = _deps_with_camera(reachy_mini=reachy_mini)
+
+    await Camera()(deps, question="What is in front of you?")
+
+    play_sound.assert_called_once_with(str(macos_sound))
 
 
 @pytest.mark.asyncio

@@ -1,3 +1,4 @@
+import os
 import base64
 import asyncio
 import logging
@@ -11,6 +12,25 @@ from reachy_mini_conversation_app.camera_frame_encoding import encode_bgr_frame_
 logger = logging.getLogger(__name__)
 _SOUNDS_DIR = Path(__file__).resolve().parents[1] / "sounds"
 _CAMERA_SNAPSHOT_SOUND = "camera_snapshot.wav"
+_SNAPSHOT_SOUND_ENV_VAR = "REACHY_MINI_CAMERA_SNAPSHOT_SOUND"
+_MACOS_SCREENSHOT_SOUND_PATHS = (
+    Path("/System/Library/Components/CoreAudio.component/Contents/SharedSupport/SystemSounds/system/Grab.aif"),
+    Path("/System/Library/Components/CoreAudio.component/Contents/SharedSupport/SystemSounds/system/Screen Capture.aif"),
+)
+
+
+def _snapshot_sound_path() -> Path:
+    """Return the best available snapshot sound for this machine."""
+    override = os.environ.get(_SNAPSHOT_SOUND_ENV_VAR, "").strip()
+    candidates = [Path(override).expanduser()] if override else []
+    candidates.extend(_MACOS_SCREENSHOT_SOUND_PATHS)
+    candidates.append(_SOUNDS_DIR / _CAMERA_SNAPSHOT_SOUND)
+
+    for path in candidates:
+        if path.is_file():
+            return path
+
+    return _SOUNDS_DIR / _CAMERA_SNAPSHOT_SOUND
 
 
 async def _play_snapshot_sound(deps: ToolDependencies) -> None:
@@ -21,7 +41,7 @@ async def _play_snapshot_sound(deps: ToolDependencies) -> None:
         logger.debug("camera: media.play_sound is unavailable; skipping snapshot sound")
         return
 
-    path = _SOUNDS_DIR / _CAMERA_SNAPSHOT_SOUND
+    path = _snapshot_sound_path()
     try:
         await asyncio.to_thread(play_sound, str(path))
     except Exception:
