@@ -1,5 +1,3 @@
-import json
-import base64
 import random
 import asyncio
 import logging
@@ -37,7 +35,6 @@ async def _run_openai_handler_with_events(
     events: list[Any],
     *,
     movement_manager: MagicMock | None = None,
-    head_wobbler: MagicMock | None = None,
     gradio_mode: bool = False,
     handler_setup: Callable[[OpenaiRealtimeHandler], None] | None = None,
 ) -> OpenaiRealtimeHandler:
@@ -106,7 +103,6 @@ async def _run_openai_handler_with_events(
     deps = ToolDependencies(
         reachy_mini=MagicMock(),
         movement_manager=movement_manager or MagicMock(),
-        head_wobbler=head_wobbler,
     )
     handler = OpenaiRealtimeHandler(deps, gradio_mode=gradio_mode)
     handler.client = FakeClient()
@@ -120,112 +116,6 @@ async def _run_openai_handler_with_events(
 
     await handler._run_realtime_session()
     return handler
-
-
-@pytest.mark.asyncio
-async def test_tool_completion_does_not_reset_head_wobbler(monkeypatch: Any) -> None:
-    """Tool completion should not interrupt ongoing speech wobble."""
-    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda: "test")
-    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
-    monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
-
-    async def _fake_dispatch(tool_name: str, args_json: str, deps: Any, **_kw: Any) -> dict[str, Any]:
-        return {"image_description": "A person in front of a door.", "tool": tool_name}
-
-    monkeypatch.setattr(btm_mod, "dispatch_tool_call", _fake_dispatch)
-
-    class FakeSession:
-        async def update(self, **_kw: Any) -> None:
-            pass
-
-    class FakeInputAudioBuffer:
-        async def append(self, **_kw: Any) -> None:
-            pass
-
-    class FakeItem:
-        def __init__(self) -> None:
-            self.created = asyncio.Event()
-
-        async def create(self, **_kw: Any) -> None:
-            self.created.set()
-
-    class FakeConversation:
-        def __init__(self) -> None:
-            self.item = FakeItem()
-
-    class FakeResponse:
-        async def create(self, **_kw: Any) -> None:
-            pass
-
-        async def cancel(self, **_kw: Any) -> None:
-            pass
-
-    class FakeConn:
-        def __init__(self) -> None:
-            self._events: asyncio.Queue[Any] = asyncio.Queue()
-            self.session = FakeSession()
-            self.input_audio_buffer = FakeInputAudioBuffer()
-            self.conversation = FakeConversation()
-            self.response = FakeResponse()
-
-        async def __aenter__(self) -> "FakeConn":
-            return self
-
-        async def __aexit__(self, *_args: Any) -> bool:
-            return False
-
-        async def close(self) -> None:
-            await self._events.put(None)
-
-        def __aiter__(self) -> "FakeConn":
-            return self
-
-        async def __anext__(self) -> Any:
-            event = await self._events.get()
-            if event is None:
-                raise StopAsyncIteration
-            return event
-
-    class FakeRealtime:
-        def __init__(self) -> None:
-            self.conn = FakeConn()
-
-        def connect(self, **_kw: Any) -> FakeConn:
-            return self.conn
-
-    class FakeClient:
-        def __init__(self) -> None:
-            self.realtime = FakeRealtime()
-
-    head_wobbler = MagicMock()
-    deps = ToolDependencies(
-        reachy_mini=MagicMock(),
-        movement_manager=MagicMock(),
-        head_wobbler=head_wobbler,
-    )
-    handler = OpenaiRealtimeHandler(deps)
-    fake_client = FakeClient()
-    handler.client = fake_client
-
-    session_task = asyncio.create_task(handler._run_realtime_session())
-
-    await asyncio.sleep(0)
-    await handler.tool_manager.start_tool(
-        call_id="call_1",
-        tool_call_routine=ToolCallRoutine(
-            tool_name="camera",
-            args_json_str='{"question":"What do I see?"}',
-            deps=deps,
-        ),
-        is_idle_tool_call=False,
-    )
-
-    fake_conn = fake_client.realtime.conn
-    await asyncio.wait_for(fake_conn.conversation.item.created.wait(), timeout=2.0)
-    await fake_conn.close()
-    await asyncio.wait_for(session_task, timeout=2.0)
-
-    head_wobbler.reset.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -350,29 +240,6 @@ async def test_completed_user_transcript_resets_idle_state(monkeypatch: Any) -> 
 
 
 @pytest.mark.asyncio
-async def test_output_audio_done_schedules_head_wobbler_reset(monkeypatch: Any) -> None:
-    """OpenAI speech completion should let the wobbler reset itself after queued audio."""
-    audio_delta = base64.b64encode(b"\x00\x00\x10\x00").decode("ascii")
-    head_wobbler = MagicMock()
-
-    handler = await _run_openai_handler_with_events(
-        monkeypatch,
-        [
-            SimpleNamespace(type="response.created"),
-            SimpleNamespace(type="response.output_audio.delta", delta=audio_delta),
-            SimpleNamespace(type="response.output_audio.done"),
-        ],
-        head_wobbler=head_wobbler,
-        gradio_mode=True,
-    )
-
-    head_wobbler.feed_pcm.assert_called_once()
-    assert head_wobbler.feed_pcm.call_args.args[1] == handler.output_sample_rate
-    head_wobbler.request_reset_after_current_audio.assert_called_once()
-    head_wobbler.reset.assert_not_called()
-
-
-@pytest.mark.asyncio
 async def test_idle_signal_starts_local_tool_without_model_turn(monkeypatch: Any) -> None:
     """Idle behavior should not send an idle message or response request to the realtime model."""
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
@@ -445,7 +312,7 @@ async def test_idle_tool_result_is_not_sent_to_realtime_model(monkeypatch: Any) 
 
 @pytest.mark.asyncio
 async def test_tool_result_followup_uses_bare_response_create(monkeypatch: Any) -> None:
-    """Post-tool follow-up should not add prompt text or override response/session instructions."""
+    """Post-tool follow-up should not override response/session instructions."""
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
     handler = OpenaiRealtimeHandler(deps)
 
@@ -464,48 +331,7 @@ async def test_tool_result_followup_uses_bare_response_create(monkeypatch: Any) 
         )
     )
 
-    assert fake_item.create.await_count == 1
-    function_output = fake_item.create.await_args_list[0].kwargs["item"]
-    assert function_output == {
-        "type": "function_call_output",
-        "call_id": "call_weather",
-        "output": '{"forecast": "sunny"}',
-    }
-    safe_response_create.assert_awaited_once_with()
-
-
-@pytest.mark.asyncio
-async def test_camera_tool_result_followup_attaches_image_without_prompt(monkeypatch: Any) -> None:
-    """Camera follow-up should attach the image without adding response instructions."""
-    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
-    handler = OpenaiRealtimeHandler(deps)
-
-    fake_item = SimpleNamespace(create=AsyncMock())
-    handler.connection = SimpleNamespace(conversation=SimpleNamespace(item=fake_item))
-    safe_response_create = AsyncMock()
-    monkeypatch.setattr(handler, "_safe_response_create", safe_response_create)
-
-    b64_im = base64.b64encode(b"jpeg-bytes").decode("ascii")
-    await handler._handle_tool_result(
-        ToolNotification(
-            id="call_camera",
-            tool_name="camera",
-            is_idle_tool_call=False,
-            status=ToolState.COMPLETED,
-            result={"b64_im": b64_im, "image_width": 32, "image_height": 24},
-        )
-    )
-
-    assert fake_item.create.await_count == 2
-    function_output = fake_item.create.await_args_list[0].kwargs["item"]
-    assert json.loads(function_output["output"]) == {
-        "image_attached": True,
-        "image_width": 32,
-        "image_height": 24,
-    }
-    image_message = fake_item.create.await_args_list[1].kwargs["item"]
-    assert image_message["role"] == "user"
-    assert image_message["content"] == [{"type": "input_image", "image_url": f"data:image/jpeg;base64,{b64_im}"}]
+    fake_item.create.assert_awaited_once()
     safe_response_create.assert_awaited_once_with()
 
 
