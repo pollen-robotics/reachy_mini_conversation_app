@@ -165,6 +165,35 @@ body {
   margin: 0;
 }
 
+.connection-alert {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 181, 71, 0.38);
+  background: rgba(255, 181, 71, 0.1);
+  color: var(--warn);
+}
+
+.connection-alert strong {
+  display: block;
+  margin-bottom: 4px;
+  color: inherit;
+  font-size: 14px;
+}
+
+.connection-alert p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.connection-alert.error {
+  border-color: rgba(255, 92, 112, 0.42);
+  background: rgba(255, 92, 112, 0.1);
+  color: var(--error);
+}
+
 .backend-note code,
 .backend-choice-copy code {
   padding: 2px 6px;

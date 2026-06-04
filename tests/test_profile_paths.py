@@ -124,7 +124,7 @@ def test_headless_profile_write_defaults_voice_at_call_time(
     """New headless profiles should use the currently selected backend default voice."""
     monkeypatch.setattr(config, "BACKEND_PROVIDER", "gemini")
     monkeypatch.setattr(config, "MODEL_NAME", "gemini-3.1-flash-live-preview")
-    monkeypatch.setattr(headless_mod, "_profiles_root", lambda: tmp_path)
+    monkeypatch.setattr(headless_mod, "DEFAULT_PROFILES_DIRECTORY", tmp_path)
 
     headless_mod._write_profile("runtime_voice_default", "test instructions", "")
 

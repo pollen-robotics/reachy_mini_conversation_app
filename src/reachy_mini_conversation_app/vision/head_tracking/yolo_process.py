@@ -26,18 +26,17 @@ logger = logging.getLogger(__name__)
 _PROCESS_START_TIMEOUT = 20.0
 _REQUEST_TIMEOUT = 0.5
 _SHUTDOWN_TIMEOUT = 2.0
+_DRAIN_TIMEOUT_MAX = 2.0
 _HEADER_STRUCT = struct.Struct("!I")
 
 
 def _build_tracker_backend() -> HeadTracker:
-    """Instantiate a concrete head-tracker backend."""
     from reachy_mini_conversation_app.vision.head_tracking.yolo import YoloHeadTracker
 
     return YoloHeadTracker()
 
 
 def _read_exact(stream: IO[bytes], size: int) -> bytes:
-    """Read exactly `size` bytes or raise EOFError."""
     chunks = bytearray()
     while len(chunks) < size:
         chunk = stream.read(size - len(chunks))
@@ -48,7 +47,6 @@ def _read_exact(stream: IO[bytes], size: int) -> bytes:
 
 
 def _send_message(stream: IO[bytes], payload: object) -> None:
-    """Serialize and write a single message."""
     data = pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
     stream.write(_HEADER_STRUCT.pack(len(data)))
     stream.write(data)
@@ -56,7 +54,6 @@ def _send_message(stream: IO[bytes], payload: object) -> None:
 
 
 def _receive_message(stream: IO[bytes]) -> object:
-    """Read and deserialize a single message."""
     header = _read_exact(stream, _HEADER_STRUCT.size)
     (size,) = _HEADER_STRUCT.unpack(header)
     data = _read_exact(stream, size)
@@ -64,7 +61,6 @@ def _receive_message(stream: IO[bytes]) -> object:
 
 
 def _reader_loop(stream: IO[bytes], messages: queue.Queue[tuple[str, object | None]]) -> None:
-    """Read responses from the child process in the background."""
     try:
         while True:
             payload = _receive_message(stream)
@@ -76,7 +72,6 @@ def _reader_loop(stream: IO[bytes], messages: queue.Queue[tuple[str, object | No
 
 
 def _worker_main() -> int:
-    """Run the tracker worker protocol."""
     protocol_out = sys.stdout.buffer
     sys.stdout = sys.stderr
 
@@ -114,7 +109,6 @@ def _worker_main() -> int:
 
 
 def _is_tracker_result(payload: object) -> TypeGuard[HeadTrackerResult]:
-    """Return whether the payload matches a tracker result."""
     if not isinstance(payload, tuple) or len(payload) != 2:
         return False
 
@@ -188,17 +182,16 @@ class YoloHeadTrackerProcess:
             self.close()
             raise RuntimeError(f"Failed to initialize yolo head tracker: {payload}")
 
-    def _wait_for_message(self, timeout: float | None = None) -> object | None:
-        """Return the next child-process message payload, or None if no queued payload is available."""
+    def _wait_for_message(self, timeout: float | None = None) -> object:
+        """Raise TimeoutError if no message arrives in time, timeout=None is a non-blocking check."""
         try:
             if timeout is None:
                 event, payload = self._messages.get_nowait()
             else:
                 event, payload = self._messages.get(timeout=timeout)
         except queue.Empty as exc:
-            if timeout is None:
-                return None
-            raise TimeoutError(f"{self._tracker_name} head tracker timed out after {timeout:.2f}s") from exc
+            label = "non-blocking check" if timeout is None else f"{timeout:.2f}s"
+            raise TimeoutError(f"{self._tracker_name} head tracker timed out ({label})") from exc
 
         if event == "message":
             return payload
@@ -207,7 +200,6 @@ class YoloHeadTrackerProcess:
         raise RuntimeError(f"{self._tracker_name} head tracker reader failed: {payload}")
 
     def _unpack_response(self, message: object) -> tuple[str, int, object]:
-        """Validate a tracker response and return its fields."""
         if not (
             isinstance(message, tuple)
             and len(message) == 3
@@ -220,7 +212,6 @@ class YoloHeadTrackerProcess:
         return status, message_request_id, payload
 
     def _wait_for_response(self, request_id: int, timeout: float) -> tuple[str, object]:
-        """Wait for the response matching the requested frame."""
         deadline = time.monotonic() + timeout
         while True:
             remaining = deadline - time.monotonic()
@@ -254,14 +245,20 @@ class YoloHeadTrackerProcess:
 
             return status, payload
 
-    def _drain_timed_out_reply(self) -> bool:
-        """Return whether the last timed-out request has been consumed."""
+    def _drain_timed_out_reply(self, drain_timeout: float = 0.0) -> bool:
+        """Consume the pending late reply; drain_timeout=0 is non-blocking, positive waits up to that many seconds."""
         if self._timed_out_request_id is None:
             return True
 
+        deadline = time.monotonic() + drain_timeout
         while True:
-            message = self._wait_for_message()
-            if message is None:
+            # None -> non-blocking check, positive float -> wait for remaining budget.
+            wait = (deadline - time.monotonic()) if drain_timeout > 0 else None
+            if wait is not None and wait <= 0:
+                return False
+            try:
+                message = self._wait_for_message(wait)
+            except TimeoutError:
                 return False
 
             status, message_request_id, payload = self._unpack_response(message)
@@ -305,12 +302,12 @@ class YoloHeadTrackerProcess:
         request_id: int | None = None
         try:
             with self._send_lock:
-                # Reserve the immediate next call after a timeout for recovery
-                # only. Later calls may drain a delayed reply and continue with
-                # a fresh request in the same turn.
                 if self._recovery_call_pending:
+                    # The call immediately after a timeout is reserved for draining the late reply.
                     self._recovery_call_pending = False
-                    self._drain_timed_out_reply()
+                    # 10x budget lets the worker finish, cap avoids stalling on a large request_timeout.
+                    drain_timeout = min(self.request_timeout * 10, _DRAIN_TIMEOUT_MAX)
+                    self._drain_timed_out_reply(drain_timeout=drain_timeout)
                     return None, None
                 if self._timed_out_request_id is not None and not self._drain_timed_out_reply():
                     return None, None
@@ -384,10 +381,7 @@ class YoloHeadTrackerProcess:
 def main() -> int:
     """CLI entrypoint for the head-tracker worker process."""
     if len(sys.argv) != 1:
-        print(
-            "usage: python -m reachy_mini_conversation_app.vision.head_tracking.yolo_process",
-            file=sys.stderr,
-        )
+        logger.error("unexpected arguments: this process takes no arguments")
         return 2
     return _worker_main()
 

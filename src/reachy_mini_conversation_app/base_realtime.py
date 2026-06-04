@@ -32,6 +32,7 @@ from reachy_mini_conversation_app.config import (
     get_default_voice_for_backend,
     get_available_voices_for_backend,
 )
+from reachy_mini_conversation_app.idle_policy import start_idle_tool_call
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.tools.background_tool_manager import (
@@ -131,8 +132,8 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         self.connection: AsyncRealtimeConnection | None = None
         self.output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]" = asyncio.Queue()
 
-        self.last_activity_time = asyncio.get_event_loop().time()
-        self.start_time = asyncio.get_event_loop().time()
+        self.last_activity_time = time.monotonic()
+        self.start_time = time.monotonic()
         self.is_idle_tool_call = False
         self.gradio_mode = gradio_mode
         self.instance_path = instance_path
@@ -231,13 +232,17 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
     def _get_session_config(self, tool_specs: list[dict[str, Any]]) -> RealtimeSessionCreateRequestParam:
         """Return the backend-specific realtime session config."""
 
-    async def _wait_for_output_item(self) -> Tuple[int, NDArray[np.int16]] | AdditionalOutputs | None:
-        """Wait for the next output item."""
-        return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
+    async def _cancel_partial_transcript_task(self) -> None:
+        if self.partial_transcript_task and not self.partial_transcript_task.done():
+            self.partial_transcript_task.cancel()
+            try:
+                await self.partial_transcript_task
+            except asyncio.CancelledError:
+                pass
 
     def _mark_activity(self, reason: str) -> None:
         """Record non-idle conversation activity for the idle timer."""
-        self.last_activity_time = asyncio.get_event_loop().time()
+        self.last_activity_time = time.monotonic()
         logger.debug("last activity time updated to %s (%s)", self.last_activity_time, reason)
 
     def _tap_audio_for_daemon_wobbler(self, decoded_pcm: NDArray[np.int16]) -> None:
@@ -579,7 +584,8 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
         try:
             self._mark_activity("tool_result_ready")
-            if isinstance(bg_tool.id, str):
+            send_result_to_model = not bg_tool.is_idle_tool_call
+            if send_result_to_model and isinstance(bg_tool.id, str):
                 await self.connection.conversation.item.create(
                     item={
                         "type": "function_call_output",
@@ -602,7 +608,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 ),
             )
 
-            if bg_tool.tool_name == "camera" and "b64_im" in tool_result:
+            if send_result_to_model and bg_tool.tool_name == "camera" and "b64_im" in tool_result:
                 # use raw base64, don't json.dumps (which adds quotes)
                 b64_im = tool_result["b64_im"]
                 if not isinstance(b64_im, str):
@@ -655,9 +661,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         ),
                     )
 
-            # If this tool call was triggered by an idle signal, don't make the robot speak.
-            # For other tool calls, let the robot reply out loud.
-            if not bg_tool.is_idle_tool_call:
+            if send_result_to_model:
                 await self._safe_response_create(
                     response=RealtimeResponseCreateParamsParam(
                         instructions="Use the tool result just returned and answer concisely in speech.",
@@ -718,11 +722,12 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 async for event in self.connection:
                     logger.debug("Realtime event: %s", event.type)
                     if event.type == "input_audio_buffer.speech_started":
+                        self.is_idle_tool_call = False
                         self._mark_activity("user_speech_started")
                         self._turn_user_done_at = None
                         self._turn_response_created_at = None
                         self._turn_first_audio_at = None
-                        if hasattr(self, "_clear_queue") and callable(self._clear_queue):
+                        if self._clear_queue:
                             self._clear_queue()
                         self.deps.movement_manager.set_listening(True)
                         logger.debug("User speech started")
@@ -749,7 +754,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         # Doesn't mean the audio is done playing
                         self._response_done_event.set()
                         self._response_started_or_rejected_event.set()
-                        self.is_idle_tool_call = False
                         logger.debug("Response done")
 
                         response = getattr(event, "response", None)
@@ -774,13 +778,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         current_partial = "".join(input_transcript.deltas)
                         sequence_counter = len(input_transcript.deltas) - 1
 
-                        # Cancel previous debounce task if it exists
-                        if self.partial_transcript_task and not self.partial_transcript_task.done():
-                            self.partial_transcript_task.cancel()
-                            try:
-                                await self.partial_transcript_task
-                            except asyncio.CancelledError:
-                                pass
+                        await self._cancel_partial_transcript_task()
 
                         # Start new debounce timer with the last delta
                         self.partial_transcript_task = asyncio.create_task(
@@ -789,19 +787,14 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
                     # Handle completed transcription (user finished speaking)
                     if event.type == "conversation.item.input_audio_transcription.completed":
+                        self.is_idle_tool_call = False
                         self._mark_activity("user_transcription_completed")
                         raw_transcript = event.transcript or ""
                         transcript = raw_transcript.strip()
                         logger.debug("User transcript: %s", raw_transcript)
                         self.deps.movement_manager.set_listening(False)
 
-                        # Cancel any pending partial emission
-                        if self.partial_transcript_task and not self.partial_transcript_task.done():
-                            self.partial_transcript_task.cancel()
-                            try:
-                                await self.partial_transcript_task
-                            except asyncio.CancelledError:
-                                pass
+                        await self._cancel_partial_transcript_task()
 
                         if not transcript:
                             logger.debug("Ignoring empty user transcript")
@@ -846,10 +839,9 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         call_id: str = str(getattr(event, "call_id", uuid.uuid4()))
 
                         logger.info(
-                            "Tool call received — tool_name=%r, call_id=%s, is_idle=%s, args=%s",
+                            "Tool call received — tool_name=%r, call_id=%s, args=%s",
                             tool_name,
                             call_id,
-                            self.is_idle_tool_call,
                             args_json_str,
                         )
 
@@ -871,7 +863,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                                 args_json_str=args_json_str,
                                 deps=self.deps,
                             ),
-                            is_idle_tool_call=self.is_idle_tool_call,
+                            is_idle_tool_call=False,
                         )
 
                         await self.output_queue.put(
@@ -970,17 +962,17 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         # This is called periodically by the fastrtc Stream
 
         # Handle idle
-        idle_duration = asyncio.get_event_loop().time() - self.last_activity_time
+        idle_duration = time.monotonic() - self.last_activity_time
         if idle_duration > 180.0 and self._response_done_event.is_set() and self.deps.movement_manager.is_idle():
             try:
                 await self.send_idle_signal(idle_duration)
             except Exception as e:
-                logger.warning("Idle signal skipped (connection closed?): %s", e)
+                logger.warning("Idle tool skipped (connection closed?): %s", e)
                 return None
 
-            self.last_activity_time = asyncio.get_event_loop().time()  # avoid repeated resets
+            self.last_activity_time = time.monotonic()  # avoid repeated resets
 
-        return await self._wait_for_output_item()
+        return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
 
     async def shutdown(self) -> None:
         """Shutdown the handler."""
@@ -990,13 +982,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         # Stop background tool manager tasks (listener + cleanup)
         await self.tool_manager.shutdown()
 
-        # Cancel any pending debounce task
-        if self.partial_transcript_task and not self.partial_transcript_task.done():
-            self.partial_transcript_task.cancel()
-            try:
-                await self.partial_transcript_task
-            except asyncio.CancelledError:
-                pass
+        await self._cancel_partial_transcript_task()
 
         if self.connection:
             try:
@@ -1017,7 +1003,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
     def format_timestamp(self) -> str:
         """Format current timestamp with date, time, and elapsed seconds."""
-        loop_time = asyncio.get_event_loop().time()  # monotonic
+        loop_time = time.monotonic()
         elapsed_seconds = loop_time - self.start_time
         dt = datetime.now()  # wall-clock
         return f"[{dt.strftime('%Y-%m-%d %H:%M:%S')} | +{elapsed_seconds:.1f}s]"
@@ -1031,23 +1017,19 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         """Build the realtime SDK client for this backend."""
 
     async def send_idle_signal(self, idle_duration: float) -> None:
-        """Send an idle signal to the realtime server."""
-        logger.debug("Sending idle signal")
-        self.is_idle_tool_call = True
-        timestamp_msg = f"[Idle time update: {self.format_timestamp()} - No activity for {idle_duration:.1f}s] You've been idle for a while. Feel free to get creative - dance, show an emotion, look around, call idle_do_nothing to stay still and silent, or just be yourself!"
+        """Run a locally selected idle tool without sending an idle turn to the model."""
+        logger.debug("Selecting local idle tool")
         if not self.connection:
-            logger.debug("No connection, cannot send idle signal")
+            logger.debug("No connection, cannot run idle tool")
             return
-        await self.connection.conversation.item.create(
-            item={
-                "type": "message",
-                "role": "user",
-                "content": [{"type": "input_text", "text": timestamp_msg}],
-            },
-        )
-        await self._safe_response_create(
-            response=RealtimeResponseCreateParamsParam(
-                instructions="You MUST respond with function calls only - no speech or text. Choose appropriate actions for idle behavior. Use idle_do_nothing only if you intentionally want no movement or sound during this idle turn.",
-                tool_choice="required",
-            ),
+
+        available_tool_names = {
+            spec["name"] for spec in self._get_active_tool_specs() if isinstance(spec.get("name"), str)
+        }
+        await start_idle_tool_call(
+            deps=self.deps,
+            tool_manager=self.tool_manager,
+            output_queue=self.output_queue,
+            available_tool_names=available_tool_names,
+            idle_duration=idle_duration,
         )

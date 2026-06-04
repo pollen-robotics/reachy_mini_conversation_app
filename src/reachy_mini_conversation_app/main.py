@@ -35,6 +35,15 @@ def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> L
 def main() -> None:
     """Entrypoint for the Reachy Mini conversation app."""
     args, _ = parse_args()
+    if args.command == "tool-spaces":
+        from reachy_mini_conversation_app.tool_spaces import handle_tool_spaces_command
+
+        logger = setup_logger(args.debug)
+        try:
+            raise SystemExit(handle_tool_spaces_command(args))
+        except Exception as exc:
+            logger.error("tool-spaces command failed: %s", exc)
+            raise SystemExit(1) from exc
     run(args)
 
 
@@ -102,6 +111,13 @@ def run(
 
     from reachy_mini_conversation_app.console import LocalStream
     from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+    from reachy_mini_conversation_app.conversation_handler import ConversationHandler
+
+    try:
+        initialize_tools(instance_path=instance_path)
+    except Exception as e:
+        logger.error("Failed to initialize tools: %s", e)
+        sys.exit(1)
 
     if args.no_camera and args.head_tracker is not None:
         logger.warning("Head tracking disabled: --no-camera flag is set. Remove --no-camera to enable head tracking.")
@@ -174,52 +190,56 @@ def run(
     )
     logger.debug(f"Chatbot avatar images: {chatbot.avatar_images}")
 
-    if is_gemini_model():
-        from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
+    def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
+        """Build a realtime handler for the current runtime backend config."""
+        if is_gemini_model():
+            from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
 
-        logger.info(
-            "Using %s via GeminiLiveHandler",
-            get_backend_label(config.BACKEND_PROVIDER),
-        )
-        handler = GeminiLiveHandler(
-            deps,
-            gradio_mode=args.gradio,
-            instance_path=instance_path,
-            startup_voice=startup_settings.voice,
-        )
-    elif config.BACKEND_PROVIDER == HF_BACKEND:
-        from reachy_mini_conversation_app.huggingface_realtime import HuggingFaceRealtimeHandler
+            logger.info(
+                "Using %s via GeminiLiveHandler",
+                get_backend_label(config.BACKEND_PROVIDER),
+            )
+            return GeminiLiveHandler(
+                deps,
+                gradio_mode=args.gradio,
+                instance_path=instance_path,
+                startup_voice=startup_voice,
+            )
+        if config.BACKEND_PROVIDER == HF_BACKEND:
+            from reachy_mini_conversation_app.huggingface_realtime import HuggingFaceRealtimeHandler
 
-        hf_connection_selection = get_hf_connection_selection()
-        transport_label = (
-            "Hugging Face direct websocket"
-            if hf_connection_selection.mode == HF_LOCAL_CONNECTION_MODE and hf_connection_selection.has_target
-            else "Hugging Face session proxy"
-        )
-        logger.info(
-            "Using %s via Hugging Face realtime handler (%s)",
-            get_backend_label(config.BACKEND_PROVIDER),
-            transport_label,
-        )
-        handler = HuggingFaceRealtimeHandler(
-            deps,
-            gradio_mode=args.gradio,
-            instance_path=instance_path,
-            startup_voice=startup_settings.voice,
-        )  # type: ignore[assignment]
-    else:
+            hf_connection_selection = get_hf_connection_selection()
+            transport_label = (
+                "Hugging Face direct websocket"
+                if hf_connection_selection.mode == HF_LOCAL_CONNECTION_MODE and hf_connection_selection.has_target
+                else "Hugging Face session proxy"
+            )
+            logger.info(
+                "Using %s via Hugging Face realtime handler (%s)",
+                get_backend_label(config.BACKEND_PROVIDER),
+                transport_label,
+            )
+            return HuggingFaceRealtimeHandler(
+                deps,
+                gradio_mode=args.gradio,
+                instance_path=instance_path,
+                startup_voice=startup_voice,
+            )
+
         from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 
         logger.info(
             "Using %s via OpenAI realtime handler (OpenAI Realtime API)",
             get_backend_label(config.BACKEND_PROVIDER),
         )
-        handler = OpenaiRealtimeHandler(
+        return OpenaiRealtimeHandler(
             deps,
             gradio_mode=args.gradio,
             instance_path=instance_path,
-            startup_voice=startup_settings.voice,
-        )  # type: ignore[assignment]
+            startup_voice=startup_voice,
+        )
+
+    handler = build_handler(startup_settings.voice)
 
     stream_manager: gr.Blocks | LocalStream | None = None
 
@@ -266,6 +286,8 @@ def run(
             robot,
             settings_app=settings_app,
             instance_path=instance_path,
+            handler_factory=build_handler,
+            startup_voice=startup_settings.voice,
         )
 
     # Each async service → its own thread/loop
