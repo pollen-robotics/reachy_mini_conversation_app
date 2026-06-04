@@ -444,8 +444,8 @@ async def test_idle_tool_result_is_not_sent_to_realtime_model(monkeypatch: Any) 
 
 
 @pytest.mark.asyncio
-async def test_tool_result_followup_uses_user_message_not_response_instructions(monkeypatch: Any) -> None:
-    """Post-tool guidance should not override response/session instructions."""
+async def test_tool_result_followup_uses_bare_response_create(monkeypatch: Any) -> None:
+    """Post-tool follow-up should not add prompt text or override response/session instructions."""
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
     handler = OpenaiRealtimeHandler(deps)
 
@@ -464,30 +464,19 @@ async def test_tool_result_followup_uses_user_message_not_response_instructions(
         )
     )
 
-    assert fake_item.create.await_count == 2
+    assert fake_item.create.await_count == 1
     function_output = fake_item.create.await_args_list[0].kwargs["item"]
     assert function_output == {
         "type": "function_call_output",
         "call_id": "call_weather",
         "output": '{"forecast": "sunny"}',
     }
-    followup_message = fake_item.create.await_args_list[1].kwargs["item"]
-    assert followup_message["role"] == "user"
-    assert followup_message["content"] == [
-        {
-            "type": "input_text",
-            "text": (
-                "Use the tool result just returned, including any attached image, to answer the user's request. "
-                "Keep it concise and natural for speech."
-            ),
-        }
-    ]
     safe_response_create.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio
-async def test_camera_tool_result_followup_keeps_image_with_user_message(monkeypatch: Any) -> None:
-    """Camera follow-up text should be attached to the image message, not response instructions."""
+async def test_camera_tool_result_followup_attaches_image_without_prompt(monkeypatch: Any) -> None:
+    """Camera follow-up should attach the image without adding response instructions."""
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
     handler = OpenaiRealtimeHandler(deps)
 
@@ -516,17 +505,7 @@ async def test_camera_tool_result_followup_keeps_image_with_user_message(monkeyp
     }
     image_message = fake_item.create.await_args_list[1].kwargs["item"]
     assert image_message["role"] == "user"
-    assert image_message["content"][0] == {
-        "type": "input_text",
-        "text": (
-            "Use the tool result just returned, including any attached image, to answer the user's request. "
-            "Keep it concise and natural for speech."
-        ),
-    }
-    assert image_message["content"][1] == {
-        "type": "input_image",
-        "image_url": f"data:image/jpeg;base64,{b64_im}",
-    }
+    assert image_message["content"] == [{"type": "input_image", "image_url": f"data:image/jpeg;base64,{b64_im}"}]
     safe_response_create.assert_awaited_once_with()
 
 

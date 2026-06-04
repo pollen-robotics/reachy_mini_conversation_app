@@ -45,10 +45,6 @@ logger = logging.getLogger(__name__)
 
 _RESPONSE_DONE_TIMEOUT: Final[float] = 30.0
 _RESPONSE_REJECTION_RETRY_DELAY: Final[float] = 0.5
-_POST_TOOL_RESPONSE_PROMPT: Final[str] = (
-    "Use the tool result just returned, including any attached image, to answer the user's request. "
-    "Keep it concise and natural for speech."
-)
 
 
 class InputTranscriptChunksByItem(BaseModel):
@@ -608,10 +604,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         "role": "user",
                         "content": [
                             {
-                                "type": "input_text",
-                                "text": _POST_TOOL_RESPONSE_PROMPT,
-                            },
-                            {
                                 "type": "input_image",
                                 "image_url": f"data:image/jpeg;base64,{b64_im}",
                             },
@@ -650,19 +642,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                     )
 
             if send_result_to_model:
-                if bg_tool.tool_name != "camera" or "b64_im" not in tool_result:
-                    await self.connection.conversation.item.create(
-                        item={
-                            "type": "message",
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": _POST_TOOL_RESPONSE_PROMPT,
-                                },
-                            ],
-                        },
-                    )
                 await self._safe_response_create()
 
         except self._connection_closed_errors():
