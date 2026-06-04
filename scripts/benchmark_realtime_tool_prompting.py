@@ -23,7 +23,23 @@ POST_CAMERA_TOOL_RESPONSE_PROMPT = (
     "Use the camera image and tool result just returned to answer the user's request. "
     "Keep it concise and natural for speech."
 )
-VARIANTS = ("response_instructions", "response_full_instructions", "conversation_user", "conversation_system", "none")
+POST_UNIFIED_RESPONSE_PROMPT = (
+    "Use the tool result just returned, including any attached image, to answer the user's request. "
+    "Keep it concise and natural for speech."
+)
+DEFAULT_VARIANTS = (
+    "response_instructions",
+    "response_full_instructions",
+    "conversation_user",
+    "conversation_system",
+    "none",
+)
+PROMPT_TEXT_VARIANTS = (
+    "conversation_user_camera",
+    "conversation_user_generic",
+    "conversation_user_unified",
+    "none",
+)
 
 
 def _short_id(prefix: str) -> str:
@@ -121,11 +137,27 @@ async def _seed_history(conn: Any, turns: int) -> None:
         )
 
 
-async def _add_tool_context(conn: Any, *, variant: str, include_image: bool) -> None:
+def _prompt_for_variant(variant: str, *, include_image: bool) -> str:
+    if variant == "conversation_user_generic":
+        return POST_TOOL_RESPONSE_PROMPT
+    if variant == "conversation_user_unified":
+        return POST_UNIFIED_RESPONSE_PROMPT
+    if variant == "conversation_user_camera" or include_image:
+        return POST_CAMERA_TOOL_RESPONSE_PROMPT
+    return POST_TOOL_RESPONSE_PROMPT
+
+
+async def _add_tool_context(
+    conn: Any,
+    *,
+    variant: str,
+    include_image: bool,
+    tool_result_mode: str,
+) -> None:
     call_id = _short_id("call")
     await conn.conversation.item.create(
         item=_user_text_item(
-            "Please use the camera and tell me what the latest tool result shows.",
+            "Please use the camera and tell me what is in the picture.",
             item_id=_short_id("tu"),
         )
     )
@@ -139,10 +171,11 @@ async def _add_tool_context(conn: Any, *, variant: str, include_image: bool) -> 
             "status": "completed",
         }
     )
-    tool_result = {
-        "image_attached": include_image,
-        "image_description": "The tool result says there is a blue cube labeled R7 on the robot's left side.",
-    }
+    tool_result = {"image_attached": include_image}
+    if tool_result_mode == "description":
+        tool_result["image_description"] = (
+            "The tool result says there is a blue cube labeled R7 on the robot's left side."
+        )
     await conn.conversation.item.create(
         item={
             "type": "function_call_output",
@@ -154,8 +187,13 @@ async def _add_tool_context(conn: Any, *, variant: str, include_image: bool) -> 
 
     if include_image:
         content = []
-        if variant == "conversation_user":
-            content.append({"type": "input_text", "text": POST_CAMERA_TOOL_RESPONSE_PROMPT})
+        if variant in {
+            "conversation_user",
+            "conversation_user_camera",
+            "conversation_user_generic",
+            "conversation_user_unified",
+        }:
+            content.append({"type": "input_text", "text": _prompt_for_variant(variant, include_image=include_image)})
         content.append({"type": "input_image", "image_url": _benchmark_image_data_uri()})
         await conn.conversation.item.create(
             item={
@@ -165,11 +203,18 @@ async def _add_tool_context(conn: Any, *, variant: str, include_image: bool) -> 
                 "content": content,
             }
         )
-    elif variant == "conversation_user":
-        await conn.conversation.item.create(item=_user_text_item(POST_TOOL_RESPONSE_PROMPT, item_id=_short_id("tf")))
+    elif variant in {
+        "conversation_user",
+        "conversation_user_camera",
+        "conversation_user_generic",
+        "conversation_user_unified",
+    }:
+        await conn.conversation.item.create(
+            item=_user_text_item(_prompt_for_variant(variant, include_image=include_image), item_id=_short_id("tf"))
+        )
 
     if variant == "conversation_system":
-        prompt = POST_CAMERA_TOOL_RESPONSE_PROMPT if include_image else POST_TOOL_RESPONSE_PROMPT
+        prompt = _prompt_for_variant(variant, include_image=include_image)
         await conn.conversation.item.create(item=_system_text_item(prompt, item_id=_short_id("tf")))
 
 
@@ -184,7 +229,7 @@ def _response_payload(
         "output_modalities": ["text"],
         "max_output_tokens": max_output_tokens,
     }
-    prompt = POST_CAMERA_TOOL_RESPONSE_PROMPT if include_image else POST_TOOL_RESPONSE_PROMPT
+    prompt = _prompt_for_variant(variant, include_image=include_image)
     if variant == "response_instructions":
         payload["instructions"] = prompt
     elif variant == "response_full_instructions":
@@ -315,7 +360,12 @@ async def _run_trial(args: argparse.Namespace, *, variant: str, iteration: int) 
         await _seed_history(conn, args.history_turns)
         if args.warmup:
             await _warmup(conn, max_output_tokens=16, timeout_s=args.timeout)
-        await _add_tool_context(conn, variant=variant, include_image=args.include_image)
+        await _add_tool_context(
+            conn,
+            variant=variant,
+            include_image=args.include_image,
+            tool_result_mode=args.tool_result_mode,
+        )
         result = await _create_and_measure(
             conn,
             _response_payload(
@@ -336,15 +386,16 @@ async def _run_trial(args: argparse.Namespace, *, variant: str, iteration: int) 
             "history_turns": args.history_turns,
             "instruction_repeat": args.instruction_repeat,
             "warmup": args.warmup,
+            "tool_result_mode": args.tool_result_mode,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     )
     return result
 
 
-def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _summarize(rows: list[dict[str, Any]], variants: tuple[str, ...]) -> dict[str, Any]:
     summary: dict[str, Any] = {}
-    for variant in VARIANTS:
+    for variant in variants:
         variant_rows = [row for row in rows if row["variant"] == variant]
         if not variant_rows:
             continue
@@ -372,12 +423,15 @@ async def _main() -> None:
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument("--include-image", action="store_true")
     parser.add_argument("--no-warmup", dest="warmup", action="store_false")
+    parser.add_argument("--tool-result-mode", choices=("description", "image_attached"), default="description")
+    parser.add_argument("--variant-set", choices=("default", "prompt_text"), default="default")
     parser.add_argument("--output", default="")
     parser.set_defaults(warmup=True)
     args = parser.parse_args()
 
+    variants = PROMPT_TEXT_VARIANTS if args.variant_set == "prompt_text" else DEFAULT_VARIANTS
     rows: list[dict[str, Any]] = []
-    schedule = [(variant, index + 1) for index in range(args.iterations) for variant in VARIANTS]
+    schedule = [(variant, index + 1) for index in range(args.iterations) for variant in variants]
     random.shuffle(schedule)
 
     for variant, iteration in schedule:
@@ -385,7 +439,7 @@ async def _main() -> None:
         rows.append(result)
         print(json.dumps(result, sort_keys=True), flush=True)
 
-    report = {"rows": rows, "summary": _summarize(rows)}
+    report = {"rows": rows, "summary": _summarize(rows, variants)}
     print(json.dumps({"summary": report["summary"]}, indent=2, sort_keys=True))
     if args.output:
         with open(args.output, "w", encoding="utf-8") as f:

@@ -477,7 +477,7 @@ async def test_tool_result_followup_uses_user_message_not_response_instructions(
         {
             "type": "input_text",
             "text": (
-                "Use the tool result just returned to answer the user's request. "
+                "Use the tool result just returned, including any attached image, to answer the user's request. "
                 "Keep it concise and natural for speech."
             ),
         }
@@ -519,7 +519,7 @@ async def test_camera_tool_result_followup_keeps_image_with_user_message(monkeyp
     assert image_message["content"][0] == {
         "type": "input_text",
         "text": (
-            "Use the camera image and tool result just returned to answer the user's request. "
+            "Use the tool result just returned, including any attached image, to answer the user's request. "
             "Keep it concise and natural for speech."
         ),
     }

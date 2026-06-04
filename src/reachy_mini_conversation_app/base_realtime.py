@@ -46,10 +46,7 @@ logger = logging.getLogger(__name__)
 _RESPONSE_DONE_TIMEOUT: Final[float] = 30.0
 _RESPONSE_REJECTION_RETRY_DELAY: Final[float] = 0.5
 _POST_TOOL_RESPONSE_PROMPT: Final[str] = (
-    "Use the tool result just returned to answer the user's request. Keep it concise and natural for speech."
-)
-_POST_CAMERA_TOOL_RESPONSE_PROMPT: Final[str] = (
-    "Use the camera image and tool result just returned to answer the user's request. "
+    "Use the tool result just returned, including any attached image, to answer the user's request. "
     "Keep it concise and natural for speech."
 )
 
@@ -181,13 +178,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             sanitized["image_attached"] = True
             return sanitized
         return tool_result
-
-    @staticmethod
-    def _post_tool_response_prompt(tool_name: str, *, image_attached: bool) -> str:
-        """Return user-level follow-up text for a model response after tool completion."""
-        if tool_name == "camera" and image_attached:
-            return _POST_CAMERA_TOOL_RESPONSE_PROMPT
-        return _POST_TOOL_RESPONSE_PROMPT
 
     def _normalize_startup_voice(self, voice: str | None) -> str | None:
         """Return a valid persisted startup voice for this backend, or None."""
@@ -619,7 +609,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         "content": [
                             {
                                 "type": "input_text",
-                                "text": self._post_tool_response_prompt(bg_tool.tool_name, image_attached=True),
+                                "text": _POST_TOOL_RESPONSE_PROMPT,
                             },
                             {
                                 "type": "input_image",
@@ -668,7 +658,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                             "content": [
                                 {
                                     "type": "input_text",
-                                    "text": self._post_tool_response_prompt(bg_tool.tool_name, image_attached=False),
+                                    "text": _POST_TOOL_RESPONSE_PROMPT,
                                 },
                             ],
                         },
