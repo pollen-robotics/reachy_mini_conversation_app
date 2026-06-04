@@ -470,7 +470,8 @@ async def _run_trial(
 
 def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     summary: dict[str, Any] = {}
-    for variant in VARIANTS:
+    variants = tuple(dict.fromkeys(row["variant"] for row in rows))
+    for variant in variants:
         variant_rows = [row for row in rows if row["variant"] == variant]
         if not variant_rows:
             continue
@@ -526,12 +527,22 @@ async def _main() -> None:
     parser.add_argument("--pace-audio", action="store_true")
     parser.add_argument("--tts-model", default="gpt-4o-mini-tts")
     parser.add_argument("--tts-voice", default="cedar")
+    parser.add_argument(
+        "--variants",
+        default=",".join(VARIANTS),
+        help=f"Comma-separated variants to run. Available: {', '.join(VARIANTS)}",
+    )
     parser.add_argument("--output", default="")
     args = parser.parse_args()
 
     source_audio_pcm, source_audio_sample_rate = _load_or_create_question_audio(args)
     rows: list[dict[str, Any]] = []
-    schedule = [(variant, index + 1) for index in range(args.iterations) for variant in VARIANTS]
+    variants = tuple(variant.strip() for variant in args.variants.split(",") if variant.strip())
+    unknown_variants = sorted(set(variants) - set(VARIANTS))
+    if unknown_variants:
+        raise ValueError(f"Unknown variants: {unknown_variants}. Available: {list(VARIANTS)}")
+
+    schedule = [(variant, index + 1) for index in range(args.iterations) for variant in variants]
     random.shuffle(schedule)
 
     for variant, iteration in schedule:
