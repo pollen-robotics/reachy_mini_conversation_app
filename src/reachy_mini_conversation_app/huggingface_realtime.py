@@ -73,7 +73,7 @@ class HuggingFaceRealtimeHandler(BaseRealtimeHandler):
 
     def _get_session_instructions(self) -> str:
         """Return Hugging Face session instructions."""
-        return get_session_instructions()
+        return get_session_instructions(self.instance_path)
 
     def _get_session_voice(self, default: str | None = None) -> str:
         """Return the configured Hugging Face session voice."""

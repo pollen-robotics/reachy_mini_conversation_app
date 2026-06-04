@@ -70,7 +70,7 @@ def test_profile_name_resolves_directly_to_storage_dir() -> None:
     assert (profile_dir / "instructions.txt").is_file()
 
 
-def test_prompts_load_from_compact_builtin_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_prompts_load_from_compact_builtin_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Prompt loading should read compact built-in profile instructions directly."""
     monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "mad_scientist_assistant")
     monkeypatch.setattr(config, "PROFILES_DIRECTORY", DEFAULT_PROFILES_DIRECTORY)
@@ -81,7 +81,7 @@ def test_prompts_load_from_compact_builtin_profile(monkeypatch: pytest.MonkeyPat
         .strip()
     )
 
-    assert prompts_mod.get_session_instructions() == expected
+    assert prompts_mod.get_session_instructions(instance_path=tmp_path) == expected
     assert read_instructions_for("mad_scientist_assistant") == expected
 
 

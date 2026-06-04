@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY, config, get_default_voice_for_backend
+from reachy_mini_conversation_app.memory import format_memory_for_prompt
 
 
 logger = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ def _expand_prompt_includes(content: str) -> str:
     return "\n".join(expanded_lines)
 
 
-def get_session_instructions() -> str:
+def get_session_instructions(instance_path: str | Path | None = None) -> str:
     """Get session instructions, loading from REACHY_MINI_CUSTOM_PROFILE if set."""
     profile = config.REACHY_MINI_CUSTOM_PROFILE
     if not profile:
@@ -81,6 +82,9 @@ def get_session_instructions() -> str:
             if instructions:
                 # Expand [<name>] placeholders with content from prompts library
                 expanded_instructions = _expand_prompt_includes(instructions)
+                memory_prompt = format_memory_for_prompt(instance_path)
+                if memory_prompt:
+                    return f"{memory_prompt}\n\n{expanded_instructions}"
                 return expanded_instructions
             logger.error(f"Profile '{profile}' has empty {INSTRUCTIONS_FILENAME}")
             sys.exit(1)

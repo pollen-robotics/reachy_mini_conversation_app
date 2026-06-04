@@ -99,7 +99,7 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Gemini turns should emit one transcript per role and let the wobbler reset after speech."""
-    monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda: "test")
+    monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
     monkeypatch.setattr(gemini_mod, "get_active_tool_specs", lambda _: [])
 
@@ -310,7 +310,7 @@ async def test_gemini_idle_tool_result_is_not_sent_to_model() -> None:
 @pytest.mark.asyncio
 async def test_apply_personality_preserves_manual_voice_override(monkeypatch) -> None:
     """Applying a profile should keep a manually selected Gemini voice active."""
-    monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda: "test")
+    monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
     monkeypatch.setattr("reachy_mini_conversation_app.config.set_custom_profile", lambda _profile: None)
 
@@ -352,7 +352,7 @@ def test_copy_preserves_current_voice_override() -> None:
 
 def test_gemini_excludes_head_tracking_when_no_head_tracker(monkeypatch) -> None:
     """head_tracking tool must not appear in Gemini session config when head_tracker is not active."""
-    monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda: "test")
+    monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
 
     # Mock the spec source while preserving get_active_tool_specs filtering.

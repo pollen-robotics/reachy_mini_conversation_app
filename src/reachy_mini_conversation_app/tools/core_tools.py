@@ -49,6 +49,7 @@ class ToolDependencies:
     reachy_mini: ReachyMini
     movement_manager: Any  # MovementManager from moves.py
     # Optional deps
+    instance_path: str | Path | None = None
     camera_worker: Any | None = None  # CameraWorker for frame buffering
     vision_processor: Any | None = None
     head_wobbler: Any | None = None  # HeadWobbler for audio-reactive motion
