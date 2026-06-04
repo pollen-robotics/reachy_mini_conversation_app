@@ -52,7 +52,6 @@ class ToolDependencies:
     instance_path: str | Path | None = None
     camera_worker: Any | None = None  # CameraWorker for frame buffering
     vision_processor: Any | None = None
-    head_wobbler: Any | None = None  # HeadWobbler for audio-reactive motion
     motion_duration_s: float = 1.0
 
 

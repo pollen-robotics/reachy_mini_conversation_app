@@ -105,12 +105,10 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
 
     movement_manager = MagicMock()
     movement_manager.is_idle.return_value = False
-    head_wobbler = MagicMock()
     robot = SimpleNamespace(media=SimpleNamespace(audio=None))
     deps = ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
-        head_wobbler=head_wobbler,
     )
     handler = GeminiLiveHandler(deps)
     monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
@@ -154,9 +152,7 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
     handler.client = _FakeLiveClient(session)
 
     task = asyncio.create_task(handler._run_live_session())
-    await _wait_for(
-        lambda: head_wobbler.request_reset_after_current_audio.called and handler.output_queue.qsize() >= 3
-    )
+    await _wait_for(lambda: handler.output_queue.qsize() >= 3)
 
     handler._stop_event.set()
     await asyncio.wait_for(task, timeout=1.0)
@@ -180,9 +176,6 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
     assert any(isinstance(output, tuple) for output in outputs), "audio output was not emitted"
     movement_manager.set_listening.assert_has_calls([call(True), call(False)])
     assert movement_manager.set_listening.call_args_list[-1] == call(False)
-    head_wobbler.feed.assert_not_called()
-    head_wobbler.request_reset_after_current_audio.assert_called_once()
-    head_wobbler.reset.assert_not_called()
 
 
 @pytest.mark.asyncio

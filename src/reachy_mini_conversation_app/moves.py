@@ -177,14 +177,6 @@ class MovementState:
     last_activity_time: float = 0.0
 
     # Secondary move state (offsets)
-    speech_offsets: Tuple[float, float, float, float, float, float] = (
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-    )
     face_tracking_offsets: Tuple[float, float, float, float, float, float] = (
         0.0,
         0.0,
@@ -288,17 +280,6 @@ class MovementManager:
 
         # Cross-thread signalling
         self._command_queue: "Queue[Tuple[str, Any]]" = Queue()
-        self._speech_offsets_lock = threading.Lock()
-        self._pending_speech_offsets: Tuple[float, float, float, float, float, float] = (
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        )
-        self._speech_offsets_dirty = False
-
         self._face_offsets_lock = threading.Lock()
         self._pending_face_offsets: Tuple[float, float, float, float, float, float] = (
             0.0,
@@ -331,16 +312,6 @@ class MovementManager:
         Thread-safe: executed by the worker thread via the command queue.
         """
         self._command_queue.put(("clear_queue", None))
-
-    def set_speech_offsets(self, offsets: Tuple[float, float, float, float, float, float]) -> None:
-        """Update speech-induced secondary offsets (x, y, z, roll, pitch, yaw).
-
-        Offsets are interpreted as metres for translation and radians for
-        rotation in the world frame. Thread-safe via a pending snapshot.
-        """
-        with self._speech_offsets_lock:
-            self._pending_speech_offsets = offsets
-            self._speech_offsets_dirty = True
 
     def set_moving_state(self, duration: float) -> None:
         """Mark the robot as actively moving for the provided duration.
@@ -388,17 +359,7 @@ class MovementManager:
             self._handle_command(command, payload, current_time)
 
     def _apply_pending_offsets(self) -> None:
-        """Apply the most recent speech/face offset updates."""
-        speech_offsets: Tuple[float, float, float, float, float, float] | None = None
-        with self._speech_offsets_lock:
-            if self._speech_offsets_dirty:
-                speech_offsets = self._pending_speech_offsets
-                self._speech_offsets_dirty = False
-
-        if speech_offsets is not None:
-            self.state.speech_offsets = speech_offsets
-            self.state.update_activity()
-
+        """Apply the most recent face offset update."""
         face_offsets: Tuple[float, float, float, float, float, float] | None = None
         with self._face_offsets_lock:
             if self._face_offsets_dirty:
@@ -566,16 +527,8 @@ class MovementManager:
         return primary_full_body_pose
 
     def _get_secondary_pose(self) -> FullBodyPose:
-        """Get the secondary full body pose from speech and face tracking offsets."""
-        # Combine speech sway offsets + face tracking offsets for secondary pose
-        current_offsets = (
-            self.state.speech_offsets[0] + self.state.face_tracking_offsets[0],
-            self.state.speech_offsets[1] + self.state.face_tracking_offsets[1],
-            self.state.speech_offsets[2] + self.state.face_tracking_offsets[2],
-            self.state.speech_offsets[3] + self.state.face_tracking_offsets[3],
-            self.state.speech_offsets[4] + self.state.face_tracking_offsets[4],
-            self.state.speech_offsets[5] + self.state.face_tracking_offsets[5],
-        )
+        """Get the secondary full body pose from face tracking offsets."""
+        current_offsets = self.state.face_tracking_offsets
 
         # Skip expensive create_head_pose if offsets unchanged since last tick
         if current_offsets == self._cached_secondary_offsets:

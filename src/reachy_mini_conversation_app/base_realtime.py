@@ -12,7 +12,7 @@ from datetime import datetime
 import numpy as np
 import gradio as gr
 from openai import AsyncOpenAI
-from fastrtc import AdditionalOutputs, wait_for_item, audio_to_int16
+from fastrtc import AdditionalOutputs, wait_for_item, audio_to_int16, audio_to_float32
 from pydantic import Field, BaseModel
 from numpy.typing import NDArray
 from scipy.signal import resample
@@ -244,6 +244,25 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         """Record non-idle conversation activity for the idle timer."""
         self.last_activity_time = time.monotonic()
         logger.debug("last activity time updated to %s (%s)", self.last_activity_time, reason)
+
+    def _tap_audio_for_daemon_wobbler(self, decoded_pcm: NDArray[np.int16]) -> None:
+        # Gradio plays audio in the browser, so the daemon's wobbler — which
+        # taps `push_audio_sample` — never sees it. Push the same samples to
+        # the daemon to drive head motion; mute the robot speaker locally if
+        # you don't want double playback.
+        try:
+            robot = self.deps.reachy_mini
+            output_rate = robot.media.get_output_audio_samplerate()
+            audio = audio_to_float32(decoded_pcm).reshape(-1)
+            if self.output_sample_rate != output_rate:
+                num_samples = int(len(audio) * output_rate / self.output_sample_rate)
+                if num_samples == 0:
+                    return
+                audio = resample(audio, num_samples)
+                logger.info("push audio")
+            robot.media.push_audio_sample(audio.astype(np.float32))
+        except Exception as exc:
+            logger.debug("Daemon wobbler audio tap failed: %s", exc)
 
     def copy(self) -> "BaseRealtimeHandler":
         """Create a copy of the handler."""
@@ -710,8 +729,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         self._turn_first_audio_at = None
                         if self._clear_queue:
                             self._clear_queue()
-                        if self.deps.head_wobbler is not None:
-                            self.deps.head_wobbler.reset()
                         self.deps.movement_manager.set_listening(True)
                         logger.debug("User speech started")
 
@@ -721,8 +738,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         logger.debug("User speech stopped - server will auto-commit with VAD")
 
                     if event.type == "response.output_audio.done":
-                        if self.deps.head_wobbler is not None:
-                            self.deps.head_wobbler.request_reset_after_current_audio()
                         logger.debug("response completed")
 
                     if event.type == "response.created":
@@ -803,8 +818,8 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                     if event.type == "response.output_audio.delta":
                         decoded_pcm_bytes = base64.b64decode(event.delta)
                         decoded_pcm = np.frombuffer(decoded_pcm_bytes, dtype=np.int16).reshape(1, -1)
-                        if self.gradio_mode and self.deps.head_wobbler is not None:
-                            self.deps.head_wobbler.feed_pcm(decoded_pcm, self.output_sample_rate)
+                        if self.gradio_mode:
+                            self._tap_audio_for_daemon_wobbler(decoded_pcm)
                         self._mark_activity("assistant_audio_delta")
                         if self._turn_user_done_at is not None and self._turn_first_audio_at is None:
                             self._turn_first_audio_at = time.perf_counter()
