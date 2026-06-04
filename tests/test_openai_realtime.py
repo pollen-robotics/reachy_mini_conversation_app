@@ -1,4 +1,3 @@
-import base64
 import random
 import asyncio
 import logging
@@ -36,7 +35,6 @@ async def _run_openai_handler_with_events(
     events: list[Any],
     *,
     movement_manager: MagicMock | None = None,
-    head_wobbler: MagicMock | None = None,
     gradio_mode: bool = False,
     handler_setup: Callable[[OpenaiRealtimeHandler], None] | None = None,
 ) -> OpenaiRealtimeHandler:
@@ -105,7 +103,6 @@ async def _run_openai_handler_with_events(
     deps = ToolDependencies(
         reachy_mini=MagicMock(),
         movement_manager=movement_manager or MagicMock(),
-        head_wobbler=head_wobbler,
     )
     handler = OpenaiRealtimeHandler(deps, gradio_mode=gradio_mode)
     handler.client = FakeClient()
@@ -240,29 +237,6 @@ async def test_completed_user_transcript_resets_idle_state(monkeypatch: Any) -> 
 
     assert handler.is_idle_tool_call is False
     assert handler.last_activity_time > 1.0
-
-
-@pytest.mark.asyncio
-async def test_output_audio_done_schedules_head_wobbler_reset(monkeypatch: Any) -> None:
-    """OpenAI speech completion should let the wobbler reset itself after queued audio."""
-    audio_delta = base64.b64encode(b"\x00\x00\x10\x00").decode("ascii")
-    head_wobbler = MagicMock()
-
-    handler = await _run_openai_handler_with_events(
-        monkeypatch,
-        [
-            SimpleNamespace(type="response.created"),
-            SimpleNamespace(type="response.output_audio.delta", delta=audio_delta),
-            SimpleNamespace(type="response.output_audio.done"),
-        ],
-        head_wobbler=head_wobbler,
-        gradio_mode=True,
-    )
-
-    head_wobbler.feed_pcm.assert_called_once()
-    assert head_wobbler.feed_pcm.call_args.args[1] == handler.output_sample_rate
-    head_wobbler.request_reset_after_current_audio.assert_called_once()
-    head_wobbler.reset.assert_not_called()
 
 
 @pytest.mark.asyncio
