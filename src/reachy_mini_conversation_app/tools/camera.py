@@ -2,12 +2,30 @@ import base64
 import asyncio
 import logging
 from typing import Any, Dict
+from pathlib import Path
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 from reachy_mini_conversation_app.camera_frame_encoding import encode_bgr_frame_as_jpeg
 
 
 logger = logging.getLogger(__name__)
+_SOUNDS_DIR = Path(__file__).resolve().parents[1] / "sounds"
+_CAMERA_SNAPSHOT_SOUND = "camera_snapshot.wav"
+
+
+async def _play_snapshot_sound(deps: ToolDependencies) -> None:
+    """Play a short shutter sound when a camera frame is captured."""
+    media = getattr(getattr(deps, "reachy_mini", None), "media", None)
+    play_sound = getattr(media, "play_sound", None)
+    if not callable(play_sound):
+        logger.debug("camera: media.play_sound is unavailable; skipping snapshot sound")
+        return
+
+    path = _SOUNDS_DIR / _CAMERA_SNAPSHOT_SOUND
+    try:
+        await asyncio.to_thread(play_sound, str(path))
+    except Exception:
+        logger.warning("camera: failed to play snapshot sound", exc_info=True)
 
 
 class Camera(Tool):
@@ -43,6 +61,8 @@ class Camera(Tool):
         else:
             logger.error("Camera worker not available")
             return {"error": "Camera worker not available"}
+
+        await _play_snapshot_sound(deps)
 
         if deps.vision_processor is not None:
             vision_result = await asyncio.to_thread(
