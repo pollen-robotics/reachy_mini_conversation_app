@@ -1,8 +1,8 @@
 camera_snapshot.wav
 ===================
 
-Source: "C220 camera shutter release.wav" by adeluc4 on Freesound.
-URL: https://freesound.org/people/adeluc4/sounds/125318/
+Source: "Camera Shutter Snap" by SecureSubset on Freesound.
+URL: https://freesound.org/people/SecureSubset/sounds/784946/
 License: Creative Commons 0.
 
 The packaged file was converted from Freesound's public MP3 preview to a
