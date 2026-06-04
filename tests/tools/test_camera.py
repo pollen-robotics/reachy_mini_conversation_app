@@ -1,5 +1,6 @@
 """Tests for the camera tool."""
 
+import wave
 import base64
 from io import BytesIO
 from types import SimpleNamespace
@@ -86,6 +87,11 @@ async def test_camera_tool_plays_snapshot_sound_after_frame_capture() -> None:
     sound_path = Path(play_sound.call_args.args[0])
     assert sound_path.name == "camera_snapshot.wav"
     assert sound_path.exists()
+    with wave.open(str(sound_path), "rb") as wav:
+        assert wav.getnchannels() == 1
+        assert wav.getsampwidth() == 2
+        assert wav.getframerate() == 44100
+        assert wav.getnframes() / wav.getframerate() < 0.4
 
 
 @pytest.mark.asyncio
