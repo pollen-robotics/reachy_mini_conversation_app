@@ -408,6 +408,16 @@ def test_handler_uses_startup_voice_at_startup(monkeypatch: Any) -> None:
     assert handler.get_current_voice() == "shimmer"
 
 
+def test_openai_session_uses_configured_transcription_language(monkeypatch: Any) -> None:
+    """OpenAI realtime sessions should forward the configured transcription language."""
+    monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", "fr")
+    handler = OpenaiRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+
+    session = handler._get_session_config([])
+
+    assert session["audio"]["input"]["transcription"]["language"] == "fr"
+
+
 def test_copy_preserves_current_voice_override(monkeypatch: Any) -> None:
     """Copied OpenAI handlers should keep the current voice override."""
     monkeypatch.setattr(config, "BACKEND_PROVIDER", "openai")

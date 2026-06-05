@@ -289,8 +289,19 @@ async def test_run_realtime_session_uses_default_voice_for_lb_allocated_sessions
     # HF at 16 kHz passes None so the backend uses its optimal default (16 kHz).
     assert session["audio"]["input"]["format"]["rate"] is None
     assert session["audio"]["output"]["format"]["rate"] is None
+    assert session["audio"]["input"]["transcription"]["language"] == "en"
     output = session["audio"]["output"]
     assert output["voice"] == HF_DEFAULT_VOICE
+
+
+def test_huggingface_session_uses_configured_transcription_language(monkeypatch: Any) -> None:
+    """Hugging Face realtime sessions should forward the configured transcription language."""
+    monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", "zh")
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+
+    session = handler._get_session_config([])
+
+    assert session["audio"]["input"]["transcription"]["language"] == "zh"
 
 
 @pytest.mark.asyncio
