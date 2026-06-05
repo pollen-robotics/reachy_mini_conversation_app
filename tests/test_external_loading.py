@@ -125,3 +125,41 @@ def test_builtin_profile_can_load_profile_local_tools(
     core_tools_mod = _reload_core_tools()
 
     assert "sweep_look" in core_tools_mod.ALL_TOOLS
+
+
+def test_tool_registry_reloads_when_profile_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Runtime profile changes should refresh enabled tools without restarting Python."""
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "example")
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", config_mod.DEFAULT_PROFILES_DIRECTORY)
+    monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
+    monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
+
+    core_tools_mod = _reload_core_tools()
+
+    initial_tool_names = {spec["name"] for spec in core_tools_mod.get_tool_specs()}
+    assert "sweep_look" in initial_tool_names
+    assert "camera" not in initial_tool_names
+
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "default")
+
+    reloaded_tool_names = {spec["name"] for spec in core_tools_mod.get_tool_specs()}
+    assert "camera" in reloaded_tool_names
+    assert "move_head" in reloaded_tool_names
+    assert "sweep_look" not in reloaded_tool_names
+    assert "camera" in core_tools_mod.ALL_TOOLS
+    assert "sweep_look" not in core_tools_mod.ALL_TOOLS
+
+
+def test_forced_tool_registry_reload_does_not_duplicate_profile_local_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reloading a profile-local tool should ignore stale class objects from the previous load."""
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "example")
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", config_mod.DEFAULT_PROFILES_DIRECTORY)
+    monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
+    monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
+
+    core_tools_mod = _reload_core_tools()
+    core_tools_mod.initialize_tools(force=True)
+
+    assert "sweep_look" in core_tools_mod.ALL_TOOLS

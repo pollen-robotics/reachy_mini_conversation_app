@@ -8,7 +8,8 @@ import inspect
 import logging
 import importlib
 import importlib.util
-from typing import TYPE_CHECKING, Any, Dict, List, ClassVar, Sequence
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, Dict, List, Callable, ClassVar, Sequence
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -30,16 +31,6 @@ logger = logging.getLogger(__name__)
 
 class MissingToolFileError(FileNotFoundError):
     """Raised when a requested tool file is absent on disk."""
-
-
-def get_concrete_subclasses(base: type[Tool]) -> List[type[Tool]]:
-    """Recursively find all auto-registerable concrete subclasses of a base class."""
-    result: List[type[Tool]] = []
-    for cls in base.__subclasses__():
-        if not inspect.isabstract(cls) and cls._auto_register:
-            result.append(cls)
-        result.extend(get_concrete_subclasses(cls))
-    return result
 
 
 @dataclass
@@ -87,6 +78,10 @@ class Tool(abc.ABC):
 ALL_TOOLS: Dict[str, Tool] = {}
 ALL_TOOL_SPECS: List[Dict[str, Any]] = []
 _TOOLS_INITIALIZED = False
+_TOOLS_SIGNATURE: tuple[str, str, str | None, bool, str | None] | None = None
+_TOOLS_INSTANCE_PATH: str | Path | None = None
+ToolCacheKey = tuple[str, str]
+_LOADED_TOOL_CLASS_CACHE: Dict[ToolCacheKey, List[type[Tool]]] = {}
 
 
 class RemoteMcpTool(Tool):
@@ -123,7 +118,10 @@ class RemoteMcpTool(Tool):
         return payload
 
 
-def _load_module_from_file(module_name: str, file_path: Path) -> None:
+_LOADED_REMOTE_TOOL_CACHE: Dict[ToolCacheKey, RemoteMcpTool] = {}
+
+
+def _load_module_from_file(module_name: str, file_path: Path) -> ModuleType:
     """Load a Python module from a file path."""
     if not file_path.is_file():
         raise MissingToolFileError(f"tool file not found at {file_path}")
@@ -139,24 +137,7 @@ def _load_module_from_file(module_name: str, file_path: Path) -> None:
         # Avoid leaving a partially initialised module registered on failure
         sys.modules.pop(module_name, None)
         raise
-
-
-def _try_load_tool(
-    tool_name: str,
-    module_path: str,
-    fallback_directory: Path | None,
-    file_subpath: str,
-) -> str:
-    """Try to load a tool: first via importlib, then from file if fallback is configured."""
-    try:
-        importlib.import_module(module_path)
-        return "module"
-    except ModuleNotFoundError:
-        if fallback_directory is None:
-            raise
-        tool_file = fallback_directory / file_subpath
-        _load_module_from_file(tool_name, tool_file)
-        return "file"
+    return module
 
 
 def _format_error(error: Exception) -> str:
@@ -168,6 +149,90 @@ def _format_error(error: Exception) -> str:
     if isinstance(error, ImportError):
         return f"Import error: {error}"
     return f"{type(error).__name__}: {error}"
+
+
+def _normalize_signature_path(value: str | Path | None) -> str | None:
+    """Normalize a path-like value for registry invalidation and cache keys."""
+    if value is None:
+        return None
+    try:
+        return str(Path(value).expanduser().resolve())
+    except Exception:
+        return str(value)
+
+
+def _cache_key_for_file(file_path: Path) -> ToolCacheKey:
+    """Return the cache key for a file-backed tool source."""
+    return ("file", _normalize_signature_path(file_path) or str(file_path))
+
+
+def _cache_key_for_module(module_path: str) -> ToolCacheKey:
+    """Return the cache key for an importable module-backed tool source."""
+    return ("module", module_path)
+
+
+def _tool_classes_from_module(module: ModuleType) -> List[type[Tool]]:
+    """Return auto-registerable Tool classes defined directly in module."""
+    tool_classes: List[type[Tool]] = []
+    seen_class_ids: set[int] = set()
+    for value in vars(module).values():
+        if not inspect.isclass(value) or value.__module__ != module.__name__:
+            continue
+        try:
+            is_tool_class = issubclass(value, Tool)
+        except TypeError:
+            continue
+        if value is Tool or not is_tool_class or inspect.isabstract(value) or not value._auto_register:
+            continue
+        cls_id = id(value)
+        if cls_id in seen_class_ids:
+            continue
+        seen_class_ids.add(cls_id)
+        tool_classes.append(value)
+    return tool_classes
+
+
+def _load_cached_tool_classes(
+    cache_key: ToolCacheKey,
+    load_module: Callable[[], ModuleType],
+) -> tuple[List[type[Tool]], bool]:
+    """Load tool classes once per source and return whether the cache was reused."""
+    cached_classes = _LOADED_TOOL_CLASS_CACHE.get(cache_key)
+    if cached_classes is not None:
+        return cached_classes, True
+
+    module = load_module()
+    tool_classes = _tool_classes_from_module(module)
+    _LOADED_TOOL_CLASS_CACHE[cache_key] = tool_classes
+    return tool_classes, False
+
+
+def _try_load_tool_classes(
+    tool_name: str,
+    module_path: str,
+    fallback_directory: Path | None,
+    file_subpath: str,
+) -> tuple[str, List[type[Tool]], bool]:
+    """Try to load tool classes: first via importlib, then from a configured external file."""
+    try:
+        return (
+            "module",
+            *_load_cached_tool_classes(
+                _cache_key_for_module(module_path),
+                lambda: importlib.import_module(module_path),
+            ),
+        )
+    except ModuleNotFoundError:
+        if fallback_directory is None:
+            raise
+        tool_file = fallback_directory / file_subpath
+        return (
+            "file",
+            *_load_cached_tool_classes(
+                _cache_key_for_file(tool_file),
+                lambda: _load_module_from_file(tool_name, tool_file),
+            ),
+        )
 
 
 def _build_tool_registry(
@@ -202,6 +267,17 @@ def _build_tool_registry(
         )
 
     return {tool.name: tool for tool in tool_instances}
+
+
+def _tool_registry_signature(instance_path: str | Path | None) -> tuple[str, str, str | None, bool, str | None]:
+    """Return the runtime inputs that determine the active tool registry."""
+    return (
+        config.REACHY_MINI_CUSTOM_PROFILE or "default",
+        _normalize_signature_path(config.PROFILES_DIRECTORY) or "",
+        _normalize_signature_path(config.TOOLS_DIRECTORY),
+        bool(config.AUTOLOAD_EXTERNAL_TOOLS),
+        _normalize_signature_path(instance_path),
+    )
 
 
 # Registry & specs (dynamic)
@@ -317,8 +393,10 @@ def _resolve_remote_tools(tool_names: list[str], instance_path: str | Path | Non
         for remote_tool in resolved_space.tools:
             if remote_tool.local_name not in enabled_tool_names:
                 continue
-            remote_tools.append(
-                RemoteMcpTool(
+            cache_key = ("remote", f"{resolved_space.slug}:{remote_tool.local_name}:{remote_tool.client_tool_name}")
+            cached_tool = _LOADED_REMOTE_TOOL_CACHE.get(cache_key)
+            if cached_tool is None:
+                cached_tool = RemoteMcpTool(
                     slug=resolved_space.slug,
                     name=remote_tool.local_name,
                     description=remote_tool.description,
@@ -326,14 +404,16 @@ def _resolve_remote_tools(tool_names: list[str], instance_path: str | Path | Non
                     client_tool_name=remote_tool.client_tool_name,
                     client=resolved_space.client,
                 )
-            )
+                _LOADED_REMOTE_TOOL_CACHE[cache_key] = cached_tool
+            remote_tools.append(cached_tool)
 
     return remote_tools
 
 
-def _load_profile_tools(tool_names: list[str], remote_tool_names: set[str]) -> None:
+def _load_profile_tools(tool_names: list[str], remote_tool_names: set[str]) -> List[type[Tool]]:
     """Load local profile/shared tools while skipping resolved remote tool IDs."""
     profile = config.REACHY_MINI_CUSTOM_PROFILE or "default"
+    loaded_tool_classes: List[type[Tool]] = []
 
     for tool_name in tool_names:
         if tool_name in remote_tool_names:
@@ -345,9 +425,14 @@ def _load_profile_tools(tool_names: list[str], remote_tool_names: set[str]) -> N
         profile_tool_file = config.PROFILES_DIRECTORY / profile / f"{tool_name}.py"
 
         try:
-            _load_module_from_file(tool_name, profile_tool_file)
+            tool_classes, reused_cache = _load_cached_tool_classes(
+                _cache_key_for_file(profile_tool_file),
+                lambda: _load_module_from_file(tool_name, profile_tool_file),
+            )
+            loaded_tool_classes.extend(tool_classes)
             profile_scope = "external" if config.PROFILES_DIRECTORY != DEFAULT_PROFILES_PATH else "built-in"
-            logger.info("✓ Loaded %s profile tool: %s", profile_scope, tool_name)
+            action = "Reused" if reused_cache else "Loaded"
+            logger.info("✓ %s %s profile tool: %s", action, profile_scope, tool_name)
             loaded = True
         except MissingToolFileError:
             logger.debug("No profile-local tool file for '%s' at %s", tool_name, profile_tool_file)
@@ -361,16 +446,18 @@ def _load_profile_tools(tool_names: list[str], remote_tool_names: set[str]) -> N
         if not loaded:
             shared_module_path = f"reachy_mini_conversation_app.tools.{tool_name}"
             try:
-                source = _try_load_tool(
+                source, tool_classes, reused_cache = _try_load_tool_classes(
                     tool_name,
                     module_path=shared_module_path,
                     fallback_directory=config.TOOLS_DIRECTORY,
                     file_subpath=f"{tool_name}.py",
                 )
+                loaded_tool_classes.extend(tool_classes)
+                action = "Reused" if reused_cache else "Loaded"
                 if source == "file":
-                    logger.info("✓ Loaded external tool: %s", tool_name)
+                    logger.info("✓ %s external tool: %s", action, tool_name)
                 else:
-                    logger.info("✓ Loaded core tool: %s", tool_name)
+                    logger.info("✓ %s core tool: %s", action, tool_name)
             except (ModuleNotFoundError, FileNotFoundError):
                 if profile_error:
                     logger.error(f"❌ Tool '{tool_name}' also not found in shared tools")
@@ -380,22 +467,35 @@ def _load_profile_tools(tool_names: list[str], remote_tool_names: set[str]) -> N
                 logger.error(f"❌ Failed to load shared tool '{tool_name}': {_format_error(e)}")
                 logger.error(f"  Module path: {shared_module_path}")
 
+    return loaded_tool_classes
 
-def initialize_tools(instance_path: str | Path | None = None) -> None:
-    """Populate the tool registry once for the current process."""
-    global ALL_TOOLS, ALL_TOOL_SPECS, _TOOLS_INITIALIZED
 
-    if _TOOLS_INITIALIZED:
-        logger.debug("Tools already initialized; skipping reinitialization.")
+def initialize_tools(instance_path: str | Path | None = None, *, force: bool = False) -> None:
+    """Populate or refresh the active-profile tool registry."""
+    global ALL_TOOLS, ALL_TOOL_SPECS, _TOOLS_INITIALIZED, _TOOLS_SIGNATURE, _TOOLS_INSTANCE_PATH
+
+    if force:
+        _LOADED_TOOL_CLASS_CACHE.clear()
+        _LOADED_REMOTE_TOOL_CACHE.clear()
+
+    if instance_path is not None:
+        _TOOLS_INSTANCE_PATH = instance_path
+    effective_instance_path = _TOOLS_INSTANCE_PATH
+    signature = _tool_registry_signature(effective_instance_path)
+
+    if _TOOLS_INITIALIZED and not force and signature == _TOOLS_SIGNATURE:
+        logger.debug("Tools already initialized for active profile; skipping reinitialization.")
         return
+    if _TOOLS_INITIALIZED:
+        logger.info("Reloading tool registry for active profile/configuration change.")
 
     tool_names = _read_profile_tool_names()
-    remote_tools = _resolve_remote_tools(tool_names, instance_path)
+    remote_tools = _resolve_remote_tools(tool_names, effective_instance_path)
     remote_tool_names = {tool.name for tool in remote_tools}
-    _load_profile_tools(tool_names, remote_tool_names)
+    loaded_tool_classes = _load_profile_tools(tool_names, remote_tool_names)
 
     ALL_TOOLS = _build_tool_registry(
-        get_concrete_subclasses(Tool),  # type: ignore[type-abstract]
+        loaded_tool_classes,
         extra_tools=remote_tools,
     )
     ALL_TOOL_SPECS = [tool.spec() for tool in ALL_TOOLS.values()]
@@ -404,12 +504,12 @@ def initialize_tools(instance_path: str | Path | None = None) -> None:
         logger.info(f"tool registered: {tool_name} - {tool.description}")
 
     _TOOLS_INITIALIZED = True
+    _TOOLS_SIGNATURE = signature
 
 
 def get_tool_specs(exclusion_list: list[str] | None = None) -> list[Dict[str, Any]]:
     """Get tool specs, optionally excluding some tools."""
-    if not _TOOLS_INITIALIZED:
-        initialize_tools()
+    initialize_tools()
     exclusion_list = exclusion_list or []
     return [spec for spec in ALL_TOOL_SPECS if spec.get("name") not in exclusion_list]
 
@@ -433,8 +533,7 @@ def _safe_load_obj(args_json: str) -> Dict[str, Any]:
 
 
 async def _dispatch_tool_call(tool_name: str, args: Dict[str, Any], deps: ToolDependencies) -> Dict[str, Any]:
-    if not _TOOLS_INITIALIZED:
-        initialize_tools()
+    initialize_tools()
     tool = ALL_TOOLS.get(tool_name)
     if not tool:
         return {"error": f"unknown tool: {tool_name}"}
