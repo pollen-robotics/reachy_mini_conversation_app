@@ -370,9 +370,7 @@ class Config:
     # Deliberately ignore HF_REALTIME_SESSION_URL from the environment; the app-managed proxy is HF_DEFAULTS.session_url.
     HF_REALTIME_SESSION_URL = HF_DEFAULTS.session_url
     HF_REALTIME_WS_URL = os.getenv(HF_REALTIME_WS_URL_ENV)
-    REALTIME_TRANSCRIPTION_LANGUAGE = _normalize_transcription_language(
-        os.getenv(REALTIME_TRANSCRIPTION_LANGUAGE_ENV)
-    )
+    REALTIME_TRANSCRIPTION_LANGUAGE = _normalize_transcription_language(os.getenv(REALTIME_TRANSCRIPTION_LANGUAGE_ENV))
     HF_HOME = os.getenv("HF_HOME", "./cache")
     LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "HuggingFaceTB/SmolVLM2-2.2B-Instruct")
     HF_TOKEN = os.getenv("HF_TOKEN")  # Optional, falls back to hf auth login if not set
@@ -476,9 +474,7 @@ def refresh_runtime_config_from_env() -> None:
     # Deliberately ignore HF_REALTIME_SESSION_URL from the environment; the app-managed proxy is HF_DEFAULTS.session_url.
     config.HF_REALTIME_SESSION_URL = HF_DEFAULTS.session_url
     config.HF_REALTIME_WS_URL = os.getenv(HF_REALTIME_WS_URL_ENV)
-    config.REALTIME_TRANSCRIPTION_LANGUAGE = _normalize_transcription_language(
-        os.getenv(REALTIME_TRANSCRIPTION_LANGUAGE_ENV)
-    )
+    config.REALTIME_TRANSCRIPTION_LANGUAGE = _normalize_transcription_language(os.getenv(REALTIME_TRANSCRIPTION_LANGUAGE_ENV))
     config.HF_HOME = os.getenv("HF_HOME", "./cache")
     config.LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "HuggingFaceTB/SmolVLM2-2.2B-Instruct")
     config.HF_TOKEN = os.getenv("HF_TOKEN")
