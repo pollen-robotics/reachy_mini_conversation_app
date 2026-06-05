@@ -481,7 +481,8 @@ class LocalStream:
         try:
             from reachy_mini_conversation_app.prompts import get_session_voice
 
-            return get_session_voice(default=default_voice)
+            session_voice = get_session_voice(default=default_voice)
+            return self._resolve_backend_voice(session_voice, fallback=default_voice) or default_voice
         except Exception:
             return default_voice
 

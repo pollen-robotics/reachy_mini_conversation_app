@@ -781,6 +781,48 @@ def test_headless_personality_routes_can_use_stream_callbacks() -> None:
         loop.close()
 
 
+def test_local_stream_current_voice_resolves_profile_voice_for_active_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Headless UI should not report an unsupported profile voice as active."""
+    monkeypatch.setattr(config, "BACKEND_PROVIDER", "openai")
+    monkeypatch.setattr("reachy_mini_conversation_app.prompts.get_session_voice", lambda default: "af_sky")
+
+    stream = LocalStream(MagicMock(), MagicMock())
+
+    assert stream.get_current_voice() == "cedar"
+
+
+@pytest.mark.asyncio
+async def test_local_stream_accepts_custom_hf_voice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Headless LocalStream should allow dynamic Hugging Face voice names."""
+    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
+    stream = LocalStream(MagicMock(), MagicMock())
+    restart = AsyncMock()
+    monkeypatch.setattr(stream, "request_backend_restart", restart)
+
+    status = await stream.change_voice("af_sky")
+
+    assert status == "Voice changed to af_sky."
+    assert stream.get_current_voice() == "af_sky"
+    restart.assert_awaited_once_with("voice_changed")
+
+
+@pytest.mark.asyncio
+async def test_local_stream_rejects_cross_backend_voice_for_hf(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reserved OpenAI/Gemini voice names should not leak into Hugging Face sessions."""
+    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
+    stream = LocalStream(MagicMock(), MagicMock())
+    restart = AsyncMock()
+    monkeypatch.setattr(stream, "request_backend_restart", restart)
+
+    status = await stream.change_voice("cedar")
+
+    assert status == "Voice changed to Aiden."
+    assert stream.get_current_voice() == "Aiden"
+    restart.assert_awaited_once_with("voice_changed")
+
+
 @pytest.mark.asyncio
 async def test_apply_personality_propagates_restart_cancellation(monkeypatch: pytest.MonkeyPatch) -> None:
     """Cancellation during backend restart should not be converted into a status string."""
