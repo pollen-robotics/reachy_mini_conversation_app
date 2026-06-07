@@ -19,6 +19,8 @@ from reachy_mini_conversation_app.config import GEMINI_AVAILABLE_VOICES, config
 from reachy_mini_conversation_app.console import LOCAL_PLAYER_BACKEND, LocalStream
 from reachy_mini_conversation_app.startup_settings import (
     StartupSettings,
+    read_startup_settings,
+    write_startup_settings,
     load_startup_settings_into_runtime,
 )
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
@@ -882,6 +884,20 @@ def test_local_stream_persist_personality_clears_legacy_startup_env_overrides(tm
 
     assert settings == StartupSettings(voice="Aiden")
     assert applied_profiles == [None]
+
+
+def test_local_stream_persist_personality_preserves_prompt_language(tmp_path) -> None:
+    """Persisting profile/voice should not drop the saved prompt language selector."""
+    write_startup_settings(tmp_path, profile=None, voice="Aiden", prompt_language="zh")
+    stream = LocalStream(MagicMock(), MagicMock(), instance_path=str(tmp_path))
+
+    stream._persist_personality("sorry_bro", "shimmer")
+
+    assert read_startup_settings(tmp_path) == StartupSettings(
+        profile="sorry_bro",
+        voice="shimmer",
+        prompt_language="zh",
+    )
 
 
 def test_local_stream_launch_waits_for_manual_openai_key_without_download(

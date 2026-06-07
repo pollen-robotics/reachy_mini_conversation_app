@@ -3,7 +3,13 @@ import sys
 import logging
 from pathlib import Path
 
-from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY, config, get_default_voice_for_backend
+from reachy_mini_conversation_app.config import (
+    DEFAULT_PROFILES_DIRECTORY,
+    PROMPT_LANGUAGE_ENV,
+    config,
+    get_default_voice_for_backend,
+    normalize_prompt_language,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -12,6 +18,38 @@ logger = logging.getLogger(__name__)
 PROMPTS_LIBRARY_DIRECTORY = Path(__file__).parent / "prompts"
 INSTRUCTIONS_FILENAME = "instructions.txt"
 VOICE_FILENAME = "voice.txt"
+DEFAULT_PROMPT_FILENAME = "default_prompt.txt"
+PROMPT_LANGUAGE_FILENAME_BY_LANGUAGE = {
+    "zh": "default_prompt.zh.txt",
+    "en": "default_prompt.en.txt",
+}
+
+
+def get_prompt_language() -> str:
+    """Return the selected prompt language, resolving auto from runtime config."""
+    selected = normalize_prompt_language(getattr(config, "PROMPT_LANGUAGE", None))
+    if selected != "auto":
+        return selected
+
+    transcription_language = getattr(config, "INPUT_TRANSCRIPTION_LANGUAGE", None)
+    normalized_transcription_language = normalize_prompt_language(transcription_language)
+    if normalized_transcription_language != "auto":
+        return normalized_transcription_language
+
+    return "en"
+
+
+def _language_specific_file(base_file: Path, language: str) -> Path:
+    """Return a language-specific sibling when it exists."""
+    if language not in {"zh", "en"}:
+        return base_file
+
+    if base_file.name == DEFAULT_PROMPT_FILENAME:
+        candidate = base_file.with_name(PROMPT_LANGUAGE_FILENAME_BY_LANGUAGE[language])
+    else:
+        candidate = base_file.with_name(f"{base_file.stem}.{language}{base_file.suffix}")
+
+    return candidate if candidate.exists() else base_file
 
 
 def _expand_prompt_includes(content: str) -> str:
@@ -58,12 +96,22 @@ def _expand_prompt_includes(content: str) -> str:
     return "\n".join(expanded_lines)
 
 
-def get_session_instructions() -> str:
+def get_session_instructions(language: str | None = None) -> str:
     """Get session instructions, loading from REACHY_MINI_CUSTOM_PROFILE if set."""
     profile = config.REACHY_MINI_CUSTOM_PROFILE
+    prompt_language = get_prompt_language() if language is None else normalize_prompt_language(language)
+    if prompt_language == "auto":
+        prompt_language = get_prompt_language()
+
     if not profile:
-        logger.info(f"Loading default prompt from {PROMPTS_LIBRARY_DIRECTORY / 'default_prompt.txt'}")
-        instructions_file = PROMPTS_LIBRARY_DIRECTORY / "default_prompt.txt"
+        base_file = PROMPTS_LIBRARY_DIRECTORY / DEFAULT_PROMPT_FILENAME
+        instructions_file = _language_specific_file(base_file, prompt_language)
+        logger.info(
+            "Loading default prompt from %s (language=%s via %s)",
+            instructions_file,
+            prompt_language,
+            PROMPT_LANGUAGE_ENV,
+        )
     else:
         if config.PROFILES_DIRECTORY != DEFAULT_PROFILES_DIRECTORY:
             logger.info(
@@ -73,7 +121,8 @@ def get_session_instructions() -> str:
             )
         else:
             logger.info(f"Loading prompt from profile '{profile}'")
-        instructions_file = config.PROFILES_DIRECTORY / profile / INSTRUCTIONS_FILENAME
+        base_file = config.PROFILES_DIRECTORY / profile / INSTRUCTIONS_FILENAME
+        instructions_file = _language_specific_file(base_file, prompt_language)
 
     try:
         if instructions_file.exists():

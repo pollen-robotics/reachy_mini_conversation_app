@@ -29,6 +29,7 @@ from reachy_mini_conversation_app.config import (
     LOCKED_PROFILE,
     OPENAI_BACKEND,
     HF_REALTIME_WS_URL_ENV,
+    PROMPT_LANGUAGE_ENV,
     HF_LOCAL_CONNECTION_MODE,
     HF_DEPLOYED_CONNECTION_MODE,
     HF_REALTIME_CONNECTION_MODE_ENV,
@@ -44,6 +45,7 @@ from reachy_mini_conversation_app.config import (
     get_default_voice_for_backend,
     refresh_runtime_config_from_env,
     get_available_voices_for_backend,
+    normalize_prompt_language,
 )
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
 from reachy_mini_conversation_app.audio.startup_config import apply_audio_startup_config
@@ -77,6 +79,7 @@ LOCAL_PLAYER_BACKEND = (
 LEGACY_STARTUP_ENV_NAMES = (
     "REACHY_MINI_CUSTOM_PROFILE",
     "REACHY_MINI_VOICE_OVERRIDE",
+    PROMPT_LANGUAGE_ENV,
 )
 BACKEND_RETRY_DELAY_SECONDS = 5.0
 
@@ -427,12 +430,16 @@ class LocalStream:
                 selection = existing.profile
             elif normalized_voice_override is None and selection:
                 normalized_voice_override = existing.voice
+            prompt_language = existing.prompt_language
+        else:
+            prompt_language = read_startup_settings(self._instance_path).prompt_language
 
         try:
             write_startup_settings(
                 self._instance_path,
                 profile=selection,
                 voice=normalized_voice_override,
+                prompt_language=prompt_language,
             )
             self._remove_persisted_env_values(LEGACY_STARTUP_ENV_NAMES)
             logger.info("Persisted startup personality settings to %s", Path(self._instance_path))
@@ -442,6 +449,27 @@ class LocalStream:
     def _read_persisted_personality(self) -> Optional[str]:
         """Read the saved startup personality from instance-local UI settings."""
         return read_startup_settings(self._instance_path).profile
+
+    def _read_persisted_prompt_language(self) -> str:
+        """Read the saved prompt language selector."""
+        settings = read_startup_settings(self._instance_path)
+        return normalize_prompt_language(settings.prompt_language or getattr(config, "PROMPT_LANGUAGE", "zh"))
+
+    async def apply_prompt_language(self, language: str) -> str:
+        """Persist prompt language and restart the active backend."""
+        from reachy_mini_conversation_app.config import set_prompt_language
+
+        selected = set_prompt_language(language)
+        if self._instance_path:
+            existing = read_startup_settings(self._instance_path)
+            write_startup_settings(
+                self._instance_path,
+                profile=existing.profile,
+                voice=existing.voice,
+                prompt_language=selected,
+            )
+        await self.request_backend_restart("prompt_language_changed")
+        return selected
 
     async def apply_personality(self, profile: Optional[str]) -> str:
         """Apply a personality by updating config and restarting the active backend."""
@@ -576,6 +604,9 @@ class LocalStream:
             hf_host: Optional[str] = None
             hf_port: Optional[int] = None
 
+        class PromptLanguagePayload(BaseModel):
+            language: str
+
         def _status_payload() -> dict[str, object]:
             backend_provider = get_backend_choice()
             active_backend = self._active_backend()
@@ -613,6 +644,7 @@ class LocalStream:
                 "can_proceed_with_gemini": can_proceed_with_gemini,
                 "can_proceed_with_hf": can_proceed_with_hf,
                 "requires_restart": requires_restart,
+                "prompt_language": self._read_persisted_prompt_language(),
                 **backend_connection,
             }
 
@@ -701,6 +733,19 @@ class LocalStream:
                     "ok": True,
                     "message": message,
                     **payload_data,
+                }
+            )
+
+        @self._settings_app.post("/prompt_language")
+        async def _set_prompt_language(payload: PromptLanguagePayload) -> JSONResponse:
+            selected = normalize_prompt_language(payload.language)
+            await self.apply_prompt_language(selected)
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "prompt_language": selected,
+                    "message": "Prompt language saved. Reconnecting backend.",
+                    **_status_payload(),
                 }
             )
 

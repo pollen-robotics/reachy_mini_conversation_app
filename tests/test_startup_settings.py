@@ -10,9 +10,13 @@ from reachy_mini_conversation_app.startup_settings import (
 
 def test_write_and_read_startup_settings(tmp_path) -> None:
     """Startup settings should round-trip through startup_settings.json."""
-    write_startup_settings(tmp_path, profile="sorry_bro", voice="shimmer")
+    write_startup_settings(tmp_path, profile="sorry_bro", voice="shimmer", prompt_language="zh")
 
-    assert read_startup_settings(tmp_path) == StartupSettings(profile="sorry_bro", voice="shimmer")
+    assert read_startup_settings(tmp_path) == StartupSettings(
+        profile="sorry_bro",
+        voice="shimmer",
+        prompt_language="zh",
+    )
 
 
 def test_load_startup_settings_into_runtime_applies_profile_when_no_env(monkeypatch, tmp_path) -> None:
@@ -29,6 +33,27 @@ def test_load_startup_settings_into_runtime_applies_profile_when_no_env(monkeypa
 
     assert settings == StartupSettings(profile="sorry_bro", voice="shimmer")
     assert applied_profiles == ["sorry_bro"]
+
+
+def test_load_startup_settings_applies_prompt_language(monkeypatch, tmp_path) -> None:
+    """Startup settings should seed the runtime prompt language."""
+    write_startup_settings(tmp_path, profile="sorry_bro", voice="shimmer", prompt_language="en")
+    applied_profiles: list[str | None] = []
+    applied_languages: list[str | None] = []
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.config.set_custom_profile",
+        lambda profile: applied_profiles.append(profile),
+    )
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.config.set_prompt_language",
+        lambda language: applied_languages.append(language),
+    )
+
+    settings = load_startup_settings_into_runtime(tmp_path)
+
+    assert settings == StartupSettings(profile="sorry_bro", voice="shimmer", prompt_language="en")
+    assert applied_profiles == ["sorry_bro"]
+    assert applied_languages == ["en"]
 
 
 def test_load_startup_settings_into_runtime_saved_settings_override_instance_env(monkeypatch, tmp_path) -> None:

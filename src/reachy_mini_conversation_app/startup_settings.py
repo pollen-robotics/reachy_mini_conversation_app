@@ -19,6 +19,7 @@ class StartupSettings:
 
     profile: str | None = None
     voice: str | None = None
+    prompt_language: str | None = None
 
 
 def _normalize_optional_text(value: object) -> str | None:
@@ -55,6 +56,7 @@ def read_startup_settings(instance_path: str | Path | None) -> StartupSettings:
     return StartupSettings(
         profile=_normalize_optional_text(payload.get("profile")),
         voice=_normalize_optional_text(payload.get("voice")),
+        prompt_language=_normalize_optional_text(payload.get("prompt_language")),
     )
 
 
@@ -63,6 +65,7 @@ def write_startup_settings(
     *,
     profile: str | None,
     voice: str | None,
+    prompt_language: str | None = None,
 ) -> None:
     """Persist startup settings in an instance-local JSON file."""
     settings_path = _startup_settings_path(instance_path)
@@ -72,8 +75,9 @@ def write_startup_settings(
     settings = StartupSettings(
         profile=_normalize_optional_text(profile),
         voice=_normalize_optional_text(voice),
+        prompt_language=_normalize_optional_text(prompt_language),
     )
-    if settings.profile is None and settings.voice is None:
+    if settings.profile is None and settings.voice is None and settings.prompt_language is None:
         try:
             settings_path.unlink()
         except FileNotFoundError:
@@ -85,13 +89,15 @@ def write_startup_settings(
         payload["profile"] = settings.profile
     if settings.voice is not None:
         payload["voice"] = settings.voice
+    if settings.prompt_language is not None:
+        payload["prompt_language"] = settings.prompt_language
 
     settings_path.write_text(f"{json.dumps(payload, indent=2, sort_keys=True)}\n", encoding="utf-8")
 
 
 def load_startup_settings_into_runtime(instance_path: str | Path | None) -> StartupSettings:
     """Load instance-local startup settings when no explicit profile override is set."""
-    from reachy_mini_conversation_app.config import LOCKED_PROFILE, set_custom_profile
+    from reachy_mini_conversation_app.config import LOCKED_PROFILE, set_custom_profile, set_prompt_language
 
     if LOCKED_PROFILE is not None:
         return StartupSettings()
@@ -100,7 +106,11 @@ def load_startup_settings_into_runtime(instance_path: str | Path | None) -> Star
     settings = read_startup_settings(instance_path)
     if settings_path is None or not settings_path.exists():
         if os.getenv("REACHY_MINI_CUSTOM_PROFILE"):
-            return StartupSettings(voice=settings.voice)
+            if settings.prompt_language:
+                set_prompt_language(settings.prompt_language)
+            return StartupSettings(voice=settings.voice, prompt_language=settings.prompt_language)
 
     set_custom_profile(settings.profile)
+    if settings.prompt_language:
+        set_prompt_language(settings.prompt_language)
     return settings

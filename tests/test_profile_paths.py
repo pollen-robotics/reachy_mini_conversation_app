@@ -85,6 +85,28 @@ def test_prompts_load_from_compact_builtin_profile(monkeypatch: pytest.MonkeyPat
     assert read_instructions_for("mad_scientist_assistant") == expected
 
 
+def test_default_prompt_language_selector_loads_chinese(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default prompt loading should support the Chinese language selector."""
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
+    monkeypatch.setattr(config, "PROMPT_LANGUAGE", "zh")
+
+    instructions = prompts_mod.get_session_instructions()
+
+    assert "默认使用中文回答" in instructions
+    assert "不要在回复里包含舞台指令" in instructions
+
+
+def test_default_prompt_language_selector_loads_english(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default prompt loading should support the English language selector."""
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
+    monkeypatch.setattr(config, "PROMPT_LANGUAGE", "en")
+
+    instructions = prompts_mod.get_session_instructions()
+
+    assert "You speak English by default" in instructions
+    assert "Do not include stage directions" in instructions
+
+
 def test_builtin_default_profile_tools_load_for_ui() -> None:
     """The UI should read built-in default tools from the packaged default profile."""
     expected = (DEFAULT_PROFILES_DIRECTORY / "default" / "tools.txt").read_text(encoding="utf-8")

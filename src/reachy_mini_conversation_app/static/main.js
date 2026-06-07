@@ -230,6 +230,19 @@ async function applyVoice(voice) {
   return await resp.json();
 }
 
+async function applyPromptLanguage(language) {
+  const resp = await fetch("/prompt_language", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ language }),
+  });
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(data.error || "apply_prompt_language_failed");
+  }
+  return await resp.json();
+}
+
 async function applyPersonality(name, { persist = false } = {}) {
   // Send as query param to avoid any body parsing issues on the server
   const url = new URL("/personalities/apply", window.location.origin);
@@ -361,6 +374,8 @@ async function init() {
   const pNew = document.getElementById("new-personality");
   const pSave = document.getElementById("save-personality");
   const pStartupLabel = document.getElementById("startup-label");
+  const pPromptLanguage = document.getElementById("prompt-language-select");
+  const pApplyPromptLanguage = document.getElementById("apply-prompt-language");
   const pName = document.getElementById("personality-name");
   const pInstr = document.getElementById("instructions-ta");
   const pTools = document.getElementById("tools-ta");
@@ -376,6 +391,10 @@ async function init() {
   };
   let selectedBackend = DEFAULT_BACKEND;
   let editingCredentials = false;
+
+  function normalizePromptLanguage(language) {
+    return ["zh", "en", "auto"].includes(language) ? language : "zh";
+  }
 
   function resolveHFHost() {
     return hfHostPreset.value === "custom" ? hfHostCustom.value.trim() : HF_DEFAULT_HOST;
@@ -573,6 +592,7 @@ async function init() {
     requires_restart: false,
   };
   populateHFFields(st);
+  pPromptLanguage.value = normalizePromptLanguage(st.prompt_language);
   setSelectedBackend(st.backend_provider || DEFAULT_BACKEND);
   statusEl.textContent = "";
   renderCredentialPanels(st);
@@ -581,6 +601,7 @@ async function init() {
     const latest = await fetchStatusSnapshot();
     if (!latest) return;
     st = latest;
+    pPromptLanguage.value = normalizePromptLanguage(st.prompt_language);
     renderCredentialPanels(st);
   }, 3000);
 
@@ -908,7 +929,7 @@ async function init() {
     }
     show(personalityPanel, true);
 
-    pApplyVoice.addEventListener("click", async () => {
+  pApplyVoice.addEventListener("click", async () => {
       const voice = getEffectiveVoice();
       if (!voice) {
         pVoiceCustom.classList.add("error");
@@ -930,7 +951,18 @@ async function init() {
       } catch (e) {
         setStatusMessage(pStatus, `Failed to apply voice${e.message ? ": " + e.message : ""}`, "error");
       }
-    });
+  });
+
+  pApplyPromptLanguage.addEventListener("click", async () => {
+    setStatusMessage(pStatus, "Saving prompt language...");
+    try {
+      const saved = await applyPromptLanguage(pPromptLanguage.value);
+      pPromptLanguage.value = normalizePromptLanguage(saved.prompt_language);
+      setStatusMessage(pStatus, saved.message || "Prompt language saved.", "ok");
+    } catch (e) {
+      setStatusMessage(pStatus, "Failed to save prompt language.", "error");
+    }
+  });
 
     pApply.addEventListener("click", async () => {
       setStatusMessage(pStatus, "Applying...");

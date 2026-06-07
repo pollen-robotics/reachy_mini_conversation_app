@@ -91,6 +91,7 @@ HF_BACKEND = "huggingface"
 DEFAULT_BACKEND_PROVIDER = HF_BACKEND
 HF_REALTIME_CONNECTION_MODE_ENV = "HF_REALTIME_CONNECTION_MODE"
 HF_REALTIME_WS_URL_ENV = "HF_REALTIME_WS_URL"
+PROMPT_LANGUAGE_ENV = "REACHY_MINI_PROMPT_LANGUAGE"
 HF_LOCAL_CONNECTION_MODE = "local"
 HF_DEPLOYED_CONNECTION_MODE = "deployed"
 HF_REALTIME_SESSION_PROXY_URL = "https://pollen-robotics-reachy-mini-realtime-url.hf.space/session"
@@ -209,6 +210,19 @@ def _normalize_hf_connection_mode(value: str | None) -> str | None:
         )
         return None
     return candidate
+
+
+def normalize_prompt_language(value: str | None) -> str:
+    """Normalize the prompt language selector."""
+    candidate = (value or "").strip().lower()
+    if candidate in {"", "auto"}:
+        return "auto"
+    if candidate in {"zh", "cn", "chinese", "zh-cn", "zh_cn"}:
+        return "zh"
+    if candidate in {"en", "english", "en-us", "en_us"}:
+        return "en"
+    logger.warning("Invalid %s=%r. Expected auto, zh, or en.", PROMPT_LANGUAGE_ENV, value)
+    return "auto"
 
 
 @dataclass(frozen=True)
@@ -363,6 +377,7 @@ class Config:
     # Deliberately ignore HF_REALTIME_SESSION_URL from the environment; the app-managed proxy is HF_DEFAULTS.session_url.
     HF_REALTIME_SESSION_URL = HF_DEFAULTS.session_url
     HF_REALTIME_WS_URL = os.getenv(HF_REALTIME_WS_URL_ENV)
+    PROMPT_LANGUAGE = normalize_prompt_language(os.getenv(PROMPT_LANGUAGE_ENV, "zh"))
     HF_HOME = os.getenv("HF_HOME", "./cache")
     LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "HuggingFaceTB/SmolVLM2-2.2B-Instruct")
     HF_TOKEN = os.getenv("HF_TOKEN")  # Optional, falls back to hf auth login if not set
@@ -466,6 +481,7 @@ def refresh_runtime_config_from_env() -> None:
     # Deliberately ignore HF_REALTIME_SESSION_URL from the environment; the app-managed proxy is HF_DEFAULTS.session_url.
     config.HF_REALTIME_SESSION_URL = HF_DEFAULTS.session_url
     config.HF_REALTIME_WS_URL = os.getenv(HF_REALTIME_WS_URL_ENV)
+    config.PROMPT_LANGUAGE = normalize_prompt_language(os.getenv(PROMPT_LANGUAGE_ENV, "zh"))
     config.HF_HOME = os.getenv("HF_HOME", "./cache")
     config.LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "HuggingFaceTB/SmolVLM2-2.2B-Instruct")
     config.HF_TOKEN = os.getenv("HF_TOKEN")
@@ -566,3 +582,17 @@ def set_custom_profile(profile: str | None) -> None:
             os.environ.pop("REACHY_MINI_CUSTOM_PROFILE", None)
     except Exception as e:
         logger.warning("Failed to sync profile to environment: %s", e)
+
+
+def set_prompt_language(language: str | None) -> str:
+    """Update the prompt language selector at runtime and expose it via env."""
+    normalized = normalize_prompt_language(language)
+    try:
+        config.PROMPT_LANGUAGE = normalized
+    except Exception as e:
+        logger.warning("Failed to update prompt language config: %s", e)
+    try:
+        os.environ[PROMPT_LANGUAGE_ENV] = normalized
+    except Exception as e:
+        logger.warning("Failed to sync prompt language to environment: %s", e)
+    return normalized
