@@ -79,9 +79,10 @@ ALL_TOOLS: Dict[str, Tool] = {}
 ALL_TOOL_SPECS: List[Dict[str, Any]] = []
 _TOOLS_INITIALIZED = False
 _TOOLS_SIGNATURE: tuple[str, str, str | None, bool, str | None] | None = None
+_TOOLS_SIGNATURE_CACHE_INPUTS: tuple[str, str | Path, str | Path | None, bool, str | Path | None] | None = None
+_TOOLS_SIGNATURE_CACHE: tuple[str, str, str | None, bool, str | None] | None = None
 _TOOLS_INSTANCE_PATH: str | Path | None = None
-ToolCacheKey = tuple[str, str]
-_LOADED_TOOL_CLASS_CACHE: Dict[ToolCacheKey, List[type[Tool]]] = {}
+_LOADED_TOOL_CLASS_CACHE: Dict[tuple[str, str], List[type[Tool]]] = {}
 
 
 class RemoteMcpTool(Tool):
@@ -118,7 +119,7 @@ class RemoteMcpTool(Tool):
         return payload
 
 
-_LOADED_REMOTE_TOOL_CACHE: Dict[ToolCacheKey, RemoteMcpTool] = {}
+_LOADED_REMOTE_TOOL_CACHE: Dict[tuple[str, str], RemoteMcpTool] = {}
 
 
 def _load_module_from_file(module_name: str, file_path: Path) -> ModuleType:
@@ -161,12 +162,12 @@ def _normalize_signature_path(value: str | Path | None) -> str | None:
         return str(value)
 
 
-def _cache_key_for_file(file_path: Path) -> ToolCacheKey:
+def _cache_key_for_file(file_path: Path) -> tuple[str, str]:
     """Return the cache key for a file-backed tool source."""
     return ("file", _normalize_signature_path(file_path) or str(file_path))
 
 
-def _cache_key_for_module(module_path: str) -> ToolCacheKey:
+def _cache_key_for_module(module_path: str) -> tuple[str, str]:
     """Return the cache key for an importable module-backed tool source."""
     return ("module", module_path)
 
@@ -193,7 +194,7 @@ def _tool_classes_from_module(module: ModuleType) -> List[type[Tool]]:
 
 
 def _load_cached_tool_classes(
-    cache_key: ToolCacheKey,
+    cache_key: tuple[str, str],
     load_module: Callable[[], ModuleType],
 ) -> tuple[List[type[Tool]], bool]:
     """Load tool classes once per source and return whether the cache was reused."""
@@ -271,13 +272,27 @@ def _build_tool_registry(
 
 def _tool_registry_signature(instance_path: str | Path | None) -> tuple[str, str, str | None, bool, str | None]:
     """Return the runtime inputs that determine the active tool registry."""
-    return (
+    global _TOOLS_SIGNATURE_CACHE_INPUTS, _TOOLS_SIGNATURE_CACHE
+
+    inputs = (
         config.REACHY_MINI_CUSTOM_PROFILE or "default",
-        _normalize_signature_path(config.PROFILES_DIRECTORY) or "",
-        _normalize_signature_path(config.TOOLS_DIRECTORY),
+        config.PROFILES_DIRECTORY,
+        config.TOOLS_DIRECTORY,
         bool(config.AUTOLOAD_EXTERNAL_TOOLS),
-        _normalize_signature_path(instance_path),
+        instance_path,
     )
+    if inputs == _TOOLS_SIGNATURE_CACHE_INPUTS and _TOOLS_SIGNATURE_CACHE is not None:
+        return _TOOLS_SIGNATURE_CACHE
+
+    _TOOLS_SIGNATURE_CACHE_INPUTS = inputs
+    _TOOLS_SIGNATURE_CACHE = (
+        inputs[0],
+        _normalize_signature_path(inputs[1]) or "",
+        _normalize_signature_path(inputs[2]),
+        inputs[3],
+        _normalize_signature_path(inputs[4]),
+    )
+    return _TOOLS_SIGNATURE_CACHE
 
 
 # Registry & specs (dynamic)
@@ -471,12 +486,19 @@ def _load_profile_tools(tool_names: list[str], remote_tool_names: set[str]) -> L
 
 
 def initialize_tools(instance_path: str | Path | None = None, *, force: bool = False) -> None:
-    """Populate or refresh the active-profile tool registry."""
-    global ALL_TOOLS, ALL_TOOL_SPECS, _TOOLS_INITIALIZED, _TOOLS_SIGNATURE, _TOOLS_INSTANCE_PATH
+    """Populate or refresh the active-profile tool registry.
+
+    When ``force`` is true, file-backed tools are re-executed, while importable
+    tool modules still follow normal ``importlib``/``sys.modules`` caching.
+    """
+    global ALL_TOOLS, ALL_TOOL_SPECS, _TOOLS_INITIALIZED, _TOOLS_SIGNATURE, _TOOLS_SIGNATURE_CACHE_INPUTS
+    global _TOOLS_SIGNATURE_CACHE, _TOOLS_INSTANCE_PATH
 
     if force:
         _LOADED_TOOL_CLASS_CACHE.clear()
         _LOADED_REMOTE_TOOL_CACHE.clear()
+        _TOOLS_SIGNATURE_CACHE_INPUTS = None
+        _TOOLS_SIGNATURE_CACHE = None
 
     if instance_path is not None:
         _TOOLS_INSTANCE_PATH = instance_path
