@@ -150,23 +150,6 @@ def test_tool_registry_reloads_when_profile_changes(monkeypatch: pytest.MonkeyPa
     assert "sweep_look" not in core_tools_mod.ALL_TOOLS
 
 
-def test_tool_registry_fast_path_reuses_cached_signature(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Repeated initialization with unchanged config should not normalize paths again."""
-    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "default")
-    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", config_mod.DEFAULT_PROFILES_DIRECTORY)
-    monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
-    monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
-
-    core_tools_mod = _reload_core_tools()
-
-    def raise_if_normalized(value: str | Path | None) -> str | None:
-        raise AssertionError(f"unexpected path normalization for {value!r}")
-
-    monkeypatch.setattr(core_tools_mod, "_normalize_signature_path", raise_if_normalized)
-
-    core_tools_mod.initialize_tools()
-
-
 def test_forced_tool_registry_reload_does_not_duplicate_profile_local_tool(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

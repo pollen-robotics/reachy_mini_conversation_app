@@ -79,8 +79,6 @@ ALL_TOOLS: Dict[str, Tool] = {}
 ALL_TOOL_SPECS: List[Dict[str, Any]] = []
 _TOOLS_INITIALIZED = False
 _TOOLS_SIGNATURE: tuple[str, str, str | None, bool, str | None] | None = None
-_TOOLS_SIGNATURE_CACHE_INPUTS: tuple[str, str | Path, str | Path | None, bool, str | Path | None] | None = None
-_TOOLS_SIGNATURE_CACHE: tuple[str, str, str | None, bool, str | None] | None = None
 _TOOLS_INSTANCE_PATH: str | Path | None = None
 _LOADED_TOOL_CLASS_CACHE: Dict[tuple[str, str], List[type[Tool]]] = {}
 
@@ -272,27 +270,13 @@ def _build_tool_registry(
 
 def _tool_registry_signature(instance_path: str | Path | None) -> tuple[str, str, str | None, bool, str | None]:
     """Return the runtime inputs that determine the active tool registry."""
-    global _TOOLS_SIGNATURE_CACHE_INPUTS, _TOOLS_SIGNATURE_CACHE
-
-    inputs = (
+    return (
         config.REACHY_MINI_CUSTOM_PROFILE or "default",
-        config.PROFILES_DIRECTORY,
-        config.TOOLS_DIRECTORY,
+        _normalize_signature_path(config.PROFILES_DIRECTORY) or "",
+        _normalize_signature_path(config.TOOLS_DIRECTORY),
         bool(config.AUTOLOAD_EXTERNAL_TOOLS),
-        instance_path,
+        _normalize_signature_path(instance_path),
     )
-    if inputs == _TOOLS_SIGNATURE_CACHE_INPUTS and _TOOLS_SIGNATURE_CACHE is not None:
-        return _TOOLS_SIGNATURE_CACHE
-
-    _TOOLS_SIGNATURE_CACHE_INPUTS = inputs
-    _TOOLS_SIGNATURE_CACHE = (
-        inputs[0],
-        _normalize_signature_path(inputs[1]) or "",
-        _normalize_signature_path(inputs[2]),
-        inputs[3],
-        _normalize_signature_path(inputs[4]),
-    )
-    return _TOOLS_SIGNATURE_CACHE
 
 
 # Registry & specs (dynamic)
@@ -491,14 +475,11 @@ def initialize_tools(instance_path: str | Path | None = None, *, force: bool = F
     When ``force`` is true, file-backed tools are re-executed, while importable
     tool modules still follow normal ``importlib``/``sys.modules`` caching.
     """
-    global ALL_TOOLS, ALL_TOOL_SPECS, _TOOLS_INITIALIZED, _TOOLS_SIGNATURE, _TOOLS_SIGNATURE_CACHE_INPUTS
-    global _TOOLS_SIGNATURE_CACHE, _TOOLS_INSTANCE_PATH
+    global ALL_TOOLS, ALL_TOOL_SPECS, _TOOLS_INITIALIZED, _TOOLS_SIGNATURE, _TOOLS_INSTANCE_PATH
 
     if force:
         _LOADED_TOOL_CLASS_CACHE.clear()
         _LOADED_REMOTE_TOOL_CACHE.clear()
-        _TOOLS_SIGNATURE_CACHE_INPUTS = None
-        _TOOLS_SIGNATURE_CACHE = None
 
     if instance_path is not None:
         _TOOLS_INSTANCE_PATH = instance_path
