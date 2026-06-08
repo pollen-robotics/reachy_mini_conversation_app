@@ -84,6 +84,25 @@ def test_resolve_emotion_name_does_not_accept_removed_substitute_intents(removed
     assert resolve_emotion_name(removed_intent, AVAILABLE_EMOTIONS) is None
 
 
+@pytest.mark.parametrize(
+    ("intent", "poor_options"),
+    [
+        ("excited", ["success2"]),
+        ("grateful", ["helpful1", "loving1"]),
+        ("happy", ["loving1"]),
+        ("lonely", ["sad1"]),
+        ("no", ["no_sad1", "no_excited1"]),
+        ("no_excited", ["no1"]),
+        ("no_sad", ["downcast1"]),
+        ("uncertain", ["resigned1"]),
+        ("yes_understanding", ["yes1"]),
+    ],
+)
+def test_resolve_emotion_name_does_not_use_weak_fallbacks(intent: str, poor_options: list[str]) -> None:
+    """Do not use loosely related moves when a precise move is unavailable."""
+    assert resolve_emotion_name(intent, poor_options) is None
+
+
 @pytest.mark.parametrize("bad_move", ["cheerful1", "oops1", "oops2", "reprimand3", "understanding1", "yes_sad1"])
 def test_resolve_emotion_name_does_not_accept_bad_exact_moves(bad_move: str) -> None:
     """Bad-quality recorded move IDs should not bypass the curated resolver."""
