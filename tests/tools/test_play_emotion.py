@@ -38,19 +38,19 @@ def test_play_emotion_schema_uses_compact_intents() -> None:
         ("sad no", "no_sad1"),
         ("confused no", "confused1"),
         ("no_excited", "no_excited1"),
-        ("contento", "cheerful1"),
         ("yes sad", "yes_sad1"),
-        ("understood", "understanding2"),
+        ("yes_understanding", "understanding2"),
     ],
 )
-def test_resolve_emotion_name_accepts_ids_intents_and_aliases(requested: str, expected: str) -> None:
-    """Resolve exact IDs, nuanced intents, phrases, and multilingual aliases."""
+def test_resolve_emotion_name_accepts_ids_intents_and_yes_no_phrases(requested: str, expected: str) -> None:
+    """Resolve exact IDs, compact intents, and exposed yes/no phrase variants."""
     assert resolve_emotion_name(requested, AVAILABLE_EMOTIONS) == expected
 
 
 def test_resolve_emotion_name_returns_none_for_random_or_unknown() -> None:
-    """Let the caller choose a random fallback when no confident match exists."""
+    """Let the caller choose a random fallback when there is no resolved match."""
     assert resolve_emotion_name("random", AVAILABLE_EMOTIONS) is None
+    assert resolve_emotion_name("contento", AVAILABLE_EMOTIONS) is None
     assert resolve_emotion_name("totally mysterious mood", AVAILABLE_EMOTIONS) is None
 
 
@@ -79,3 +79,31 @@ async def test_play_emotion_queues_resolved_emotion(monkeypatch: pytest.MonkeyPa
     assert result == {"status": "queued", "emotion": "no_sad1"}
     queued_move = movement_manager.queue_move.call_args.args[0]
     assert queued_move.emotion_name == "no_sad1"
+
+
+@pytest.mark.asyncio
+async def test_play_emotion_queues_random_for_unknown_emotion(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unknown explicit values should fall back to a random recorded emotion."""
+
+    class FakeRecordedMoves:
+        def list_moves(self) -> list[str]:
+            return AVAILABLE_EMOTIONS
+
+    class FakeEmotionQueueMove:
+        def __init__(self, emotion_name: str, recorded_moves: FakeRecordedMoves) -> None:
+            self.emotion_name = emotion_name
+            self.recorded_moves = recorded_moves
+
+    monkeypatch.setattr(play_emotion_module, "EMOTION_AVAILABLE", True)
+    monkeypatch.setattr(play_emotion_module, "RECORDED_MOVES", FakeRecordedMoves())
+    monkeypatch.setattr(play_emotion_module, "EmotionQueueMove", FakeEmotionQueueMove)
+    monkeypatch.setattr(play_emotion_module.random, "choice", lambda _emotion_names: "cheerful1")
+
+    movement_manager = MagicMock()
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement_manager)
+
+    result = await PlayEmotion()(deps, emotion="contento")
+
+    assert result == {"status": "queued", "emotion": "cheerful1"}
+    queued_move = movement_manager.queue_move.call_args.args[0]
+    assert queued_move.emotion_name == "cheerful1"

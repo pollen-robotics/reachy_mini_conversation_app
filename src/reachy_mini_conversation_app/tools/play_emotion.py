@@ -130,68 +130,11 @@ _INTENT_TO_MOVES: dict[str, tuple[str, ...]] = {
     "dying": ("dying1",),
 }
 
-_EMOTION_ALIASES: dict[str, str] = {
-    "agree": "yes",
-    "agreement": "yes",
-    "ok": "yes",
-    "okay": "yes",
-    "understood": "yes_understanding",
-    "understanding_yes": "yes_understanding",
-    "sad_yes": "yes_sad",
-    "resigned_yes": "yes_sad",
-    "melancholic_yes": "yes_sad",
-    "proud_yes": "yes_proud",
-    "refusal": "no",
-    "firm_no": "no_firm",
-    "hard_no": "no_firm",
-    "sad_no": "no_sad",
-    "melancholic_no": "no_sad",
-    "resigned_no": "no_sad",
-    "confused_no": "no_confused",
-    "uncertain_no": "no_confused",
-    "hesitant_no": "no_confused",
-    "excited_no": "no_excited",
-    "playful_no": "no_excited",
-    "contento": "happy",
-    "feliz": "happy",
-    "alegre": "happy",
-    "heureux": "happy",
-    "joyeux": "happy",
-    "glucklich": "happy",
-    "froh": "happy",
-    "triste": "sad",
-    "tristeza": "sad",
-    "malheureux": "sad",
-    "traurig": "sad",
-    "enojado": "angry",
-    "enfadado": "angry",
-    "fache": "angry",
-    "furieux": "angry",
-    "wutend": "angry",
-    "confuso": "confused",
-    "confus": "confused",
-    "verwirrt": "confused",
-    "curioso": "curious",
-    "curieux": "curious",
-    "sorprendido": "surprised",
-    "surpris": "surprised",
-    "cansado": "tired",
-    "fatigue": "tired",
-    "mude": "tired",
-    "aburrido": "bored",
-    "ennuye": "bored",
-    "langweilig": "bored",
-}
-
 _KEYWORD_INTENTS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("no", "sad"), "no_sad"),
-    (("no", "triste"), "no_sad"),
     (("no", "confused"), "no_confused"),
-    (("no", "confuso"), "no_confused"),
-    (("no", "uncertain"), "no_confused"),
-    (("no", "hesitant"), "no_confused"),
     (("no", "excited"), "no_excited"),
-    (("no", "playful"), "no_excited"),
+    (("no", "firm"), "no_firm"),
     (("yes", "sad"), "yes_sad"),
     (("yes", "proud"), "yes_proud"),
     (("yes", "understanding"), "yes_understanding"),
@@ -199,7 +142,7 @@ _KEYWORD_INTENTS: tuple[tuple[tuple[str, ...], str], ...] = (
 
 
 def _normalize_emotion_key(value: str) -> str:
-    """Normalize an emotion request for exact, alias, and keyword matching."""
+    """Normalize an emotion request for exact intent and keyword matching."""
     without_accents = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
     return re.sub(r"[^a-z0-9]+", "_", without_accents.lower()).strip("_")
 
@@ -214,7 +157,7 @@ def _keyword_intent(normalized_key: str) -> str | None:
 
 
 def resolve_emotion_name(requested_emotion: object, available_emotions: list[str]) -> str | None:
-    """Resolve a compact intent, alias, or recorded move ID to an available move name."""
+    """Resolve a compact intent, nuanced yes/no phrase, or recorded move ID."""
     if not available_emotions:
         return None
 
@@ -231,9 +174,7 @@ def resolve_emotion_name(requested_emotion: object, available_emotions: list[str
     if exact_move is not None:
         return exact_move
 
-    intent = _EMOTION_ALIASES.get(normalized)
-    if intent is None and normalized in _INTENT_TO_MOVES:
-        intent = normalized
+    intent = normalized if normalized in _INTENT_TO_MOVES else None
     if intent is None:
         intent = _keyword_intent(normalized)
 
@@ -277,9 +218,9 @@ class PlayEmotion(Tool):
                 "type": "string",
                 "enum": list(EMOTION_INTENTS),
                 "description": (
-                    "Compact emotional intent to express. Use nuanced labels like no_sad, no_confused, "
-                    "no_excited, yes_sad, or yes_understanding when plain yes/no loses meaning. "
-                    "Use random if no clear intent fits."
+                    "Compact emotional intent to express. Choose one of the enum values. Use nuanced "
+                    "labels like no_sad, no_confused, no_excited, yes_sad, or yes_understanding when "
+                    "plain yes/no loses meaning. Use random if no clear intent fits."
                 ),
             },
         },
