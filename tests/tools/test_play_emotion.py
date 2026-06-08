@@ -30,9 +30,13 @@ def test_play_emotion_schema_uses_compact_intents() -> None:
 
     assert emotion_schema["enum"] == list(EMOTION_INTENTS)
     assert "no_sad" in emotion_schema["enum"]
-    assert "no_confused" in emotion_schema["enum"]
     assert "no_excited" in emotion_schema["enum"]
-    assert "yes_sad" in emotion_schema["enum"]
+    assert "no_firm" in emotion_schema["enum"]
+    assert "yes_understanding" in emotion_schema["enum"]
+    assert "no_confused" not in emotion_schema["enum"]
+    assert "oops" not in emotion_schema["enum"]
+    assert "yes_sad" not in emotion_schema["enum"]
+    assert "yes_proud" not in emotion_schema["enum"]
     assert "loving1" not in emotion_schema["enum"]
     assert "Available emotions" not in emotion_schema["description"]
 
@@ -42,9 +46,7 @@ def test_play_emotion_schema_uses_compact_intents() -> None:
     [
         ("no_sad1", "no_sad1"),
         ("sad no", "no_sad1"),
-        ("confused no", "confused1"),
         ("no_excited", "no_excited1"),
-        ("yes sad", "resigned1"),
         ("yes_understanding", "understanding2"),
     ],
 )
@@ -58,6 +60,28 @@ def test_resolve_emotion_name_returns_none_for_random_or_unknown() -> None:
     assert resolve_emotion_name("random", AVAILABLE_EMOTIONS) is None
     assert resolve_emotion_name("contento", AVAILABLE_EMOTIONS) is None
     assert resolve_emotion_name("totally mysterious mood", AVAILABLE_EMOTIONS) is None
+
+
+@pytest.mark.parametrize(
+    "removed_intent",
+    [
+        "confused no",
+        "curious",
+        "inquiring",
+        "lost",
+        "no_confused",
+        "oops",
+        "proud",
+        "uncomfortable",
+        "yes proud",
+        "yes sad",
+        "yes_proud",
+        "yes_sad",
+    ],
+)
+def test_resolve_emotion_name_does_not_accept_removed_substitute_intents(removed_intent: str) -> None:
+    """Removed intents should not resolve through unrelated substitute moves."""
+    assert resolve_emotion_name(removed_intent, AVAILABLE_EMOTIONS) is None
 
 
 @pytest.mark.parametrize("bad_move", ["cheerful1", "oops1", "oops2", "reprimand3", "understanding1", "yes_sad1"])
