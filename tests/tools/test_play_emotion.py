@@ -4,7 +4,12 @@ import pytest
 
 from reachy_mini_conversation_app.tools import play_emotion as play_emotion_module
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
-from reachy_mini_conversation_app.tools.play_emotion import EMOTION_INTENTS, PlayEmotion, resolve_emotion_name
+from reachy_mini_conversation_app.tools.play_emotion import (
+    EMOTION_INTENTS,
+    PlayEmotion,
+    resolve_emotion_name,
+    random_curated_emotion,
+)
 
 
 AVAILABLE_EMOTIONS = [
@@ -13,6 +18,7 @@ AVAILABLE_EMOTIONS = [
     "no1",
     "no_sad1",
     "no_excited1",
+    "resigned1",
     "understanding2",
     "yes_sad1",
 ]
@@ -38,7 +44,7 @@ def test_play_emotion_schema_uses_compact_intents() -> None:
         ("sad no", "no_sad1"),
         ("confused no", "confused1"),
         ("no_excited", "no_excited1"),
-        ("yes sad", "yes_sad1"),
+        ("yes sad", "resigned1"),
         ("yes_understanding", "understanding2"),
     ],
 )
@@ -52,6 +58,64 @@ def test_resolve_emotion_name_returns_none_for_random_or_unknown() -> None:
     assert resolve_emotion_name("random", AVAILABLE_EMOTIONS) is None
     assert resolve_emotion_name("contento", AVAILABLE_EMOTIONS) is None
     assert resolve_emotion_name("totally mysterious mood", AVAILABLE_EMOTIONS) is None
+
+
+@pytest.mark.parametrize("bad_move", ["cheerful1", "oops1", "oops2", "reprimand3", "understanding1", "yes_sad1"])
+def test_resolve_emotion_name_does_not_accept_bad_exact_moves(bad_move: str) -> None:
+    """Bad-quality recorded move IDs should not bypass the curated resolver."""
+    assert resolve_emotion_name(bad_move, [*AVAILABLE_EMOTIONS, bad_move]) is None
+
+
+@pytest.mark.parametrize(
+    "ambiguous_move",
+    [
+        "contempt1",
+        "curious1",
+        "dance1",
+        "furious1",
+        "helpful2",
+        "impatient1",
+        "incomprehensible2",
+        "inquiring1",
+        "lost1",
+        "proud2",
+        "proud3",
+        "tired1",
+        "uncomfortable1",
+        "welcoming1",
+    ],
+)
+def test_resolve_emotion_name_does_not_accept_redundant_ambiguous_exact_moves(ambiguous_move: str) -> None:
+    """OK ambiguous moves should be skipped when clear or excellent alternatives exist."""
+    assert resolve_emotion_name(ambiguous_move, [*AVAILABLE_EMOTIONS, ambiguous_move]) is None
+
+
+def test_random_curated_emotion_uses_curated_pool(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Random fallback should avoid non-curated moves when curated options exist."""
+    choices_seen: list[str] = []
+
+    def fake_choice(choices: list[str]) -> str:
+        choices_seen.extend(choices)
+        return choices[0]
+
+    monkeypatch.setattr(play_emotion_module.random, "choice", fake_choice)
+
+    assert random_curated_emotion(["cheerful1", "yes_sad1", "confused1"]) == "confused1"
+    assert choices_seen == ["confused1"]
+
+
+def test_random_curated_emotion_falls_back_when_no_curated_moves(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fallback should still return an available move if the curated pool is unavailable."""
+    choices_seen: list[str] = []
+
+    def fake_choice(choices: list[str]) -> str:
+        choices_seen.extend(choices)
+        return choices[0]
+
+    monkeypatch.setattr(play_emotion_module.random, "choice", fake_choice)
+
+    assert random_curated_emotion(["cheerful1"]) == "cheerful1"
+    assert choices_seen == ["cheerful1"]
 
 
 @pytest.mark.asyncio
@@ -97,13 +161,19 @@ async def test_play_emotion_queues_random_for_unknown_emotion(monkeypatch: pytes
     monkeypatch.setattr(play_emotion_module, "EMOTION_AVAILABLE", True)
     monkeypatch.setattr(play_emotion_module, "RECORDED_MOVES", FakeRecordedMoves())
     monkeypatch.setattr(play_emotion_module, "EmotionQueueMove", FakeEmotionQueueMove)
-    monkeypatch.setattr(play_emotion_module.random, "choice", lambda _emotion_names: "cheerful1")
+
+    def fake_choice(emotion_names: list[str]) -> str:
+        assert "cheerful1" not in emotion_names
+        assert "yes_sad1" not in emotion_names
+        return "confused1"
+
+    monkeypatch.setattr(play_emotion_module.random, "choice", fake_choice)
 
     movement_manager = MagicMock()
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement_manager)
 
     result = await PlayEmotion()(deps, emotion="contento")
 
-    assert result == {"status": "queued", "emotion": "cheerful1"}
+    assert result == {"status": "queued", "emotion": "confused1"}
     queued_move = movement_manager.queue_move.call_args.args[0]
-    assert queued_move.emotion_name == "cheerful1"
+    assert queued_move.emotion_name == "confused1"
