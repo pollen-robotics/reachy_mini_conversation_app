@@ -99,6 +99,7 @@ pip install -e .
 pip install -e .[local_vision]          # Local vision stack
 pip install -e .[yolo_vision]           # YOLO face-detection backend for head tracking
 pip install -e .[mediapipe_vision]      # MediaPipe-based vision
+pip install -e .[remote_tools]          # Hugging Face Space tools over MCP
 pip install -e .[all_vision]            # All vision features
 pip install -e .[dev]                   # Development tools
 ```
@@ -131,6 +132,7 @@ Copy `.env.example` to `.env` when you want to switch backends, provide API keys
 | `GEMINI_API_KEY` | Required for Gemini mode. Also accepts `GOOGLE_API_KEY`. Get one at [aistudio.google.com](https://aistudio.google.com/apikey). |
 | `BACKEND_PROVIDER` | Realtime backend to use: `huggingface` (default), `openai`, or `gemini`. |
 | `MODEL_NAME` | Optional model override for OpenAI Realtime or Gemini Live. Defaults to `gpt-realtime-2` for OpenAI and `gemini-3.1-flash-live-preview` for Gemini. Hugging Face uses the server's model selection. |
+| `REALTIME_TRANSCRIPTION_LANGUAGE` | Optional input transcription language for realtime backends. Defaults to `en`; set to a backend-supported code such as `zh` for Chinese. |
 | `HF_REALTIME_CONNECTION_MODE` | Hugging Face connection selector: `deployed` uses the built-in Hugging Face server; `local` uses `HF_REALTIME_WS_URL`. Defaults to `deployed`. |
 | `HF_REALTIME_WS_URL` | Direct websocket endpoint for your own Hugging Face backend. Accepts either a base URL like `ws://127.0.0.1:8765/v1` or the full websocket URL `ws://127.0.0.1:8765/v1/realtime`. Used when `HF_REALTIME_CONNECTION_MODE=local`. |
 | `HF_HOME` | Cache directory for local Hugging Face downloads (only used with `--local-vision` flag, defaults to `./cache`). |
@@ -276,6 +278,7 @@ play_emotion
 sweep_look
 ```
 Tools are resolved first from Python files in the profile folder (custom tools), then from the core library `src/reachy_mini_conversation_app/tools/` (like `dance`, `head_tracking`).
+Installed public Hugging Face Space tools can also be enabled here after you add them with `tool-spaces`.
 
 **Custom tools:**
 
@@ -322,8 +325,9 @@ external_content/
 │       ├── instructions.txt
 │       ├── tools.txt        # optional (see fallback behavior below)
 │       └── voice.txt        # optional
-└── external_tools/
-    └── my_custom_tool.py
+├── external_tools/
+│   └── my_custom_tool.py
+└── installed_tool_spaces.json
 ```
 
 **Environment variables:**
@@ -344,10 +348,47 @@ REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY=./external_content/external_tools
 - **Default/strict mode**: `tools.txt` defines enabled tools explicitly. Every name in `tools.txt` must resolve to either a built-in tool (`src/reachy_mini_conversation_app/tools/`) or an external tool module in `REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY`.
 - **Convenience mode** (`AUTOLOAD_EXTERNAL_TOOLS=1`): all valid `*.py` tool files in `REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY` are auto-added.
 - **External profile fallback**: if the selected external profile has no `tools.txt`, the app falls back to built-in `profiles/default/tools.txt`.
+- **Duplicate safety**: every loaded tool class must expose a unique `Tool.name`. The app now fails fast if two tool implementations claim the same tool name.
 
 This supports both:
-1. Downloaded external tools used with built-in/default profile.
-2. Downloaded external profiles used with built-in default tools.
+1. Local external tools used with built-in/default profile.
+2. Local external profiles used with built-in default tools.
+
+</details>
+
+<details>
+<summary><b>Public Hugging Face Space tools</b></summary>
+
+You can install public MCP-compatible Hugging Face Spaces as remote tool sources for this app.
+
+```bash
+# install + enable in active profile
+reachy-mini-conversation-app tool-spaces add <owner/space-name>
+
+# enable in a specific profile
+reachy-mini-conversation-app tool-spaces add <owner/space-name> --profile NAME
+
+# install without enabling
+reachy-mini-conversation-app tool-spaces add <owner/space-name> --install-only
+
+# list installed spaces
+reachy-mini-conversation-app tool-spaces list
+
+# remove an installed space
+reachy-mini-conversation-app tool-spaces remove owner/space-name
+```
+
+The app validates the public Space slug through the Hugging Face Hub, probes the standard public MCP endpoint, discovers tools, enables them in the active profile's `tools.txt`, and writes the installed Space to:
+
+- `installed_tool_spaces.json` in the managed app instance directory
+- `external_content/installed_tool_spaces.json` in terminal mode
+
+Recommended tags for discoverability on Hugging Face:
+
+- `reachy-mini-tool`
+- `mcp`
+
+These tags are advisory only. Installation still relies on successful MCP validation, not on tag presence.
 
 </details>
 

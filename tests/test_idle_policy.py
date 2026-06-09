@@ -10,6 +10,7 @@ from reachy_mini_conversation_app.tools.idle_do_nothing import IdleDoNothing
 class FakeIdleTool(Tool):
     """Tool with an idle tool name but not the idle tool class."""
 
+    _auto_register = False
     name = "idle_do_nothing"
     description = "Fake idle tool with the same public name."
     parameters_schema: dict[str, Any] = {"type": "object", "properties": {}, "required": []}

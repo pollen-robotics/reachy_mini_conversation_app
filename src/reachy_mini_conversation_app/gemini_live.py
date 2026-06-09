@@ -9,6 +9,7 @@ Audio formats (per Gemini Live API spec):
 """
 
 import json
+import time
 import uuid
 import base64
 import random
@@ -164,8 +165,9 @@ class GeminiLiveHandler(ConversationHandler):
         self.session: Any = None  # google.genai live session
         self.output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]" = asyncio.Queue()
 
-        self.last_activity_time = asyncio.get_event_loop().time()
-        self.start_time = asyncio.get_event_loop().time()
+        self.last_activity_time = time.monotonic()
+        self.start_time = time.monotonic()
+        self.is_idle_tool_call = False
 
         # Track API key source (env vs textbox)
         self._key_source: Literal["env", "textbox"] = "env"
@@ -222,8 +224,6 @@ class GeminiLiveHandler(ConversationHandler):
         await self._flush_transcript_chunks("assistant", self._pending_assistant_transcript_chunks)
         if self._clear_queue:
             self._clear_queue()
-        if self.deps.head_wobbler is not None:
-            self.deps.head_wobbler.reset()
         self._set_listening_state(True)
 
     async def _handle_turn_complete(self) -> None:
@@ -232,8 +232,6 @@ class GeminiLiveHandler(ConversationHandler):
         await self._flush_transcript_chunks("user", self._pending_user_transcript_chunks)
         await self._flush_transcript_chunks("assistant", self._pending_assistant_transcript_chunks)
         self._set_listening_state(False)
-        if self.deps.head_wobbler is not None:
-            self.deps.head_wobbler.request_reset_after_current_audio()
 
     async def apply_personality(self, profile: str | None) -> str:
         """Apply a new personality (profile) at runtime.
@@ -606,12 +604,7 @@ class GeminiLiveHandler(ConversationHandler):
                                             if len(audio_array) == 0:
                                                 continue
 
-                                            if self.gradio_mode and self.deps.head_wobbler is not None:
-                                                self.deps.head_wobbler.feed(
-                                                    base64.b64encode(audio_bytes).decode("utf-8")
-                                                )
-
-                                            self.last_activity_time = asyncio.get_event_loop().time()
+                                            self.last_activity_time = time.monotonic()
 
                                             await self.output_queue.put(
                                                 (GEMINI_OUTPUT_SAMPLE_RATE, audio_array),
@@ -689,14 +682,14 @@ class GeminiLiveHandler(ConversationHandler):
     async def emit(self) -> Tuple[int, NDArray[np.int16]] | AdditionalOutputs | None:
         """Emit audio frame to be played by the speaker."""
         # Handle idle
-        idle_duration = asyncio.get_event_loop().time() - self.last_activity_time
+        idle_duration = time.monotonic() - self.last_activity_time
         if idle_duration > 15.0 and self.deps.movement_manager.is_idle():
             try:
                 await self.send_idle_signal(idle_duration)
             except Exception as e:
                 logger.warning("Idle tool skipped: %s", e)
                 return None
-            self.last_activity_time = asyncio.get_event_loop().time()
+            self.last_activity_time = time.monotonic()
 
         return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
 
@@ -723,7 +716,7 @@ class GeminiLiveHandler(ConversationHandler):
 
     def format_timestamp(self) -> str:
         """Format current timestamp with date, time, and elapsed seconds."""
-        loop_time = asyncio.get_event_loop().time()
+        loop_time = time.monotonic()
         elapsed_seconds = loop_time - self.start_time
         dt = datetime.now()
         return f"[{dt.strftime('%Y-%m-%d %H:%M:%S')} | +{elapsed_seconds:.1f}s]"

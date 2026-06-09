@@ -105,12 +105,10 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
 
     movement_manager = MagicMock()
     movement_manager.is_idle.return_value = False
-    head_wobbler = MagicMock()
     robot = SimpleNamespace(media=SimpleNamespace(audio=None))
     deps = ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
-        head_wobbler=head_wobbler,
     )
     handler = GeminiLiveHandler(deps)
     monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
@@ -154,9 +152,7 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
     handler.client = _FakeLiveClient(session)
 
     task = asyncio.create_task(handler._run_live_session())
-    await _wait_for(
-        lambda: head_wobbler.request_reset_after_current_audio.called and handler.output_queue.qsize() >= 3
-    )
+    await _wait_for(lambda: handler.output_queue.qsize() >= 3)
 
     handler._stop_event.set()
     await asyncio.wait_for(task, timeout=1.0)
@@ -180,9 +176,6 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
     assert any(isinstance(output, tuple) for output in outputs), "audio output was not emitted"
     movement_manager.set_listening.assert_has_calls([call(True), call(False)])
     assert movement_manager.set_listening.call_args_list[-1] == call(False)
-    head_wobbler.feed.assert_not_called()
-    head_wobbler.request_reset_after_current_audio.assert_called_once()
-    head_wobbler.reset.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -355,15 +348,17 @@ def test_gemini_excludes_head_tracking_when_no_head_tracker(monkeypatch) -> None
     monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda: "test")
     monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
 
-    # mock ALL_TOOL_SPECS to include at least head_tracking and one other tool, to verify that only head_tracking is excluded, not all tools
-    monkeypatch.setattr(
-        ct_mod,
-        "ALL_TOOL_SPECS",
-        [
-            {"type": "function", "name": "head_tracking", "description": "head_tracking", "parameters": {}},
-            {"type": "function", "name": "fake_tool", "description": "fake_tool", "parameters": {}},
-        ],
-    )
+    # Mock the spec source while preserving get_active_tool_specs filtering.
+    fake_tool_specs = [
+        {"type": "function", "name": "head_tracking", "description": "head_tracking", "parameters": {}},
+        {"type": "function", "name": "fake_tool", "description": "fake_tool", "parameters": {}},
+    ]
+
+    def fake_get_tool_specs(exclusion_list: list[str] | None = None) -> list[dict[str, object]]:
+        excluded = set(exclusion_list or [])
+        return [spec for spec in fake_tool_specs if spec["name"] not in excluded]
+
+    monkeypatch.setattr(ct_mod, "get_tool_specs", fake_get_tool_specs)
 
     # case 1: no camera at all, --no-camera flag passed
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock(), camera_worker=None)
