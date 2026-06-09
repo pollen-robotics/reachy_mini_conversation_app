@@ -30,7 +30,7 @@ Most of the signals already exist; we mostly need to *expose* them:
 
 Build bottom-up; each tier stands alone and is useful on its own.
 
-### Tier 0 — robot event log (cheapest)
+### Tier 0 — robot event log (cheapest) — ✅ shipped (#515)
 
 A JSONL sink fed by the spans the app already emits. Each line is a timestamped
 fact: TTS started/ended, peak dBFS for the turn, the transcript excerpt, which
@@ -38,17 +38,29 @@ tool fired (`dance`, `play_emotion`, …), turn outcome. An agent reads the tail
 and answers *"did the robot speak/move in the last N seconds, and what did it
 say/do?"* — no new ML, no new sensors.
 
-Implementation sketch: add a span processor (alongside `CompactLineExporter`)
-that appends selected spans to a rolling JSONL file, **or** consume the existing
-`RCSPAN` stdout / OTLP→SigNoz stream on the Pi side. Reuse, don't reinvent.
+Shipped as `telemetry.JsonlEventExporter` (enable with
+`ROBOT_INSTRUMENTATION=trace` + `ROBOT_EVENT_LOG=/path/events.jsonl`) and the
+`robot_comic.observer.events` reader.
 
-### Tier 1 — independent audio witness
+### Tier 1 — independent audio witness — ✅ shipped
 
-A tiny always-on script on the *laptop* reads its own mic, computes RMS dBFS in
-~100 ms windows (reuse the `_rms_dbfs` approach), and logs "sound present"
-intervals with timestamps. This **independently confirms the robot's speaker
-actually produced sound** — not just that the app *claims* it did. Pairs with
-Tier 0: app says "TTS at t=12.3s", witness says "sound at 12.4–14.1s" ⇒ verified.
+A tiny always-on process on the *laptop* reads its own mic, computes RMS dBFS in
+~100 ms blocks (the `dbfs()` helper mirrors `audio/speech_tapper.py`), and logs
+"sound present" intervals with timestamps. This **independently confirms the
+robot's speaker actually produced sound** — not just that the app *claims* it
+did. Pairs with Tier 0: app says "TTS at t=12.3s", witness says "sound at
+12.4–14.1s" ⇒ verified.
+
+Shipped as `robot_comic.observer.audio_witness` (run it natively where the mic
+lives — WSL2 mic capture is unreliable):
+
+```
+ROBOT_AUDIO_LOG=/path/audio.jsonl python -m robot_comic.observer.audio_witness   # needs: uv pip install sounddevice numpy
+```
+
+The `robot_comic.observer.audio_activity` reader + the `robot_get_audio_activity`
+MCP tool surface it to the agent. A hysteresis state machine (`DB_ON` / `DB_OFF`,
+defaults −35 / −45 dBFS) keeps brief dips from chopping one utterance into many.
 
 Later option: hand the active windows to a local Whisper/Moonshine to capture
 *what* was heard — but STT is a known pain point (see issues in
@@ -114,7 +126,7 @@ the events to debug.
 
 ## Suggested build order
 
-1. Tier 0 JSONL sink + `robot_get_recent_events` (smallest, highest signal).
-2. Tier 1 mic witness + `robot_get_audio_activity`.
-3. `robot_play_prompt` actuator → first real closed loop.
+1. ✅ Tier 0 JSONL sink + `robot_get_recent_events` (smallest, highest signal).
+2. ✅ Tier 1 mic witness + `robot_get_audio_activity`.
+3. `robot_play_prompt` actuator → first real closed loop. **(next)**
 4. Tier 2 visual witness, on-demand.
