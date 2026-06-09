@@ -1,13 +1,18 @@
+import os
 import json
 import time
 import uuid
 import base64
 import random
+import shutil
 import asyncio
 import logging
+import subprocess
 from abc import ABC, abstractmethod
 from typing import Any, Final, Tuple, ClassVar, Optional
 from datetime import datetime
+from collections import deque
+from dataclasses import dataclass
 
 import numpy as np
 import gradio as gr
@@ -33,6 +38,14 @@ from reachy_mini_conversation_app.config import (
 )
 from reachy_mini_conversation_app.idle_policy import start_idle_tool_call
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.audio.latency_probe import (
+    POST_ASSISTANT_BEEP_ROLE,
+    AUDIBLE_AUDIO_RMS_THRESHOLD,
+    POST_ASSISTANT_BEEP_CONTENT,
+    SLOW_FIRST_AUDIBLE_AUDIO_MS,
+    normalized_audio_rms,
+    post_assistant_beep_enabled,
+)
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolCallRoutine,
@@ -45,6 +58,68 @@ logger = logging.getLogger(__name__)
 
 _RESPONSE_DONE_TIMEOUT: Final[float] = 30.0
 _RESPONSE_REJECTION_RETRY_DELAY: Final[float] = 0.5
+_TRANSPORT_PING_INTERVAL_S: Final[float] = 15.0
+_TRANSPORT_PING_TIMEOUT_S: Final[float] = 5.0
+_AUDIO_APPEND_SEND_SUMMARY_INTERVAL_S: Final[float] = 10.0
+_SLOW_AUDIO_APPEND_SEND_MS: Final[float] = 100.0
+
+
+@dataclass(frozen=True)
+class ResponseCreateTiming:
+    """Client-side timing for a response.create event sent over the websocket."""
+
+    event_id: str
+    started_at: float
+    send_ms: float
+
+
+def _read_sysfs_text(path: str) -> str | None:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def _system_snapshot() -> str:
+    """Best-effort one-line system snapshot for slow-turn debug logs."""
+    parts: list[str] = []
+    try:
+        load1, load5, load15 = os.getloadavg()
+        parts.append(f"load={load1:.2f}/{load5:.2f}/{load15:.2f}")
+    except OSError:
+        pass
+
+    temp_raw = _read_sysfs_text("/sys/class/thermal/thermal_zone0/temp")
+    if temp_raw:
+        try:
+            parts.append(f"temp={float(temp_raw) / 1000:.1f}C")
+        except ValueError:
+            parts.append(f"temp={temp_raw}")
+
+    freq_raw = _read_sysfs_text("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq")
+    if freq_raw:
+        try:
+            parts.append(f"cpu_freq={float(freq_raw) / 1000:.0f}MHz")
+        except ValueError:
+            parts.append(f"cpu_freq={freq_raw}")
+
+    if shutil.which("vcgencmd"):
+        try:
+            result = subprocess.run(
+                ["vcgencmd", "get_throttled"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=0.3,
+            )
+            throttled = result.stdout.strip()
+            if throttled:
+                parts.append(throttled)
+        except Exception:
+            pass
+
+    return " ".join(parts) if parts else "unavailable"
 
 
 class InputTranscriptChunksByItem(BaseModel):
@@ -161,9 +236,25 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         self._response_done_event.set()
         self._response_started_or_rejected_event: asyncio.Event = asyncio.Event()
         self._last_response_rejected: bool = False
+        self._response_create_timings: deque[ResponseCreateTiming] = deque()
+        self._turn_speech_started_at: float | None = None
+        self._turn_speech_stopped_at: float | None = None
         self._turn_user_done_at: float | None = None
         self._turn_response_created_at: float | None = None
         self._turn_first_audio_at: float | None = None
+        self._turn_first_audible_audio_at: float | None = None
+        self._turn_audio_started_at: float | None = None
+        self._turn_audio_last_chunk_at: float | None = None
+        self._turn_audio_chunks = 0
+        self._turn_audio_ms = 0.0
+        self._turn_audio_before_audible_ms = 0.0
+        self._turn_audio_max_rms = 0.0
+        self._turn_slow_snapshot_logged = False
+        self._audio_append_stats_started_at = time.perf_counter()
+        self._audio_append_send_count = 0
+        self._audio_append_send_pcm_bytes = 0
+        self._audio_append_send_total_ms = 0.0
+        self._audio_append_send_max_ms = 0.0
 
     @staticmethod
     def _sanitize_tool_result_for_model(tool_name: str, tool_result: dict[str, Any]) -> dict[str, Any]:
@@ -210,6 +301,88 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
     def _response_done_timeout(self) -> float:
         """Return the response completion timeout."""
         return _RESPONSE_DONE_TIMEOUT
+
+    def _reset_turn_audio_probe(self) -> None:
+        self._turn_first_audio_at = None
+        self._turn_first_audible_audio_at = None
+        self._turn_audio_started_at = None
+        self._turn_audio_last_chunk_at = None
+        self._turn_audio_chunks = 0
+        self._turn_audio_ms = 0.0
+        self._turn_audio_before_audible_ms = 0.0
+        self._turn_audio_max_rms = 0.0
+        self._turn_slow_snapshot_logged = False
+
+    def _log_first_audible_audio(self, now: float, *, rms: float) -> None:
+        self._turn_first_audible_audio_at = now
+        if self._turn_user_done_at is None:
+            logger.info(
+                "Backend latency: first audible audio detected (leading_silence=%.0f ms, rms=%.4f, threshold=%.4f)",
+                self._turn_audio_before_audible_ms,
+                rms,
+                AUDIBLE_AUDIO_RMS_THRESHOLD,
+            )
+            return
+
+        delta_ms = (now - self._turn_user_done_at) * 1000
+        if self._turn_speech_stopped_at is not None:
+            stopped_delta_ms = (now - self._turn_speech_stopped_at) * 1000
+            logger.info(
+                "Backend latency: first audible audio %.0f ms after user transcript "
+                "(%.0f ms after speech_stopped; leading_silence=%.0f ms, rms=%.4f, threshold=%.4f)",
+                delta_ms,
+                stopped_delta_ms,
+                self._turn_audio_before_audible_ms,
+                rms,
+                AUDIBLE_AUDIO_RMS_THRESHOLD,
+            )
+        else:
+            logger.info(
+                "Backend latency: first audible audio %.0f ms after user transcript "
+                "(leading_silence=%.0f ms, rms=%.4f, threshold=%.4f)",
+                delta_ms,
+                self._turn_audio_before_audible_ms,
+                rms,
+                AUDIBLE_AUDIO_RMS_THRESHOLD,
+            )
+
+        if delta_ms >= SLOW_FIRST_AUDIBLE_AUDIO_MS and not self._turn_slow_snapshot_logged:
+            self._turn_slow_snapshot_logged = True
+            logger.info(
+                "Latency probe: slow first audible audio snapshot "
+                "(first_audible=%.0f ms, response_created=%s, system=%s)",
+                delta_ms,
+                (
+                    f"{(self._turn_response_created_at - self._turn_user_done_at) * 1000:.0f} ms"
+                    if self._turn_response_created_at is not None
+                    else "unknown"
+                ),
+                _system_snapshot(),
+            )
+
+    def _log_turn_audio_summary(self) -> None:
+        if self._turn_audio_chunks == 0:
+            return
+
+        stream_span_ms = 0.0
+        if self._turn_audio_started_at is not None and self._turn_audio_last_chunk_at is not None:
+            stream_span_ms = (self._turn_audio_last_chunk_at - self._turn_audio_started_at) * 1000
+
+        first_audible = "not_detected"
+        if self._turn_first_audible_audio_at is not None and self._turn_user_done_at is not None:
+            first_audible = f"{(self._turn_first_audible_audio_at - self._turn_user_done_at) * 1000:.0f} ms"
+
+        logger.info(
+            "Assistant audio summary: chunks=%s audio=%.0f ms stream_span=%.0f ms "
+            "max_rms=%.4f first_audible=%s leading_silence=%.0f ms threshold=%.4f",
+            self._turn_audio_chunks,
+            self._turn_audio_ms,
+            stream_span_ms,
+            self._turn_audio_max_rms,
+            first_audible,
+            self._turn_audio_before_audible_ms,
+            AUDIBLE_AUDIO_RMS_THRESHOLD,
+        )
 
     def _connection_closed_errors(self) -> tuple[type[BaseException], ...]:
         """Return websocket closure exceptions handled as reconnectable/ignorable."""
@@ -393,6 +566,111 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             cost += (getattr(out, "text_tokens", 0) or 0) * self.TEXT_OUTPUT_COST_PER_1M / 1e6
         return cost
 
+    def _reset_audio_append_send_stats(self) -> None:
+        self._audio_append_stats_started_at = time.perf_counter()
+        self._audio_append_send_count = 0
+        self._audio_append_send_pcm_bytes = 0
+        self._audio_append_send_total_ms = 0.0
+        self._audio_append_send_max_ms = 0.0
+
+    def _record_audio_append_send(self, *, send_ms: float, pcm_bytes: int, encoded_chars: int) -> None:
+        self._audio_append_send_count += 1
+        self._audio_append_send_pcm_bytes += pcm_bytes
+        self._audio_append_send_total_ms += send_ms
+        self._audio_append_send_max_ms = max(self._audio_append_send_max_ms, send_ms)
+
+        if send_ms >= _SLOW_AUDIO_APPEND_SEND_MS:
+            logger.info(
+                "Realtime transport latency: slow input_audio_buffer.append send %.0f ms "
+                "(pcm_bytes=%d, encoded_chars=%d)",
+                send_ms,
+                pcm_bytes,
+                encoded_chars,
+            )
+
+        now = time.perf_counter()
+        stats_span_s = now - self._audio_append_stats_started_at
+        if stats_span_s < _AUDIO_APPEND_SEND_SUMMARY_INTERVAL_S or self._audio_append_send_count == 0:
+            return
+
+        logger.info(
+            "Realtime transport summary: input_audio_buffer.append frames=%d pcm=%.1f KB "
+            "mean_send=%.1f ms max_send=%.1f ms span=%.1f s",
+            self._audio_append_send_count,
+            self._audio_append_send_pcm_bytes / 1024,
+            self._audio_append_send_total_ms / self._audio_append_send_count,
+            self._audio_append_send_max_ms,
+            stats_span_s,
+        )
+        self._reset_audio_append_send_stats()
+
+    def _pop_response_create_timing(self, *, event_id: str | None = None) -> ResponseCreateTiming | None:
+        if not self._response_create_timings:
+            return None
+
+        if event_id is None:
+            return self._response_create_timings.popleft()
+
+        for index, timing in enumerate(self._response_create_timings):
+            if timing.event_id == event_id:
+                del self._response_create_timings[index]
+                return timing
+
+        return None
+
+    @staticmethod
+    def _conversation_item_payload_bytes(item: dict[str, Any]) -> int:
+        try:
+            return len(json.dumps(item, separators=(",", ":")).encode("utf-8"))
+        except TypeError:
+            return 0
+
+    async def _send_conversation_item_create(self, *, item: dict[str, Any], purpose: str) -> None:
+        if self.connection is None:
+            raise RuntimeError("Realtime connection is not ready")
+
+        item_type = item.get("type")
+        payload_bytes = self._conversation_item_payload_bytes(item)
+        send_started = time.perf_counter()
+        await self.connection.conversation.item.create(item=item)
+        send_ms = (time.perf_counter() - send_started) * 1000
+        logger.info(
+            "Realtime transport: conversation.item.create sent purpose=%s item_type=%s payload=%d bytes in %.0f ms",
+            purpose,
+            item_type,
+            payload_bytes,
+            send_ms,
+        )
+
+    async def _measure_websocket_ping(self) -> float | None:
+        if self.connection is None:
+            return None
+
+        raw_connection = getattr(self.connection, "_connection", None)
+        ping = getattr(raw_connection, "ping", None)
+        if not callable(ping):
+            return None
+
+        pong_waiter = await ping()
+        if isinstance(pong_waiter, (int, float)):
+            return float(pong_waiter)
+
+        return float(await asyncio.wait_for(pong_waiter, timeout=_TRANSPORT_PING_TIMEOUT_S))
+
+    async def _transport_ping_loop(self) -> None:
+        while self.connection is not None:
+            try:
+                await asyncio.sleep(_TRANSPORT_PING_INTERVAL_S)
+                latency_s = await self._measure_websocket_ping()
+                if latency_s is None:
+                    logger.debug("Realtime transport: websocket ping unavailable for this connection")
+                    return
+                logger.info("Realtime transport latency: websocket ping RTT %.0f ms", latency_s * 1000)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.debug("Realtime transport ping failed: %s", e)
+
     async def _prepare_startup_credentials(self) -> None:
         """Let providers collect any startup credentials they need."""
 
@@ -472,7 +750,14 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
         This method never blocks the caller.
         """
+        pending_before = self._pending_responses.qsize()
+        logger.info(
+            "Queueing response.create (pending_before=%d, kwargs_keys=%s)",
+            pending_before,
+            sorted(kwargs),
+        )
         await self._pending_responses.put(kwargs)
+        logger.debug("response.create queued (pending_after=%d)", self._pending_responses.qsize())
 
     async def _response_sender_loop(self) -> None:
         """Dedicated worker that sends ``response.create()`` calls serially.
@@ -492,6 +777,11 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 kwargs = await self._pending_responses.get()
             except asyncio.CancelledError:
                 return
+            logger.info(
+                "Dequeued response.create (pending_after=%d, kwargs_keys=%s)",
+                self._pending_responses.qsize(),
+                sorted(kwargs),
+            )
 
             sent = False
             max_retries = 5
@@ -512,7 +802,33 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 self._last_response_rejected = False
                 self._response_started_or_rejected_event.clear()
                 try:
-                    await self.connection.response.create(**kwargs)
+                    request_kwargs = dict(kwargs)
+                    response_create_event_id = str(
+                        request_kwargs.get("event_id") or f"response-create-{uuid.uuid4().hex}"
+                    )
+                    request_kwargs["event_id"] = response_create_event_id
+                    logger.info(
+                        "Sending response.create (attempt=%d/%d, event_id=%s, kwargs_keys=%s)",
+                        attempts + 1,
+                        max_retries,
+                        response_create_event_id,
+                        sorted(request_kwargs),
+                    )
+                    send_started = time.perf_counter()
+                    await self.connection.response.create(**request_kwargs)
+                    send_ms = (time.perf_counter() - send_started) * 1000
+                    self._response_create_timings.append(
+                        ResponseCreateTiming(
+                            event_id=response_create_event_id,
+                            started_at=send_started,
+                            send_ms=send_ms,
+                        )
+                    )
+                    logger.info(
+                        "Realtime transport: response.create sent event_id=%s in %.0f ms",
+                        response_create_event_id,
+                        send_ms,
+                    )
                 except Exception as e:
                     logger.debug("_response_sender_loop: send failed: %s", e)
                     self._response_done_event.set()
@@ -584,13 +900,49 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         try:
             self._mark_activity("tool_result_ready")
             send_result_to_model = not bg_tool.is_idle_tool_call
+            result_summary = (
+                sorted(tool_result_for_model)
+                if isinstance(tool_result_for_model, dict)
+                else type(tool_result_for_model).__name__
+            )
+            logger.info(
+                "Tool result ready — tool_name=%r, call_id=%s, status=%s, idle=%s, "
+                "send_result_to_model=%s, result=%s",
+                bg_tool.tool_name,
+                bg_tool.id,
+                bg_tool.status.value,
+                bg_tool.is_idle_tool_call,
+                send_result_to_model,
+                result_summary,
+            )
             if send_result_to_model and isinstance(bg_tool.id, str):
-                await self.connection.conversation.item.create(
+                logger.info(
+                    "Sending function_call_output — tool_name=%r, call_id=%s, result=%s",
+                    bg_tool.tool_name,
+                    bg_tool.id,
+                    result_summary,
+                )
+                await self._send_conversation_item_create(
                     item={
                         "type": "function_call_output",
                         "call_id": bg_tool.id,
                         "output": json.dumps(tool_result_for_model),
                     },
+                    purpose=f"tool_result:{bg_tool.tool_name}",
+                )
+            elif send_result_to_model:
+                logger.warning(
+                    "Tool result cannot be sent as function_call_output because call_id is not a string "
+                    "(tool_name=%r, call_id=%r)",
+                    bg_tool.tool_name,
+                    bg_tool.id,
+                )
+            else:
+                logger.info(
+                    "Skipping function_call_output for tool result — tool_name=%r, call_id=%s, idle=%s",
+                    bg_tool.tool_name,
+                    bg_tool.id,
+                    bg_tool.is_idle_tool_call,
                 )
 
             await self.output_queue.put(
@@ -617,7 +969,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 image_height = tool_result.get("image_height")
                 jpeg_bytes_value = tool_result.get("jpeg_bytes")
                 jpeg_bytes = jpeg_bytes_value if isinstance(jpeg_bytes_value, int) else (len(b64_im) * 3) // 4
-                await self.connection.conversation.item.create(
+                await self._send_conversation_item_create(
                     item={
                         "type": "message",
                         "role": "user",
@@ -628,6 +980,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                             },
                         ],
                     },
+                    purpose="camera_image",
                 )
                 if isinstance(image_width, int) and isinstance(image_height, int):
                     logger.info(
@@ -661,7 +1014,19 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                     )
 
             if send_result_to_model:
+                logger.info(
+                    "Requesting post-tool response.create — tool_name=%r, call_id=%s",
+                    bg_tool.tool_name,
+                    bg_tool.id,
+                )
                 await self._safe_response_create()
+            else:
+                logger.info(
+                    "Skipping post-tool response.create — tool_name=%r, call_id=%s, idle=%s",
+                    bg_tool.tool_name,
+                    bg_tool.id,
+                    bg_tool.is_idle_tool_call,
+                )
 
         except self._connection_closed_errors():
             logger.warning("Connection closed while sending tool result")
@@ -680,10 +1045,20 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             connect_kwargs["model"] = config.MODEL_NAME
         if self._realtime_connect_query:
             connect_kwargs["extra_query"] = self._realtime_connect_query
+        connect_started = time.perf_counter()
         async with self.client.realtime.connect(**connect_kwargs) as conn:
+            logger.info(
+                "Realtime transport: websocket connected in %.0f ms",
+                (time.perf_counter() - connect_started) * 1000,
+            )
             try:
                 session_config = self._get_session_config(tool_specs)
+                session_update_started = time.perf_counter()
                 await conn.session.update(session=session_config)
+                logger.info(
+                    "Realtime transport: session.update sent in %.0f ms",
+                    (time.perf_counter() - session_update_started) * 1000,
+                )
                 logger.info(
                     "Realtime session initialized with profile=%r voice=%r",
                     getattr(config, "REACHY_MINI_CUSTOM_PROFILE", None),
@@ -707,21 +1082,25 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 pass
 
             response_sender_task: asyncio.Task[None] | None = None
+            transport_ping_task: asyncio.Task[None] | None = None
             try:
                 # Start the background tool manager
                 self.tool_manager.start_up(tool_callbacks=[self._handle_tool_result])
 
                 # Start the response sender worker
                 response_sender_task = asyncio.create_task(self._response_sender_loop(), name="response-sender")
+                transport_ping_task = asyncio.create_task(self._transport_ping_loop(), name="transport-ping")
 
                 async for event in self.connection:
                     logger.debug("Realtime event: %s", event.type)
                     if event.type == "input_audio_buffer.speech_started":
                         self.is_idle_tool_call = False
                         self._mark_activity("user_speech_started")
+                        self._turn_speech_started_at = time.perf_counter()
+                        self._turn_speech_stopped_at = None
                         self._turn_user_done_at = None
                         self._turn_response_created_at = None
-                        self._turn_first_audio_at = None
+                        self._reset_turn_audio_probe()
                         if self._clear_queue:
                             self._clear_queue()
                         self.deps.movement_manager.set_listening(True)
@@ -729,20 +1108,48 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
                     if event.type == "input_audio_buffer.speech_stopped":
                         self._mark_activity("user_speech_stopped")
+                        self._turn_speech_stopped_at = time.perf_counter()
                         self.deps.movement_manager.set_listening(False)
+                        if self._turn_speech_started_at is not None:
+                            delta_ms = (self._turn_speech_stopped_at - self._turn_speech_started_at) * 1000
+                            logger.info(
+                                "Turn timing: server VAD speech_stopped %.0f ms after speech_started", delta_ms
+                            )
                         logger.debug("User speech stopped - server will auto-commit with VAD")
 
                     if event.type == "response.output_audio.done":
+                        self._log_turn_audio_summary()
+                        if not self.gradio_mode and post_assistant_beep_enabled():
+                            logger.info("Latency probe: queueing post-assistant beep")
+                            await self.output_queue.put(
+                                AdditionalOutputs(
+                                    {
+                                        "role": POST_ASSISTANT_BEEP_ROLE,
+                                        "content": POST_ASSISTANT_BEEP_CONTENT,
+                                    }
+                                )
+                            )
                         logger.debug("response completed")
 
                     if event.type == "response.created":
                         self._mark_activity("response_created")
+                        response_created_at = time.perf_counter()
                         self._response_done_event.clear()
                         self._response_started_or_rejected_event.set()
+                        response_create_timing = self._pop_response_create_timing()
+                        if response_create_timing is not None:
+                            delta_ms = (response_created_at - response_create_timing.started_at) * 1000
+                            logger.info(
+                                "Realtime transport latency: response.created %.0f ms after response.create "
+                                "(event_id=%s, send_call=%.0f ms)",
+                                delta_ms,
+                                response_create_timing.event_id,
+                                response_create_timing.send_ms,
+                            )
                         if self._turn_user_done_at is not None and self._turn_response_created_at is None:
-                            self._turn_response_created_at = time.perf_counter()
+                            self._turn_response_created_at = response_created_at
                             delta_ms = (self._turn_response_created_at - self._turn_user_done_at) * 1000
-                            logger.info("Turn latency: response.created %.0f ms after user transcript", delta_ms)
+                            logger.info("Backend latency: response.created %.0f ms after user transcript", delta_ms)
                         logger.debug("Response created (active)")
 
                     if event.type == "response.done":
@@ -797,7 +1204,19 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
                         self._turn_user_done_at = time.perf_counter()
                         self._turn_response_created_at = None
-                        self._turn_first_audio_at = None
+                        self._reset_turn_audio_probe()
+                        if self._turn_speech_stopped_at is not None:
+                            delta_ms = (self._turn_user_done_at - self._turn_speech_stopped_at) * 1000
+                            logger.info(
+                                "Turn timing: user transcript completed %.0f ms after speech_stopped",
+                                delta_ms,
+                            )
+                        elif self._turn_speech_started_at is not None:
+                            delta_ms = (self._turn_user_done_at - self._turn_speech_started_at) * 1000
+                            logger.info(
+                                "Turn timing: user transcript completed %.0f ms after speech_started",
+                                delta_ms,
+                            )
 
                         await self.output_queue.put(AdditionalOutputs({"role": "user", "content": transcript}))
 
@@ -816,10 +1235,42 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         if self.gradio_mode:
                             self._tap_audio_for_daemon_wobbler(decoded_pcm)
                         self._mark_activity("assistant_audio_delta")
+                        audio_now = time.perf_counter()
+                        chunk_samples = decoded_pcm.shape[-1]
+                        chunk_ms = chunk_samples / self.output_sample_rate * 1000
+                        chunk_rms = normalized_audio_rms(decoded_pcm)
+                        if self._turn_audio_chunks == 0:
+                            self._turn_audio_started_at = audio_now
+                        self._turn_audio_last_chunk_at = audio_now
+                        self._turn_audio_chunks += 1
+                        self._turn_audio_ms += chunk_ms
+                        self._turn_audio_max_rms = max(self._turn_audio_max_rms, chunk_rms)
                         if self._turn_user_done_at is not None and self._turn_first_audio_at is None:
-                            self._turn_first_audio_at = time.perf_counter()
+                            self._turn_first_audio_at = audio_now
                             delta_ms = (self._turn_first_audio_at - self._turn_user_done_at) * 1000
-                            logger.info("Turn latency: first audio delta %.0f ms after user transcript", delta_ms)
+                            if self._turn_speech_stopped_at is not None:
+                                stopped_delta_ms = (self._turn_first_audio_at - self._turn_speech_stopped_at) * 1000
+                                logger.info(
+                                    "Backend latency: first audio delta %.0f ms after user transcript "
+                                    "(%.0f ms after speech_stopped; first chunk %.0f ms at %s Hz)",
+                                    delta_ms,
+                                    stopped_delta_ms,
+                                    chunk_ms,
+                                    self.output_sample_rate,
+                                )
+                            else:
+                                logger.info(
+                                    "Backend latency: first audio delta %.0f ms after user transcript "
+                                    "(first chunk %.0f ms at %s Hz)",
+                                    delta_ms,
+                                    chunk_ms,
+                                    self.output_sample_rate,
+                                )
+                        if self._turn_first_audible_audio_at is None:
+                            if chunk_rms >= AUDIBLE_AUDIO_RMS_THRESHOLD:
+                                self._log_first_audible_audio(audio_now, rms=chunk_rms)
+                            else:
+                                self._turn_audio_before_audible_ms += chunk_ms
                         await self.output_queue.put(
                             (
                                 self.output_sample_rate,
@@ -880,6 +1331,19 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         code = getattr(err, "code", "") or getattr(err, "type", "")
 
                         if code == "conversation_already_has_active_response":
+                            rejected_event_id = getattr(err, "event_id", None)
+                            response_create_timing = self._pop_response_create_timing(
+                                event_id=rejected_event_id if isinstance(rejected_event_id, str) else None
+                            )
+                            if response_create_timing is not None:
+                                elapsed_ms = (time.perf_counter() - response_create_timing.started_at) * 1000
+                                logger.info(
+                                    "Realtime transport latency: response.create rejected %.0f ms after send "
+                                    "(event_id=%s, send_call=%.0f ms)",
+                                    elapsed_ms,
+                                    response_create_timing.event_id,
+                                    response_create_timing.send_ms,
+                                )
                             # response.create was rejected.  The sender worker
                             # is waiting on _response_done_event; when the active
                             # response finishes it will wake up and see this flag.
@@ -904,6 +1368,12 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                     response_sender_task.cancel()
                     try:
                         await response_sender_task
+                    except asyncio.CancelledError:
+                        pass
+                if transport_ping_task is not None:
+                    transport_ping_task.cancel()
+                    try:
+                        await transport_ping_task
                     except asyncio.CancelledError:
                         pass
 
@@ -945,8 +1415,16 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
         # Send to the realtime input buffer (guard against races during reconnect).
         try:
+            pcm_bytes = audio_frame.nbytes
             audio_message = base64.b64encode(audio_frame.tobytes()).decode("utf-8")
+            send_started = time.perf_counter()
             await self.connection.input_audio_buffer.append(audio=audio_message)
+            send_ms = (time.perf_counter() - send_started) * 1000
+            self._record_audio_append_send(
+                send_ms=send_ms,
+                pcm_bytes=pcm_bytes,
+                encoded_chars=len(audio_message),
+            )
         except Exception as e:
             logger.debug("Dropping audio frame: connection not ready (%s)", e)
             return
