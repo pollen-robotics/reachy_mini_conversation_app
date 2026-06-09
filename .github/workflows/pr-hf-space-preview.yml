@@ -46,7 +46,7 @@ jobs:
       - name: Sync preview space
         id: sync
         continue-on-error: true
-        uses: huggingface/hub-sync@6fbce0a787a7146710e588abe7a4fd5eca07f47c  # v0.1.0
+        uses: huggingface/hub-sync@64269e310f79686d68ea78fd189cd1dd7d5ce427  # v0.2.0
         with:
           github_repo_id: ${{ github.repository }}
           huggingface_repo_id: ${{ steps.preview.outputs.space_id }}
