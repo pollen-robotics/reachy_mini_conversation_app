@@ -195,19 +195,30 @@ def build_server() -> Any:
         return report
 
     @server.tool()  # type: ignore[misc]
-    def robot_watch_bonks(seconds: float = 60.0) -> dict[str, Any]:
+    def robot_watch_bonks(
+        seconds: float = 60.0,
+        device: int | str | None = None,
+        record_wav: str | None = None,
+    ) -> dict[str, Any]:
         """Tier-1: listen for cowling-impact signatures and grow the caution list.
 
         Detects short broadband transients (peak jumps over the rolling speech
         background with high-frequency content), attributes each to the
         move/emotion rendering at that moment (via ``ROBOT_EVENT_LOG``), and
         appends entries to the persistent bonk caution list (#522). Blocks for
-        the full ``seconds``.
+        the full ``seconds``. ``device`` is an input index or name substring
+        (default: ``ROBOT_AUDIO_DEVICE``, then system default); ``record_wav``
+        saves the raw capture for offline threshold tuning.
         """
         from robot_comic.observer.bonk_detector import watch
 
         try:
-            return watch(seconds, events_path=os.getenv("ROBOT_EVENT_LOG", "") or None)
+            return watch(
+                seconds,
+                events_path=os.getenv("ROBOT_EVENT_LOG", "") or None,
+                device=device,
+                record_wav=record_wav,
+            )
         except Exception as exc:  # no mic / sounddevice missing
             return {"error": str(exc)}
 

@@ -8,10 +8,14 @@ logic is unit-testable; capture and caution-list persistence are seams.
 """
 
 from __future__ import annotations
+import sys
+import wave
+from pathlib import Path
 
 import numpy as np
+import pytest
 
-from robot_comic.observer.bonk_detector import BonkDetector, append_caution_entries
+from robot_comic.observer.bonk_detector import BonkDetector, watch, finalize_partial_wav, append_caution_entries
 
 
 SR = 16_000
@@ -87,6 +91,108 @@ def test_quiet_clicks_below_floor_are_ignored() -> None:
 # ---------------------------------------------------------------------------
 # Caution list persistence
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# watch(): device selection + raw-capture recording (#531)
+# ---------------------------------------------------------------------------
+
+
+class _FakeStream:
+    """Stands in for sd.InputStream; records the kwargs it was opened with."""
+
+    last_kwargs: dict | None = None
+
+    def __init__(self, **kwargs) -> None:
+        _FakeStream.last_kwargs = kwargs
+
+    def __enter__(self) -> "_FakeStream":
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def read(self, n: int) -> tuple[np.ndarray, bool]:
+        return np.zeros((n, 1), dtype=np.float32), False
+
+
+class _StubSounddevice:
+    InputStream = _FakeStream
+
+    def query_devices(self) -> list[dict]:
+        return [
+            {"name": "Microphone Array (Intel Smart Sound)", "max_input_channels": 6},
+            {"name": "Speakerphone (Brio 500)", "max_input_channels": 2},
+        ]
+
+
+@pytest.fixture()
+def stub_sd(monkeypatch: pytest.MonkeyPatch) -> _StubSounddevice:
+    stub = _StubSounddevice()
+    monkeypatch.setitem(sys.modules, "sounddevice", stub)
+    _FakeStream.last_kwargs = None
+    return stub
+
+
+def test_watch_resolves_device_name_from_env(stub_sd, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ROBOT_AUDIO_DEVICE", "brio")
+    watch(0.1, caution_list=str(tmp_path / "caution.jsonl"))
+    assert _FakeStream.last_kwargs is not None
+    assert _FakeStream.last_kwargs["device"] == 1
+
+
+def test_watch_explicit_device_overrides_env(stub_sd, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ROBOT_AUDIO_DEVICE", "brio")
+    watch(0.1, device=0, caution_list=str(tmp_path / "caution.jsonl"))
+    assert _FakeStream.last_kwargs is not None
+    assert _FakeStream.last_kwargs["device"] == 0
+
+
+def test_watch_records_wav(stub_sd, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ROBOT_AUDIO_DEVICE", raising=False)
+    wav_path = tmp_path / "session.wav"
+    report = watch(0.2, caution_list=str(tmp_path / "caution.jsonl"), record_wav=str(wav_path))
+    assert report["record_wav"] == str(wav_path)
+    with wave.open(str(wav_path), "rb") as wf:
+        assert wf.getframerate() == 16_000
+        assert wf.getnchannels() == 1
+        assert wf.getsampwidth() == 2
+        # 0.2 s at 16 kHz in 50 ms blocks -> 4 blocks of 800 frames
+        assert wf.getnframes() == 3_200
+    assert not (tmp_path / "session.wav.partial").exists(), "clean finish should remove the sidecar"
+
+
+class _DyingStream(_FakeStream):
+    """Delivers two blocks, then dies — models a watch killed mid-window."""
+
+    reads = 0
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        _DyingStream.reads = 0
+
+    def read(self, n: int) -> tuple[np.ndarray, bool]:
+        if _DyingStream.reads >= 2:
+            raise RuntimeError("stream died")
+        _DyingStream.reads += 1
+        return np.zeros((n, 1), dtype=np.float32), False
+
+
+def test_killed_watch_leaves_recoverable_partial(stub_sd, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ROBOT_AUDIO_DEVICE", raising=False)
+    monkeypatch.setattr(stub_sd, "InputStream", _DyingStream, raising=False)
+    wav_path = tmp_path / "session.wav"
+    with pytest.raises(RuntimeError, match="stream died"):
+        watch(1.0, caution_list=str(tmp_path / "caution.jsonl"), record_wav=str(wav_path))
+    partial = tmp_path / "session.wav.partial"
+    assert partial.exists(), "audio captured before the kill must survive on disk"
+    # 2 delivered blocks of 800 frames at 2 bytes/frame
+    assert partial.stat().st_size == 2 * 800 * 2
+
+    finalize_partial_wav(str(wav_path))
+    assert not partial.exists()
+    with wave.open(str(wav_path), "rb") as wf:
+        assert wf.getnframes() == 1_600
 
 
 def test_append_caution_entries_writes_attributed_jsonl(tmp_path) -> None:

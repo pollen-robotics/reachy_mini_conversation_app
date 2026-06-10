@@ -93,14 +93,21 @@ def fetch_remote_event_lines(host: str, path: str, *, timeout_s: float = 15.0) -
 def listen_for_intervals(window_s: float, *, samplerate: int = 16_000, block_ms: int = 100) -> list[dict[str, Any]]:
     """Capture the laptop mic for ``window_s`` and return sound-present intervals.
 
-    Reuses the Tier-1 witness dBFS + hysteresis logic. Lazy audio imports
+    Reuses the Tier-1 witness dBFS + hysteresis logic and the witness device
+    selection (``ROBOT_AUDIO_DEVICE``). Lazy audio imports
     (``sounddevice``/``numpy``); not unit-tested — needs a real mic.
     """
     import sounddevice as sd
 
-    from robot_comic.observer.audio_witness import IntervalDetector, dbfs
+    from robot_comic.observer.audio_witness import IntervalDetector, dbfs, resolve_input_device
 
-    frames = sd.rec(int(samplerate * window_s), samplerate=samplerate, channels=1, dtype="float32")
+    frames = sd.rec(
+        int(samplerate * window_s),
+        samplerate=samplerate,
+        channels=1,
+        dtype="float32",
+        device=resolve_input_device(),
+    )
     sd.wait()
     arr = frames.ravel()
     detector = IntervalDetector()

@@ -35,6 +35,37 @@ MAX_BYTES = int(os.getenv("ROBOT_AUDIO_LOG_MAX_BYTES", str(5_000_000)))
 _SILENCE_DBFS = -120.0
 
 
+def resolve_input_device(value: int | str | None = None) -> int | None:
+    """Resolve the witness input device to a sounddevice index.
+
+    ``value`` (or, when omitted, the ``ROBOT_AUDIO_DEVICE`` env var — read at
+    call time, not import time) may be a device index or a case-insensitive
+    name substring (e.g. ``"Brio"``); a substring resolves to the first input-
+    capable device whose name contains it. Empty/unset means the system
+    default (``None``). Raises ``ValueError`` when a substring matches no
+    input device — a witness silently listening to the wrong mic looks
+    exactly like a healthy witness hearing silence (#531).
+    """
+    if value is None:
+        value = os.getenv("ROBOT_AUDIO_DEVICE", "")
+    if isinstance(value, int):
+        return value
+    raw = value.strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        pass
+    import sounddevice as sd
+
+    needle = raw.lower()
+    for idx, dev in enumerate(sd.query_devices()):
+        if int(dev.get("max_input_channels", 0)) > 0 and needle in str(dev.get("name", "")).lower():
+            return idx
+    raise ValueError(f"no audio input device matching {raw!r}")
+
+
 def dbfs(frame: Any) -> float:
     """Return the RMS level of a float32 mono frame (values in [-1, 1]) in dBFS.
 
@@ -116,7 +147,7 @@ def _append_interval(path: str, interval: dict[str, Any], *, max_bytes: int = MA
 def run_witness(
     path: str,
     *,
-    device: Optional[int] = None,
+    device: Optional[int | str] = None,
     samplerate: int = 16_000,
     block_ms: int = 100,
     db_on: float = DB_ON,
@@ -124,14 +155,20 @@ def run_witness(
 ) -> None:
     """Capture the mic and append sound-present intervals to ``path`` until Ctrl-C.
 
-    Imports ``sounddevice`` lazily so this module stays importable (and its pure
-    helpers testable) on hosts without an audio stack.
+    ``device`` accepts an index or name substring; ``None`` falls back to
+    ``ROBOT_AUDIO_DEVICE``, then the system default (see
+    ``resolve_input_device``). Imports ``sounddevice`` lazily so this module
+    stays importable (and its pure helpers testable) on hosts without an audio
+    stack.
     """
     import sounddevice as sd
 
+    device_index = resolve_input_device(device)
     detector = IntervalDetector(db_on, db_off)
     block = max(1, int(samplerate * block_ms / 1000))
-    with sd.InputStream(channels=1, samplerate=samplerate, blocksize=block, dtype="float32", device=device) as stream:
+    with sd.InputStream(
+        channels=1, samplerate=samplerate, blocksize=block, dtype="float32", device=device_index
+    ) as stream:
         try:
             while True:
                 frames, _ = stream.read(block)
@@ -148,7 +185,11 @@ def run_witness(
 def main() -> None:
     """Console entry point: read ``ROBOT_AUDIO_LOG`` + flags, run the witness."""
     parser = argparse.ArgumentParser(description="Tier-1 robot audio witness")
-    parser.add_argument("--device", type=int, default=None, help="input device index (default: system default)")
+    parser.add_argument(
+        "--device",
+        default=None,
+        help="input device index or name substring, e.g. 'Brio' (default: ROBOT_AUDIO_DEVICE, then system default)",
+    )
     parser.add_argument("--samplerate", type=int, default=16_000)
     parser.add_argument("--block-ms", type=int, default=100)
     args = parser.parse_args()

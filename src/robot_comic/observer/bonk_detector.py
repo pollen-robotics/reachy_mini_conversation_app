@@ -29,7 +29,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from robot_comic.observer.audio_witness import dbfs
+from robot_comic.observer.audio_witness import dbfs, resolve_input_device
 from robot_comic.observer.motion_witness import load_events, correlate_spikes_with_events
 
 
@@ -138,6 +138,33 @@ def append_caution_entries(
             fh.write(json.dumps(entry, separators=(",", ":")) + "\n")
 
 
+def _block_to_pcm(block: NDArray[np.float32]) -> bytes:
+    """One float32 block as raw 16-bit little-endian PCM bytes."""
+    return (np.clip(block, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
+
+
+def finalize_partial_wav(wav_path: str, *, sample_rate: int = 16_000) -> str:
+    """Convert ``<wav_path>.partial`` (raw 16-bit mono PCM) into ``wav_path``.
+
+    The watch streams raw PCM to the sidecar as it captures, so a watch that
+    is killed mid-window still leaves recoverable audio; this wraps it in a
+    WAV header and removes the sidecar. Called automatically on a clean
+    finish, and usable manually after a kill.
+    """
+    import wave
+
+    partial = wav_path + ".partial"
+    with open(partial, "rb") as fh:
+        pcm = fh.read()
+    with wave.open(wav_path, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(pcm)
+    os.remove(partial)
+    return wav_path
+
+
 def watch(
     seconds: float,
     *,
@@ -145,29 +172,56 @@ def watch(
     caution_list: str = DEFAULT_CAUTION_LIST,
     sample_rate: int = 16_000,
     block_ms: int = 50,
+    device: int | str | None = None,
+    record_wav: str | None = None,
 ) -> dict[str, Any]:
-    """Listen on the witness mic for ``seconds``; detect, attribute, persist."""
+    """Listen on the witness mic for ``seconds``; detect, attribute, persist.
+
+    ``device`` accepts an index or name substring; ``None`` falls back to
+    ``ROBOT_AUDIO_DEVICE``, then the system default. ``record_wav`` saves the
+    raw capture so thresholds can be tuned offline against a recorded tap
+    session instead of re-tapping live. The capture streams unbuffered to
+    ``<record_wav>.partial`` while the window is open, so a watch killed
+    mid-window keeps its audio (recover with ``finalize_partial_wav``).
+    """
     import sounddevice as sd
 
+    device_index = resolve_input_device(device)
     detector = BonkDetector()
     block_size = int(sample_rate * block_ms / 1000)
     detections: list[dict[str, Any]] = []
     start_wall = time.time()
 
-    with sd.InputStream(samplerate=sample_rate, channels=1, dtype="float32", blocksize=block_size) as stream:
-        n_blocks = int(math.ceil(seconds * 1000 / block_ms))
-        for _ in range(n_blocks):
-            block, _overflowed = stream.read(block_size)
-            ts_ms = int((time.time() - start_wall) * 1000)
-            hit = detector.update(ts_ms=ts_ms, block=block[:, 0], sample_rate=sample_rate)
-            if hit is not None:
-                hit["wall_ts"] = int((start_wall + hit["ts_ms"] / 1000.0) * 1000)
-                detections.append(hit)
-                print(
-                    f"BONK? t={hit['ts_ms'] / 1000:.1f}s level={hit['peak_dbfs']} dBFS "
-                    f"onset=+{hit['onset_db']} dB hf={hit['hf_ratio']}",
-                    flush=True,
-                )
+    raw_fh = None
+    if record_wav:
+        os.makedirs(os.path.dirname(record_wav) or ".", exist_ok=True)
+        raw_fh = open(record_wav + ".partial", "wb", buffering=0)
+    try:
+        with sd.InputStream(
+            samplerate=sample_rate, channels=1, dtype="float32", blocksize=block_size, device=device_index
+        ) as stream:
+            n_blocks = int(math.ceil(seconds * 1000 / block_ms))
+            for _ in range(n_blocks):
+                block, _overflowed = stream.read(block_size)
+                ts_ms = int((time.time() - start_wall) * 1000)
+                mono = block[:, 0]
+                if raw_fh is not None:
+                    raw_fh.write(_block_to_pcm(mono))
+                hit = detector.update(ts_ms=ts_ms, block=mono, sample_rate=sample_rate)
+                if hit is not None:
+                    hit["wall_ts"] = int((start_wall + hit["ts_ms"] / 1000.0) * 1000)
+                    detections.append(hit)
+                    print(
+                        f"BONK? t={hit['ts_ms'] / 1000:.1f}s level={hit['peak_dbfs']} dBFS "
+                        f"onset=+{hit['onset_db']} dB hf={hit['hf_ratio']}",
+                        flush=True,
+                    )
+    finally:
+        if raw_fh is not None:
+            raw_fh.close()
+
+    if record_wav:
+        finalize_partial_wav(record_wav, sample_rate=sample_rate)
 
     attributions: list[dict[str, Any]] = []
     if detections and events_path:
@@ -182,9 +236,11 @@ def watch(
 
     return {
         "seconds": seconds,
+        "device": device_index,
         "detections": detections,
         "attributions": attributions,
         "caution_list": caution_list if detections else None,
+        "record_wav": record_wav,
     }
 
 
@@ -194,16 +250,30 @@ def main() -> None:
     parser.add_argument("--seconds", type=float, default=120.0, help="listen window (default: %(default)s)")
     parser.add_argument("--events", default=None, help="Tier-0 events file for attribution")
     parser.add_argument("--caution-list", default=DEFAULT_CAUTION_LIST, help="caution list JSONL path")
+    parser.add_argument(
+        "--device",
+        default=None,
+        help="input device index or name substring, e.g. 'Brio' (default: ROBOT_AUDIO_DEVICE, then system default)",
+    )
+    parser.add_argument("--record-wav", default=None, help="also save the raw capture to this WAV for offline tuning")
     args = parser.parse_args()
 
     print(f"listening {args.seconds:g}s for impact signatures...", flush=True)
-    report = watch(args.seconds, events_path=args.events, caution_list=args.caution_list)
+    report = watch(
+        args.seconds,
+        events_path=args.events,
+        caution_list=args.caution_list,
+        device=args.device,
+        record_wav=args.record_wav,
+    )
     print(f"{len(report['detections'])} detection(s)")
     for det, att in zip(report["detections"], report["attributions"]):
         tool = att.get("tool") or "UNATTRIBUTED"
         print(f"  t={det['ts_ms'] / 1000:.1f}s {det['peak_dbfs']} dBFS hf={det['hf_ratio']} -> {tool}")
     if report["caution_list"]:
         print(f"caution list updated: {report['caution_list']}")
+    if report["record_wav"]:
+        print(f"raw capture saved: {report['record_wav']}")
 
 
 if __name__ == "__main__":

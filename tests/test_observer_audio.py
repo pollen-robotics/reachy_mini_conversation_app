@@ -1,12 +1,13 @@
 """Tests for Tier-1 of the closing-the-loop observer (audio witness).
 
-Covers the pure interval-detection state machine and the dBFS helper in
-``audio_witness``, plus the dependency-free reader in ``audio_activity``. The
-``sounddevice`` capture loop (``run_witness``) needs real hardware, so it isn't
-exercised here.
+Covers the pure interval-detection state machine, the dBFS helper, and the
+input-device resolver in ``audio_witness``, plus the dependency-free reader in
+``audio_activity``. The ``sounddevice`` capture loop (``run_witness``) needs
+real hardware, so it isn't exercised here.
 """
 
 from __future__ import annotations
+import sys
 import json
 from pathlib import Path
 
@@ -77,6 +78,58 @@ def test_detector_flush_noop_when_idle() -> None:
     det = audio_witness.IntervalDetector()
     det.update(0, -80.0)
     assert det.flush() is None
+
+
+# ---------------------------------------------------------------------------
+# resolve_input_device (#531: the witness must aim at the Brio, not the default)
+# ---------------------------------------------------------------------------
+class _StubSounddevice:
+    """Minimal sounddevice stand-in for name-based device resolution."""
+
+    def __init__(self, devices: list[dict]) -> None:
+        self._devices = devices
+
+    def query_devices(self) -> list[dict]:
+        return self._devices
+
+
+_DEVICES = [
+    {"name": "Microphone Array (Intel Smart Sound)", "max_input_channels": 6},
+    {"name": "Speakers (Brio 500)", "max_input_channels": 0},  # output-only
+    {"name": "Speakerphone (Brio 500)", "max_input_channels": 2},
+]
+
+
+def test_resolve_device_none_without_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ROBOT_AUDIO_DEVICE", raising=False)
+    assert audio_witness.resolve_input_device() is None
+
+
+def test_resolve_device_int_passthrough() -> None:
+    assert audio_witness.resolve_input_device(3) == 3
+
+
+def test_resolve_device_numeric_string_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ROBOT_AUDIO_DEVICE", "2")
+    assert audio_witness.resolve_input_device() == 2
+
+
+def test_resolve_device_name_substring_skips_output_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ROBOT_AUDIO_DEVICE", "brio")
+    monkeypatch.setitem(sys.modules, "sounddevice", _StubSounddevice(_DEVICES))
+    assert audio_witness.resolve_input_device() == 2
+
+
+def test_resolve_device_explicit_value_overrides_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ROBOT_AUDIO_DEVICE", "brio")
+    monkeypatch.setitem(sys.modules, "sounddevice", _StubSounddevice(_DEVICES))
+    assert audio_witness.resolve_input_device("intel") == 0
+
+
+def test_resolve_device_no_match_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "sounddevice", _StubSounddevice(_DEVICES))
+    with pytest.raises(ValueError, match="yeti"):
+        audio_witness.resolve_input_device("yeti")
 
 
 # ---------------------------------------------------------------------------
