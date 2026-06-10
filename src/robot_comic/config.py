@@ -1046,6 +1046,16 @@ class Config:
     GEMINI_LIVE_IDLE_BACKOFF_FACTOR = float(os.getenv("GEMINI_LIVE_IDLE_BACKOFF_FACTOR", "2.0"))
     GEMINI_LIVE_IDLE_MAX_S = float(os.getenv("GEMINI_LIVE_IDLE_MAX_S", "600"))
 
+    # Gemini Live self-echo guard (#527): input transcriptions that match the
+    # robot's own recent speech (it hears itself through the chassis mic) must
+    # not reset the idle-riff backoff or the presence monitor; the turn closes
+    # tagged ``outcome=self_echo`` instead.
+    # GEMINI_LIVE_ECHO_GUARD_ENABLED: master switch (default on).
+    # GEMINI_LIVE_ECHO_SIMILARITY: fragment-similarity threshold against the
+    #   last few assistant utterances (default 0.85; lower = more aggressive).
+    GEMINI_LIVE_ECHO_GUARD_ENABLED = _env_flag("GEMINI_LIVE_ECHO_GUARD_ENABLED", default=True)
+    GEMINI_LIVE_ECHO_SIMILARITY = float(os.getenv("GEMINI_LIVE_ECHO_SIMILARITY", "0.85"))
+
     # Gemini Live server-side VAD tuning. Defaults raise the end-of-speech bar
     # well above the SDK's eager defaults so brief pauses / breaths during the
     # user's reply don't fire a fresh turn while the model is still responding.
@@ -1381,6 +1391,8 @@ def refresh_runtime_config_from_env() -> None:
     config.GEMINI_LIVE_IDLE_FIRST_S = float(os.getenv("GEMINI_LIVE_IDLE_FIRST_S", "15"))
     config.GEMINI_LIVE_IDLE_BACKOFF_FACTOR = float(os.getenv("GEMINI_LIVE_IDLE_BACKOFF_FACTOR", "2.0"))
     config.GEMINI_LIVE_IDLE_MAX_S = float(os.getenv("GEMINI_LIVE_IDLE_MAX_S", "600"))
+    config.GEMINI_LIVE_ECHO_GUARD_ENABLED = _env_flag("GEMINI_LIVE_ECHO_GUARD_ENABLED", default=True)
+    config.GEMINI_LIVE_ECHO_SIMILARITY = float(os.getenv("GEMINI_LIVE_ECHO_SIMILARITY", "0.85"))
     config.GEMINI_LIVE_VAD_SILENCE_MS = int(os.getenv("GEMINI_LIVE_VAD_SILENCE_MS", "600"))
     config.GEMINI_LIVE_VAD_PREFIX_MS = int(os.getenv("GEMINI_LIVE_VAD_PREFIX_MS", "200"))
     config.GEMINI_LIVE_VAD_START_SENSITIVITY = os.getenv("GEMINI_LIVE_VAD_START_SENSITIVITY", "LOW").upper()

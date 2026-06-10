@@ -54,7 +54,6 @@ class is only for composable-mode pipelines.
 
 from __future__ import annotations
 import os
-import re
 import time
 import uuid
 import asyncio
@@ -80,6 +79,7 @@ from robot_comic.backends import (
     TTSBackend,
     LLMResponse,
 )
+from robot_comic.echo_filter import normalize_for_echo_check
 from robot_comic.history_trim import trim_history_in_place
 from robot_comic.joke_history import record_joke_history
 from robot_comic.welcome_gate import GateState, WelcomeGate
@@ -233,25 +233,10 @@ def _tts_down_cooldown_s() -> float:
     return value
 
 
-_PUNCT_RE = re.compile(r"[^\w\s]", flags=re.UNICODE)
-_WS_RE = re.compile(r"\s+")
-
-
-def _normalize_for_echo_check(text: str) -> str:
-    """Return a comparison-only form of ``text`` for echo similarity scoring.
-
-    Lowercases, replaces every non-word non-whitespace character with a
-    single space (so punctuation, apostrophes, ellipses all collapse),
-    and squashes whitespace runs. The output is used only for the
-    :func:`difflib.SequenceMatcher` ratio — the original transcript
-    string is what would be dispatched / appended to history.
-    """
-    if not text:
-        return ""
-    lowered = text.lower()
-    no_punct = _PUNCT_RE.sub(" ", lowered)
-    collapsed = _WS_RE.sub(" ", no_punct)
-    return collapsed.strip()
+# The normalize step moved to ``echo_filter`` (#527) so the Gemini Live
+# input-transcription path can run the same comparison; the alias keeps this
+# module's call sites and tests unchanged.
+_normalize_for_echo_check = normalize_for_echo_check
 
 
 # Duplicate-suppression window + similarity threshold (post-5f.2).

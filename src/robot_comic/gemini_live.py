@@ -16,6 +16,7 @@ import uuid
 import base64
 import asyncio
 import logging
+import collections
 from typing import TYPE_CHECKING, Any, Dict, List, Final, Tuple, Optional
 from datetime import datetime
 
@@ -40,6 +41,7 @@ from robot_comic.config import (
     config,
 )
 from robot_comic.prompts import get_session_voice, get_session_instructions
+from robot_comic.echo_filter import is_echo_of_recent, normalize_for_echo_check
 from robot_comic.gemini_retry import (
     compute_backoff,
     is_rate_limit_error,
@@ -362,6 +364,13 @@ class GeminiLiveHandler(AsyncStreamHandler, ConversationHandler):
         self._pending_assistant_transcript_chunks: list[str] = []
         self._listening_state = False
 
+        # Self-echo guard (#527): normalized recent assistant utterances; an
+        # input transcription matching one is the robot hearing itself and
+        # must not reset the riff pacing. Re-evaluated per chunk so the flag
+        # reflects the latest accumulated transcript when the turn closes.
+        self._recent_assistant_texts: collections.deque[str] = collections.deque(maxlen=5)
+        self._turn_is_self_echo = False
+
         # OTel turn-span tracking
         self._session_id: str = str(uuid.uuid4())
         self._turn_id: str | None = None
@@ -552,6 +561,25 @@ class GeminiLiveHandler(AsyncStreamHandler, ConversationHandler):
 
         await self.output_queue.put(AdditionalOutputs({"role": role, "content": transcript}))
 
+    def _is_self_echo(self, transcript: str) -> bool:
+        """Return True when ``transcript`` matches the robot's own recent speech (#527)."""
+        if not config.GEMINI_LIVE_ECHO_GUARD_ENABLED or not self._recent_assistant_texts:
+            return False
+        return is_echo_of_recent(
+            transcript,
+            self._recent_assistant_texts,
+            threshold=config.GEMINI_LIVE_ECHO_SIMILARITY,
+        )
+
+    def _remember_assistant_speech(self) -> None:
+        """Buffer the pending assistant transcript for the self-echo guard.
+
+        Must run *before* the chunks are flushed (flushing clears them).
+        """
+        normalized = normalize_for_echo_check("".join(self._pending_assistant_transcript_chunks))
+        if normalized:
+            self._recent_assistant_texts.append(normalized)
+
     async def _mark_model_response_started(self) -> None:
         """Switch out of user-listening mode when the model begins responding."""
         await self._flush_transcript_chunks("user", self._pending_user_transcript_chunks)
@@ -564,6 +592,7 @@ class GeminiLiveHandler(AsyncStreamHandler, ConversationHandler):
     async def _handle_interruption(self) -> None:
         """Stop current playback and preserve any transcript already spoken."""
         logger.debug("Gemini: user interrupted")
+        self._remember_assistant_speech()
         await self._flush_transcript_chunks("assistant", self._pending_assistant_transcript_chunks)
         self._close_turn_span("interrupted")
         if hasattr(self, "_clear_queue") and callable(self._clear_queue):
@@ -580,9 +609,11 @@ class GeminiLiveHandler(AsyncStreamHandler, ConversationHandler):
         # Capture the assistant transcript *before* flushing so we can
         # classify it as a question turn for the presence monitor.
         assistant_transcript = "".join(self._pending_assistant_transcript_chunks).strip()
+        self._remember_assistant_speech()
         await self._flush_transcript_chunks("assistant", self._pending_assistant_transcript_chunks)
 
-        self._close_turn_span("success")
+        self._close_turn_span("self_echo" if self._turn_is_self_echo else "success")
+        self._turn_is_self_echo = False
         self._set_listening_state(False)
         if self.deps.head_wobbler is not None:
             self.deps.head_wobbler.request_reset_after_current_audio()
@@ -1054,6 +1085,7 @@ class GeminiLiveHandler(AsyncStreamHandler, ConversationHandler):
                                     if not self._pending_user_transcript_chunks:
                                         # First chunk — open turn span and record user-done timestamp
                                         self._close_turn_span("interrupted")
+                                        self._turn_is_self_echo = False
                                         self._turn_id = str(uuid.uuid4())
                                         now_pc = time.perf_counter()
                                         self._turn_start_at = now_pc
@@ -1082,11 +1114,26 @@ class GeminiLiveHandler(AsyncStreamHandler, ConversationHandler):
                                         )
                                     self._pending_user_transcript_chunks.append(transcript)
                                     self._set_listening_state(True)
-                                    # User is speaking — cancel any pending presence probe
-                                    # and reset the unprompted-riff backoff.
-                                    if self._presence_monitor is not None:
-                                        self._presence_monitor.on_user_activity()
-                                    self._idle_backoff.on_user_activity()
+                                    # Self-echo guard (#527): re-evaluate the accumulated
+                                    # transcript each chunk — the robot hearing its own riff
+                                    # must not look like user activity.
+                                    was_echo = self._turn_is_self_echo
+                                    self._turn_is_self_echo = self._is_self_echo(
+                                        "".join(self._pending_user_transcript_chunks)
+                                    )
+                                    if self._turn_is_self_echo:
+                                        if not was_echo:
+                                            logger.info(
+                                                "Self-echo guard: input transcription matches recent "
+                                                "assistant speech; riff pacing not reset (%r)",
+                                                "".join(self._pending_user_transcript_chunks)[:80],
+                                            )
+                                    else:
+                                        # User is speaking — cancel any pending presence probe
+                                        # and reset the unprompted-riff backoff.
+                                        if self._presence_monitor is not None:
+                                            self._presence_monitor.on_user_activity()
+                                        self._idle_backoff.on_user_activity()
 
                                 # Handle output transcription (model speech)
                                 if content.output_transcription and content.output_transcription.text:
