@@ -1035,6 +1035,17 @@ class Config:
     GEMINI_LIVE_PRESENCE_MAX_ATTEMPTS = int(os.getenv("GEMINI_LIVE_PRESENCE_MAX_ATTEMPTS", "3"))
     GEMINI_LIVE_PRESENCE_BACKOFF_FACTOR = float(os.getenv("GEMINI_LIVE_PRESENCE_BACKOFF_FACTOR", "2.0"))
 
+    # Gemini Live idle-signal backoff: the idle nudge that makes the robot riff
+    # unprompted fires on an exponentially growing cadence so humans get
+    # increasingly long windows to interject. Resets when the user speaks.
+    # GEMINI_LIVE_IDLE_FIRST_S: idle seconds before the first nudge (default 15).
+    # GEMINI_LIVE_IDLE_BACKOFF_FACTOR: multiplier per successive nudge (default 2.0;
+    #   set 1.0 to restore the old fixed cadence).
+    # GEMINI_LIVE_IDLE_MAX_S: cap on the idle threshold (default 600).
+    GEMINI_LIVE_IDLE_FIRST_S = float(os.getenv("GEMINI_LIVE_IDLE_FIRST_S", "15"))
+    GEMINI_LIVE_IDLE_BACKOFF_FACTOR = float(os.getenv("GEMINI_LIVE_IDLE_BACKOFF_FACTOR", "2.0"))
+    GEMINI_LIVE_IDLE_MAX_S = float(os.getenv("GEMINI_LIVE_IDLE_MAX_S", "600"))
+
     # Gemini Live server-side VAD tuning. Defaults raise the end-of-speech bar
     # well above the SDK's eager defaults so brief pauses / breaths during the
     # user's reply don't fire a fresh turn while the model is still responding.
@@ -1361,6 +1372,9 @@ def refresh_runtime_config_from_env() -> None:
     config.GEMINI_LIVE_PRESENCE_FIRST_S = float(os.getenv("GEMINI_LIVE_PRESENCE_FIRST_S", "10"))
     config.GEMINI_LIVE_PRESENCE_MAX_ATTEMPTS = int(os.getenv("GEMINI_LIVE_PRESENCE_MAX_ATTEMPTS", "3"))
     config.GEMINI_LIVE_PRESENCE_BACKOFF_FACTOR = float(os.getenv("GEMINI_LIVE_PRESENCE_BACKOFF_FACTOR", "2.0"))
+    config.GEMINI_LIVE_IDLE_FIRST_S = float(os.getenv("GEMINI_LIVE_IDLE_FIRST_S", "15"))
+    config.GEMINI_LIVE_IDLE_BACKOFF_FACTOR = float(os.getenv("GEMINI_LIVE_IDLE_BACKOFF_FACTOR", "2.0"))
+    config.GEMINI_LIVE_IDLE_MAX_S = float(os.getenv("GEMINI_LIVE_IDLE_MAX_S", "600"))
     config.GEMINI_LIVE_VAD_SILENCE_MS = int(os.getenv("GEMINI_LIVE_VAD_SILENCE_MS", "600"))
     config.GEMINI_LIVE_VAD_PREFIX_MS = int(os.getenv("GEMINI_LIVE_VAD_PREFIX_MS", "200"))
     config.GEMINI_LIVE_VAD_START_SENSITIVITY = os.getenv("GEMINI_LIVE_VAD_START_SENSITIVITY", "LOW").upper()

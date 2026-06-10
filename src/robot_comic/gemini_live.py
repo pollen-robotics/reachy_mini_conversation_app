@@ -46,6 +46,7 @@ from robot_comic.gemini_retry import (
     describe_quota_failure,
     extract_retry_after_seconds,
 )
+from robot_comic.idle_backoff import IdleSignalBackoff
 from robot_comic.presence_monitor import PresenceMonitor
 from robot_comic.tools.core_tools import (
     ToolDependencies,
@@ -340,6 +341,14 @@ class GeminiLiveHandler(AsyncStreamHandler, ConversationHandler):
         self.last_activity_time = asyncio.get_event_loop().time()
         self.start_time = asyncio.get_event_loop().time()
         self.is_idle_tool_call = False
+
+        # Unprompted-riff pacing: each idle nudge raises the bar for the next
+        # one so interjection windows grow; user speech resets the cadence.
+        self._idle_backoff = IdleSignalBackoff(
+            first_s=config.GEMINI_LIVE_IDLE_FIRST_S,
+            factor=config.GEMINI_LIVE_IDLE_BACKOFF_FACTOR,
+            max_s=config.GEMINI_LIVE_IDLE_MAX_S,
+        )
 
         # Internal lifecycle flags
         self._connected_event: asyncio.Event = asyncio.Event()
@@ -1073,9 +1082,11 @@ class GeminiLiveHandler(AsyncStreamHandler, ConversationHandler):
                                         )
                                     self._pending_user_transcript_chunks.append(transcript)
                                     self._set_listening_state(True)
-                                    # User is speaking — cancel any pending presence probe.
+                                    # User is speaking — cancel any pending presence probe
+                                    # and reset the unprompted-riff backoff.
                                     if self._presence_monitor is not None:
                                         self._presence_monitor.on_user_activity()
+                                    self._idle_backoff.on_user_activity()
 
                                 # Handle output transcription (model speech)
                                 if content.output_transcription and content.output_transcription.text:
@@ -1154,13 +1165,14 @@ class GeminiLiveHandler(AsyncStreamHandler, ConversationHandler):
 
         # Handle idle
         idle_duration = asyncio.get_event_loop().time() - self.last_activity_time
-        if idle_duration > 15.0 and self.deps.movement_manager.is_idle():
+        if idle_duration > self._idle_backoff.threshold_s and self.deps.movement_manager.is_idle():
             try:
                 await self.send_idle_signal(idle_duration)
             except Exception as e:
                 logger.warning("Idle signal skipped: %s", e)
                 return None
             self.last_activity_time = asyncio.get_event_loop().time()
+            self._idle_backoff.on_signal_sent()
 
         return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
 
