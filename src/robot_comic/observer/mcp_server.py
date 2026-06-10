@@ -87,6 +87,51 @@ def build_server() -> Any:
             "intervals": intervals,
         }
 
+    @server.tool()  # type: ignore[misc]
+    def robot_play_prompt(wav: str | None = None, text: str | None = None) -> dict[str, Any]:
+        """Play a trigger prompt at the robot from the laptop speaker (Tier 1.5).
+
+        Provide exactly one of ``wav`` (a WAV file path) or ``text`` (synthesized
+        with piper). This is the autonomous trigger — it makes the robot's mic
+        hear audio so hear-and-respond behaviours can be exercised without a
+        human. Guarded: opt-in via ``ROBOT_PLAY_PROMPT_ENABLED=1``, duration-
+        capped, and rate-limited (cooldown + per-session cap). On refusal it
+        returns ``{"played": false, "error": ...}`` so the agent can react rather
+        than crash. See ``docs/closing-the-loop.md``.
+        """
+        # Lazy import: keeps the optional audio/TTS deps off the server's import
+        # path (matching how the witness treats sounddevice).
+        from robot_comic.observer.play_prompt import PlayPromptError, play_prompt
+
+        try:
+            return play_prompt(wav=wav, text=text)
+        except PlayPromptError as exc:
+            return {"played": False, "error": str(exc)}
+
+    @server.tool()  # type: ignore[misc]
+    def robot_run_loop_check(
+        text: str | None = None,
+        wav: str | None = None,
+        window_s: float = 12.0,
+        expect_tool: str | None = None,
+    ) -> dict[str, Any]:
+        """Run one closing-the-loop trigger->verify cycle and return a verdict.
+
+        Plays a prompt at the robot (exactly one of ``text``/``wav``), listens
+        ``window_s`` on the laptop mic, reads the robot's new Tier-0 events, and
+        returns ``{passed, robot_spoke, heard_response, excerpt, tools_fired,
+        ...}``. Pass ``expect_tool`` (e.g. ``play_emotion``) to require a tool
+        fired. Honors the play_prompt guards (opt-in/rate-limit/duration). On a
+        guard refusal it returns ``{"passed": false, "error": ...}``.
+        """
+        from robot_comic.observer.loop_check import run_loop_check
+        from robot_comic.observer.play_prompt import PlayPromptError
+
+        try:
+            return run_loop_check(text=text, wav=wav, window_s=window_s, expect_tool=expect_tool)
+        except PlayPromptError as exc:
+            return {"passed": False, "error": str(exc)}
+
     return server
 
 

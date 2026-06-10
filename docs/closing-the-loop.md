@@ -90,6 +90,16 @@ Wrap the tiers as a thin **local MCP server** the agent can call. Tools:
 `text`) into the room, exactly the `audio-playback-recipe.md` loop, so behaviors
 that depend on hearing audio can be exercised without a human talking.
 
+Shipped as `robot_comic.observer.play_prompt` (run the MCP server where the
+speaker lives; `uv pip install sounddevice numpy piper-tts`). Provide exactly one
+of `wav` (a file path) or `text` (synthesized via piper —
+`ROBOT_PLAY_PROMPT_PIPER_MODEL` points at a `.onnx` voice). Guarded per the
+*Tradeoffs & guardrails* below: opt-in via `ROBOT_PLAY_PROMPT_ENABLED=1`, a
+`ROBOT_PLAY_PROMPT_MAX_DURATION_S` clip cap (default 15s), and rate limiting
+(`ROBOT_PLAY_PROMPT_COOLDOWN_S` gap, default 3s; `ROBOT_PLAY_PROMPT_MAX_PLAYS`
+per-process cap, default 20 — the stop condition for an unattended loop). On
+refusal the tool returns `{"played": false, "error": ...}` rather than raising.
+
 The server is a small local process reading the Tier-0 JSONL + driving the
 mic/camera; register it in the agent's MCP config (Claude Code or Hermes). It can
 read signals locally, or over the existing `docs/ws-protocol.md` WebSocket when
@@ -108,6 +118,15 @@ the robot and laptop are separate hosts.
 
 A green run is evidence the end-to-end behavior works; a red run hands the agent
 the events to debug.
+
+This loop is packaged as `robot_comic.observer.loop_check` — one call snapshots
+the robot's event log, fires the prompt, listens on the laptop mic, diffs the
+*newly appended* events (a line-count diff, so a robot/laptop clock skew can't
+hide the turn), and returns a `{passed, robot_spoke, heard_response, excerpt,
+tools_fired, ...}` verdict. Run it as a CLI
+(`python -m robot_comic.observer.loop_check --text "Hey Richie, tell me a joke"
+--expect-tool play_emotion`; exit 0/1) or via the `robot_run_loop_check` MCP
+tool. Topology via `LOOP_CHECK_SSH_HOST` / `LOOP_CHECK_REMOTE_EVENT_LOG`.
 
 ## Tradeoffs & guardrails
 
@@ -128,5 +147,5 @@ the events to debug.
 
 1. ✅ Tier 0 JSONL sink + `robot_get_recent_events` (smallest, highest signal).
 2. ✅ Tier 1 mic witness + `robot_get_audio_activity`.
-3. `robot_play_prompt` actuator → first real closed loop. **(next)**
+3. ✅ `robot_play_prompt` actuator → first real closed loop.
 4. Tier 2 visual witness, on-demand.
