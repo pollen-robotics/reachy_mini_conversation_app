@@ -97,7 +97,7 @@ jobs:
       - run: echo "Docs-only PR — pytest-fast workflow did not fire; reporting green stub."
 
   pytest-fast-windows:
-    name: pytest-fast (windows-latest, py3.12)
+    name: pytest-fast (windows-self-hosted, py3.12)
     needs: changes
     if: needs.changes.outputs.code-changed == 'false'
     runs-on: ubuntu-latest
@@ -113,7 +113,7 @@ jobs:
       - run: echo "Docs-only PR — pytest-full workflow did not fire; reporting green stub."
 
   pytest-full-windows:
-    name: pytest-full (windows-latest, py3.12)
+    name: pytest-full (windows-self-hosted, py3.12)
     needs: changes
     if: needs.changes.outputs.code-changed == 'false'
     runs-on: ubuntu-latest

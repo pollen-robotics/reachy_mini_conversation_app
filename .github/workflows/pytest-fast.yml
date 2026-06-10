@@ -42,14 +42,19 @@ concurrency:
 
 jobs:
   pytest-fast:
-    name: pytest-fast (${{ matrix.os }}, py${{ matrix.python-version }})
-    runs-on: ${{ matrix.os }}
+    name: pytest-fast (${{ matrix.os-name }}, py${{ matrix.python-version }})
+    runs-on: ${{ fromJSON(matrix.runs-on) }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        python-version: ["3.12"]
+        include:
+          - os-name: ubuntu-latest
+            runs-on: '["ubuntu-latest"]'
+            python-version: "3.12"
+          - os-name: windows-self-hosted
+            runs-on: '["self-hosted","Windows","X64","robot-comic"]'
+            python-version: "3.12"
 
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
