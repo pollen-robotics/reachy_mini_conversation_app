@@ -17,7 +17,6 @@ SCHEMA_VERSION = 1
 MAX_FACTS = 60
 MAX_FACT_CHARS = 280
 MEMORY_FILENAME = "memory.v1.json"
-MEMORY_PATH_ENV = "REACHY_MINI_MEMORY_PATH"
 
 _STORE_LOCK = threading.Lock()
 
@@ -49,10 +48,6 @@ class ForgetMemoryResult:
 
 def memory_path_for_instance(instance_path: str | Path | None = None) -> Path:
     """Return the memory JSON path for this app instance."""
-    env_path = os.getenv(MEMORY_PATH_ENV)
-    if env_path:
-        return Path(env_path).expanduser()
-
     if instance_path is not None:
         return Path(instance_path).expanduser() / MEMORY_FILENAME
 
@@ -174,20 +169,12 @@ def add_memory_fact(instance_path: str | Path | None, text: str) -> MemoryFact |
 def forget_memory_fact(
     instance_path: str | Path | None,
     *,
-    fact_id: str | None = None,
     query: str | None = None,
 ) -> ForgetMemoryResult:
-    """Remove a fact by id or by case-insensitive substring query."""
+    """Remove a fact by case-insensitive substring query."""
     path = memory_path_for_instance(instance_path)
     with _STORE_LOCK:
         facts = _read_memory_file(path)
-
-        if fact_id:
-            removed = next((fact for fact in facts if fact.id == fact_id), None)
-            if removed is None:
-                return ForgetMemoryResult(removed=None, candidates=())
-            _write_memory_file(path, [fact for fact in facts if fact.id != fact_id])
-            return ForgetMemoryResult(removed=removed, candidates=(removed,))
 
         normalized_query = normalize_memory_text(query or "").lower()
         if not normalized_query:
