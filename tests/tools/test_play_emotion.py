@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import MagicMock
 
 import pytest
@@ -189,7 +190,10 @@ async def test_play_emotion_queues_resolved_emotion(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
-async def test_play_emotion_queues_random_for_unknown_emotion(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_play_emotion_queues_random_for_unknown_emotion(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Unknown explicit values should fall back to a random recorded emotion."""
 
     class FakeRecordedMoves:
@@ -215,8 +219,10 @@ async def test_play_emotion_queues_random_for_unknown_emotion(monkeypatch: pytes
     movement_manager = MagicMock()
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement_manager)
 
-    result = await PlayEmotion()(deps, emotion="contento")
+    with caplog.at_level(logging.INFO, logger=play_emotion_module.logger.name):
+        result = await PlayEmotion()(deps, emotion="contento")
 
     assert result == {"status": "queued", "emotion": "confused1"}
+    assert "play_emotion: 'contento' did not resolve; using random curated" in caplog.text
     queued_move = movement_manager.queue_move.call_args.args[0]
     assert queued_move.emotion_name == "confused1"

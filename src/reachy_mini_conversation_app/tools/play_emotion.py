@@ -287,6 +287,7 @@ class PlayEmotion(Tool):
 
             emotion_name = resolve_emotion_name(requested_emotion, emotion_names)
             if not emotion_name:
+                logger.info("play_emotion: %r did not resolve; using random curated", requested_emotion)
                 emotion_name = random_curated_emotion(emotion_names)
 
             movement_manager = deps.movement_manager
