@@ -24,6 +24,9 @@ on:
       - ".github/workflows/**"
       - "pyproject.toml"
       - "uv.lock"
+  # Merge queue: advisory there, same as on PRs (not a required check, so
+  # it never gates the queue). merge_group does not support paths filters.
+  merge_group:
 
 permissions:
   contents: read
@@ -41,9 +44,10 @@ jobs:
     name: pytest-full (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
-    # Advisory on PRs, gating on main. The `if` branch is mirrored in the
-    # issue-creation step below so it only fires on main failures.
-    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    # Advisory on PRs and merge groups, gating on main. The `if` branch is
+    # mirrored in the issue-creation step below so it only fires on main
+    # failures.
+    continue-on-error: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
     strategy:
       fail-fast: false
       matrix:

@@ -5,6 +5,9 @@ on:
     paths:
       - "pyproject.toml"
       - "uv.lock"
+  # Merge queue: merge_group does not support paths filters; fires on every
+  # merge group so the check reports there.
+  merge_group:
 
 jobs:
   uv-lock-check:

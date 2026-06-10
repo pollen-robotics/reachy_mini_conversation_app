@@ -16,6 +16,9 @@ on:
       - "tests/**"
       - ".github/workflows/**"
       - "pyproject.toml"
+  # Merge queue: merge_group does not support paths filters; fires on every
+  # merge group so the check reports there.
+  merge_group:
 
 permissions:
   contents: read

@@ -27,6 +27,10 @@ on:
       - ".github/workflows/**"
       - "pyproject.toml"
       - "uv.lock"
+  # Merge queue: required checks must report on every merge group or the
+  # queue stalls. merge_group does not support paths filters, so this fires
+  # unconditionally (ci-skip stubs are PR-only and don't cover merge groups).
+  merge_group:
 
 permissions:
   contents: read
