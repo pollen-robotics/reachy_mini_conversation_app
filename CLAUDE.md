@@ -44,6 +44,29 @@ python -m robot_comic.main --debug   # Verbose logging
 journalctl -u reachy-app-autostart -f   # Live app log
 ```
 
+## Observer workstation services
+
+The robot relays every telemetry span over UDP (`ROBOT_EVENT_RELAY` in the
+robot's `.env`) to a **log sink** on the dev workstation. The relay is
+fire-and-forget by design: if the sink is down, spans silently vanish — so
+the sink must be running before any live-robot session.
+
+```bash
+# Start the sink (workstation; keep running while the robot is up)
+robot-comic-logsink --port 9477 --file <sink file>      # e.g. D:\logs\ricci_events.log
+
+# Live turn table off-robot, fed by the sink file
+robot-comic-monitor --file <sink file>
+```
+
+A `SessionStart` hook (`.claude/hooks/check_log_sink.py`) reports the sink's
+status into session context. **When it reports NOT RUNNING and live-robot
+work is planned, nudge the operator to start it — or offer to run it in the
+background yourself before proceeding.** The observer MCP server's
+`ROBOT_EVENT_LOG` points at the sink file, so a dead sink also starves
+`robot_get_recent_events`, `robot_measure_motion` attribution, and
+`robot_watch_bonks` attribution.
+
 ## Architecture
 
 This is a conversational voice app for the **Reachy Mini robot**, implementing a comedian persona (Don Rickles-style). The key abstraction layers are:

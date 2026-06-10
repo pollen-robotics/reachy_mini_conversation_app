@@ -1,5 +1,16 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import os,sys,subprocess; p='.claude/hooks/check_log_sink.py'; sys.exit(subprocess.call([sys.executable, p]) if os.path.exists(p) else 0)\""
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
