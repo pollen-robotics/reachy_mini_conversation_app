@@ -60,6 +60,11 @@ jobs:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       HF_HUB_ETAG_TIMEOUT: "120"
       HF_HUB_DOWNLOAD_TIMEOUT: "120"
+      # Pin uv to the matrix interpreter. Without this, uv prefers its own
+      # managed interpreters over the setup-python one — on a persistent
+      # self-hosted runner that can resolve to a newer Python (e.g. 3.13)
+      # that the frozen lock cannot satisfy.
+      UV_PYTHON: ${{ matrix.python-version }}
 
     steps:
       - name: Install system deps (Linux)
