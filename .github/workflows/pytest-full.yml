@@ -167,6 +167,10 @@ jobs:
 
       - name: Run pytest (full) – Windows
         if: runner.os == 'Windows'
+        env:
+          # See pytest-fast.yml: cap `-n auto` workers on the self-hosted
+          # workstation so asyncio timing-sensitive tests aren't starved.
+          PYTEST_XDIST_AUTO_NUM_WORKERS: "8"
         run: .venv/Scripts/pytest tests/ -m "not hardware" -q --ignore=tests/vision/test_local_vision.py
 
   # Post-merge gate: if the full suite failed on the `push: branches: [main]`

@@ -176,6 +176,12 @@ jobs:
         if: runner.os == 'Windows'
         id: pytest-windows
         shell: bash
+        env:
+          # The self-hosted workstation has 20 logical CPUs; `-n auto` spawns
+          # 20 workers, oversubscribes the box, and starves the asyncio
+          # timing-sensitive tests (e.g. test_gemini_echo_guard 5 s waits).
+          # Cap the auto worker count instead of editing addopts.
+          PYTEST_XDIST_AUTO_NUM_WORKERS: "8"
         run: |
           start=$(date +%s)
           .venv/Scripts/pytest tests/ -m "not slow and not integration and not hardware" -q --ignore=tests/vision/test_local_vision.py
@@ -184,16 +190,22 @@ jobs:
           echo "pytest_elapsed_seconds=${elapsed}" >> "$GITHUB_OUTPUT"
           echo "pytest fast subset completed in ${elapsed}s"
 
-      - name: Enforce 90 s wall-clock budget
+      - name: Enforce wall-clock budget
         shell: bash
         run: |
+          # Per-OS budget: 90 s on the Linux hosted leg (original target).
+          # The Windows self-hosted leg runs the same suite with capped xdist
+          # workers on shared workstation hardware; measured warm runs land
+          # around 3 minutes, so its runaway-detection budget is 300 s.
           if [ "${{ runner.os }}" = "Linux" ]; then
             elapsed="${{ steps.pytest-linux.outputs.pytest_elapsed_seconds }}"
+            budget=90
           else
             elapsed="${{ steps.pytest-windows.outputs.pytest_elapsed_seconds }}"
+            budget=300
           fi
-          echo "pytest-fast took ${elapsed}s (budget: 90s)"
-          if [ "${elapsed}" -gt 90 ]; then
-            echo "::error::pytest-fast exceeded 90 s budget (took ${elapsed}s). Investigate slowest tests with: pytest --durations=25"
+          echo "pytest-fast took ${elapsed}s (budget: ${budget}s)"
+          if [ "${elapsed}" -gt "${budget}" ]; then
+            echo "::error::pytest-fast exceeded ${budget} s budget (took ${elapsed}s). Investigate slowest tests with: pytest --durations=25"
             exit 1
           fi
