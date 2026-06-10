@@ -241,6 +241,107 @@ def write_report(entries: list[dict[str, Any]], path: str) -> None:
         fh.write("\n".join(lines) + "\n")
 
 
+def write_review_page(entries: list[dict[str, Any]], path: str, *, title: str = "Bonk sweep review") -> None:
+    """Write a self-contained HTML review page for the operator.
+
+    Flagged moves get an audio player (relative ``wav/<move>.wav``) and a
+    confirm/dismiss/unsure verdict with notes; the **Generate feedback JSON**
+    button downloads ``bonk_review_feedback.json`` for the caution-list
+    triage. Clean moves are listed collapsed at the bottom.
+    """
+
+    def _peak(e: dict[str, Any]) -> float:
+        value = e.get("max_peak_dbfs")
+        return float(value) if value is not None else -999.0
+
+    flagged = sorted((e for e in entries if e.get("detect_count")), key=_peak, reverse=True)
+    clean = sorted(e["move"] for e in entries if not e.get("detect_count") and not e.get("error"))
+
+    rows = []
+    for e in flagged:
+        move = e["move"]
+        dataset_short = "emotions" if "emotions" in e["dataset"] else "dances"
+        dets = ", ".join(
+            f"t={d['ts_ms'] / 1000:.1f}s {d['peak_dbfs']} dBFS (+{d['onset_db']} dB)" for d in e.get("detections", [])
+        )
+        rows.append(f"""
+      <tr data-move="{move}">
+        <td><strong>{move}</strong><br><small>{dataset_short} · {e.get("duration_s", "?")} s</small></td>
+        <td>{e.get("detect_count", 0)}<br><small>{dets}</small></td>
+        <td><audio controls preload="none" src="wav/{move}.wav"></audio></td>
+        <td>
+          <label><input type="radio" name="v-{move}" value="confirmed"> bonk</label><br>
+          <label><input type="radio" name="v-{move}" value="dismissed"> not a bonk</label><br>
+          <label><input type="radio" name="v-{move}" value="unsure" checked> unsure</label>
+        </td>
+        <td><input type="text" class="notes" placeholder="notes" size="24"></td>
+      </tr>""")
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{title}</title>
+<style>
+  body {{ font-family: system-ui, sans-serif; margin: 2rem; max-width: 70rem; }}
+  table {{ border-collapse: collapse; width: 100%; }}
+  th, td {{ border: 1px solid #ccc; padding: 0.5rem; text-align: left; vertical-align: top; }}
+  th {{ background: #f0f0f0; }}
+  tr:nth-child(even) {{ background: #fafafa; }}
+  button {{ font-size: 1rem; padding: 0.5rem 1rem; margin: 1rem 0; cursor: pointer; }}
+  small {{ color: #666; }}
+  details {{ margin-top: 1.5rem; }}
+</style>
+</head>
+<body>
+<h1>{title}</h1>
+<p>{len(flagged)} flagged move(s) to review. Listen to each clip: a real bonk is a dull low
+thump (chassis/cowling); sharp ticks are usually servo stops; musical hits are soundtrack.
+Verdicts feed the caution-list triage — confirmed moves stay denylisted, dismissed ones come off.</p>
+<table>
+  <thead><tr><th>move</th><th>detections</th><th>witness audio</th><th>verdict</th><th>notes</th></tr></thead>
+  <tbody>{"".join(rows)}
+  </tbody>
+</table>
+<button onclick="generateFeedback()">Generate feedback JSON</button>
+<details><summary>{len(clean)} clean moves (no detections)</summary><p>{", ".join(clean)}</p></details>
+<script>
+function generateFeedback() {{
+  const rows = document.querySelectorAll("tbody tr");
+  const verdicts = [];
+  rows.forEach(row => {{
+    const move = row.dataset.move;
+    const verdict = row.querySelector("input[type=radio]:checked").value;
+    const notes = row.querySelector("input.notes").value;
+    verdicts.push({{ move: move, verdict: verdict, notes: notes }});
+  }});
+  const payload = {{ generated_at: new Date().toISOString(), source: document.title, verdicts: verdicts }};
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {{ type: "application/json" }});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "bonk_review_feedback.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}}
+</script>
+</body>
+</html>
+"""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(html)
+
+
+def _load_entries(jsonl_path: str) -> list[dict[str, Any]]:
+    """Read sweep entries back from a sweep.jsonl."""
+    loaded: list[dict[str, Any]] = []
+    with open(jsonl_path, encoding="utf-8") as fh:
+        for line in fh:
+            if line.strip():
+                loaded.append(json.loads(line))
+    return loaded
+
+
 def main() -> None:
     """CLI entry point."""
     parser = argparse.ArgumentParser(description="Play every preset move via the daemon; witness each for bonks")
@@ -253,7 +354,20 @@ def main() -> None:
     parser.add_argument("--tail", type=float, default=1.5, help="listen tail after each move, seconds")
     parser.add_argument("--limit", type=int, default=None, help="sweep only the first N planned moves")
     parser.add_argument("--caution-list", default=DEFAULT_CAUTION_LIST, help="caution list JSONL path")
+    parser.add_argument(
+        "--review-only",
+        action="store_true",
+        help="regenerate report.md + review.html from an existing <out-dir>/sweep.jsonl; plays nothing",
+    )
     args = parser.parse_args()
+
+    if args.review_only:
+        loaded = _load_entries(os.path.join(args.out_dir, "sweep.jsonl"))
+        write_report(loaded, os.path.join(args.out_dir, "report.md"))
+        review_path = os.path.join(args.out_dir, "review.html")
+        write_review_page(loaded, review_path, title=f"Bonk sweep review — {os.path.basename(args.out_dir)}")
+        print(f"review page: {review_path}")
+        return
 
     trigger = DaemonMoveTrigger(host=args.host)
     mode = trigger.motors_mode()
@@ -296,9 +410,15 @@ def main() -> None:
             )
 
     write_report(entries, os.path.join(args.out_dir, "report.md"))
+    write_review_page(
+        entries,
+        os.path.join(args.out_dir, "review.html"),
+        title=f"Bonk sweep review — {os.path.basename(args.out_dir)}",
+    )
     flagged = [e["move"] for e in entries if e.get("detect_count")]
     print(f"done: {len(flagged)} flagged move(s): {', '.join(flagged) if flagged else 'none'}")
     print(f"report: {os.path.join(args.out_dir, 'report.md')}")
+    print(f"review page: {os.path.join(args.out_dir, 'review.html')}")
 
 
 if __name__ == "__main__":

@@ -993,6 +993,23 @@ def _parse_play_emotion_denylist(raw: str | None) -> frozenset[str]:
     return frozenset(name.strip() for name in raw.split(",") if name.strip())
 
 
+# Chassis-safety denylist for the dance tool, mirroring the emotion one
+# (#542 — the #536 bonk sweep flagged dances too, and dances previously had
+# no avoidance mechanism). No dances are denied by default.
+DANCE_DENYLIST_ENV = "REACHY_MINI_DANCE_DENYLIST"
+
+
+def _parse_dance_denylist(raw: str | None) -> frozenset[str]:
+    """Parse a comma-separated dance denylist string into a frozenset.
+
+    None or empty → empty set (no dances denied by default). Whitespace
+    around names is stripped.
+    """
+    if not raw:
+        return frozenset()
+    return frozenset(name.strip() for name in raw.split(",") if name.strip())
+
+
 class Config:
     """Configuration class for Robot Comic."""
 
@@ -1082,6 +1099,9 @@ class Config:
     # tool spec and blocked at call time.  Default covers boredom/sleep motions
     # observed to drive the head chin-down toward the cowling (issue #480).
     PLAY_EMOTION_DENYLIST: frozenset[str] = _parse_play_emotion_denylist(os.getenv(PLAY_EMOTION_DENYLIST_ENV))
+    # Chassis-safe dance denylist (#542): same mechanism for the dance tool;
+    # empty by default — populate from bonk-sweep findings (#536).
+    DANCE_DENYLIST: frozenset[str] = _parse_dance_denylist(os.getenv(DANCE_DENYLIST_ENV))
     MOONSHINE_HEARTBEAT = _env_flag("MOONSHINE_HEARTBEAT", default=False)
     FASTER_WHISPER_MODEL = os.getenv(FASTER_WHISPER_MODEL_ENV, FASTER_WHISPER_DEFAULT_MODEL)
     FASTER_WHISPER_COMPUTE_TYPE = os.getenv(FASTER_WHISPER_COMPUTE_TYPE_ENV, FASTER_WHISPER_DEFAULT_COMPUTE_TYPE)
@@ -1403,6 +1423,7 @@ def refresh_runtime_config_from_env() -> None:
     )
     config.IDLE_ANIMATION_ENABLED = _env_flag("IDLE_ANIMATION_ENABLED", default=False)
     config.PLAY_EMOTION_DENYLIST = _parse_play_emotion_denylist(os.getenv(PLAY_EMOTION_DENYLIST_ENV))
+    config.DANCE_DENYLIST = _parse_dance_denylist(os.getenv(DANCE_DENYLIST_ENV))
     config.MOONSHINE_HEARTBEAT = _env_flag("MOONSHINE_HEARTBEAT", default=False)
     config.FASTER_WHISPER_MODEL = os.getenv(FASTER_WHISPER_MODEL_ENV, FASTER_WHISPER_DEFAULT_MODEL)
     config.FASTER_WHISPER_COMPUTE_TYPE = os.getenv(

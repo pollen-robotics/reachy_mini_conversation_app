@@ -140,6 +140,38 @@ def test_datasets_registry_names() -> None:
     assert bonk_sweep.DATASETS["dances"].endswith("dances-library")
 
 
+def test_write_review_page_lists_flagged_with_audio_and_verdicts(tmp_path: Path) -> None:
+    entries = [
+        {"dataset": DATASETS["emotions"], "move": "calm1", "duration_s": 3.0, "detect_count": 0},
+        {
+            "dataset": DATASETS["dances"],
+            "move": "grid_snap",
+            "duration_s": 5.0,
+            "detect_count": 2,
+            "max_peak_dbfs": -1.0,
+            "detections": [
+                {"ts_ms": 1000, "peak_dbfs": -1.0, "onset_db": 68.8, "hf_ratio": 0.1, "confirm": "decay"},
+                {"ts_ms": 2500, "peak_dbfs": -3.0, "onset_db": 30.0, "hf_ratio": 0.1, "confirm": "decay"},
+            ],
+        },
+    ]
+    path = tmp_path / "review.html"
+    bonk_sweep.write_review_page(entries, str(path))
+    html = path.read_text(encoding="utf-8")
+    assert 'src="wav/grid_snap.wav"' in html
+    assert 'name="v-grid_snap"' in html  # verdict radios
+    assert "Generate feedback JSON" in html
+    assert "calm1" in html  # clean move listed in the collapsed section
+    assert 'data-move="calm1"' not in html  # ...but gets no review row
+
+
+def test_load_entries_roundtrip(tmp_path: Path) -> None:
+    jsonl = tmp_path / "sweep.jsonl"
+    jsonl.write_text('{"move":"a","detect_count":0}\n\n{"move":"b","detect_count":1}\n', encoding="utf-8")
+    entries = bonk_sweep._load_entries(str(jsonl))
+    assert [e["move"] for e in entries] == ["a", "b"]
+
+
 def test_parse_running_handles_daemon_object_shape() -> None:
     """The live daemon returns a list of {'uuid': ...} objects, not strings."""
     assert bonk_sweep._parse_running([{"uuid": "abc"}, {"uuid": "def"}]) == ["abc", "def"]

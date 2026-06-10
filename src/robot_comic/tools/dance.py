@@ -19,16 +19,36 @@ except ImportError as e:
     DANCE_AVAILABLE = False
 
 
+def _get_dance_denylist() -> frozenset[str]:
+    """Return the current chassis-safety dance denylist from config (#542).
+
+    Imported lazily to avoid a circular import at module load time. Always
+    reflects the live config value so .env overrides applied by
+    refresh_runtime_config_from_env() take effect at call time.
+    """
+    from robot_comic.config import config  # noqa: PLC0415
+
+    return config.DANCE_DENYLIST
+
+
+def _safe_dance_names() -> list[str]:
+    """Return the available dance names with the denylist filtered out."""
+    denylist = _get_dance_denylist()
+    return [name for name in AVAILABLE_MOVES if name not in denylist]
+
+
 def get_available_dances_and_descriptions() -> str:
-    """Get formatted list of available dances with descriptions."""
+    """Get formatted list of available (non-denylisted) dances with descriptions."""
     if not DANCE_AVAILABLE:
         return "Moves not available."
 
-    if not AVAILABLE_MOVES:  # if AVAILABLE_MOVES is empty
+    safe_names = _safe_dance_names()
+    if not safe_names:
         return "Moves not available."
 
     output = ""
-    for move_name, (func, params, metadata) in AVAILABLE_MOVES.items():
+    for move_name in safe_names:
+        _func, _params, metadata = AVAILABLE_MOVES[move_name]
         description = metadata.get("description", "No description available.")
         output += f"{move_name}: {description}\n"
     return output
@@ -39,16 +59,17 @@ class Dance(Tool):
 
     name = "dance"
     description = "Play a named or random dance move once (or repeat). Non-blocking."
-    parameters_schema = {
+    # NOTE: parameters_schema is a class attribute for compatibility with
+    # Tool.spec(); Dance overrides spec() below so the LLM always receives an
+    # enum that reflects the *current* denylist at call time (mirrors
+    # PlayEmotion / #542).
+    parameters_schema: Dict[str, Any] = {
         "type": "object",
         "properties": {
             "move": {
                 "type": "string",
-                "enum": list(AVAILABLE_MOVES.keys() if DANCE_AVAILABLE else []),
-                "description": f"""Name of the moves and their descriptions; omit for random.
-                                Here is a list of the available moves, you MUST only choose from these: \n
-                                {get_available_dances_and_descriptions()}
-                                """,
+                "enum": [],  # populated dynamically by spec()
+                "description": "",  # populated dynamically by spec()
             },
             "repeat": {
                 "type": "integer",
@@ -58,12 +79,40 @@ class Dance(Tool):
         "required": [],
     }
 
+    def spec(self) -> Dict[str, Any]:
+        """Return the function spec with the move enum filtered by the live denylist."""
+        return {
+            "type": "function",
+            "name": self.name,
+            "description": self.description,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "move": {
+                        "type": "string",
+                        "enum": _safe_dance_names() if DANCE_AVAILABLE else [],
+                        "description": (
+                            "Name of the moves and their descriptions; omit for random.\n"
+                            "Here is a list of the available moves, you MUST only choose from these:\n"
+                            f"{get_available_dances_and_descriptions()}"
+                        ),
+                    },
+                    "repeat": {
+                        "type": "integer",
+                        "description": "How many times to repeat the move (default 1).",
+                    },
+                },
+                "required": [],
+            },
+        }
+
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Play a named or random dance move once (or repeat). Non-blocking."""
         if not DANCE_AVAILABLE:
             return {"error": "Dance system not available"}
 
-        if not AVAILABLE_MOVES:  # if AVAILABLE_MOVES is empty
+        safe_names = _safe_dance_names()
+        if not safe_names:
             return {"error": "No moves currently available"}
 
         move_name = kwargs.get("move")
@@ -71,11 +120,24 @@ class Dance(Tool):
 
         logger.info("Tool call: dance move=%s repeat=%d", move_name, repeat)
 
-        if not move_name:
-            move_name = random.choice(list(AVAILABLE_MOVES.keys()))
+        # Chassis-safety denylist check (#542): defense-in-depth guard — the
+        # spec() override already removes these from the LLM's enum; this
+        # catches the LLM ignoring the enum or the denylist changing between
+        # spec generation and call time.
+        if move_name and move_name in _get_dance_denylist():
+            logger.warning("Refusing denylisted dance %r (REACHY_MINI_DANCE_DENYLIST chassis safety)", move_name)
+            return {
+                "error": (
+                    f"dance '{move_name}' is denylisted by REACHY_MINI_DANCE_DENYLIST"
+                    " (chassis safety). Pick a different move."
+                )
+            }
 
-        if move_name not in AVAILABLE_MOVES:
-            return {"error": f"Unknown dance move '{move_name}'. Available: {list(AVAILABLE_MOVES.keys())}"}
+        if not move_name:
+            move_name = random.choice(safe_names)
+
+        if move_name not in safe_names:
+            return {"error": f"Unknown dance move '{move_name}'. Available: {safe_names}"}
 
         # Add dance moves to queue
         movement_manager = deps.movement_manager
