@@ -2,6 +2,9 @@ name: Type check
 
 on:
   push:
+    # main only: feature-branch pushes are covered by the pull_request
+    # trigger; an unfiltered push trigger ran every check twice per push.
+    branches: [main]
     paths:
       - "src/**"
       - "tests/**"
