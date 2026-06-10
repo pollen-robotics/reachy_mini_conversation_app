@@ -440,6 +440,132 @@ async def test_video_task_not_started_when_streaming_disabled(monkeypatch):
     assert video_sender_calls == [], "Video sender must not start when flag is False"
 
 
+def _make_1008_goaway() -> Exception:
+    from google.genai.errors import APIError
+
+    response_json = {
+        "error": {
+            "code": 1008,
+            "status": None,
+            "message": (
+                "Connection aborted because the client failed to close the "
+                "connection after receiving a GoAway signal once the session "
+                "duration cap was reached"
+            ),
+        }
+    }
+    return APIError(1008, response_json, None)
+
+
+@pytest.mark.asyncio
+async def test_start_up_reconnects_on_goaway_1008_without_counting_attempts(monkeypatch) -> None:
+    """A GoAway/1008 from a connected session is a scheduled rotation: start_up
+    must reconnect in-process even when rotations outnumber max_attempts."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = GeminiLiveHandler(deps)
+
+    call_count = 0
+
+    async def capped_session() -> None:
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 4:  # one more than start_up's historical max_attempts=3
+            handler.session = object()  # the session connected before the cap hit
+            raise _make_1008_goaway()
+        return None  # clean exit (stop requested)
+
+    handler._run_live_session = capped_session  # type: ignore[method-assign]
+
+    async def fast_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(gemini_mod.asyncio, "sleep", fast_sleep)
+
+    await handler.start_up()  # must not raise
+
+    assert call_count == 5
+
+
+@pytest.mark.asyncio
+async def test_start_up_1008_before_connect_still_counts_as_failure(monkeypatch) -> None:
+    """A 1008 raised without the session ever connecting is a real failure and
+    must exhaust the bounded retry loop, not reconnect forever."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = GeminiLiveHandler(deps)
+
+    err = _make_1008_goaway()
+    call_count = 0
+
+    async def never_connects() -> None:
+        nonlocal call_count
+        call_count += 1
+        raise err  # handler.session stays None: connect itself failed
+
+    handler._run_live_session = never_connects  # type: ignore[method-assign]
+
+    async def fast_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(gemini_mod.asyncio, "sleep", fast_sleep)
+
+    with pytest.raises(type(err)):
+        await handler.start_up()
+
+    assert call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_start_up_treats_rotation_sentinel_as_rotation(monkeypatch) -> None:
+    """The proactive GoAway sentinel must also reconnect without counting attempts."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = GeminiLiveHandler(deps)
+
+    call_count = 0
+
+    async def rotating_session() -> None:
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 4:
+            raise gemini_mod.GeminiSessionRotation("server sent GoAway")
+        return None
+
+    handler._run_live_session = rotating_session  # type: ignore[method-assign]
+
+    async def fast_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(gemini_mod.asyncio, "sleep", fast_sleep)
+
+    await handler.start_up()  # must not raise
+
+    assert call_count == 5
+
+
+@pytest.mark.asyncio
+async def test_go_away_notice_rotates_session_proactively(monkeypatch) -> None:
+    """A GoAway notice in the response stream must close the session cleanly
+    (raise the rotation sentinel) instead of waiting for the 1008 kill."""
+    monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda: "test")
+    monkeypatch.setattr(gemini_mod, "get_session_voice", lambda default=None, backend=None: "Kore")
+    monkeypatch.setattr(gemini_mod, "get_active_tool_specs", lambda _: [])
+
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = GeminiLiveHandler(deps)
+    monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
+    monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
+
+    go_away_response = SimpleNamespace(
+        server_content=None,
+        tool_call=None,
+        go_away=SimpleNamespace(time_left="10s"),
+    )
+    session = _FakeSession(batches=[[go_away_response]], stop_event=handler._stop_event)
+    handler.client = _FakeLiveClient(session)
+
+    with pytest.raises(gemini_mod.GeminiSessionRotation):
+        await handler._run_live_session()
+
+
 def test_strip_tts_delivery_tags_removes_section():
     instructions = """\
 ## IDENTITY

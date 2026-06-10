@@ -9,6 +9,7 @@ from robot_comic.gemini_retry import (
     compute_backoff,
     is_rate_limit_error,
     describe_quota_failure,
+    is_session_rotation_error,
     extract_retry_after_seconds,
 )
 from robot_comic.tools.core_tools import ToolDependencies
@@ -75,6 +76,38 @@ def test_extract_retry_after_handles_missing_info() -> None:
 def test_describe_quota_failure_extracts_metric() -> None:
     exc = _make_429()
     assert "free_tier" in describe_quota_failure(exc)
+
+
+def _make_1008_goaway():
+    """Build an APIError shaped like the Live API's session-duration-cap close."""
+    from google.genai.errors import APIError
+
+    response_json = {
+        "error": {
+            "code": 1008,
+            "status": None,
+            "message": (
+                "Connection aborted because the client failed to close the "
+                "connection after receiving a GoAway signal once the session "
+                "duration cap was reached"
+            ),
+        }
+    }
+    return APIError(1008, response_json, None)
+
+
+def test_is_session_rotation_error_detects_1008() -> None:
+    assert is_session_rotation_error(_make_1008_goaway()) is True
+
+
+def test_is_session_rotation_error_detects_goaway_text_without_code() -> None:
+    exc = RuntimeError("connection closed after receiving a GoAway signal")
+    assert is_session_rotation_error(exc) is True
+
+
+def test_is_session_rotation_error_ignores_429_and_generic() -> None:
+    assert is_session_rotation_error(_make_429()) is False
+    assert is_session_rotation_error(RuntimeError("503 UNAVAILABLE")) is False
 
 
 def test_compute_backoff_honours_retry_after() -> None:

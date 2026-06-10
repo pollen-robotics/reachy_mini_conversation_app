@@ -46,6 +46,7 @@ from robot_comic.gemini_retry import (
     compute_backoff,
     is_rate_limit_error,
     describe_quota_failure,
+    is_session_rotation_error,
     extract_retry_after_seconds,
 )
 from robot_comic.idle_backoff import IdleSignalBackoff
@@ -65,6 +66,19 @@ from robot_comic.tools.background_tool_manager import (
 
 
 logger = logging.getLogger(__name__)
+
+
+class GeminiSessionRotation(Exception):
+    """Internal signal: the server scheduled a session end (GoAway notice).
+
+    Raised out of the receive loop so the ``async with connect(...)`` block
+    closes the websocket cleanly, then caught by ``start_up`` which reconnects
+    without counting the rotation against its bounded retry budget (#533).
+    """
+
+
+# Pause between a server-scheduled session end and the in-process reconnect.
+GOAWAY_RECONNECT_DELAY_S: Final[float] = 0.5
 
 GEMINI_INPUT_SAMPLE_RATE: Final[int] = 16000
 GEMINI_OUTPUT_SAMPLE_RATE: Final[int] = 24000
@@ -698,11 +712,28 @@ class GeminiLiveHandler(AsyncStreamHandler, ConversationHandler):
         self.client = genai.Client(api_key=gemini_api_key)
 
         max_attempts = 3
-        for attempt in range(1, max_attempts + 1):
+        attempt = 0
+        while True:
+            attempt += 1
             try:
                 await self._run_live_session()
                 return
             except Exception as e:
+                # A GoAway/1008 from a *connected* session is the server's
+                # scheduled duration-cap rotation (#533): reconnect in-process
+                # without burning the bounded retry budget. A 1008 before the
+                # session ever connected is a real failure and falls through.
+                was_connected = self.session is not None
+                if isinstance(e, GeminiSessionRotation) or (was_connected and is_session_rotation_error(e)):
+                    if self._stop_event.is_set():
+                        return
+                    logger.info(
+                        "Gemini Live session ended by server (GoAway/1008); reconnecting in-process: %s",
+                        e,
+                    )
+                    attempt = 0
+                    await asyncio.sleep(GOAWAY_RECONNECT_DELAY_S)
+                    continue
                 rate_limited = is_rate_limit_error(e)
                 if rate_limited:
                     logger.warning(
@@ -1005,6 +1036,18 @@ class GeminiLiveHandler(AsyncStreamHandler, ConversationHandler):
                                 logger.info("Stop event set, breaking receive loop")
                                 break
 
+                            # Server-scheduled session end (#533): the GoAway
+                            # notice precedes the duration-cap close. Rotate
+                            # the session ourselves instead of letting the
+                            # websocket die with an app-killing 1008.
+                            go_away = getattr(response, "go_away", None)
+                            if go_away is not None:
+                                logger.info(
+                                    "Gemini Live GoAway notice (time_left=%s); rotating session",
+                                    getattr(go_away, "time_left", None),
+                                )
+                                raise GeminiSessionRotation("server sent GoAway")
+
                             # Handle server content (audio, transcription, interruption)
                             if response.server_content:
                                 content = response.server_content
@@ -1156,6 +1199,8 @@ class GeminiLiveHandler(AsyncStreamHandler, ConversationHandler):
                             if usage_metadata is not None:
                                 self._record_usage_metadata(usage_metadata)
 
+                    except GeminiSessionRotation:
+                        raise  # scheduled rotation, already logged at INFO
                     except Exception as e:
                         if self._stop_event.is_set():
                             break

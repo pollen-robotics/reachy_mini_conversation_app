@@ -127,6 +127,19 @@ def describe_quota_failure(exc: BaseException) -> str:
     return "unknown"
 
 
+def is_session_rotation_error(exc: BaseException) -> bool:
+    """Return True if ``exc`` is the Live API's scheduled session end (GoAway/1008).
+
+    Gemini Live caps session duration. At the cap the server sends a GoAway
+    notice and then closes the websocket with code 1008; google-genai surfaces
+    that as an APIError out of ``session.receive()``. This is a scheduled
+    rotation, not a failure — callers should reconnect, not crash.
+    """
+    if getattr(exc, "code", None) == 1008:
+        return True
+    return "goaway" in str(exc).lower()
+
+
 def is_rate_limit_error(exc: BaseException) -> bool:
     """Return True if ``exc`` represents a 429 / RESOURCE_EXHAUSTED response."""
     code = getattr(exc, "code", None)
