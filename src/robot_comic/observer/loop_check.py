@@ -77,7 +77,10 @@ def fetch_remote_event_lines(host: str, path: str, *, timeout_s: float = 15.0) -
     """
     import subprocess
 
-    cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, f"cat {shlex.quote(path)}"]
+    # ``-n`` (stdin from the null device) is load-bearing: under the MCP server
+    # ssh inherits the server's protocol pipe as stdin and then never exits —
+    # the fetch times out and the verdict silently degrades to "no events".
+    cmd = ["ssh", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, f"cat {shlex.quote(path)}"]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
     except (subprocess.SubprocessError, OSError):

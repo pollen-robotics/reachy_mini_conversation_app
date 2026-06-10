@@ -132,11 +132,72 @@ def build_server() -> Any:
         except PlayPromptError as exc:
             return {"passed": False, "error": str(exc)}
 
+    @server.tool()  # type: ignore[misc]
+    def robot_capture_frame(device: int | None = None) -> dict[str, Any]:
+        """Tier-2: grab one still from the laptop camera aimed at the robot.
+
+        Saves a JPEG and returns ``{captured, path, width, height}`` (or
+        ``{captured: false, error}`` if no frame could be read). On-demand only.
+        ``device`` defaults to ``VISUAL_WITNESS_CAMERA_DEVICE``.
+        """
+        from robot_comic.observer.visual_witness import VisualWitnessError, capture_frame
+
+        try:
+            return capture_frame(device=device) if device is not None else capture_frame()
+        except VisualWitnessError as exc:
+            return {"captured": False, "error": str(exc)}
+
+    @server.tool()  # type: ignore[misc]
+    def robot_describe_scene(prompt: str, device: int | None = None, image_path: str | None = None) -> dict[str, Any]:
+        """Tier-2: vision-model answer about the robot scene (e.g. "did it move?").
+
+        Grabs a fresh frame from the laptop camera (or describes ``image_path``)
+        and runs the local SmolVLM2 model. Returns ``{prompt, description,
+        frame_path}``. Expensive/laggy — use only when a motion needs confirming.
+        ``device`` defaults to ``VISUAL_WITNESS_CAMERA_DEVICE``.
+        """
+        from robot_comic.observer.visual_witness import VisualWitnessError, describe_scene
+
+        try:
+            if device is not None:
+                return describe_scene(prompt, device=device, image_path=image_path)
+            return describe_scene(prompt, image_path=image_path)
+        except VisualWitnessError as exc:
+            return {"error": str(exc)}
+
     return server
 
 
 def main() -> None:
     """Console entry point — runs the server over stdio."""
+    # Pre-import numpy/scipy extension modules before the anyio event loop
+    # starts. On Windows, loading them lazily inside a tool call deadlocks in
+    # the extension-module DLL load (numpy 2.2.5 / scipy / mcp 1.27.2 /
+    # CPython 3.12) once the stdio server's stdin-reader thread is running —
+    # the call never returns and the agent sees a hung tool. MSVC-built stacks
+    # (cv2, torch) lazy-load fine; the gfortran/OpenBLAS-runtime ones do not.
+    # All optional deps: the event-log tools work without any of this.
+    try:
+        import numpy  # noqa: F401
+        import scipy.linalg  # noqa: F401
+    except ImportError:
+        pass
+    # The describe_scene chain (transformers -> scipy submodules) hits the same
+    # deadlock, but pulling torch+transformers in costs ~15s and real RAM on
+    # every server start, so it is opt-in: set VISUAL_WITNESS_PRELOAD=1 where
+    # robot_describe_scene will actually be used (the model weights still load
+    # lazily on the first describe call).
+    if os.getenv("VISUAL_WITNESS_PRELOAD", "").strip().lower() in {"1", "true", "yes", "on"}:
+        try:
+            import scipy.signal  # noqa: F401
+            import scipy.sparse  # noqa: F401
+            import scipy.ndimage  # noqa: F401
+            import scipy.special  # noqa: F401
+            import scipy.interpolate  # noqa: F401
+
+            import robot_comic.vision.local_vision  # noqa: F401
+        except ImportError:
+            pass
     build_server().run()
 
 

@@ -67,12 +67,21 @@ Later option: hand the active windows to a local Whisper/Moonshine to capture
 `lane/improvement` + the `Local voice clone + STT` milestone), so start with
 level-only.
 
-### Tier 2 — visual witness (on-demand only)
+### Tier 2 — visual witness (on-demand only) — ✅ shipped
 
 Triggered still capture from a webcam aimed at the robot (or reuse
 `camera_worker` frames), described by a vision model to confirm a gesture ("did
 the antennas move? is the head centered?"). Expensive and laggy, so **on-demand**
 (when the agent needs to confirm a specific motion), never a continuous stream.
+
+Shipped as `robot_comic.observer.visual_witness`: `capture_frame()` grabs a
+laptop-camera still (OpenCV, lazy), and `describe_scene(prompt)` runs the repo's
+local SmolVLM2 (`vision.local_vision`) on a fresh (or supplied) frame. Surfaced
+as the `robot_capture_frame` / `robot_describe_scene` MCP tools. Frames are
+written under `VISUAL_WITNESS_FRAME_DIR` (outside the repo). The camera device is
+`VISUAL_WITNESS_CAMERA_DEVICE` (default `0`). Note: from WSL the laptop webcam
+needs a custom kernel with `uvcvideo` (the stock WSL2 kernel lacks it) or a
+native-Windows capture process.
 
 ## The MCP
 
@@ -148,4 +157,4 @@ tool. Topology via `LOOP_CHECK_SSH_HOST` / `LOOP_CHECK_REMOTE_EVENT_LOG`.
 1. ✅ Tier 0 JSONL sink + `robot_get_recent_events` (smallest, highest signal).
 2. ✅ Tier 1 mic witness + `robot_get_audio_activity`.
 3. ✅ `robot_play_prompt` actuator → first real closed loop.
-4. Tier 2 visual witness, on-demand.
+4. ✅ Tier 2 visual witness, on-demand.
