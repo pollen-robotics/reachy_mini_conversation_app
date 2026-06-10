@@ -242,6 +242,9 @@ reachy-mini-conversation-app --gradio
 | `forget` | Remove a saved memory fact by matching a short query. | Core install only. |
 | `idle_do_nothing` | Explicitly remain idle during an idle turn. Not intended for normal conversation turns. | Core install only. |
 
+> [!NOTE]
+> `remember`/`forget` facts are stored in `memory.v1.json` inside the app's instance data directory (`~/.local/share/reachy_mini_conversation_app/` by default, or the instance path used by the desktop launcher). `forget` only removes facts matched by query. To reset all remembered facts, delete this file.
+
 ## Advanced features
 
 Built-in motion content is published as open Hugging Face datasets:
