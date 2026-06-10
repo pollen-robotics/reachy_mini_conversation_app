@@ -32,6 +32,7 @@ Safety
 """
 
 from __future__ import annotations
+import math
 import time
 import logging
 import threading
@@ -324,6 +325,19 @@ class MovementManager:
         self._set_target_backoff_s = 0.0  # current backoff delay; 0 means no delay yet
         self._cached_secondary_offsets: tuple[float, ...] = ()  # force miss on first call
         self._cached_secondary_pose: FullBodyPose = (np.eye(4, dtype=np.float32), (0.0, 0.0), 0.0)
+
+        # Secondary-offset smoothing (#521): the producers (HeadWobbler reset,
+        # face tracking on/off) step their offsets instantaneously; a short
+        # exponential low-pass here removes every such snap in one place.
+        # tau <= 0 disables smoothing (legacy passthrough).
+        try:
+            from robot_comic.config import config as _cfg
+
+            self._secondary_smoothing_tau: float = getattr(_cfg, "SECONDARY_SMOOTHING_TAU_S", 0.06)
+        except Exception:
+            self._secondary_smoothing_tau = 0.06
+        self._smoothed_secondary_offsets: tuple[float, float, float, float, float, float] = (0.0,) * 6
+        self._last_secondary_smooth_time: float | None = None
 
         # Move playback speed multiplier
         try:
@@ -663,10 +677,18 @@ class MovementManager:
 
         return primary_full_body_pose
 
-    def _get_secondary_pose(self) -> FullBodyPose:
-        """Get the secondary full body pose from speech and face tracking offsets."""
+    def _get_secondary_pose(self, current_time: float) -> FullBodyPose:
+        """Get the secondary full body pose from speech and face tracking offsets.
+
+        The combined offsets are run through a short exponential low-pass
+        (#521): producers step them instantaneously (HeadWobbler.reset()
+        zeroes the sway when speech ends; face tracking snaps on at full
+        amplitude), and smoothing at the consumer removes every such C0 step
+        in one place. Once converged the smoothed value snaps exactly onto
+        the target so the unchanged-offsets cache below re-engages.
+        """
         # Combine speech sway offsets + face tracking offsets for secondary pose
-        current_offsets = (
+        target_offsets = (
             self.state.speech_offsets[0] + self.state.face_tracking_offsets[0],
             self.state.speech_offsets[1] + self.state.face_tracking_offsets[1],
             self.state.speech_offsets[2] + self.state.face_tracking_offsets[2],
@@ -674,6 +696,24 @@ class MovementManager:
             self.state.speech_offsets[4] + self.state.face_tracking_offsets[4],
             self.state.speech_offsets[5] + self.state.face_tracking_offsets[5],
         )
+
+        tau = self._secondary_smoothing_tau
+        if tau <= 0.0:
+            current_offsets = target_offsets
+        else:
+            last_time = self._last_secondary_smooth_time
+            dt = max(0.0, current_time - last_time) if last_time is not None else 0.0
+            alpha = 1.0 - math.exp(-dt / tau) if dt > 0.0 else 0.0
+            smoothed = tuple(
+                prev + alpha * (target - prev)
+                for prev, target in zip(self._smoothed_secondary_offsets, target_offsets)
+            )
+            # Snap onto the target once converged so steady state is exact.
+            if all(abs(s - t) < 1e-4 for s, t in zip(smoothed, target_offsets)):
+                smoothed = target_offsets
+            self._smoothed_secondary_offsets = smoothed  # type: ignore[assignment]
+            current_offsets = smoothed  # type: ignore[assignment]
+        self._last_secondary_smooth_time = current_time
 
         # Skip expensive create_head_pose if offsets unchanged since last tick
         if current_offsets == self._cached_secondary_offsets:
@@ -696,7 +736,7 @@ class MovementManager:
     def _compose_full_body_pose(self, current_time: float) -> FullBodyPose:
         """Compose primary and secondary poses into a single command pose."""
         primary = self._get_primary_pose(current_time)
-        secondary = self._get_secondary_pose()
+        secondary = self._get_secondary_pose(current_time)
         return combine_full_body(primary, secondary)
 
     def _update_primary_motion(self, current_time: float) -> None:

@@ -1061,6 +1061,12 @@ class Config:
     GEMINI_LIVE_VAD_START_SENSITIVITY = os.getenv("GEMINI_LIVE_VAD_START_SENSITIVITY", "LOW").upper()
     GEMINI_LIVE_VAD_END_SENSITIVITY = os.getenv("GEMINI_LIVE_VAD_END_SENSITIVITY", "LOW").upper()
     MOVEMENT_SPEED_FACTOR = _env_float_clamped("MOVEMENT_SPEED_FACTOR", default=0.3, lo=0.1, hi=2.0)
+    # Exponential low-pass time constant (seconds) for the additive secondary
+    # offsets (speech sway + face tracking) in the 60 Hz control loop. Removes
+    # the C0 steps when producers snap their offsets (#521). 0 disables.
+    SECONDARY_SMOOTHING_TAU_S = _env_float_clamped(
+        "REACHY_MINI_SECONDARY_SMOOTHING_TAU_S", default=0.06, lo=0.0, hi=1.0
+    )
     IDLE_ANIMATION_ENABLED = _env_flag("IDLE_ANIMATION_ENABLED", default=False)
     # Chassis-safe emotion denylist: emotions in this set are hidden from the LLM
     # tool spec and blocked at call time.  Default covers boredom/sleep motions
@@ -1380,6 +1386,9 @@ def refresh_runtime_config_from_env() -> None:
     config.GEMINI_LIVE_VAD_START_SENSITIVITY = os.getenv("GEMINI_LIVE_VAD_START_SENSITIVITY", "LOW").upper()
     config.GEMINI_LIVE_VAD_END_SENSITIVITY = os.getenv("GEMINI_LIVE_VAD_END_SENSITIVITY", "LOW").upper()
     config.MOVEMENT_SPEED_FACTOR = _env_float_clamped("MOVEMENT_SPEED_FACTOR", default=0.3, lo=0.1, hi=2.0)
+    config.SECONDARY_SMOOTHING_TAU_S = _env_float_clamped(
+        "REACHY_MINI_SECONDARY_SMOOTHING_TAU_S", default=0.06, lo=0.0, hi=1.0
+    )
     config.IDLE_ANIMATION_ENABLED = _env_flag("IDLE_ANIMATION_ENABLED", default=False)
     config.PLAY_EMOTION_DENYLIST = _parse_play_emotion_denylist(os.getenv(PLAY_EMOTION_DENYLIST_ENV))
     config.MOONSHINE_HEARTBEAT = _env_flag("MOONSHINE_HEARTBEAT", default=False)
