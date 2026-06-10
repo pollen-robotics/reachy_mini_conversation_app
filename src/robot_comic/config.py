@@ -443,6 +443,17 @@ LOCAL_STT_DEFAULT_MODEL = "tiny_streaming"
 LOCAL_STT_MODEL_CHOICES = ("tiny_streaming", "small_streaming")
 LOCAL_STT_DEFAULT_UPDATE_INTERVAL = 0.35
 
+# Process-isolation for the local STT path (#540). When enabled, Moonshine
+# runs in a dedicated child process so a crash or stall in the recognizer can
+# no longer wedge the app's audio loop; a watchdog respawns the worker
+# independently. Off by default — opt-in until validated on the robot.
+LOCAL_STT_PROCESS_ISOLATION_ENV = "REACHY_MINI_STT_PROCESS_ISOLATION"
+LOCAL_STT_DEFAULT_PROCESS_ISOLATION = False
+# Watchdog stall threshold: no transcript event or heartbeat from the worker
+# within this many seconds → kill + respawn.
+LOCAL_STT_STALL_TIMEOUT_ENV = "REACHY_MINI_STT_STALL_TIMEOUT"
+LOCAL_STT_DEFAULT_STALL_TIMEOUT = 30.0
+
 # ---------------------------------------------------------------------------
 # Faster-whisper STT tuning knobs (issue #429).
 #
@@ -677,6 +688,31 @@ def _normalize_local_stt_update_interval(value: str | None) -> float:
         )
         return LOCAL_STT_DEFAULT_UPDATE_INTERVAL
     return interval
+
+
+def _normalize_local_stt_stall_timeout(value: str | None) -> float:
+    """Normalize the STT subprocess watchdog stall threshold in seconds."""
+    if value is None or not value.strip():
+        return LOCAL_STT_DEFAULT_STALL_TIMEOUT
+    try:
+        timeout = float(value)
+    except ValueError:
+        logger.warning(
+            "Invalid %s=%r. Using %.1f.",
+            LOCAL_STT_STALL_TIMEOUT_ENV,
+            value,
+            LOCAL_STT_DEFAULT_STALL_TIMEOUT,
+        )
+        return LOCAL_STT_DEFAULT_STALL_TIMEOUT
+    if timeout < 1.0 or timeout > 300.0:
+        logger.warning(
+            "Invalid %s=%r. Expected 1-300 seconds; using %.1f.",
+            LOCAL_STT_STALL_TIMEOUT_ENV,
+            value,
+            LOCAL_STT_DEFAULT_STALL_TIMEOUT,
+        )
+        return LOCAL_STT_DEFAULT_STALL_TIMEOUT
+    return timeout
 
 
 def derive_audio_backends(
@@ -1038,6 +1074,10 @@ class Config:
     LOCAL_STT_LANGUAGE = _normalize_local_stt_language(os.getenv(LOCAL_STT_LANGUAGE_ENV))
     LOCAL_STT_MODEL = _normalize_local_stt_model(os.getenv(LOCAL_STT_MODEL_ENV))
     LOCAL_STT_UPDATE_INTERVAL = _normalize_local_stt_update_interval(os.getenv(LOCAL_STT_UPDATE_INTERVAL_ENV))
+    LOCAL_STT_PROCESS_ISOLATION = _env_flag(
+        LOCAL_STT_PROCESS_ISOLATION_ENV, default=LOCAL_STT_DEFAULT_PROCESS_ISOLATION
+    )
+    LOCAL_STT_STALL_TIMEOUT = _normalize_local_stt_stall_timeout(os.getenv(LOCAL_STT_STALL_TIMEOUT_ENV))
 
     GEMINI_LIVE_VIDEO_STREAMING = _env_flag("GEMINI_LIVE_VIDEO_STREAMING", default=False)
 
@@ -1394,6 +1434,10 @@ def refresh_runtime_config_from_env() -> None:
     config.LOCAL_STT_LANGUAGE = _normalize_local_stt_language(os.getenv(LOCAL_STT_LANGUAGE_ENV))
     config.LOCAL_STT_MODEL = _normalize_local_stt_model(os.getenv(LOCAL_STT_MODEL_ENV))
     config.LOCAL_STT_UPDATE_INTERVAL = _normalize_local_stt_update_interval(os.getenv(LOCAL_STT_UPDATE_INTERVAL_ENV))
+    config.LOCAL_STT_PROCESS_ISOLATION = _env_flag(
+        LOCAL_STT_PROCESS_ISOLATION_ENV, default=LOCAL_STT_DEFAULT_PROCESS_ISOLATION
+    )
+    config.LOCAL_STT_STALL_TIMEOUT = _normalize_local_stt_stall_timeout(os.getenv(LOCAL_STT_STALL_TIMEOUT_ENV))
     config.REACHY_MINI_CUSTOM_PROFILE = LOCKED_PROFILE or os.getenv("REACHY_MINI_CUSTOM_PROFILE")
     # External profile / tool directories. Class-body reads only fire once at
     # module import — re-read here so values loaded from .env by load_dotenv()

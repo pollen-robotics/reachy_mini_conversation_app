@@ -38,4 +38,19 @@ __all__ = [
     "LlamaLLMAdapter",
     "MoonshineListener",
     "MoonshineSTTAdapter",
+    "SubprocessSTTAdapter",
 ]
+
+
+def __getattr__(name: str) -> object:
+    """Lazily expose :class:`SubprocessSTTAdapter` (#540).
+
+    Imported on demand so the subprocess module (and its numpy import)
+    only loads when process isolation is actually selected, preserving
+    the package's import budget for the common in-process path.
+    """
+    if name == "SubprocessSTTAdapter":
+        from robot_comic.adapters.stt_process import SubprocessSTTAdapter
+
+        return SubprocessSTTAdapter
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

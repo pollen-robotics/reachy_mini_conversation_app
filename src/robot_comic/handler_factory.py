@@ -535,6 +535,19 @@ def _build_stt_adapter(
     practice.
     """
     if input_backend == AUDIO_INPUT_MOONSHINE:
+        # ``is True`` (not just truthiness) so a MagicMock-patched config in
+        # tests that omit the attr doesn't accidentally select the subprocess
+        # path; the real config sets a genuine bool via ``_env_flag``.
+        if getattr(config, "LOCAL_STT_PROCESS_ISOLATION", False) is True:
+            # #540 — run Moonshine in a dedicated child process so a crash
+            # or stall in the recognizer can't wedge the audio loop; a
+            # watchdog respawns it independently.
+            from robot_comic.adapters.stt_process import SubprocessSTTAdapter
+
+            return SubprocessSTTAdapter(
+                should_drop_frame=should_drop_frame,
+                stall_timeout=getattr(config, "LOCAL_STT_STALL_TIMEOUT", 30.0),
+            )
         from robot_comic.adapters import MoonshineSTTAdapter
 
         return MoonshineSTTAdapter(should_drop_frame=should_drop_frame)
