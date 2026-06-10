@@ -383,6 +383,15 @@ class MovementManager:
         """
         self._command_queue.put(("queue_move", move))
 
+    def last_commanded_full_pose(self) -> FullBodyPose:
+        """Return a copy of the last commanded (head, antennas, body_yaw).
+
+        Thread-safe snapshot for moves that need to begin interpolating from
+        the live commanded pose instead of a hardcoded neutral (#521).
+        """
+        with self._status_lock:
+            return clone_full_body_pose(self._last_commanded_pose)
+
     def clear_move_queue(self) -> None:
         """Stop the active move and discard any queued primary moves.
 

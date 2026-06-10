@@ -91,9 +91,9 @@ class GotoQueueMove(Move):  # type: ignore
         target_head_pose: NDArray[np.float32],
         start_head_pose: NDArray[np.float32] | Callable[[], NDArray[np.float32]] | None = None,
         target_antennas: Tuple[float, float] = (0, 0),
-        start_antennas: Tuple[float, float] | None = None,
+        start_antennas: Tuple[float, float] | Callable[[], Tuple[float, float]] | None = None,
         target_body_yaw: float = 0,
-        start_body_yaw: float | None = None,
+        start_body_yaw: float | Callable[[], float] | None = None,
         duration: float = 1.0,
         speed_factor: float = 1.0,
         ease: bool = False,
@@ -115,6 +115,10 @@ class GotoQueueMove(Move):  # type: ignore
           *actually* is when the move begins executing, not where it was when the
           LLM queued the call.  This is the fix for the "head whip" bug where
           rapid sequential ``move_head`` calls all captured a mid-swing pose.
+
+        ``start_antennas`` and ``start_body_yaw`` accept the same lazy-callable
+        sentinel so gestures can begin from the live commanded pose on every
+        axis, not just the head (#521 transition snap).
         """
         self.speed_factor = max(0.1, min(2.0, speed_factor))
         self._duration = duration / self.speed_factor
@@ -122,9 +126,17 @@ class GotoQueueMove(Move):  # type: ignore
         self.start_head_pose: NDArray[np.float32] | Callable[[], NDArray[np.float32]] | None = start_head_pose
         self._resolved_start_pose: NDArray[np.float32] | None = None if callable(start_head_pose) else start_head_pose
         self.target_antennas = target_antennas
-        self.start_antennas = start_antennas or (0, 0)
+        self.start_antennas: Tuple[float, float] | Callable[[], Tuple[float, float]] = (
+            start_antennas if callable(start_antennas) else (start_antennas or (0, 0))
+        )
+        self._resolved_start_antennas: Tuple[float, float] | None = (
+            None if callable(start_antennas) else (start_antennas or (0, 0))
+        )
         self.target_body_yaw = target_body_yaw
-        self.start_body_yaw = start_body_yaw or 0
+        self.start_body_yaw: float | Callable[[], float] = (
+            start_body_yaw if callable(start_body_yaw) else (start_body_yaw or 0)
+        )
+        self._resolved_start_body_yaw: float | None = None if callable(start_body_yaw) else (start_body_yaw or 0)
         self.ease = ease
 
     @property
@@ -164,6 +176,31 @@ class GotoQueueMove(Move):  # type: ignore
                     )
                     self._resolved_start_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
 
+            # Same dequeue-time capture for antennas and body yaw (#521).
+            if self._resolved_start_antennas is None:
+                try:
+                    resolved = self.start_antennas() if callable(self.start_antennas) else self.start_antennas
+                    self._resolved_start_antennas = (float(resolved[0]), float(resolved[1]))
+                except Exception as exc:
+                    logger.warning(
+                        "GotoQueueMove: start_antennas callable raised %s; falling back to (0, 0)",
+                        exc,
+                    )
+                    self._resolved_start_antennas = (0.0, 0.0)
+            if self._resolved_start_body_yaw is None:
+                try:
+                    self._resolved_start_body_yaw = float(
+                        self.start_body_yaw() if callable(self.start_body_yaw) else self.start_body_yaw
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "GotoQueueMove: start_body_yaw callable raised %s; falling back to 0.0",
+                        exc,
+                    )
+                    self._resolved_start_body_yaw = 0.0
+            start_antennas = self._resolved_start_antennas
+            start_body_yaw = self._resolved_start_body_yaw
+
             # Clamp t to [0, 1] for interpolation
             t_clamped = max(0, min(1, t / self.duration))
             t_eff = self._smoothstep(t_clamped) if self.ease else t_clamped
@@ -183,14 +220,14 @@ class GotoQueueMove(Move):  # type: ignore
             # Interpolate antennas - return as numpy array
             antennas = np.array(
                 [
-                    self.start_antennas[0] + (self.target_antennas[0] - self.start_antennas[0]) * t_eff,
-                    self.start_antennas[1] + (self.target_antennas[1] - self.start_antennas[1]) * t_eff,
+                    start_antennas[0] + (self.target_antennas[0] - start_antennas[0]) * t_eff,
+                    start_antennas[1] + (self.target_antennas[1] - start_antennas[1]) * t_eff,
                 ],
                 dtype=np.float64,
             )
 
             # Interpolate body yaw
-            body_yaw = self.start_body_yaw + (self.target_body_yaw - self.start_body_yaw) * t_eff
+            body_yaw = start_body_yaw + (self.target_body_yaw - start_body_yaw) * t_eff
 
             return (head_pose, antennas, body_yaw)
 

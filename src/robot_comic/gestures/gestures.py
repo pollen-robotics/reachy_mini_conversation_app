@@ -58,18 +58,25 @@ def _goto(
     roll: float = 0.0,
     duration: float = 0.4,
 ) -> None:
-    """Queue a single goto move to the given head pose (degrees)."""
+    """Queue a single goto move to the given head pose (degrees).
+
+    Starts every axis from the manager's last commanded pose, captured
+    lazily at dequeue time, with smoothstep easing — a gesture queued while
+    the robot is off-neutral eases out of the live pose instead of snapping
+    onto a neutral-based path (#521).
+    """
     target = create_head_pose(0, 0, 0, roll, pitch, yaw, degrees=True)
     speed = getattr(manager, "speed_factor", 1.0)
     move = GotoQueueMove(
         target_head_pose=target,
-        start_head_pose=None,  # manager fills from last pose
+        start_head_pose=lambda: manager.last_commanded_full_pose()[0],
         target_antennas=_NEUTRAL_ANTENNAS,
-        start_antennas=_NEUTRAL_ANTENNAS,
+        start_antennas=lambda: manager.last_commanded_full_pose()[1],
         target_body_yaw=0.0,
-        start_body_yaw=0.0,
+        start_body_yaw=lambda: float(manager.last_commanded_full_pose()[2]),
         duration=duration,
         speed_factor=speed,
+        ease=True,
     )
     manager.queue_move(move)
 
