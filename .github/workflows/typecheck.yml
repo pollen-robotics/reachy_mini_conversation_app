@@ -38,9 +38,22 @@ jobs:
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
         with:
           python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
 
       - name: Install deps (locked) incl. vision extras
         run: uv sync --frozen --group dev --extra all_vision
+
+      # mypy is by far the slowest step (~76 s cold). Restore the incremental
+      # cache from the latest run with the same lockfile; the per-SHA key means
+      # every run saves an updated cache for the next one to restore.
+      - name: Cache mypy incremental state
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        with:
+          path: .mypy_cache
+          key: mypy-${{ runner.os }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          restore-keys: |
+            mypy-${{ runner.os }}-${{ hashFiles('uv.lock') }}-
 
       - name: Run mypy
         run: uv run mypy
