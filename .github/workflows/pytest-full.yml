@@ -85,16 +85,31 @@ jobs:
 
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
         with:
-          enable-cache: true
+          # "auto" = GitHub cache round-trip on GitHub-hosted runners only.
+          # The self-hosted Windows runner is persistent: uv's local cache and
+          # the reused .venv in the runner work dir beat uploading/downloading
+          # a cache archive every run.
+          enable-cache: auto
           cache-dependency-glob: "uv.lock"
 
       - name: Set HF_HOME
         shell: bash
         run: |
-          echo "HF_HOME=${RUNNER_TEMP}/.hf" >> "$GITHUB_ENV"
-          mkdir -p "${RUNNER_TEMP}/.hf"
+          if [ "${{ runner.environment }}" = "self-hosted" ]; then
+            # Persistent runner: keep the HF hub cache next to the tool cache,
+            # which survives between jobs (RUNNER_TEMP is wiped after each job).
+            HF_DIR="$(echo "${RUNNER_TOOL_CACHE}" | tr '\\' '/')/hf-home"
+          else
+            HF_DIR="${RUNNER_TEMP}/.hf"
+          fi
+          echo "HF_HOME=${HF_DIR}" >> "$GITHUB_ENV"
+          mkdir -p "${HF_DIR}"
 
       - name: Cache Hugging Face hub
+        # Self-hosted runners keep HF_HOME on persistent local disk (see Set
+        # HF_HOME above); the actions/cache round-trip only pays off on
+        # ephemeral GitHub-hosted runners.
+        if: runner.environment == 'github-hosted'
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
         with:
           path: ${{ runner.temp }}/.hf
