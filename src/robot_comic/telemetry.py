@@ -15,6 +15,7 @@ enabled — callers never need to check ENABLED themselves.
 
 import os
 import json
+import socket
 import logging
 import threading
 from typing import Any, Optional
@@ -191,6 +192,59 @@ class JsonlEventExporter(SpanExporter):
         return True
 
 
+class UdpEventExporter(SpanExporter):
+    """Fire-and-forget UDP relay of span lines to a workstation log sink.
+
+    Enable with ``ROBOT_EVENT_RELAY=host:port``. Each span is sent as one
+    UDP datagram containing the same compact JSON used by the other
+    exporters. Strictly best-effort by design: if the sink is down, the
+    host is unresolvable, or the network is gone, datagrams are dropped
+    silently and the app is never blocked or errored — journald vacuuming
+    on the robot's small disk is the problem this works around.
+    """
+
+    def __init__(self, target: str) -> None:
+        """Parse ``host:port`` and open the UDP socket; never raises."""
+        self._addr: tuple[str, int] | None = None
+        self._sock: Any = None
+        try:
+            host, _, port = target.rpartition(":")
+            if host and port:
+                self._addr = (host, int(port))
+                self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                self._sock.setblocking(False)
+            else:
+                logger.warning("event relay: invalid target %r (want host:port); relay disabled", target)
+        except Exception:
+            logger.warning("event relay: failed to initialise for %r; relay disabled", target, exc_info=True)
+            self._addr = None
+            self._sock = None
+
+    def export(self, spans: Any) -> SpanExportResult:
+        """Send each span as one datagram; drop silently on any failure."""
+        if self._sock is None or self._addr is None:
+            return SpanExportResult.SUCCESS
+        for span in spans:
+            try:
+                payload = json.dumps(_span_to_line(span), separators=(",", ":")).encode("utf-8")
+                self._sock.sendto(payload, self._addr)
+            except Exception:  # noqa: S112 - best-effort by contract
+                continue
+        return SpanExportResult.SUCCESS
+
+    def shutdown(self) -> None:
+        """Close the socket."""
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        """No-op flush — datagrams are sent synchronously."""
+        return True
+
+
 def _init_otel() -> None:
     """Set up TracerProvider and MeterProvider.  Called once at app startup."""
     resource = Resource.create({SERVICE_NAME: _SERVICE})
@@ -205,6 +259,13 @@ def _init_otel() -> None:
     if _event_log:
         tracer_provider.add_span_processor(SimpleSpanProcessor(JsonlEventExporter(_event_log)))
         logger.info("OTel: JSONL event log -> %s", _event_log)
+
+    # Best-effort UDP relay to a workstation log sink (robot-comic-logsink).
+    # Survives journald vacuuming on the robot; harmless when the sink is down.
+    _event_relay = os.getenv("ROBOT_EVENT_RELAY", "").strip()
+    if _event_relay:
+        tracer_provider.add_span_processor(SimpleSpanProcessor(UdpEventExporter(_event_relay)))
+        logger.info("OTel: UDP event relay -> %s", _event_relay)
 
     if _REMOTE:
         try:

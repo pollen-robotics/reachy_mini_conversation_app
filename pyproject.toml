@@ -117,6 +117,7 @@ dev = [
 [project.scripts]
 robot-comic = "robot_comic.main:main"
 robot-comic-monitor = "robot_comic.monitor:main"
+robot-comic-logsink = "robot_comic.log_sink:main"
 
 [tool.uv]
 torch-backend = "cu124"
