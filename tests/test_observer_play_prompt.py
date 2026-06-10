@@ -30,6 +30,44 @@ def _write_wav(path: Path, *, duration_s: float, rate: int = 16_000) -> str:
     return str(path)
 
 
+def test_resolve_prompt_volume_default_and_hard_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Workstation speaker volume for prompts: default 22, hard ceiling 40
+    (operator rule 2026-06-10 — louder than 40 is never allowed)."""
+    monkeypatch.delenv("ROBOT_PROMPT_VOLUME", raising=False)
+    assert pp.resolve_prompt_volume() == 22
+    monkeypatch.setenv("ROBOT_PROMPT_VOLUME", "35")
+    assert pp.resolve_prompt_volume() == 35
+    monkeypatch.setenv("ROBOT_PROMPT_VOLUME", "100")
+    assert pp.resolve_prompt_volume() == 40
+    monkeypatch.setenv("ROBOT_PROMPT_VOLUME", "-5")
+    assert pp.resolve_prompt_volume() == 0
+    monkeypatch.setenv("ROBOT_PROMPT_VOLUME", "garbage")
+    assert pp.resolve_prompt_volume() == 22
+
+
+def test_pad_silence_adds_lead_and_tail() -> None:
+    """Playback pads silence around the samples so the speaker chain cannot clip
+    the first or last phoneme (live finding 2026-06-10: 'her?' arrived as 'huh')."""
+    import numpy as np
+
+    data = np.ones(16_000, dtype=np.int16)
+    padded = pp.pad_silence(data, rate=16_000, lead_s=0.5, tail_s=1.5)
+    assert len(padded) == 16_000 + 8_000 + 24_000
+    assert not padded[:8_000].any(), "lead pad must be silent"
+    assert not padded[-24_000:].any(), "tail pad must be silent"
+    assert padded[8_000:24_000].all(), "original samples must be preserved"
+    assert padded.dtype == data.dtype
+
+
+def test_pad_silence_handles_stereo() -> None:
+    import numpy as np
+
+    data = np.ones((1_000, 2), dtype=np.int16)
+    padded = pp.pad_silence(data, rate=1_000, lead_s=1.0, tail_s=2.0)
+    assert padded.shape == (1_000 + 1_000 + 2_000, 2)
+    assert not padded[:1_000].any() and not padded[-2_000:].any()
+
+
 class _FakePlayer:
     """Records the paths it was asked to play instead of touching audio hardware."""
 

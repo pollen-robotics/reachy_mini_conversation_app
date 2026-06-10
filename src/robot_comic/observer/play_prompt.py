@@ -47,6 +47,18 @@ MAX_PLAYS = int(os.getenv("ROBOT_PLAY_PROMPT_MAX_PLAYS", "20"))
 # piper voice model (.onnx); required for text mode. No default — must be set.
 PIPER_MODEL_ENV = "ROBOT_PLAY_PROMPT_PIPER_MODEL"
 
+# Workstation speaker volume for prompt playback. Operator rule (2026-06-10):
+# never louder than 40; 22 is the calibrated robot-mic sweet spot.
+PROMPT_VOLUME_ENV = "ROBOT_PROMPT_VOLUME"
+DEFAULT_PROMPT_VOLUME = 22
+MAX_PROMPT_VOLUME = 40
+
+# Silence padding around playback so the speaker chain (Bluetooth/driver
+# latency, sd.wait returning at buffer-drain) can't clip the first or last
+# phoneme. Live finding 2026-06-10: a trailing "her?" arrived as "huh".
+LEAD_PAD_S = float(os.getenv("ROBOT_PROMPT_LEAD_PAD_S", "0.5"))
+TAIL_PAD_S = float(os.getenv("ROBOT_PROMPT_TAIL_PAD_S", "1.5"))
+
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
@@ -140,6 +152,63 @@ def synthesize_piper(text: str, *, model: Optional[str] = None) -> str:
     return out_path
 
 
+def resolve_prompt_volume(env: Optional[Mapping[str, str]] = None) -> int:
+    """Prompt playback volume: ``ROBOT_PROMPT_VOLUME`` clamped to [0, 40].
+
+    Defaults to 22 (the calibrated sweet spot) on unset or unparseable values.
+    The 40 ceiling is a hard operator rule — values above it clamp, they do
+    not error, so a typo can't blast the room.
+    """
+    env = os.environ if env is None else env
+    raw = env.get(PROMPT_VOLUME_ENV, "").strip()
+    try:
+        value = int(float(raw)) if raw else DEFAULT_PROMPT_VOLUME
+    except ValueError:
+        value = DEFAULT_PROMPT_VOLUME
+    return max(0, min(MAX_PROMPT_VOLUME, value))
+
+
+def pad_silence(data: Any, *, rate: int, lead_s: float = LEAD_PAD_S, tail_s: float = TAIL_PAD_S) -> Any:
+    """Return ``data`` with ``lead_s``/``tail_s`` of silence around it.
+
+    Works for mono ``(n,)`` and multi-channel ``(n, ch)`` int arrays. Pure
+    numpy; unit-tested (unlike the hardware playback that consumes it).
+    """
+    import numpy as np
+
+    def _pad(seconds: float) -> Any:
+        frames = max(0, int(seconds * rate))
+        shape = (frames,) if data.ndim == 1 else (frames, data.shape[1])
+        return np.zeros(shape, dtype=data.dtype)
+
+    return np.concatenate([_pad(lead_s), data, _pad(tail_s)])
+
+
+def set_master_volume(percent: int) -> tuple[bool, Optional[str]]:
+    """Best-effort set of the system master output volume (Windows: pycaw).
+
+    Returns ``(ok, error)``. Non-Windows platforms report ``(False, reason)``
+    without raising — the caller decides how hard to enforce.
+    """
+    import sys
+
+    if sys.platform != "win32":
+        return False, f"volume control not implemented on {sys.platform}"
+    try:
+        from ctypes import POINTER, cast
+
+        from comtypes import CLSCTX_ALL
+        from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+
+        speakers = AudioUtilities.GetSpeakers()
+        interface = speakers.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+        endpoint = cast(interface, POINTER(IAudioEndpointVolume))
+        endpoint.SetMasterVolumeLevelScalar(percent / 100.0, None)
+        return True, None
+    except Exception as e:  # noqa: BLE001 - any COM/audio failure reports, never crashes
+        return False, str(e)
+
+
 def play_wav(path: str, *, blocking: bool = True) -> None:
     """Play a WAV file through the default output device. Lazy audio imports.
 
@@ -162,7 +231,7 @@ def play_wav(path: str, *, blocking: bool = True) -> None:
     data = np.frombuffer(raw, dtype=dtype)
     if channels > 1:
         data = data.reshape(-1, channels)
-    sd.play(data, rate)
+    sd.play(pad_silence(data, rate=rate), rate)
     if blocking:
         sd.wait()
 
@@ -190,7 +259,20 @@ def play_prompt(
     limiter = _LIMITER if limiter is None else limiter
     clock = time.monotonic if clock is None else clock
     synthesizer = synthesize_piper if synthesizer is None else synthesizer
-    player = play_wav if player is None else player
+    volume: Optional[dict[str, Any]] = None
+    if player is None:
+        player = play_wav
+        # Real hardware playback only: pin the speaker to the calibrated
+        # prompt volume (hard-capped at 40). On Windows a failure to set it
+        # is a refusal — playing at an unknown volume broke turn 1 of the
+        # 2026-06-10 live block and "too loud" is an operator complaint.
+        import sys
+
+        target = resolve_prompt_volume(env)
+        ok, error = set_master_volume(target)
+        if not ok and sys.platform == "win32":
+            raise PlayPromptError(f"could not enforce speaker volume {target}: {error}")
+        volume = {"target": target, "applied": ok, "error": error}
 
     if not is_enabled(env):
         raise PlayPromptError(f"actuator disabled — set {ENABLED_ENV}=1 to opt in for this session")
@@ -234,4 +316,5 @@ def play_prompt(
         "source": source,
         "duration_s": round(duration_s, 3),
         "plays_remaining": limiter.plays_remaining,
+        "volume": volume,
     }

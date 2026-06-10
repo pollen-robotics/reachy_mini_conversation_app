@@ -42,6 +42,11 @@ from robot_comic.observer.audio_activity import summarize_activity
 DEFAULT_SSH_HOST = os.getenv("LOOP_CHECK_SSH_HOST", "reachy-mini-ip")
 DEFAULT_REMOTE_EVENT_LOG = os.getenv("LOOP_CHECK_REMOTE_EVENT_LOG", "/home/pollen/.robot_comic/events.jsonl")
 DEFAULT_WINDOW_S = float(os.getenv("LOOP_CHECK_WINDOW_S", "12"))
+# Turn-pause gate: wait for this much continuous quiet before triggering, give
+# up (but still trigger, reporting timed_out) after the timeout. Live finding
+# 2026-06-10: prompts fired mid-robot-speech barge in or get swallowed.
+DEFAULT_QUIET_HOLD_S = float(os.getenv("LOOP_CHECK_QUIET_HOLD_S", "1.2"))
+DEFAULT_QUIET_TIMEOUT_S = float(os.getenv("LOOP_CHECK_QUIET_TIMEOUT_S", "20"))
 
 
 def _parse_events(lines: list[str]) -> list[dict[str, Any]]:
@@ -124,6 +129,56 @@ def listen_for_intervals(window_s: float, *, samplerate: int = 16_000, block_ms:
     return intervals
 
 
+def wait_for_quiet(
+    sample_dbfs: Callable[[], float],
+    *,
+    quiet_dbfs: Optional[float] = None,
+    hold_s: float = DEFAULT_QUIET_HOLD_S,
+    timeout_s: float = DEFAULT_QUIET_TIMEOUT_S,
+    clock: Callable[[], float] = time.monotonic,
+    sleeper: Callable[[float], None] = time.sleep,
+    step_s: float = 0.1,
+) -> dict[str, Any]:
+    """Block until the room holds ``hold_s`` of continuous quiet (turn-pause gate).
+
+    ``sample_dbfs`` returns the current mic level; quiet means at or below
+    ``quiet_dbfs`` (default: the witness's ``DB_OFF`` hysteresis floor, so
+    "quiet" agrees with what closes a sound interval). Returns
+    ``{waited_s, timed_out}`` — on timeout the caller still proceeds; the flag
+    lets the verdict say the trigger may have talked over the robot.
+    """
+    if quiet_dbfs is None:
+        from robot_comic.observer.audio_witness import DB_OFF
+
+        quiet_dbfs = DB_OFF
+    start = clock()
+    quiet_run = 0.0
+    while True:
+        if sample_dbfs() <= quiet_dbfs:
+            quiet_run += step_s
+            if quiet_run >= hold_s:
+                return {"waited_s": round(clock() - start, 2), "timed_out": False}
+        else:
+            quiet_run = 0.0
+        if clock() - start >= timeout_s:
+            return {"waited_s": round(clock() - start, 2), "timed_out": True}
+        sleeper(step_s)
+
+
+def _default_quiet_sampler() -> float:
+    """One ~200 ms mic reading as dBFS (witness device). Lazy audio imports."""
+    import sounddevice as sd
+
+    from robot_comic.observer.audio_witness import dbfs, resolve_input_device
+
+    samplerate = 16_000
+    frames = sd.rec(
+        int(samplerate * 0.2), samplerate=samplerate, channels=1, dtype="float32", device=resolve_input_device()
+    )
+    sd.wait()
+    return dbfs(frames.ravel())
+
+
 def evaluate_loop(
     new_events: list[dict[str, Any]],
     audio_intervals: list[dict[str, Any]],
@@ -167,6 +222,8 @@ def run_loop_check(
     trigger: Optional[Callable[[], dict[str, Any]]] = None,
     listener: Optional[Callable[[], list[dict[str, Any]]]] = None,
     event_fetcher: Optional[Callable[[], list[str]]] = None,
+    quiet_sampler: Optional[Callable[[], float]] = None,
+    wait_quiet: bool = True,
 ) -> dict[str, Any]:
     """Run one trigger->verify cycle and return a verdict dict.
 
@@ -178,10 +235,20 @@ def run_loop_check(
     ssh_host = ssh_host or DEFAULT_SSH_HOST
     remote_event_log = remote_event_log or DEFAULT_REMOTE_EVENT_LOG
     trigger = trigger or (lambda: play_prompt(text=text, wav=wav))
+    # The real mic-based quiet gate engages only alongside the real mic
+    # listener — injected (test) listeners must not touch audio hardware.
+    if quiet_sampler is None and listener is None and wait_quiet:
+        quiet_sampler = _default_quiet_sampler
     listener = listener or (lambda: listen_for_intervals(window_s))
     event_fetcher = event_fetcher or (lambda: fetch_remote_event_lines(ssh_host, remote_event_log))
 
     before = event_fetcher()
+    # Turn-pause gate: don't talk over the robot. On timeout we still trigger,
+    # but the verdict carries the flag so overlap is diagnosable.
+    if wait_quiet and quiet_sampler is not None:
+        quiet_wait = wait_for_quiet(quiet_sampler)
+    else:
+        quiet_wait = {"waited_s": 0.0, "timed_out": False, "skipped": True}
     trigger_result = trigger()
     intervals = listener()
     after = event_fetcher()
@@ -189,6 +256,7 @@ def run_loop_check(
     new_lines = after[len(before) :] if len(after) >= len(before) else after
     verdict = evaluate_loop(_parse_events(new_lines), intervals, expect_tool=expect_tool)
     verdict["trigger"] = trigger_result
+    verdict["quiet_wait"] = quiet_wait
     return verdict
 
 
