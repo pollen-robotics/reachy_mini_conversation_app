@@ -1,9 +1,11 @@
 """Tests for the bonk detector (#522): audio impact signatures → caution list.
 
-A bonk — the head striking the plastic cowling — is a short *broadband*
-transient: a sudden onset well above the rolling background with substantial
-high-frequency energy (unlike speech onsets, whose energy sits mostly below
-2 kHz). The detector is pure (fed blocks, no audio deps) so the signature
+A bonk — the head striking the plastic cowling — is a short **low-frequency
+thump**: an extreme peak onset over the rolling background that rings down
+within ~200 ms. Ground truth (2026-06-10, 10 real cowling taps): peaks −1..−9
+dBFS, onsets +44..+54 dB, HF ratio 0.00–0.11 — *not* broadband. Keyboard
+clicks are the broadband ones (HF 0.4+), so high HF now *rejects* a
+candidate. The detector is pure (fed blocks, no audio deps) so the signature
 logic is unit-testable; capture and caution-list persistence are seams.
 """
 
@@ -26,8 +28,15 @@ def _silence() -> np.ndarray:
     return np.zeros(BLOCK, dtype=np.float32)
 
 
-def _click(amplitude: float = 0.6) -> np.ndarray:
-    """A broadband impact: white-noise burst with a sharp decay envelope."""
+def _thump(amplitude: float = 0.9) -> np.ndarray:
+    """A cowling impact: low-frequency (400 Hz) burst with a sharp decay."""
+    t = np.arange(BLOCK) / SR
+    envelope = np.exp(-np.arange(BLOCK) / (BLOCK / 6)).astype(np.float32)
+    return (amplitude * np.sin(2 * np.pi * 400 * t)).astype(np.float32) * envelope
+
+
+def _keyboard_click(amplitude: float = 0.6) -> np.ndarray:
+    """A broadband transient (keyboard/mouse click): white-noise burst."""
     rng = np.random.default_rng(42)
     burst = rng.uniform(-1.0, 1.0, BLOCK).astype(np.float32)
     envelope = np.exp(-np.arange(BLOCK) / (BLOCK / 8)).astype(np.float32)
@@ -35,7 +44,7 @@ def _click(amplitude: float = 0.6) -> np.ndarray:
 
 
 def _speech_like(amplitude: float = 0.6) -> np.ndarray:
-    """A voiced onset: low-frequency harmonics (150/300/450 Hz)."""
+    """A voiced block: low-frequency harmonics (150/300/450 Hz)."""
     t = np.arange(BLOCK) / SR
     wave = sum(np.sin(2 * np.pi * f * t) / (i + 1) for i, f in enumerate((150, 300, 450)))
     return (amplitude * wave / np.max(np.abs(wave))).astype(np.float32)
@@ -50,42 +59,64 @@ def _feed(detector: BonkDetector, blocks: list[np.ndarray]) -> list[dict]:
     return hits
 
 
-def test_click_after_silence_is_detected() -> None:
+def test_thump_after_silence_is_detected() -> None:
+    """A low-frequency thump that rings down to silence is a bonk."""
     detector = BonkDetector()
-    hits = _feed(detector, [_silence()] * 10 + [_click()] + [_silence()] * 5)
+    hits = _feed(detector, [_silence()] * 10 + [_thump()] + [_silence()] * 5)
     assert len(hits) == 1
     assert hits[0]["ts_ms"] == 10 * 50
-    assert hits[0]["peak_dbfs"] > -30
+    assert hits[0]["peak_dbfs"] > -10
+    assert hits[0]["confirm"] == "decay"
 
 
-def test_speech_onset_is_not_detected() -> None:
-    """Loud but low-frequency onsets (speech/TTS) must not count as bonks."""
+def test_keyboard_click_is_rejected() -> None:
+    """Broadband transients (keyboard clicks) must NOT count as bonks."""
     detector = BonkDetector()
-    hits = _feed(detector, [_silence()] * 10 + [_speech_like()] * 6)
+    hits = _feed(detector, [_silence()] * 10 + [_keyboard_click()] + [_silence()] * 5)
     assert hits == []
 
 
-def test_click_during_speech_is_detected() -> None:
-    """A bonk while the robot is talking still pops above the rolling floor."""
+def test_sustained_speech_onset_is_not_detected() -> None:
+    """A sound that holds its level (speech onset) is discarded, however loud."""
     detector = BonkDetector()
-    speech = [_speech_like(0.2) for _ in range(12)]
-    speech_with_bonk = speech + [_click(0.9)] + [_speech_like(0.2)] * 4
-    hits = _feed(detector, speech_with_bonk)
+    blocks = [_speech_like(0.02)] * 12 + [_speech_like(0.5)] * 6
+    assert _feed(detector, blocks) == []
+
+
+def test_moderate_thump_confirms_via_decay() -> None:
+    """A transient over a voiced background that rings down is a bonk."""
+    detector = BonkDetector()
+    # Background ~-34 dBFS peak; bump to -6 dBFS (+31 dB onset), then back
+    # down >=15 dB -> decay-confirmed at the onset timestamp.
+    blocks = [_speech_like(0.02)] * 12 + [_speech_like(0.5)] + [_speech_like(0.02)] * 4
+    hits = _feed(detector, blocks)
     assert len(hits) == 1
     assert hits[0]["ts_ms"] == 12 * 50
+    assert hits[0]["confirm"] == "decay"
 
 
 def test_detections_are_debounced() -> None:
-    """Two clicks 50 ms apart are one impact event, not two."""
+    """Two thumps 50 ms apart are one impact event, not two."""
     detector = BonkDetector(debounce_ms=500)
-    hits = _feed(detector, [_silence()] * 10 + [_click(), _click()] + [_silence()] * 5)
+    hits = _feed(detector, [_silence()] * 10 + [_thump(), _thump()] + [_silence()] * 5)
     assert len(hits) == 1
 
 
-def test_quiet_clicks_below_floor_are_ignored() -> None:
+def test_quiet_thumps_below_floor_are_ignored() -> None:
     detector = BonkDetector()
-    hits = _feed(detector, [_silence()] * 10 + [_click(0.005)] + [_silence()] * 5)
+    hits = _feed(detector, [_silence()] * 10 + [_thump(0.05)] + [_silence()] * 5)
     assert hits == []
+
+
+def test_double_tap_reanchors_and_still_confirms() -> None:
+    """A second, louder hit inside the decay window extends it (re-anchor)."""
+    detector = BonkDetector()
+    # First hit moderate, second louder, then ring-down: must yield one
+    # detection anchored at the first hit, not be discarded as sustained.
+    blocks = [_speech_like(0.02)] * 12 + [_speech_like(0.4), _speech_like(0.7)] + [_speech_like(0.02)] * 5
+    hits = _feed(detector, blocks)
+    assert len(hits) == 1
+    assert hits[0]["ts_ms"] == 12 * 50
 
 
 # ---------------------------------------------------------------------------

@@ -1,10 +1,19 @@
 """Bonk detector (#522): audio impact signatures correlated into a caution list.
 
-A bonk — the head striking the plastic cowling — reads as a short *broadband*
-transient on the witness microphone: a sudden onset well above the rolling
-background level with substantial high-frequency energy. Speech and TTS
-onsets carry their energy mostly below ~2 kHz, so the high-frequency ratio
-separates the two even when the robot is mid-riff.
+A bonk — the head striking the plastic cowling — reads as a short
+**low-frequency thump** on the witness microphone: an extreme peak onset over
+the rolling background that rings down within ~200 ms. Ground truth (10 real
+cowling taps, 2026-06-10): peaks −1..−9 dBFS, onsets +44..+54 dB, HF ratio
+0.00–0.11. The shell resonates low — impacts are *not* broadband here; the
+broadband transients in a real room are keyboard/mouse clicks, so a high HF
+ratio now *rejects* a candidate instead of confirming it.
+
+An onset over the rolling background becomes a pending candidate and confirms
+only if the level decays ``ROBOT_BONK_DECAY_DB`` within
+``ROBOT_BONK_DECAY_BLOCKS`` blocks — speech sustains, impacts ring down.
+(Validated offline: 10/10 ground-truth taps, 0 false positives on speech
+onsets after silence, which an immediate-confirm-on-extreme-onset variant
+let through.)
 
 Pipeline: mic blocks → ``BonkDetector`` (pure, unit-tested) → correlate each
 detection with the Tier-0 event log (same join as the motion witness) →
@@ -34,15 +43,21 @@ from robot_comic.observer.motion_witness import load_events, correlate_spikes_wi
 
 
 # Onset: the block's PEAK level must clear the rolling RMS background by this
-# much. Impacts have a high crest factor, so peak-vs-RMS keeps a bonk visible
-# even while the robot is talking over it.
-ONSET_DB = float(os.getenv("ROBOT_BONK_ONSET_DB", "15"))
-# …and the block's absolute level must clear this floor (quiet taps from the
-# street don't qualify).
-FLOOR_DBFS = float(os.getenv("ROBOT_BONK_FLOOR_DBFS", "-30"))
-# Impacts are broadband: at least this fraction of block energy above HF_CUT_HZ.
-HF_RATIO_MIN = float(os.getenv("ROBOT_BONK_HF_RATIO_MIN", "0.35"))
+# much to become a candidate. Impacts have a high crest factor, so peak-vs-RMS
+# keeps a bonk visible even while the robot is talking over it.
+ONSET_DB = float(os.getenv("ROBOT_BONK_ONSET_DB", "25"))
+# …and the block's absolute level must clear this floor (ground-truth taps
+# peaked −1..−9 dBFS on the witness mic; quiet taps from the street don't
+# qualify).
+FLOOR_DBFS = float(os.getenv("ROBOT_BONK_FLOOR_DBFS", "-20"))
+# Impacts are low-frequency thumps; broadband energy above HF_CUT_HZ marks a
+# keyboard/mouse click instead, so high HF *rejects* the candidate.
+HF_RATIO_MAX = float(os.getenv("ROBOT_BONK_HF_RATIO_MAX", "0.30"))
 HF_CUT_HZ = float(os.getenv("ROBOT_BONK_HF_CUT_HZ", "2000"))
+# Moderate-onset candidates confirm only if the level rings down this much…
+DECAY_DB = float(os.getenv("ROBOT_BONK_DECAY_DB", "15"))
+# …within this many blocks of the (re-anchored) peak. Speech sustains instead.
+DECAY_BLOCKS = int(os.getenv("ROBOT_BONK_DECAY_BLOCKS", "4"))
 DEBOUNCE_MS = int(os.getenv("ROBOT_BONK_DEBOUNCE_MS", "500"))
 
 DEFAULT_CAUTION_LIST = os.path.join(os.path.expanduser("~"), ".robot_comic", "observer", "bonk_caution_list.jsonl")
@@ -69,28 +84,34 @@ def _hf_ratio(block: NDArray[np.float32], sample_rate: int, cut_hz: float) -> fl
 
 
 class BonkDetector:
-    """Pure block-fed impact detector: onset + floor + broadband signature."""
+    """Pure block-fed impact detector: onset + floor + low-HF + ring-down."""
 
     def __init__(
         self,
         *,
         onset_db: float = ONSET_DB,
         floor_dbfs: float = FLOOR_DBFS,
-        hf_ratio_min: float = HF_RATIO_MIN,
+        hf_ratio_max: float = HF_RATIO_MAX,
         hf_cut_hz: float = HF_CUT_HZ,
+        decay_db: float = DECAY_DB,
+        decay_blocks: int = DECAY_BLOCKS,
         debounce_ms: int = DEBOUNCE_MS,
     ) -> None:
         """Configure the impact signature thresholds."""
         self.onset_db = onset_db
         self.floor_dbfs = floor_dbfs
-        self.hf_ratio_min = hf_ratio_min
+        self.hf_ratio_max = hf_ratio_max
         self.hf_cut_hz = hf_cut_hz
+        self.decay_db = decay_db
+        self.decay_blocks = decay_blocks
         self.debounce_ms = debounce_ms
         self._recent_db: list[float] = []
         self._last_hit_ms: int | None = None
+        self._pending: dict[str, Any] | None = None
+        self._pending_wait = 0
 
     def update(self, *, ts_ms: int, block: NDArray[np.float32], sample_rate: int) -> dict[str, Any] | None:
-        """Feed one block; return a detection dict when an impact just landed."""
+        """Feed one block; return a detection dict when an impact is confirmed."""
         level = _peak_dbfs(block)
         background = float(np.median(self._recent_db)) if self._recent_db else -120.0
         # Background history tracks RMS so sustained speech sets the floor the
@@ -99,6 +120,9 @@ class BonkDetector:
         if len(self._recent_db) > _HISTORY_BLOCKS:
             self._recent_db.pop(0)
 
+        if self._pending is not None:
+            return self._advance_pending(ts_ms, level)
+
         if level < self.floor_dbfs:
             return None
         if level - background < self.onset_db:
@@ -106,16 +130,38 @@ class BonkDetector:
         if self._last_hit_ms is not None and (ts_ms - self._last_hit_ms) < self.debounce_ms:
             return None
         ratio = _hf_ratio(block, sample_rate, self.hf_cut_hz)
-        if ratio < self.hf_ratio_min:
-            return None
+        if ratio > self.hf_ratio_max:
+            return None  # broadband transient = keyboard/click, not a cowling thump
 
-        self._last_hit_ms = ts_ms
-        return {
+        self._pending = {
             "ts_ms": ts_ms,
             "peak_dbfs": round(level, 1),
             "onset_db": round(level - background, 1),
             "hf_ratio": round(ratio, 3),
         }
+        self._pending_wait = 0
+        return None
+
+    def _advance_pending(self, ts_ms: int, level: float) -> dict[str, Any] | None:
+        """Resolve a pending moderate candidate: re-anchor, confirm, or discard."""
+        assert self._pending is not None
+        anchor = float(self._pending["peak_dbfs"])
+        if level > anchor:
+            # Louder follow-up hit (double tap / clipped burst): re-anchor the
+            # decay reference and restart the window; keep the original onset ts.
+            self._pending["peak_dbfs"] = round(level, 1)
+            self._pending_wait = 0
+            return None
+        if level <= anchor - self.decay_db:
+            detection = self._pending
+            detection["confirm"] = "decay"
+            self._pending = None
+            self._last_hit_ms = ts_ms
+            return detection
+        self._pending_wait += 1
+        if self._pending_wait >= self.decay_blocks:
+            self._pending = None  # held its level: sustained sound, not an impact
+        return None
 
 
 def append_caution_entries(
