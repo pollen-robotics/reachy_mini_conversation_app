@@ -165,6 +165,52 @@ def build_server() -> Any:
         except VisualWitnessError as exc:
             return {"error": str(exc)}
 
+    @server.tool()  # type: ignore[misc]
+    def robot_measure_motion(seconds: float = 30.0, device: int | None = None) -> dict[str, Any]:
+        """Tier-2: record the witness camera and quantify movement smoothness.
+
+        Reduces the burst to a localized motion-energy series, detects jerk
+        spikes, and attributes each spike to the tool.execute span rendering
+        at that moment (via ``ROBOT_EVENT_LOG``). Returns ``{mean_energy,
+        max_energy, max_jerk, spikes, attributions, fps, samples}``. Blocks
+        for the full ``seconds`` — keep windows short.
+        ``device`` defaults to ``VISUAL_WITNESS_CAMERA_DEVICE``.
+        """
+        from robot_comic.observer.motion_witness import (
+            load_events,
+            record_motion,
+            analyze_motion,
+            correlate_spikes_with_events,
+        )
+
+        try:
+            start_wall_ts, fps, energies = record_motion(seconds, device=device)
+        except Exception as exc:  # camera missing/busy must not kill the server
+            return {"error": str(exc)}
+        report = analyze_motion(energies, fps, start_wall_ts=start_wall_ts)
+        report["fps"] = fps
+        events_path = os.getenv("ROBOT_EVENT_LOG", "")
+        if events_path and report["spikes"]:
+            report["attributions"] = correlate_spikes_with_events(report["spikes"], load_events(events_path))
+        return report
+
+    @server.tool()  # type: ignore[misc]
+    def robot_watch_bonks(seconds: float = 60.0) -> dict[str, Any]:
+        """Tier-1: listen for cowling-impact signatures and grow the caution list.
+
+        Detects short broadband transients (peak jumps over the rolling speech
+        background with high-frequency content), attributes each to the
+        move/emotion rendering at that moment (via ``ROBOT_EVENT_LOG``), and
+        appends entries to the persistent bonk caution list (#522). Blocks for
+        the full ``seconds``.
+        """
+        from robot_comic.observer.bonk_detector import watch
+
+        try:
+            return watch(seconds, events_path=os.getenv("ROBOT_EVENT_LOG", "") or None)
+        except Exception as exc:  # no mic / sounddevice missing
+            return {"error": str(exc)}
+
     return server
 
 

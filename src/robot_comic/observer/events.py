@@ -41,6 +41,10 @@ def read_events(path: str, *, max_lines: int = 2000) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     for line in raw[-max_lines:]:
         line = line.strip()
+        # The relay sink (robot-comic-logsink) prefixes lines with "RCSPAN "
+        # for the monitor TUI; accept those files as event sources too.
+        if line.startswith("RCSPAN "):
+            line = line[len("RCSPAN ") :]
         if not line:
             continue
         try:

@@ -170,3 +170,18 @@ def test_summarize_events_reports_speech_and_tools() -> None:
 def test_summarize_events_empty() -> None:
     summary = obs_events.summarize_events([])
     assert summary == {"count": 0, "spoke": False, "tools_fired": [], "latest_ts": None}
+
+
+def test_read_events_tolerates_rcspan_prefixed_lines(tmp_path: Path) -> None:
+    """The relay sink (robot-comic-logsink) writes RCSPAN-prefixed lines so the
+    monitor can tail them; the reader must accept that file as an event source
+    (mixed with raw JSONL lines)."""
+    from robot_comic.observer.events import read_events
+
+    log = tmp_path / "relayed_events.log"
+    log.write_text(
+        'RCSPAN {"name":"turn","ts":1000,"attrs":{}}\n{"name":"tool.execute","ts":2000,"attrs":{}}\n',
+        encoding="utf-8",
+    )
+    events = read_events(str(log))
+    assert [e["name"] for e in events] == ["turn", "tool.execute"]
