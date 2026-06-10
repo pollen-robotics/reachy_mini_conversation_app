@@ -89,6 +89,7 @@ class BreathingMove(Move):  # type: ignore
         interpolation_start_antennas: Tuple[float, float],
         interpolation_duration: float = 1.0,
         sway_enabled: bool = True,
+        speed_factor: float = 1.0,
     ):
         """Initialize breathing move.
 
@@ -98,11 +99,14 @@ class BreathingMove(Move):  # type: ignore
             interpolation_duration: Duration of interpolation to neutral (seconds)
             sway_enabled: If False, amplitudes are zeroed so the robot holds neutral
                           without any head bob or antenna sway.
+            speed_factor: Global movement speed multiplier; the ease-in-to-neutral
+                          duration is scaled by it so the breathing handoff matches
+                          the tempo of the surrounding moves (#521).
 
         """
         self.interpolation_start_pose = interpolation_start_pose
         self.interpolation_start_antennas = np.array(interpolation_start_antennas)
-        self.interpolation_duration = interpolation_duration
+        self.interpolation_duration = interpolation_duration / max(0.1, min(2.0, speed_factor))
 
         # Neutral positions for breathing base
         self.neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
@@ -628,6 +632,7 @@ class MovementManager:
                         interpolation_start_antennas=current_antennas,
                         interpolation_duration=1.0,
                         sway_enabled=self.idle_animation_enabled,
+                        speed_factor=self.speed_factor,
                     )
                     self.move_queue.append(breathing_move)
                     logger.debug("Started breathing after %.1fs of inactivity", idle_for)
@@ -750,7 +755,9 @@ class MovementManager:
         listening = self._is_listening
         listening_antennas = self._listening_antennas
         blend = self._antenna_unfreeze_blend
-        blend_duration = self._antenna_blend_duration
+        # Scale the unfreeze blend by the global speed factor so antennas
+        # re-engage at the same tempo as the (possibly slowed) body (#521).
+        blend_duration = self._antenna_blend_duration / max(0.1, self.speed_factor)
         last_update = self._last_listening_blend_time
         self._last_listening_blend_time = now
 
