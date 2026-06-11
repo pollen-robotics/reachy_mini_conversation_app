@@ -879,9 +879,9 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
     monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
 
+    # 400 near-simultaneous tool results coalesce into far fewer response.create sends.
     N_TOOL_RESULTS = 400
-    REJECT_CALL_NUMBERS = {1, 3, 5, 10, 25, 50, 75, 100, 150, 200, 300, 399}
-    EXPECTED_TOTAL_CALLS = N_TOOL_RESULTS + len(REJECT_CALL_NUMBERS)
+    REJECT_EVERY = 4  # deterministically reject every 4th send to exercise retry
 
     response_create_log: list[tuple[int, dict[str, Any]]] = []
     handler_ref: list[rt_mod.OpenaiRealtimeHandler] = []
@@ -953,7 +953,7 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
 
             # Intentional rejections (simulating a race where another
             # response sneaks in right after our check).
-            if n in REJECT_CALL_NUMBERS:
+            if n % REJECT_EVERY == 0:
                 await event_queue.put(
                     FakeEvent(
                         "error",
@@ -987,11 +987,16 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
             pass
 
     class FakeItem:
+        def __init__(self) -> None:
+            self.call_count = 0
+
         async def create(self, **_kw: Any) -> None:
-            pass
+            self.call_count += 1
+
+    fake_item = FakeItem()
 
     class FakeConversation:
-        item = FakeItem()
+        item = fake_item
 
     class FakeConn:
         session = FakeSession()
@@ -1058,11 +1063,11 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
         )
 
     # Wait until spawned tool tasks, the listener, and the sender have drained.
-    # This stress test queues hundreds of serialized response.create calls; a
-    # condition-based wait avoids racing slower CI runners while still failing
-    # promptly if the sender stops making progress.
+    # This stress test queues hundreds of tool results; a condition-based wait
+    # avoids racing slower CI runners while still failing promptly if the
+    # sender stops making progress.
     deadline = asyncio.get_event_loop().time() + 25.0
-    while fake_response_api._call_count < EXPECTED_TOTAL_CALLS and asyncio.get_event_loop().time() < deadline:
+    while fake_item.call_count < N_TOOL_RESULTS and asyncio.get_event_loop().time() < deadline:
         await asyncio.sleep(0.05)
 
     # ---- Tear down ----
@@ -1073,6 +1078,11 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
 
     # ---- Assertions ----
 
+    # Every tool result must still reach the model as function_call_output.
+    assert fake_item.call_count == N_TOOL_RESULTS, (
+        f"Expected {N_TOOL_RESULTS} function_call_output items, got {fake_item.call_count}"
+    )
+
     # Serialization: every response.create() must have been called only when
     # no response was in-flight (_response_done_event was set).  Any violation
     # means the sender fired a new request before the previous one finished.
@@ -1081,24 +1091,18 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
         f"call(s) {fake_response_api._serialization_violations}"
     )
 
-    # Total response.create() calls = tool results + retries for rejected ones
-    assert fake_response_api._call_count == EXPECTED_TOTAL_CALLS, (
-        f"Expected {EXPECTED_TOTAL_CALLS} response.create calls "
-        f"({N_TOOL_RESULTS} results + {len(REJECT_CALL_NUMBERS)} retries), "
+    # Coalescing means far fewer response.create sends than tool results.
+    assert 0 < fake_response_api._call_count < N_TOOL_RESULTS, (
+        f"Expected response.create calls to be coalesced below {N_TOOL_RESULTS}, "
         f"got {fake_response_api._call_count}"
     )
 
-    # The error event handler must have set _last_response_rejected for each
-    # rejection (the log message comes from the event handler code path).
+    # Every rejection from the error handler must have led to a retry.
     rejection_logs = [r for r in caplog.records if "worker will retry" in getattr(r, "msg", "")]
-    assert len(rejection_logs) == len(REJECT_CALL_NUMBERS), (
-        f"Expected {len(REJECT_CALL_NUMBERS)} rejection entries from error handler, got {len(rejection_logs)}"
-    )
-
-    # The sender loop must have retried after each rejection.
     retry_logs = [r for r in caplog.records if "response.create was rejected; retrying" in getattr(r, "msg", "")]
-    assert len(retry_logs) == len(REJECT_CALL_NUMBERS), (
-        f"Expected {len(REJECT_CALL_NUMBERS)} retry entries from sender loop, got {len(retry_logs)}"
+    assert len(rejection_logs) == len(retry_logs) > 0, (
+        f"Expected matching non-zero rejection/retry counts, got "
+        f"{len(rejection_logs)} rejections and {len(retry_logs)} retries"
     )
 
 
