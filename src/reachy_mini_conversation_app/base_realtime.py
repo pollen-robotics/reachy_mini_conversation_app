@@ -33,6 +33,7 @@ from reachy_mini_conversation_app.config import (
 )
 from reachy_mini_conversation_app.idle_policy import start_idle_tool_call
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.tools.tool_constants import SILENT_TOOLS
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolCallRoutine,
@@ -493,6 +494,13 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             except asyncio.CancelledError:
                 return
 
+            # Parallel tool calls enqueue duplicate empty requests; coalesce to one.
+            while not kwargs and not self._pending_responses.empty():
+                try:
+                    self._pending_responses.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+
             sent = False
             max_retries = 5
             attempts = 0
@@ -660,7 +668,8 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         ),
                     )
 
-            if send_result_to_model:
+            # Always surface errors, skip the spoken follow-up for silent tools.
+            if send_result_to_model and (bg_tool.error is not None or bg_tool.tool_name not in SILENT_TOOLS):
                 await self._safe_response_create()
 
         except self._connection_closed_errors():
