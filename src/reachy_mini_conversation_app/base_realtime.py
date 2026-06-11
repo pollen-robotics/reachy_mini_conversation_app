@@ -26,6 +26,7 @@ from openai.types.realtime import (
 from websockets.exceptions import ConnectionClosedError
 from openai.resources.realtime.realtime import AsyncRealtimeConnection
 
+from reachy_mini_conversation_app.tools import core_tools
 from reachy_mini_conversation_app.config import (
     config,
     get_default_voice_for_backend,
@@ -34,7 +35,6 @@ from reachy_mini_conversation_app.config import (
 from reachy_mini_conversation_app.idle_policy import start_idle_tool_call
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
-from reachy_mini_conversation_app.tools.tool_constants import SILENT_TOOLS
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolCallRoutine,
     ToolNotification,
@@ -668,8 +668,9 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         ),
                     )
 
-            # Always surface errors, skip the spoken follow-up for silent tools.
-            if send_result_to_model and (bg_tool.error is not None or bg_tool.tool_name not in SILENT_TOOLS):
+            tool = core_tools.ALL_TOOLS.get(bg_tool.tool_name)
+            # Always surface errors, skip the spoken follow-up for tools that opt out.
+            if send_result_to_model and (bg_tool.error is not None or tool is None or tool.needs_response):
                 await self._safe_response_create()
 
         except self._connection_closed_errors():

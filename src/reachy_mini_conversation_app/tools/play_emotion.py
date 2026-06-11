@@ -45,6 +45,7 @@ class PlayEmotion(Tool):
 
     name = "play_emotion"
     description = "Play a pre-recorded emotion"
+    needs_response = False
     parameters_schema = {
         "type": "object",
         "properties": {

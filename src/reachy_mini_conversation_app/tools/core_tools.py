@@ -53,9 +53,13 @@ class Tool(abc.ABC):
       - name: str
       - description: str
       - parameters_schema: Dict[str, Any]  # JSON Schema
+
+    Tools may override:
+      - needs_response: bool = True  # set False to skip the spoken follow-up after this tool runs
     """
 
     _auto_register: ClassVar[bool] = True
+    needs_response: ClassVar[bool] = True
 
     name: str
     description: str

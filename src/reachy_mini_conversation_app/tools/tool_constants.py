@@ -15,15 +15,3 @@ class SystemTool(Enum):
 
     TASK_STATUS = "task_status"
     TASK_CANCEL = "task_cancel"
-
-
-# Pure side effects with nothing to narrate, skip the spoken follow-up.
-SILENT_TOOLS: frozenset[str] = frozenset(
-    {
-        "dance",
-        "stop_dance",
-        "play_emotion",
-        "stop_emotion",
-        "move_head",
-    }
-)

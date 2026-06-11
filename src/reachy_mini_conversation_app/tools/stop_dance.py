@@ -12,6 +12,7 @@ class StopDance(Tool):
 
     name = "stop_dance"
     description = "Stop the current dance move"
+    needs_response = False
     parameters_schema = {
         "type": "object",
         "properties": {
