@@ -1093,8 +1093,7 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
 
     # Coalescing means far fewer response.create sends than tool results.
     assert 0 < fake_response_api._call_count < N_TOOL_RESULTS, (
-        f"Expected response.create calls to be coalesced below {N_TOOL_RESULTS}, "
-        f"got {fake_response_api._call_count}"
+        f"Expected response.create calls to be coalesced below {N_TOOL_RESULTS}, got {fake_response_api._call_count}"
     )
 
     # Every rejection from the error handler must have led to a retry.

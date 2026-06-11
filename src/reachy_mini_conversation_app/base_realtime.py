@@ -33,8 +33,8 @@ from reachy_mini_conversation_app.config import (
 )
 from reachy_mini_conversation_app.idle_policy import start_idle_tool_call
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
-from reachy_mini_conversation_app.tools.tool_constants import SILENT_TOOLS
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
+from reachy_mini_conversation_app.tools.tool_constants import SILENT_TOOLS
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolCallRoutine,
     ToolNotification,
