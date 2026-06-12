@@ -949,6 +949,48 @@ async function init() {
         setStatusMessage(pStatus, "Failed to save.", "error");
       }
     });
+
+    // ---- Audio output gain slider ----
+    const gainSlider = document.getElementById("audio-gain-slider");
+    const gainValue = document.getElementById("audio-gain-value");
+    const gainStatus = document.getElementById("audio-gain-status");
+
+    async function loadAudioGain() {
+      try {
+        const res = await fetch("/api/audio/output_gain");
+        if (res.ok) {
+          const data = await res.json();
+          gainSlider.value = data.gain_db;
+          gainValue.textContent = data.gain_db.toFixed(1) + " dB";
+        }
+      } catch {}
+    }
+
+    gainSlider.addEventListener("input", () => {
+      gainValue.textContent = parseFloat(gainSlider.value).toFixed(1) + " dB";
+    });
+
+    gainSlider.addEventListener("change", async () => {
+      const db = parseFloat(gainSlider.value);
+      try {
+        const res = await fetch("/api/audio/output_gain", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ gain_db: db }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          gainValue.textContent = data.gain_db.toFixed(1) + " dB";
+          setStatusMessage(gainStatus, "Saved.", "ok");
+        } else {
+          setStatusMessage(gainStatus, "Failed to save gain.", "error");
+        }
+      } catch {
+        setStatusMessage(gainStatus, "Failed to save gain.", "error");
+      }
+    });
+
+    await loadAudioGain();
   } catch (e) {
     setStatusMessage(statusEl, "UI failed to load. Please refresh.", "warn");
   } finally {

@@ -223,6 +223,23 @@
         </div>
         <p id="personality-status" class="status" role="status" aria-live="polite" aria-atomic="true"></p>
       </div>
+
+      <div id="audio-panel" class="panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Audio</p>
+            <h2>Output gain</h2>
+          </div>
+          <span class="chip">Live</span>
+        </div>
+        <p class="muted">Boost the robot's speaker volume beyond the system default. Useful in noisy environments.</p>
+        <div class="row audio-gain-row">
+          <label for="audio-gain-slider">Gain</label>
+          <input id="audio-gain-slider" type="range" min="0" max="24" step="0.5" value="0" />
+          <span id="audio-gain-value" class="audio-gain-readout">0.0 dB</span>
+        </div>
+        <p id="audio-gain-status" class="status" role="status" aria-live="polite" aria-atomic="true"></p>
+      </div>
     </div>
 
     <script src="/static/main.js"></script>

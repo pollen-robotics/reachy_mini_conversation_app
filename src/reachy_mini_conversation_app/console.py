@@ -46,6 +46,7 @@ from reachy_mini_conversation_app.config import (
 )
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
 from reachy_mini_conversation_app.audio.startup_config import apply_audio_startup_config
+from reachy_mini_conversation_app.audio_output_gain import get_gain_linear, get_gain_db, set_gain_db
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
 
@@ -619,6 +620,21 @@ class LocalStream:
                 }
             )
 
+        # GET /api/audio/output_gain -> current gain in dB
+        @self._settings_app.get("/api/audio/output_gain")
+        def _get_audio_gain() -> JSONResponse:
+            return JSONResponse({"gain_db": get_gain_db()})
+
+        # POST /api/audio/output_gain -> set gain in dB and persist
+        class AudioGainPayload(BaseModel):
+            gain_db: float
+
+        @self._settings_app.post("/api/audio/output_gain")
+        def _set_audio_gain(payload: AudioGainPayload) -> JSONResponse:
+            set_gain_db(payload.gain_db)
+            self._persist_env_value("FAMILIAR_AUDIO_GAIN_DB", str(get_gain_db()))
+            return JSONResponse({"ok": True, "gain_db": get_gain_db()})
+
         # POST /validate_api_key -> validate key without persisting it
         @self._settings_app.post("/validate_api_key")
         async def _validate_key(payload: ApiKeyPayload) -> JSONResponse:
@@ -927,6 +943,13 @@ class LocalStream:
                         audio_frame,
                         num_samples,
                     )
+
+                # Apply output gain and clip to prevent overflow
+                gain = get_gain_linear()
+                if gain != 1.0:
+                    import numpy as np
+
+                    audio_frame = np.clip(audio_frame * gain, -1.0, 1.0)
 
                 self._robot.media.push_audio_sample(audio_frame)
 
