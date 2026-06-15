@@ -9,6 +9,7 @@ from typing import List
 from pathlib import Path
 
 from .config import USER_PERSONALITIES_DIRNAME, config, get_default_voice_for_backend
+from .prompts import DEFAULT_GREETING_PROMPT
 from .tools.tool_constants import SystemTool
 
 
@@ -83,6 +84,20 @@ def read_tools_for(name: str) -> str:
         return ""
 
 
+def read_greeting_for(name: str) -> str:
+    """Read the greeting.txt content for the given profile name."""
+    try:
+        profile_name = "default" if name == DEFAULT_OPTION else name
+        target = resolve_profile_dir(profile_name) / "greeting.txt"
+        if target.exists():
+            greeting = target.read_text(encoding="utf-8").strip()
+            if greeting:
+                return greeting
+        return DEFAULT_GREETING_PROMPT
+    except Exception:
+        return DEFAULT_GREETING_PROMPT
+
+
 def available_tools_for(selected: str) -> List[str]:
     """List available tool modules for the given profile selection."""
     shared: List[str] = []
@@ -105,10 +120,18 @@ def available_tools_for(selected: str) -> List[str]:
     return sorted(set(shared + local))
 
 
-def _write_profile(sanitized_name: str, instructions: str, tools_text: str, voice: str | None = None) -> None:
+def _write_profile(
+    sanitized_name: str,
+    instructions: str,
+    tools_text: str,
+    voice: str | None = None,
+    greeting: str | None = None,
+) -> None:
     default_voice = get_default_voice_for_backend()
     target_dir = config.user_personalities_root() / sanitized_name
     target_dir.mkdir(parents=True, exist_ok=True)
     (target_dir / "instructions.txt").write_text(instructions.strip() + "\n", encoding="utf-8")
     (target_dir / "tools.txt").write_text((tools_text or "").strip() + "\n", encoding="utf-8")
     (target_dir / "voice.txt").write_text((voice or default_voice).strip() + "\n", encoding="utf-8")
+    if greeting is not None:
+        (target_dir / "greeting.txt").write_text(greeting.strip() + "\n", encoding="utf-8")

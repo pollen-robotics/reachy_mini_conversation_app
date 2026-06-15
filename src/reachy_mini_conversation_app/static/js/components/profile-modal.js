@@ -1,4 +1,4 @@
-/** Modal to collect name + instructions for a new custom personality. Returns { name, instructions } or null. */
+/** Modal to collect fields for a new custom personality. Returns { name, instructions, greeting } or null. */
 
 import { h } from "../ui.js";
 
@@ -6,7 +6,7 @@ const NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
 /**
  * @param {{ signal?: AbortSignal }} [options]
- * @returns {Promise<{ name: string, instructions: string }|null>}
+ * @returns {Promise<{ name: string, instructions: string, greeting: string }|null>}
  */
 export function openCustomProfileModal({ signal } = {}) {
   return new Promise((resolve) => {
@@ -78,6 +78,7 @@ export function openCustomProfileModal({ signal } = {}) {
       const formData = new FormData(event.target);
       const name = String(formData.get("name") || "").trim();
       const instructions = String(formData.get("instructions") || "").trim();
+      const greeting = String(formData.get("greeting") || "").trim();
 
       if (!name) return showError(errorBox, "Please pick a name.");
       if (!NAME_PATTERN.test(name)) {
@@ -85,7 +86,7 @@ export function openCustomProfileModal({ signal } = {}) {
       }
       if (!instructions) return showError(errorBox, "Please write some instructions.");
 
-      close({ name, instructions });
+      close({ name, instructions, greeting });
     });
   });
 }
@@ -146,6 +147,21 @@ function buildDialog() {
             "You are a calm, slow-speaking zen guide. Pause between sentences. Encourage the user to breathe.",
           class: "modal__textarea",
         })
+      ),
+      h(
+        "label",
+        { class: "modal__field" },
+        h("span", { class: "modal__label" }, "Startup greeting prompt"),
+        h(
+          "textarea",
+          {
+            name: "greeting",
+            rows: "3",
+            placeholder: "Start the conversation with a short greeting in character.",
+            class: "modal__textarea",
+          },
+          "Start the conversation with one short greeting in character. Vary the wording each time."
+        )
       ),
       h("p", { class: "modal__error", role: "alert", "aria-live": "polite" }),
       h(

@@ -31,7 +31,11 @@ from reachy_mini_conversation_app.config import (
     DEFAULT_VOICE_BY_BACKEND,
     config,
 )
-from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
+from reachy_mini_conversation_app.prompts import (
+    get_session_voice,
+    get_session_instructions,
+    get_session_greeting_prompt,
+)
 from reachy_mini_conversation_app.idle_policy import start_idle_tool_call
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
@@ -182,6 +186,7 @@ class GeminiLiveHandler(ConversationHandler):
         self._pending_user_transcript_chunks: list[str] = []
         self._pending_assistant_transcript_chunks: list[str] = []
         self._listening_state = False
+        self._startup_greeting_sent = False
 
     def copy(self) -> "GeminiLiveHandler":
         """Return a fresh handler, preserving deps and voice override."""
@@ -437,6 +442,35 @@ class GeminiLiveHandler(ConversationHandler):
 
             logger.info("Started background tool: %s (id=%s, call_id=%s)", tool_name, bg_tool.tool_id, call_id)
 
+    async def _send_startup_greeting_prompt(self) -> None:
+        """Prompt Gemini to open the conversation once the live session is ready."""
+        if self._startup_greeting_sent or not self.session:
+            return
+
+        greeting_prompt = get_session_greeting_prompt(self.instance_path).strip()
+        if not greeting_prompt:
+            self._startup_greeting_sent = True
+            return
+
+        send_client_content = getattr(self.session, "send_client_content", None)
+        if not callable(send_client_content):
+            logger.warning("Gemini session does not support send_client_content; startup greeting skipped")
+            return
+
+        try:
+            await send_client_content(
+                turns=types.Content(
+                    role="user",
+                    parts=[types.Part(text=greeting_prompt)],
+                ),
+                turn_complete=True,
+            )
+            self._startup_greeting_sent = True
+            self.last_activity_time = time.monotonic()
+            logger.info("Queued Gemini startup greeting prompt")
+        except Exception as e:
+            logger.warning("Failed to queue Gemini startup greeting prompt: %s", e)
+
     async def _handle_tool_result(self, bg_tool: ToolNotification) -> None:
         """Process the result of a completed tool and send it back to Gemini."""
         if bg_tool.error is not None:
@@ -548,6 +582,8 @@ class GeminiLiveHandler(ConversationHandler):
                 # Start video sender if camera is available
                 if self.deps.camera_worker is not None:
                     video_task = asyncio.create_task(self._video_sender_loop(), name="gemini-video-sender")
+
+                await self._send_startup_greeting_prompt()
 
                 # session.receive() yields responses for the current turn then completes.
                 # We loop so the session stays alive across multiple conversation turns.

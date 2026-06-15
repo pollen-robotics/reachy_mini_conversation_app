@@ -31,6 +31,7 @@ from reachy_mini_conversation_app.config import (
     get_default_voice_for_backend,
     get_available_voices_for_backend,
 )
+from reachy_mini_conversation_app.prompts import get_session_greeting_prompt
 from reachy_mini_conversation_app.idle_policy import start_idle_tool_call
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
@@ -163,6 +164,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         self._turn_user_done_at: float | None = None
         self._turn_response_created_at: float | None = None
         self._turn_first_audio_at: float | None = None
+        self._startup_greeting_sent = False
 
     @staticmethod
     def _sanitize_tool_result_for_model(tool_name: str, tool_result: dict[str, Any]) -> dict[str, Any]:
@@ -484,6 +486,36 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         """
         await self._pending_responses.put(kwargs)
 
+    async def _send_startup_greeting_prompt(self) -> None:
+        """Prompt the model to open the conversation once the session is ready."""
+        if self._startup_greeting_sent or not self.connection:
+            return
+
+        greeting_prompt = get_session_greeting_prompt(self.instance_path).strip()
+        if not greeting_prompt:
+            self._startup_greeting_sent = True
+            return
+
+        try:
+            await self.connection.conversation.item.create(
+                item={
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": greeting_prompt,
+                        },
+                    ],
+                },
+            )
+            self._startup_greeting_sent = True
+            self._mark_activity("startup_greeting_prompt")
+            await self._safe_response_create()
+            logger.info("Queued startup greeting prompt")
+        except Exception as e:
+            logger.warning("Failed to queue startup greeting prompt: %s", e)
+
     async def _response_sender_loop(self) -> None:
         """Dedicated worker that sends ``response.create()`` calls serially.
 
@@ -728,6 +760,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
                 # Start the response sender worker
                 response_sender_task = asyncio.create_task(self._response_sender_loop(), name="response-sender")
+                await self._send_startup_greeting_prompt()
 
                 async for event in self.connection:
                     logger.debug("Realtime event: %s", event.type)

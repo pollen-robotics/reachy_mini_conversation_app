@@ -24,6 +24,7 @@ from .personality import (
     _sanitize_name,
     _write_profile,
     read_tools_for,
+    read_greeting_for,
     list_personalities,
     available_tools_for,
     resolve_profile_dir,
@@ -97,6 +98,7 @@ def mount_personality_routes(
     def _load(name: str) -> dict:  # type: ignore
         instr = read_instructions_for(name)
         tools_txt = read_tools_for(name)
+        greeting = read_greeting_for(name)
         voice = get_default_voice_for_backend()
         uses_default_voice = True
         if name != DEFAULT_OPTION:
@@ -110,6 +112,7 @@ def mount_personality_routes(
         enabled = [ln.strip() for ln in tools_txt.splitlines() if ln.strip() and not ln.strip().startswith("#")]
         return {
             "instructions": instr,
+            "greeting": greeting,
             "tools_text": tools_txt,
             "voice": voice,
             "uses_default_voice": uses_default_voice,
@@ -126,6 +129,7 @@ def mount_personality_routes(
             raw = {}
         name = str(raw.get("name", ""))
         instructions = str(raw.get("instructions", ""))
+        greeting = str(raw["greeting"]) if raw.get("greeting") is not None else None
         tools_text = str(raw.get("tools_text", ""))
         voice = (
             str(raw.get("voice", get_default_voice_for_backend()))
@@ -138,13 +142,20 @@ def mount_personality_routes(
             return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)  # type: ignore
         try:
             logger.info(
-                "save: name=%r voice=%r instr_len=%d tools_len=%d",
+                "save: name=%r voice=%r instr_len=%d greeting_len=%d tools_len=%d",
                 sanitized_name,
                 voice,
                 len(instructions),
+                len(greeting or ""),
                 len(tools_text),
             )
-            _write_profile(sanitized_name, instructions, tools_text, voice or get_default_voice_for_backend())
+            _write_profile(
+                sanitized_name,
+                instructions,
+                tools_text,
+                voice or get_default_voice_for_backend(),
+                greeting,
+            )
             value = f"user_personalities/{sanitized_name}"
             choices = [DEFAULT_OPTION, *list_personalities()]
             return {"ok": True, "value": value, "choices": choices}

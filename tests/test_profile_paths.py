@@ -12,6 +12,7 @@ from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY, conf
 from reachy_mini_conversation_app.personality import (
     DEFAULT_OPTION,
     read_tools_for,
+    read_greeting_for,
     list_personalities,
     resolve_profile_dir,
     read_instructions_for,
@@ -99,6 +100,41 @@ def test_session_voice_defaults_follow_selected_backend(monkeypatch: pytest.Monk
     monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
 
     assert prompts_mod.get_session_voice() == "Kore"
+
+
+def test_session_greeting_prompt_loads_from_selected_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Profile greeting.txt should steer the startup greeting prompt."""
+    profile_dir = tmp_path / "friendly"
+    profile_dir.mkdir()
+    (profile_dir / "instructions.txt").write_text("test instructions\n", encoding="utf-8")
+    (profile_dir / "greeting.txt").write_text("Greet me like a tiny stage host.\n", encoding="utf-8")
+
+    monkeypatch.setattr(config, "PROFILES_DIRECTORY", tmp_path)
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "friendly")
+
+    assert prompts_mod.get_session_greeting_prompt() == "Greet me like a tiny stage host."
+
+
+def test_headless_profile_write_can_store_greeting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """New headless profiles can persist a greeting prompt next to instructions/tools/voice."""
+    monkeypatch.setattr(config, "INSTANCE_PATH", tmp_path)
+
+    headless_mod._write_profile(
+        "with_greeting",
+        "test instructions",
+        "",
+        greeting="Open with a quick astronomy joke.",
+    )
+
+    greeting_file = tmp_path / "user_personalities" / "with_greeting" / "greeting.txt"
+    assert greeting_file.read_text(encoding="utf-8") == "Open with a quick astronomy joke.\n"
+    assert read_greeting_for("user_personalities/with_greeting") == "Open with a quick astronomy joke."
 
 
 def test_headless_profile_write_defaults_voice_at_call_time(

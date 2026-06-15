@@ -13,6 +13,12 @@ logger = logging.getLogger(__name__)
 PROMPTS_LIBRARY_DIRECTORY = Path(__file__).parent / "prompts"
 INSTRUCTIONS_FILENAME = "instructions.txt"
 VOICE_FILENAME = "voice.txt"
+GREETING_FILENAME = "greeting.txt"
+
+DEFAULT_GREETING_PROMPT = (
+    "Start the conversation now with a brief, spontaneous greeting in character. "
+    "Keep it to one sentence, invite the user in naturally, and vary the wording each time."
+)
 
 
 def _expand_prompt_includes(content: str) -> str:
@@ -114,3 +120,18 @@ def get_session_voice(default: str | None = None) -> str:
     except Exception:
         pass
     return fallback
+
+
+def get_session_greeting_prompt(instance_path: str | Path | None = None) -> str:
+    """Resolve the startup greeting prompt for the selected profile."""
+    _ = instance_path
+    profile = config.REACHY_MINI_CUSTOM_PROFILE or "default"
+    try:
+        greeting_file = config.resolve_profile_dir(profile) / GREETING_FILENAME
+        if greeting_file.exists():
+            greeting = greeting_file.read_text(encoding="utf-8").strip()
+            if greeting:
+                return _expand_prompt_includes(greeting)
+    except Exception as e:
+        logger.warning("Failed to load greeting prompt from profile %r: %s", profile, e)
+    return DEFAULT_GREETING_PROMPT

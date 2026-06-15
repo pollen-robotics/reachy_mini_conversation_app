@@ -261,7 +261,7 @@ For normal usage, select a profile from the UI and save it for startup. That sel
 
 If no startup settings have been saved yet, you can still seed startup from the environment with `REACHY_MINI_CUSTOM_PROFILE=<name>` to load `profiles/<name>/`. If neither is set, the `default` profile is used.
 
-Each profile should include `instructions.txt` (prompt text). `tools.txt` (list of allowed tools) is recommended. If missing for a non-default profile, the app falls back to `profiles/default/tools.txt`. Profiles can optionally contain custom tool implementations.
+Each profile should include `instructions.txt` (prompt text). `greeting.txt` is optional and controls how the robot should start the conversation after the backend connects. `tools.txt` (list of allowed tools) is recommended. If missing for a non-default profile, the app falls back to `profiles/default/tools.txt`. Profiles can optionally contain custom tool implementations.
 
 **Custom instructions:**
 
@@ -271,6 +271,14 @@ Write plain-text prompts in `instructions.txt`. To reuse shared prompt pieces, a
 [behaviors/silent_robot]
 ```
 Each placeholder pulls the matching file under `src/reachy_mini_conversation_app/prompts/` (nested paths allowed).
+
+**Startup greeting:**
+
+On startup, once the realtime backend is connected and ready, the app sends the active profile's `greeting.txt` as an internal text turn so the model opens with a fresh spoken greeting. Keep this file as a short instruction, not a fixed script, for example:
+```
+Greet me warmly in one sentence, in character, and vary the wording each time.
+```
+If `greeting.txt` is missing, the app uses the built-in default greeting prompt.
 
 **Enabling tools:**
 
@@ -294,7 +302,7 @@ Custom tools must subclass `reachy_mini_conversation_app.tools.core_tools.Tool` 
 
 When running with `--ui`, the Home view lists available profiles (folders under `profiles/`) plus the built-in default:
 - Tap a card to apply that personality and start talking.
-- Tap "Custom" to create a new personality by entering a name and instructions. It copies `tools.txt` from the `default` profile and stores the files under `user_personalities/<name>/` in the app instance directory (next to `.env`/`startup_settings.json`).
+- Tap "Custom" to create a new personality by entering a name, instructions, and an optional startup greeting prompt. It copies `tools.txt` from the `default` profile and stores the files under `user_personalities/<name>/` in the app instance directory (next to `.env`/`startup_settings.json`).
 
 Note: switching a personality reloads its instructions and tools in place via a quick backend reconnect — no app restart. Editing the active profile's files on disk needs a re-select (or restart) to apply.
 
@@ -327,6 +335,7 @@ external_content/
 ├── external_profiles/
 │   └── my_profile/
 │       ├── instructions.txt
+│       ├── greeting.txt     # optional startup greeting prompt
 │       ├── tools.txt        # optional (see fallback behavior below)
 │       └── voice.txt        # optional
 ├── external_tools/

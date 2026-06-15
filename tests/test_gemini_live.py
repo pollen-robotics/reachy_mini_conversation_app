@@ -56,6 +56,7 @@ class _FakeSession:
         self._stop_event = stop_event
         self.realtime_inputs: list[dict[str, Any]] = []
         self.tool_responses: list[dict[str, Any]] = []
+        self.client_contents: list[dict[str, Any]] = []
 
     async def close(self) -> None:
         self._stop_event.set()
@@ -66,6 +67,10 @@ class _FakeSession:
 
     async def send_tool_response(self, **kwargs: Any) -> None:
         self.tool_responses.append(kwargs)
+        return None
+
+    async def send_client_content(self, **kwargs: Any) -> None:
+        self.client_contents.append(kwargs)
         return None
 
     async def receive(self) -> AsyncIterator[SimpleNamespace]:
@@ -179,6 +184,36 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
     assert any(isinstance(output, tuple) for output in outputs), "audio output was not emitted"
     movement_manager.set_listening.assert_has_calls([call(True), call(False)])
     assert movement_manager.set_listening.call_args_list[-1] == call(False)
+
+
+@pytest.mark.asyncio
+async def test_gemini_live_session_queues_startup_greeting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Gemini sessions should send the profile greeting as the first text turn."""
+    monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
+    monkeypatch.setattr(gemini_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(
+        gemini_mod, "get_session_greeting_prompt", lambda _instance_path=None: "Greet me like a tiny stage host."
+    )
+
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = GeminiLiveHandler(deps)
+    monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
+    monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
+    session = _FakeSession([], handler._stop_event)
+    handler.client = _FakeLiveClient(session)
+
+    task = asyncio.create_task(handler._run_live_session())
+    await _wait_for(lambda: len(session.client_contents) == 1)
+
+    handler._stop_event.set()
+    await asyncio.wait_for(task, timeout=1.0)
+
+    sent = session.client_contents[0]
+    assert sent["turn_complete"] is True
+    assert sent["turns"].role == "user"
+    assert sent["turns"].parts[0].text == "Greet me like a tiny stage host."
+    assert handler._startup_greeting_sent is True
 
 
 @pytest.mark.asyncio

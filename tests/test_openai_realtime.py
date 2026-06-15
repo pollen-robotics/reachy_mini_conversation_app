@@ -199,6 +199,7 @@ async def test_non_idle_tool_call_does_not_queue_progress_response(monkeypatch: 
 
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
     handler = OpenaiRealtimeHandler(deps)
+    handler._startup_greeting_sent = True
     fake_client = FakeClient()
     handler.client = fake_client
     safe_response_create = AsyncMock()
@@ -237,6 +238,92 @@ async def test_completed_user_transcript_resets_idle_state(monkeypatch: Any) -> 
 
     assert handler.is_idle_tool_call is False
     assert handler.last_activity_time > 1.0
+
+
+@pytest.mark.asyncio
+async def test_run_realtime_session_queues_startup_greeting(monkeypatch: Any) -> None:
+    """OpenAI-compatible sessions should inject a profile-driven first turn after connect."""
+    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
+    monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(
+        base_rt_mod, "get_session_greeting_prompt", lambda _instance_path=None: "Greet the user as a comet captain."
+    )
+
+    created_items: list[dict[str, Any]] = []
+
+    class FakeSession:
+        async def update(self, **_kw: Any) -> None:
+            pass
+
+    class FakeInputAudioBuffer:
+        async def append(self, **_kw: Any) -> None:
+            pass
+
+    class FakeItem:
+        async def create(self, **kwargs: Any) -> None:
+            created_items.append(kwargs["item"])
+
+    class FakeConversation:
+        item = FakeItem()
+
+    class FakeResponse:
+        async def create(self, **_kw: Any) -> None:
+            pass
+
+        async def cancel(self, **_kw: Any) -> None:
+            pass
+
+    class FakeConn:
+        session = FakeSession()
+        input_audio_buffer = FakeInputAudioBuffer()
+        conversation = FakeConversation()
+        response = FakeResponse()
+
+        async def __aenter__(self) -> "FakeConn":
+            return self
+
+        async def __aexit__(self, *_args: Any) -> bool:
+            return False
+
+        async def close(self) -> None:
+            pass
+
+        def __aiter__(self) -> "FakeConn":
+            return self
+
+        async def __anext__(self) -> Any:
+            raise StopAsyncIteration
+
+    class FakeRealtime:
+        def connect(self, **_kw: Any) -> FakeConn:
+            return FakeConn()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.realtime = FakeRealtime()
+
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = OpenaiRealtimeHandler(deps)
+    handler.client = FakeClient()
+    monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
+    monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
+
+    await handler._run_realtime_session()
+
+    assert handler._startup_greeting_sent is True
+    assert created_items == [
+        {
+            "type": "message",
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": "Greet the user as a comet captain.",
+                }
+            ],
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -703,6 +790,7 @@ async def test_run_realtime_session_propagates_session_update_failure(monkeypatc
             self.realtime = FakeRealtime()
 
     handler = rt_mod.OpenaiRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler._startup_greeting_sent = True
     handler.client = FakeClient()
 
     with pytest.raises(RuntimeError, match="invalid session config"):
@@ -887,6 +975,7 @@ async def test_response_sender_retries_when_active_response_error_uses_type_only
             self.realtime = FakeRealtime()
 
     handler = rt_mod.OpenaiRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler._startup_greeting_sent = True
     handler.client = FakeClient()
 
     session_task = asyncio.create_task(handler._run_realtime_session())
@@ -1110,6 +1199,7 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
 
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
     handler = rt_mod.OpenaiRealtimeHandler(deps)
+    handler._startup_greeting_sent = True
     handler_ref.append(handler)
 
     asyncio.create_task(handler.start_up())
