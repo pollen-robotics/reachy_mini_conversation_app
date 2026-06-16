@@ -445,20 +445,22 @@ class LocalStream:
             return get_default_voice_for_backend(get_backend_choice())
 
     async def change_voice(self, voice: str) -> str:
-        """Change the voice by rebuilding the active backend from LocalStream."""
-        available_voices = get_available_voices_for_backend(get_backend_choice())
-        default_voice = get_default_voice_for_backend(get_backend_choice())
-        resolved_voice = voice if voice in available_voices else default_voice
-        if resolved_voice != voice:
-            logger.warning(
-                "Ignoring unsupported voice %r for backend=%r; using %r",
-                voice,
-                get_backend_choice(),
-                resolved_voice,
-            )
-        self._voice_override = resolved_voice
-        await self.request_backend_restart("voice_changed")
-        return f"Voice changed to {resolved_voice}."
+        """Change the voice through the active handler without rebuilding the backend."""
+        try:
+            status = await self.handler.change_voice(voice)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error("Error changing voice to %r: %s", voice, e)
+            return f"Failed to change voice: {e}"
+
+        try:
+            current_voice = self.handler.get_current_voice()
+            if isinstance(current_voice, str) and current_voice.strip():
+                self._voice_override = current_voice
+        except Exception as e:
+            logger.debug("Could not sync LocalStream voice override after voice change: %s", e)
+        return status
 
     def _init_settings_ui_if_needed(self) -> None:
         """Attach minimal settings UI to the settings app.

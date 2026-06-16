@@ -749,6 +749,22 @@ async def test_apply_personality_propagates_restart_cancellation(monkeypatch: py
         await stream.apply_personality("sorry_bro")
 
 
+@pytest.mark.asyncio
+async def test_local_stream_change_voice_delegates_without_backend_restart() -> None:
+    """LocalStream voice changes should update the active handler without rebuilding it."""
+    handler = MagicMock()
+    handler.change_voice = AsyncMock(return_value="Voice changed to Serena.")
+    handler.get_current_voice = MagicMock(return_value="Serena")
+    stream = LocalStream(handler, MagicMock())
+
+    status = await stream.change_voice("Serena")
+
+    assert status == "Voice changed to Serena."
+    handler.change_voice.assert_awaited_once_with("Serena")
+    assert stream._voice_override == "Serena"
+    assert not stream._restart_requested.is_set()
+
+
 def test_local_stream_persist_personality_stores_voice_override(tmp_path) -> None:
     """Persisting startup settings should write both profile and voice override."""
     stream = LocalStream(MagicMock(), MagicMock(), instance_path=str(tmp_path))

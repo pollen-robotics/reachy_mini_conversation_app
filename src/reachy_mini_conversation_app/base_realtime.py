@@ -274,16 +274,27 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         )
 
     async def change_voice(self, voice: str) -> str:
-        """Change only the voice and restart the session."""
+        """Change only the voice, updating the active session when possible."""
         default_voice = get_default_voice_for_backend(self.BACKEND_PROVIDER)
-        resolved_voice = self._resolve_backend_voice(voice, source="requested voice", fallback=default_voice)
+        resolved_voice = (
+            self._resolve_backend_voice(voice, source="requested voice", fallback=default_voice) or default_voice
+        )
         self._voice_override = resolved_voice
-        if getattr(self, "client", None) is not None:
+        if self.connection is not None:
             try:
-                await self._restart_session()
+                await self.connection.session.update(
+                    session=RealtimeSessionCreateRequestParam(
+                        type="realtime",
+                        audio=RealtimeAudioConfigParam(
+                            output=RealtimeAudioConfigOutputParam(
+                                voice=resolved_voice,
+                            ),
+                        ),
+                    ),
+                )
                 return f"Voice changed to {resolved_voice}."
             except Exception as e:
-                logger.warning("Failed to restart session for voice change: %s", e)
+                logger.warning("Failed to update live session for voice change: %s", e)
                 return "Voice change failed. Will take effect on next connection."
         return "Voice changed. Will take effect on next connection."
 
