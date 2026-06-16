@@ -110,13 +110,17 @@ def test_head_tracker_skips_new_frame_until_timed_out_reply_is_drained(
 
     tracker = YoloHeadTrackerProcess(request_timeout=0.01)
     try:
-        frame = np.zeros((1024, 1024, 3), dtype=np.uint8)
+        frame = np.zeros((12, 20, 3), dtype=np.uint8)
 
         eye_center, roll = tracker.get_head_position(frame)
         assert eye_center is None
         assert roll is None
 
-        time.sleep(0.1)
+        deadline = time.monotonic() + 1.0
+        while tracker._messages.empty() and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert not tracker._messages.empty()
+
         blocked_started = time.monotonic()
         eye_center, roll = tracker.get_head_position(frame)
         blocked_elapsed = time.monotonic() - blocked_started
