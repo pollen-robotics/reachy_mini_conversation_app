@@ -336,6 +336,40 @@ async def test_tool_result_followup_uses_bare_response_create(monkeypatch: Any) 
 
 
 @pytest.mark.asyncio
+async def test_tool_result_waits_for_response_done_before_model_output(monkeypatch: Any) -> None:
+    """Tool output should wait until the function-call item is committed by response.done."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = OpenaiRealtimeHandler(deps)
+
+    fake_item = SimpleNamespace(create=AsyncMock())
+    handler.connection = SimpleNamespace(conversation=SimpleNamespace(item=fake_item))
+    handler._response_done_event.clear()
+    safe_response_create = AsyncMock()
+    monkeypatch.setattr(handler, "_safe_response_create", safe_response_create)
+
+    task = asyncio.create_task(
+        handler._handle_tool_result(
+            ToolNotification(
+                id="call_weather",
+                tool_name="weather",
+                is_idle_tool_call=False,
+                status=ToolState.COMPLETED,
+                result={"forecast": "sunny"},
+            )
+        )
+    )
+    await asyncio.sleep(0)
+
+    fake_item.create.assert_not_awaited()
+
+    handler._response_done_event.set()
+    await asyncio.wait_for(task, timeout=1.0)
+
+    fake_item.create.assert_awaited_once()
+    safe_response_create.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
 async def test_user_speech_events_reset_idle_timer(monkeypatch: Any) -> None:
     """User speech/transcription events should postpone idle behavior."""
     movement_manager = MagicMock()
