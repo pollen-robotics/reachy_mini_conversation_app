@@ -336,6 +336,69 @@ async def test_tool_result_followup_uses_bare_response_create(monkeypatch: Any) 
 
 
 @pytest.mark.asyncio
+async def test_tool_result_waits_for_response_done_before_model_output(monkeypatch: Any) -> None:
+    """Tool output should wait until the function-call item is committed by response.done."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = OpenaiRealtimeHandler(deps)
+
+    fake_item = SimpleNamespace(create=AsyncMock())
+    handler.connection = SimpleNamespace(conversation=SimpleNamespace(item=fake_item))
+    handler._response_done_event.clear()
+    safe_response_create = AsyncMock()
+    monkeypatch.setattr(handler, "_safe_response_create", safe_response_create)
+
+    task = asyncio.create_task(
+        handler._handle_tool_result(
+            ToolNotification(
+                id="call_weather",
+                tool_name="weather",
+                is_idle_tool_call=False,
+                status=ToolState.COMPLETED,
+                result={"forecast": "sunny"},
+            )
+        )
+    )
+    await asyncio.sleep(0)
+
+    fake_item.create.assert_not_awaited()
+
+    handler._response_done_event.set()
+    await asyncio.wait_for(task, timeout=1.0)
+
+    fake_item.create.assert_awaited_once()
+    safe_response_create.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_tool_result_timeout_does_not_force_response_done(monkeypatch: Any) -> None:
+    """A tool-result wait timeout should not lie about response lifecycle state."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = OpenaiRealtimeHandler(deps)
+
+    fake_item = SimpleNamespace(create=AsyncMock())
+    handler.connection = SimpleNamespace(conversation=SimpleNamespace(item=fake_item))
+    handler._response_done_event.clear()
+    safe_response_create = AsyncMock()
+    monkeypatch.setattr(handler, "_safe_response_create", safe_response_create)
+    monkeypatch.setattr(handler, "_response_done_timeout", lambda: 0.01)
+
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="call_weather",
+            tool_name="weather",
+            is_idle_tool_call=False,
+            status=ToolState.COMPLETED,
+            result={"forecast": "sunny"},
+        )
+    )
+
+    assert not handler._response_done_event.is_set()
+    fake_item.create.assert_not_awaited()
+    safe_response_create.assert_not_awaited()
+    assert not handler.output_queue.empty()
+
+
+@pytest.mark.asyncio
 async def test_user_speech_events_reset_idle_timer(monkeypatch: Any) -> None:
     """User speech/transcription events should postpone idle behavior."""
     movement_manager = MagicMock()
@@ -881,7 +944,7 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
 
     # 400 near-simultaneous tool results coalesce into far fewer response.create sends.
     N_TOOL_RESULTS = 400
-    REJECT_EVERY = 4  # deterministically reject every 4th send to exercise retry
+    INTENTIONAL_REJECTIONS = 1  # deterministically exercise the retry path even when sends coalesce heavily
 
     response_create_log: list[tuple[int, dict[str, Any]]] = []
     handler_ref: list[rt_mod.OpenaiRealtimeHandler] = []
@@ -923,6 +986,7 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
         def __init__(self) -> None:
             self._call_count = 0
             self._serialization_violations: list[int] = []
+            self._intentional_rejections_remaining = INTENTIONAL_REJECTIONS
 
         async def create(self, **kwargs: Any) -> None:
             self._call_count += 1
@@ -951,9 +1015,12 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
                 await event_queue.put(FakeEvent("response.done", response=MagicMock()))
                 return
 
-            # Intentional rejections (simulating a race where another
-            # response sneaks in right after our check).
-            if n % REJECT_EVERY == 0:
+            # Intentional rejection (simulating a race where another response
+            # sneaks in right after our check). Rejecting the first eligible
+            # send keeps the retry assertion deterministic on event loops that
+            # coalesce the tool-result burst into only a few response.create calls.
+            if self._intentional_rejections_remaining > 0:
+                self._intentional_rejections_remaining -= 1
                 await event_queue.put(
                     FakeEvent(
                         "error",
