@@ -893,7 +893,7 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
 
     # 400 near-simultaneous tool results coalesce into far fewer response.create sends.
     N_TOOL_RESULTS = 400
-    REJECT_EVERY = 4  # deterministically reject every 4th send to exercise retry
+    INTENTIONAL_REJECTIONS = 1  # deterministically exercise the retry path even when sends coalesce heavily
 
     response_create_log: list[tuple[int, dict[str, Any]]] = []
     handler_ref: list[rt_mod.OpenaiRealtimeHandler] = []
@@ -935,6 +935,7 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
         def __init__(self) -> None:
             self._call_count = 0
             self._serialization_violations: list[int] = []
+            self._intentional_rejections_remaining = INTENTIONAL_REJECTIONS
 
         async def create(self, **kwargs: Any) -> None:
             self._call_count += 1
@@ -963,9 +964,12 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
                 await event_queue.put(FakeEvent("response.done", response=MagicMock()))
                 return
 
-            # Intentional rejections (simulating a race where another
-            # response sneaks in right after our check).
-            if n % REJECT_EVERY == 0:
+            # Intentional rejection (simulating a race where another response
+            # sneaks in right after our check). Rejecting the first eligible
+            # send keeps the retry assertion deterministic on event loops that
+            # coalesce the tool-result burst into only a few response.create calls.
+            if self._intentional_rejections_remaining > 0:
+                self._intentional_rejections_remaining -= 1
                 await event_queue.put(
                     FakeEvent(
                         "error",
