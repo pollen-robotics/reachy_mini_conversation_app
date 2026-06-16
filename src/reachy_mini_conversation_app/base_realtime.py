@@ -147,10 +147,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
         # Internal lifecycle flags
         self._connected_event: asyncio.Event = asyncio.Event()
-        self._realtime_session_finished_event: asyncio.Event = asyncio.Event()
-        self._realtime_session_finished_event.set()
-        self._session_restart_requested = False
-        self._session_restart_refresh_client: bool | None = None
 
         # Background tool manager
         self.tool_manager = BackgroundToolManager()
@@ -250,10 +246,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
     def _get_session_config(self, tool_specs: list[dict[str, Any]]) -> RealtimeSessionCreateRequestParam:
         """Return the backend-specific realtime session config."""
 
-    def _refresh_client_on_personality_restart(self) -> bool:
-        """Return whether personality restarts need a freshly built realtime client."""
-        return False
-
     async def _cancel_partial_transcript_task(self) -> None:
         if self.partial_transcript_task and not self.partial_transcript_task.done():
             self.partial_transcript_task.cancel()
@@ -330,8 +322,8 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         """Apply a new personality (profile) at runtime if possible.
 
         - Updates the global config's selected profile for subsequent calls.
-        - If a realtime connection is active, reconnects the current endpoint
-          so backend conversation history starts fresh with the new tools.
+        - If a realtime connection is active, sends a session.update with the
+          freshly resolved instructions so the change takes effect immediately.
 
         Returns a short status message for UI feedback.
         """
@@ -347,8 +339,8 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             )
 
             try:
-                tool_specs = self._get_active_tool_specs()
-                _ = self._get_session_config(tool_specs)
+                instructions = self._get_session_instructions()
+                voice = self.get_current_voice()
             except BaseException as e:  # catch SystemExit from prompt loader without crashing
                 set_custom_profile(previous_profile)
                 logger.error("Failed to resolve personality content: %s", e)
@@ -356,13 +348,26 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
             if self.connection is not None:
                 try:
-                    await self._restart_session(
-                        refresh_client=self._refresh_client_on_personality_restart(),
+                    await self.connection.session.update(
+                        session=RealtimeSessionCreateRequestParam(
+                            type="realtime",
+                            instructions=instructions,
+                            audio=RealtimeAudioConfigParam(
+                                output=RealtimeAudioConfigOutputParam(
+                                    voice=voice,
+                                ),
+                            ),
+                        ),
                     )
-                    logger.info("Applied personality via session reconnect: %s", profile or "built-in default")
+                    logger.info("Applied personality via live update: %s", profile or "built-in default")
+                except Exception as e:
+                    logger.warning("Live update failed; will restart session: %s", e)
+
+                try:
+                    await self._restart_session()
                     return "Applied personality and restarted realtime session."
                 except Exception as e:
-                    logger.warning("Session reconnect failed for personality change: %s", e)
+                    logger.warning("Failed to restart session after apply: %s", e)
                     return "Applied personality. Will take effect on next connection."
             else:
                 logger.info(
@@ -426,19 +431,12 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         self.client = await self._build_realtime_client()
 
         max_attempts = 3
-        attempt = 1
-        while attempt <= max_attempts:
+        for attempt in range(1, max_attempts + 1):
             try:
                 await self._run_realtime_session()
-                if await self._consume_session_restart_request():
-                    attempt = 1
-                    continue
-                # Normal exit from the session, stop retrying.
+                # Normal exit from the session, stop retrying
                 return
             except self._connection_closed_errors() as e:
-                if await self._consume_session_restart_request():
-                    attempt = 1
-                    continue
                 # Abrupt close (e.g., "no close frame received or sent") → retry
                 logger.warning("Realtime websocket closed unexpectedly (attempt %d/%d): %s", attempt, max_attempts, e)
                 if attempt < max_attempts:
@@ -450,7 +448,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                     delay = base_delay + jitter
                     logger.info("Retrying in %.1f seconds...", delay)
                     await asyncio.sleep(delay)
-                    attempt += 1
                     continue
                 raise
             finally:
@@ -461,56 +458,33 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 except Exception:
                     pass
 
-    async def _consume_session_restart_request(self) -> bool:
-        """Return whether the active startup loop should reconnect intentionally."""
-        if not self._session_restart_requested:
-            return False
+    async def _restart_session(self) -> None:
+        """Force-close the current session and start a fresh one in background.
 
-        refresh_client = self._session_restart_refresh_client
-        self._session_restart_requested = False
-        self._session_restart_refresh_client = None
-        if refresh_client is None:
-            refresh_client = self.REFRESH_CLIENT_ON_RECONNECT
-        if refresh_client:
-            self.client = await self._build_realtime_client()
-        return True
-
-    async def _restart_session(self, *, refresh_client: bool | None = None) -> None:
-        """Force-close the current session and wait for the startup loop to reconnect."""
+        Does not block the caller while the new session is establishing.
+        """
         try:
+            if self.connection is not None:
+                try:
+                    await self.connection.close()
+                except Exception:
+                    pass
+                finally:
+                    self.connection = None
+
+            # Ensure we have a client (start_up must have run once)
             if getattr(self, "client", None) is None:
-                self._session_restart_requested = False
-                self._session_restart_refresh_client = None
                 logger.warning("Cannot restart: realtime client not initialized yet.")
                 return
 
-            if self.connection is None:
-                # No active websocket means there is nothing to close and no
-                # startup loop exit to consume a restart request. The current
-                # config will be used by the next normal session startup.
-                self._session_restart_requested = False
-                self._session_restart_refresh_client = None
-                logger.info("No active realtime connection to restart.")
-                return
-
-            self._session_restart_requested = True
-            self._session_restart_refresh_client = refresh_client
+            # Fire-and-forget new session and wait briefly for connection
             try:
                 self._connected_event.clear()
             except Exception:
                 pass
-
-            try:
-                await self.connection.close()
-            except Exception:
-                pass
-            finally:
-                self.connection = None
-            try:
-                await asyncio.wait_for(self._realtime_session_finished_event.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
-                logger.warning("Timed out waiting for old realtime session cleanup; reconnecting anyway.")
-
+            if self.REFRESH_CLIENT_ON_RECONNECT:
+                self.client = await self._build_realtime_client()
+            asyncio.create_task(self._run_realtime_session(), name="realtime-session-restart")
             try:
                 await asyncio.wait_for(self._connected_event.wait(), timeout=5.0)
                 logger.info("Realtime session restarted and connected.")
@@ -749,7 +723,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
     async def _run_realtime_session(self) -> None:
         """Establish and manage a single realtime session."""
-        self._realtime_session_finished_event.clear()
         tool_specs = self._get_active_tool_specs()
         logger.info(
             "Tools to be used in conversation: %s",
@@ -992,7 +965,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
                 # Stop background tool manager tasks (listener + cleanup) in all paths.
                 await self.tool_manager.shutdown()
-                self._realtime_session_finished_event.set()
 
     # Microphone receive
     async def receive(self, frame: Tuple[int, NDArray[np.int16]]) -> None:

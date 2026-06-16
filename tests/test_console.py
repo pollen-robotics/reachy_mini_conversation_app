@@ -705,7 +705,7 @@ def test_headless_personality_routes_persist_startup_with_voice_override() -> No
     """Saving a startup personality should persist the active manual voice override."""
     app = FastAPI()
     handler = MagicMock()
-    handler.apply_personality = AsyncMock(return_value="Applied personality to current realtime session.")
+    handler.apply_personality = AsyncMock(return_value="Applied personality and restarted realtime session.")
     handler.get_current_voice = MagicMock(return_value="shimmer")
     persist_personality = MagicMock()
 
@@ -777,7 +777,7 @@ def test_headless_personality_routes_can_use_stream_callbacks() -> None:
     app = FastAPI()
     handler = MagicMock()
     handler.apply_personality = AsyncMock(return_value="handler should not be called")
-    apply_personality = AsyncMock(return_value="Applied personality to current realtime session.")
+    apply_personality = AsyncMock(return_value="Applied personality and restarting backend.")
     get_current_voice = MagicMock(return_value="cedar")
 
     loop = asyncio.new_event_loop()
@@ -804,7 +804,7 @@ def test_headless_personality_routes_can_use_stream_callbacks() -> None:
         response = TestClient(app).post("/personalities/apply?name=sorry_bro")
 
         assert response.status_code == 200
-        assert response.json()["status"] == "Applied personality to current realtime session."
+        assert response.json()["status"] == "Applied personality and restarting backend."
         apply_personality.assert_awaited_once_with("sorry_bro")
         handler.apply_personality.assert_not_awaited()
     finally:
@@ -814,40 +814,48 @@ def test_headless_personality_routes_can_use_stream_callbacks() -> None:
 
 
 @pytest.mark.asyncio
-async def test_apply_personality_propagates_handler_cancellation() -> None:
-    """Cancellation during handler personality updates should not be converted into a status string."""
-    handler = MagicMock()
+async def test_apply_personality_propagates_restart_cancellation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cancellation during backend restart should not be converted into a status string."""
+    monkeypatch.setattr("reachy_mini_conversation_app.config.set_custom_profile", lambda _profile: None)
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.prompts.get_session_instructions", lambda _instance_path=None: "instructions"
+    )
+    monkeypatch.setattr("reachy_mini_conversation_app.prompts.get_session_voice", lambda default: default)
 
-    async def cancel_apply(_profile: str | None) -> str:
+    stream = LocalStream(MagicMock(), MagicMock())
+
+    async def cancel_restart(_reason: str) -> None:
         raise asyncio.CancelledError
 
-    handler.apply_personality = cancel_apply
-    stream = LocalStream(handler, MagicMock())
+    monkeypatch.setattr(stream, "request_backend_restart", cancel_restart)
 
     with pytest.raises(asyncio.CancelledError):
         await stream.apply_personality("sorry_bro")
 
 
 @pytest.mark.asyncio
-async def test_local_stream_apply_personality_delegates_without_backend_restart() -> None:
-    """LocalStream personality changes should stop playback and use the active handler in place."""
+async def test_local_stream_apply_personality_restarts_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LocalStream personality changes should stop playback and request a backend restart."""
     events: list[str] = []
-
-    async def apply_personality(_profile: str | None) -> str:
-        events.append("apply")
-        return "Applied personality to current realtime session."
+    monkeypatch.setattr("reachy_mini_conversation_app.config.set_custom_profile", lambda _profile: None)
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.prompts.get_session_instructions", lambda _instance_path=None: "instructions"
+    )
+    monkeypatch.setattr("reachy_mini_conversation_app.prompts.get_session_voice", lambda default: default)
 
     handler = MagicMock()
-    handler.apply_personality = AsyncMock(side_effect=apply_personality)
     stream = LocalStream(handler, MagicMock())
     stream.clear_audio_queue = MagicMock(side_effect=lambda: events.append("clear"))
 
+    async def restart_backend(_reason: str) -> None:
+        events.append("restart")
+
+    monkeypatch.setattr(stream, "request_backend_restart", restart_backend)
+
     status = await stream.apply_personality("sorry_bro")
 
-    assert status == "Applied personality to current realtime session."
-    handler.apply_personality.assert_awaited_once_with("sorry_bro")
-    assert events == ["clear", "apply", "clear"]
-    assert not stream._restart_requested.is_set()
+    assert status == "Applied personality and restarting backend."
+    assert events == ["clear", "clear", "restart"]
 
 
 @pytest.mark.asyncio
