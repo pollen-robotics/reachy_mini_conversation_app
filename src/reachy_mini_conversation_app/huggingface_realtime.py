@@ -83,6 +83,10 @@ class HuggingFaceRealtimeHandler(BaseRealtimeHandler):
         """Return active tool specs for the current session dependencies."""
         return get_active_tool_specs(self.deps)
 
+    def _refresh_client_on_personality_restart(self) -> bool:
+        """Allocate a fresh deployed session URL when restarting for new tools."""
+        return get_hf_connection_selection().mode != HF_LOCAL_CONNECTION_MODE
+
     def _get_session_config(self, tool_specs: list[dict[str, Any]]) -> RealtimeSessionCreateRequestParam:
         """Return the Hugging Face OpenAI-compatible session config."""
         return RealtimeSessionCreateRequestParam(

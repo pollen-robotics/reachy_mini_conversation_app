@@ -250,6 +250,10 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
     def _get_session_config(self, tool_specs: list[dict[str, Any]]) -> RealtimeSessionCreateRequestParam:
         """Return the backend-specific realtime session config."""
 
+    def _refresh_client_on_personality_restart(self) -> bool:
+        """Return whether personality restarts need a freshly built realtime client."""
+        return False
+
     async def _cancel_partial_transcript_task(self) -> None:
         if self.partial_transcript_task and not self.partial_transcript_task.done():
             self.partial_transcript_task.cancel()
@@ -352,7 +356,9 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
             if self.connection is not None:
                 try:
-                    await self._restart_session(refresh_client=False)
+                    await self._restart_session(
+                        refresh_client=self._refresh_client_on_personality_restart(),
+                    )
                     logger.info("Applied personality via session reconnect: %s", profile or "built-in default")
                     return "Applied personality and restarted realtime session."
                 except Exception as e:

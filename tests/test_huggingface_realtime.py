@@ -526,8 +526,8 @@ async def test_build_realtime_client_does_not_send_openai_key_to_hf_allocator(mo
 
 
 @pytest.mark.asyncio
-async def test_apply_personality_restarts_hf_session_without_reallocating_endpoint(monkeypatch: Any) -> None:
-    """Live personality updates should reset history without going through the allocator again."""
+async def test_apply_personality_restarts_deployed_hf_session_with_fresh_allocation(monkeypatch: Any) -> None:
+    """Deployed HF personality restarts must get a fresh session-token URL."""
     monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "new instructions")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "Serena")
     monkeypatch.setattr(
@@ -543,6 +543,7 @@ async def test_apply_personality_restarts_hf_session_without_reallocating_endpoi
         ],
     )
     monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
+    monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "deployed")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", "https://lb.example.test/session")
 
     handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
@@ -553,11 +554,32 @@ async def test_apply_personality_restarts_hf_session_without_reallocating_endpoi
     result = await handler.apply_personality("example")
 
     assert result == "Applied personality and restarted realtime session."
-    restart.assert_awaited_once_with(refresh_client=False)
+    restart.assert_awaited_once_with(refresh_client=True)
     session = handler._get_session_config(handler._get_active_tool_specs())
     assert session["instructions"] == "new instructions"
     assert session["audio"]["output"]["voice"] == "Serena"
     assert [tool["name"] for tool in session["tools"]] == ["remember"]
+
+
+@pytest.mark.asyncio
+async def test_apply_personality_restarts_local_hf_session_without_refreshing_client(monkeypatch: Any) -> None:
+    """Local/direct HF personality restarts can reuse the same websocket endpoint."""
+    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "new instructions")
+    monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "Serena")
+    monkeypatch.setattr(hf_mod, "get_active_tool_specs", lambda _deps: [])
+    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
+    monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "local")
+    monkeypatch.setattr(config, "HF_REALTIME_WS_URL", "ws://127.0.0.1:8765/v1/realtime")
+
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.connection = MagicMock()
+    restart = AsyncMock(return_value=None)
+    monkeypatch.setattr(handler, "_restart_session", restart)
+
+    result = await handler.apply_personality("example")
+
+    assert result == "Applied personality and restarted realtime session."
+    restart.assert_awaited_once_with(refresh_client=False)
 
 
 @pytest.mark.asyncio
@@ -579,8 +601,8 @@ async def test_apply_personality_rolls_back_profile_when_resolution_fails(monkey
 
 
 @pytest.mark.asyncio
-async def test_restart_session_can_reuse_hf_allocated_endpoint(monkeypatch: Any) -> None:
-    """A requested same-endpoint restart must not call the HF session allocator or exit startup."""
+async def test_restart_session_can_reuse_direct_hf_endpoint_when_requested(monkeypatch: Any) -> None:
+    """A requested same-endpoint restart must not rebuild the HF client or exit startup."""
     monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
 
     handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
