@@ -1,4 +1,3 @@
-import re
 import json
 import time
 import uuid
@@ -47,7 +46,6 @@ logger = logging.getLogger(__name__)
 
 _RESPONSE_DONE_TIMEOUT: Final[float] = 30.0
 _RESPONSE_REJECTION_RETRY_DELAY: Final[float] = 0.5
-_MISSING_FUNCTION_CALL_RE = re.compile(r"No function_call with call_id '([^']+)' found")
 
 
 class InputTranscriptChunksByItem(BaseModel):
@@ -86,7 +84,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
     BACKEND_PROVIDER: ClassVar[str]
     SAMPLE_RATE: ClassVar[int]
     REFRESH_CLIENT_ON_RECONNECT: ClassVar[bool]
-    SUPPRESS_MISSING_FUNCTION_CALL_OUTPUT_ERRORS: ClassVar[bool] = False
     AUDIO_INPUT_COST_PER_1M: ClassVar[float]
     AUDIO_OUTPUT_COST_PER_1M: ClassVar[float]
     TEXT_INPUT_COST_PER_1M: ClassVar[float]
@@ -169,7 +166,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         self._response_done_event.set()
         self._response_started_or_rejected_event: asyncio.Event = asyncio.Event()
         self._last_response_rejected: bool = False
-        self._submitted_tool_result_call_ids: set[str] = set()
         self._turn_user_done_at: float | None = None
         self._turn_response_created_at: float | None = None
         self._turn_first_audio_at: float | None = None
@@ -188,39 +184,19 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         """Return a valid persisted startup voice for this backend, or None."""
         return self._resolve_backend_voice(voice, source="persisted startup voice")
 
-    def _should_suppress_missing_function_call_output_error(self, code: str, message: str) -> bool:
-        """Return whether a backend missing-function-call error is expected compatibility noise."""
-        if not self.SUPPRESS_MISSING_FUNCTION_CALL_OUTPUT_ERRORS or code != "invalid_conversation_item":
-            return False
-
-        match = _MISSING_FUNCTION_CALL_RE.search(message)
-        if not match:
-            return False
-
-        call_id = match.group(1)
-        if call_id not in self._submitted_tool_result_call_ids:
-            return False
-
-        logger.warning(
-            "Realtime backend rejected function_call_output for known tool call_id=%s; continuing with "
-            "available conversation context.",
-            call_id,
-        )
-        return True
-
-    async def _wait_for_response_done_before_tool_result(self) -> None:
-        """Wait for the function-call response to finish before sending tool output."""
+    async def _wait_for_response_done_before_tool_result(self) -> bool:
+        """Return whether the function-call response finished before sending tool output."""
         if self._response_done_event.is_set():
-            return
+            return True
 
         try:
             await asyncio.wait_for(
                 self._response_done_event.wait(),
                 timeout=self._response_done_timeout(),
             )
+            return True
         except asyncio.TimeoutError:
-            logger.debug("Timed out waiting for response.done before sending tool result; forcing ahead")
-            self._response_done_event.set()
+            return False
 
     def _resolve_backend_voice(
         self,
@@ -661,23 +637,32 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         try:
             self._mark_activity("tool_result_ready")
             send_result_to_model = not bg_tool.is_idle_tool_call
+            model_result_submitted = False
             if send_result_to_model and isinstance(bg_tool.id, str):
-                await self._wait_for_response_done_before_tool_result()
-                if not self.connection:
+                if not await self._wait_for_response_done_before_tool_result():
+                    send_result_to_model = False
+                if not send_result_to_model:
+                    logger.warning(
+                        "Dropping realtime model result for tool '%s' (id=%s) because response.done was not observed",
+                        bg_tool.tool_name,
+                        bg_tool.id,
+                    )
+                elif not self.connection:
                     logger.warning(
                         "Connection closed before sending tool '%s' (id=%s) result back",
                         bg_tool.tool_name,
                         bg_tool.id,
                     )
                     return
-                self._submitted_tool_result_call_ids.add(bg_tool.id)
-                await self.connection.conversation.item.create(
-                    item={
-                        "type": "function_call_output",
-                        "call_id": bg_tool.id,
-                        "output": json.dumps(tool_result_for_model),
-                    },
-                )
+                else:
+                    await self.connection.conversation.item.create(
+                        item={
+                            "type": "function_call_output",
+                            "call_id": bg_tool.id,
+                            "output": json.dumps(tool_result_for_model),
+                        },
+                    )
+                    model_result_submitted = True
 
             await self.output_queue.put(
                 AdditionalOutputs(
@@ -693,7 +678,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 ),
             )
 
-            if send_result_to_model and bg_tool.tool_name == "camera" and "b64_im" in tool_result:
+            if model_result_submitted and bg_tool.tool_name == "camera" and "b64_im" in tool_result:
                 # use raw base64, don't json.dumps (which adds quotes)
                 b64_im = tool_result["b64_im"]
                 if not isinstance(b64_im, str):
@@ -748,7 +733,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
             tool = core_tools.ALL_TOOLS.get(bg_tool.tool_name)
             # Always surface errors, skip the spoken follow-up for tools that opt out.
-            if send_result_to_model and (bg_tool.error is not None or tool is None or tool.needs_response):
+            if model_result_submitted and (bg_tool.error is not None or tool is None or tool.needs_response):
                 await self._safe_response_create()
 
         except self._connection_closed_errors():
@@ -967,7 +952,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         err = getattr(event, "error", None)
                         msg = getattr(err, "message", str(err) if err else "unknown error")
                         code = getattr(err, "code", "") or getattr(err, "type", "")
-                        suppress_user_error = self._should_suppress_missing_function_call_output_error(code, msg)
 
                         if code == "conversation_already_has_active_response":
                             # response.create was rejected.  The sender worker
@@ -976,8 +960,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                             self._last_response_rejected = True
                             self._response_started_or_rejected_event.set()
                             logger.debug("response.create rejected; worker will retry after active response finishes")
-                        elif suppress_user_error:
-                            self._response_started_or_rejected_event.set()
                         else:
                             self._response_started_or_rejected_event.set()
                             logger.error("Realtime error [%s]: %s (raw=%s)", code, msg, err)
@@ -986,7 +968,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                             self.deps.movement_manager.set_listening(False)
 
                         # Only show user-facing errors, not internal state errors.
-                        if not suppress_user_error and code not in (
+                        if code not in (
                             "input_audio_buffer_commit_empty",
                             "conversation_already_has_active_response",
                         ):

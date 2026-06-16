@@ -370,6 +370,35 @@ async def test_tool_result_waits_for_response_done_before_model_output(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_tool_result_timeout_does_not_force_response_done(monkeypatch: Any) -> None:
+    """A tool-result wait timeout should not lie about response lifecycle state."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = OpenaiRealtimeHandler(deps)
+
+    fake_item = SimpleNamespace(create=AsyncMock())
+    handler.connection = SimpleNamespace(conversation=SimpleNamespace(item=fake_item))
+    handler._response_done_event.clear()
+    safe_response_create = AsyncMock()
+    monkeypatch.setattr(handler, "_safe_response_create", safe_response_create)
+    monkeypatch.setattr(handler, "_response_done_timeout", lambda: 0.01)
+
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="call_weather",
+            tool_name="weather",
+            is_idle_tool_call=False,
+            status=ToolState.COMPLETED,
+            result={"forecast": "sunny"},
+        )
+    )
+
+    assert not handler._response_done_event.is_set()
+    fake_item.create.assert_not_awaited()
+    safe_response_create.assert_not_awaited()
+    assert not handler.output_queue.empty()
+
+
+@pytest.mark.asyncio
 async def test_user_speech_events_reset_idle_timer(monkeypatch: Any) -> None:
     """User speech/transcription events should postpone idle behavior."""
     movement_manager = MagicMock()

@@ -1,6 +1,5 @@
 import os
 import asyncio
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -138,96 +137,6 @@ async def test_partial_transcription_uses_latest_snapshot(monkeypatch: Any) -> N
 
     assert handler.input_transcript_chunks_by_item.item_id == "item-1"
     assert handler.input_transcript_chunks_by_item.deltas == ["Hey, how are you?"]
-
-
-@pytest.mark.asyncio
-async def test_missing_function_call_output_error_is_internal_for_known_hf_tool_result(monkeypatch: Any) -> None:
-    """HF may reject function_call_output while still accepting follow-up context messages."""
-    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
-    monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "Aiden")
-    monkeypatch.setattr(hf_mod, "get_active_tool_specs", lambda _: [])
-
-    class FakeEvent:
-        def __init__(self, etype: str, **kwargs: Any) -> None:
-            self.type = etype
-            for key, value in kwargs.items():
-                setattr(self, key, value)
-
-    class FakeSession:
-        async def update(self, **_kw: Any) -> None:
-            pass
-
-    class FakeInputAudioBuffer:
-        async def append(self, **_kw: Any) -> None:
-            pass
-
-    class FakeItem:
-        async def create(self, **_kw: Any) -> None:
-            pass
-
-    class FakeConversation:
-        item = FakeItem()
-
-    class FakeResponse:
-        async def create(self, **_kw: Any) -> None:
-            pass
-
-        async def cancel(self, **_kw: Any) -> None:
-            pass
-
-    class FakeConn:
-        session = FakeSession()
-        input_audio_buffer = FakeInputAudioBuffer()
-        conversation = FakeConversation()
-        response = FakeResponse()
-
-        def __init__(self) -> None:
-            error = SimpleNamespace(
-                message="No function_call with call_id 'call_camera_1' found in conversation history.",
-                code=None,
-                type="invalid_conversation_item",
-            )
-            self._events = iter([FakeEvent("error", error=error)])
-
-        async def __aenter__(self) -> "FakeConn":
-            return self
-
-        async def __aexit__(self, *_args: Any) -> bool:
-            return False
-
-        async def close(self) -> None:
-            pass
-
-        def __aiter__(self) -> "FakeConn":
-            return self
-
-        async def __anext__(self) -> FakeEvent:
-            try:
-                return next(self._events)
-            except StopIteration:
-                raise StopAsyncIteration
-
-    class FakeRealtime:
-        def connect(self, **_kw: Any) -> FakeConn:
-            return FakeConn()
-
-    class FakeClient:
-        def __init__(self) -> None:
-            self.realtime = FakeRealtime()
-
-    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
-    handler = HuggingFaceRealtimeHandler(deps)
-    handler.client = FakeClient()
-    handler._submitted_tool_result_call_ids.add("call_camera_1")
-
-    start_up = MagicMock()
-    shutdown = AsyncMock()
-    monkeypatch.setattr(type(handler.tool_manager), "start_up", start_up)
-    monkeypatch.setattr(type(handler.tool_manager), "shutdown", shutdown)
-
-    await handler._run_realtime_session()
-
-    assert handler.output_queue.empty()
 
 
 @pytest.mark.asyncio
