@@ -1,5 +1,6 @@
 """Behavior tests for the Gemini Live handler."""
 
+import os
 import base64
 import asyncio
 from types import SimpleNamespace
@@ -318,6 +319,23 @@ async def test_apply_personality_preserves_manual_voice_override(monkeypatch) ->
     assert status == "Applied personality and restarted Gemini session."
     assert handler.get_current_voice() == "Orus"
     restart.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_apply_personality_rolls_back_profile_when_resolution_fails(monkeypatch) -> None:
+    """A broken Gemini profile should not remain selected after validation fails."""
+    previous_profile = "previous"
+    monkeypatch.setattr(gemini_mod.config, "REACHY_MINI_CUSTOM_PROFILE", previous_profile)
+    monkeypatch.setenv("REACHY_MINI_CUSTOM_PROFILE", previous_profile)
+    monkeypatch.setattr(gemini_mod, "get_session_instructions", MagicMock(side_effect=RuntimeError("bad profile")))
+
+    handler = GeminiLiveHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+
+    result = await handler.apply_personality("broken")
+
+    assert result == "Failed to apply personality: bad profile"
+    assert gemini_mod.config.REACHY_MINI_CUSTOM_PROFILE == previous_profile
+    assert os.environ["REACHY_MINI_CUSTOM_PROFILE"] == previous_profile
 
 
 def test_handler_uses_startup_voice_at_startup() -> None:

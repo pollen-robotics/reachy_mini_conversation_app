@@ -239,11 +239,14 @@ async function applyPersonality(name, { persist = false } = {}) {
   }
   url.searchParams.set("_", Date.now().toString());
   const resp = await fetchWithTimeout(url, { method: "POST" }, 5000);
+  const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {
-    const data = await resp.json().catch(() => ({}));
     throw new Error(data.error || "apply_failed");
   }
-  return await resp.json();
+  if (data.ok === false) {
+    throw new Error(data.error || data.status || "apply_failed");
+  }
+  return data;
 }
 
 async function getVoices() {

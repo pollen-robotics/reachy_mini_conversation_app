@@ -242,6 +242,7 @@ class GeminiLiveHandler(ConversationHandler):
         try:
             from reachy_mini_conversation_app.config import set_custom_profile
 
+            previous_profile = getattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
             set_custom_profile(profile)
             logger.info("Set custom profile to %r", profile)
 
@@ -249,6 +250,7 @@ class GeminiLiveHandler(ConversationHandler):
                 _ = get_session_instructions(self.instance_path)
                 _ = get_session_voice()
             except BaseException as e:
+                set_custom_profile(previous_profile)
                 logger.error("Failed to resolve personality content: %s", e)
                 return f"Failed to apply personality: {e}"
 
