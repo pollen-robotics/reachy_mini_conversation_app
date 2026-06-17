@@ -166,7 +166,7 @@ class GeminiLiveHandler(ConversationHandler):
         self.output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]" = asyncio.Queue()
 
         self.last_activity_time = time.monotonic()
-        self.last_user_activity_time = self.last_activity_time
+        self.last_idle_behavior_time = self.last_activity_time
         self.start_time = time.monotonic()
         self.is_idle_tool_call = False
 
@@ -201,13 +201,6 @@ class GeminiLiveHandler(ConversationHandler):
             return
         self._listening_state = listening
         self.deps.movement_manager.set_listening(listening)
-
-    def _mark_user_activity(self, reason: str) -> None:
-        """Record user speech activity for app-level inactivity shutdown."""
-        now = time.monotonic()
-        self.last_user_activity_time = now
-        self.last_activity_time = now
-        logger.debug("Gemini last user activity time updated to %s (%s)", self.last_user_activity_time, reason)
 
     async def _flush_transcript_chunks(self, role: str, chunks: list[str]) -> None:
         """Emit one finalized transcript message for the current turn."""
@@ -620,7 +613,7 @@ class GeminiLiveHandler(ConversationHandler):
 
                                 # Handle input transcription (user speech)
                                 if content.input_transcription and content.input_transcription.text:
-                                    self._mark_user_activity("user_input_transcription")
+                                    self.last_activity_time = time.monotonic()
                                     transcript = content.input_transcription.text
                                     logger.debug("User transcript chunk: %s", transcript)
                                     self._pending_user_transcript_chunks.append(transcript)
@@ -691,14 +684,16 @@ class GeminiLiveHandler(ConversationHandler):
     async def emit(self) -> Tuple[int, NDArray[np.int16]] | AdditionalOutputs | None:
         """Emit audio frame to be played by the speaker."""
         # Handle idle
-        idle_duration = time.monotonic() - self.last_activity_time
-        if idle_duration > 15.0 and self.deps.movement_manager.is_idle():
+        now = time.monotonic()
+        idle_duration = now - self.last_activity_time
+        idle_behavior_duration = now - self.last_idle_behavior_time
+        if idle_duration > 15.0 and idle_behavior_duration > 15.0 and self.deps.movement_manager.is_idle():
+            self.last_idle_behavior_time = now
             try:
                 await self.send_idle_signal(idle_duration)
             except Exception as e:
                 logger.warning("Idle tool skipped: %s", e)
                 return None
-            self.last_activity_time = time.monotonic()
 
         return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
 

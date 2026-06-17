@@ -44,8 +44,8 @@ def test_resolve_app_timeout_disables_non_positive_values(monkeypatch) -> None:
 
 
 def test_inactivity_timeout_thread_closes_stream_manager() -> None:
-    """The inactivity watchdog should close the stream once user activity is too old."""
-    handler = SimpleNamespace(get_last_user_activity_time=lambda: time.monotonic() - 10.0)
+    """The inactivity watchdog should close the stream once activity is too old."""
+    handler = SimpleNamespace(last_activity_time=time.monotonic() - 10.0)
     stream_manager = SimpleNamespace(handler=handler, close=MagicMock())
 
     thread = main_mod._start_inactivity_timeout_thread(
@@ -62,10 +62,10 @@ def test_inactivity_timeout_thread_closes_stream_manager() -> None:
     stream_manager.close.assert_called_once_with()
 
 
-def test_get_last_user_activity_time_uses_active_stream_handler() -> None:
+def test_get_last_activity_time_uses_active_stream_handler() -> None:
     """Dynamic stream managers should report the currently installed handler."""
-    fallback_handler = SimpleNamespace(get_last_user_activity_time=lambda: 1.0)
-    active_handler = SimpleNamespace(get_last_user_activity_time=lambda: 2.0)
+    fallback_handler = SimpleNamespace(last_activity_time=1.0)
+    active_handler = SimpleNamespace(last_activity_time=2.0)
     stream_manager = SimpleNamespace(handler=active_handler)
 
-    assert main_mod._get_last_user_activity_time(stream_manager, fallback_handler) == 2.0
+    assert main_mod._get_last_activity_time(stream_manager, fallback_handler) == 2.0

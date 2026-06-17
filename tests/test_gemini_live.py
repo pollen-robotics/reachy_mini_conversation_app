@@ -1,5 +1,6 @@
 """Behavior tests for the Gemini Live handler."""
 
+import time
 import base64
 import asyncio
 from types import SimpleNamespace
@@ -111,7 +112,7 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
         movement_manager=movement_manager,
     )
     handler = GeminiLiveHandler(deps)
-    handler.last_user_activity_time = 1.0
+    handler.last_activity_time = 1.0
     monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
     monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
 
@@ -174,7 +175,7 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
         {"role": "user", "content": "How's it going, Reachy?"},
         {"role": "assistant", "content": "Doing great."},
     ]
-    assert handler.last_user_activity_time > 1.0
+    assert handler.last_activity_time > 1.0
     assert any(isinstance(output, tuple) for output in outputs), "audio output was not emitted"
     movement_manager.set_listening.assert_has_calls([call(True), call(False)])
     assert movement_manager.set_listening.call_args_list[-1] == call(False)
@@ -278,6 +279,30 @@ async def test_gemini_idle_signal_starts_local_tool_without_model_input(monkeypa
             ),
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_gemini_idle_emit_updates_idle_clock_without_refreshing_activity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gemini idle behavior should not postpone app inactivity timeout."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    deps.movement_manager.is_idle.return_value = True
+    handler = GeminiLiveHandler(deps)
+    now = time.monotonic()
+    previous_activity_time = now - 16.0
+    previous_idle_behavior_time = now - 16.0
+    handler.last_activity_time = previous_activity_time
+    handler.last_idle_behavior_time = previous_idle_behavior_time
+    send_idle_signal = AsyncMock()
+    monkeypatch.setattr(handler, "send_idle_signal", send_idle_signal)
+    monkeypatch.setattr(gemini_mod, "wait_for_item", AsyncMock(return_value=None))
+
+    await handler.emit()
+
+    send_idle_signal.assert_awaited_once()
+    assert handler.last_activity_time == previous_activity_time
+    assert handler.last_idle_behavior_time > previous_idle_behavior_time
 
 
 @pytest.mark.asyncio

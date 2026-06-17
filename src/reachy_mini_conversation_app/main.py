@@ -56,14 +56,10 @@ def _resolve_app_timeout_seconds(args: argparse.Namespace, logger: Any) -> float
     return timeout_seconds
 
 
-def _get_last_user_activity_time(stream_manager: Any, fallback_handler: Any) -> float:
-    """Return latest user activity from the active handler."""
+def _get_last_activity_time(stream_manager: Any, fallback_handler: Any) -> float:
+    """Return latest activity from the active handler."""
     active_handler = getattr(stream_manager, "handler", fallback_handler)
-    getter = getattr(active_handler, "get_last_user_activity_time", None)
-    if callable(getter):
-        return float(getter())
-
-    timestamp = getattr(active_handler, "last_user_activity_time", None)
+    timestamp = getattr(active_handler, "last_activity_time", None)
     if isinstance(timestamp, (int, float)):
         return float(timestamp)
 
@@ -82,20 +78,20 @@ def _start_inactivity_timeout_thread(
     logger: Any,
     app_stop_event: threading.Event | None,
 ) -> threading.Thread | None:
-    """Close the app after a configured period without user speech."""
+    """Close the app after a configured period without activity."""
     if timeout_seconds is None:
         return None
 
     def poll_inactivity_timeout() -> None:
-        logger.info("App inactivity timeout enabled: %.1f seconds without user speech.", timeout_seconds)
+        logger.info("App inactivity timeout enabled: %.1f seconds without conversation activity.", timeout_seconds)
         while True:
             if app_stop_event is not None and app_stop_event.is_set():
                 return
 
-            elapsed = time.monotonic() - _get_last_user_activity_time(stream_manager, fallback_handler)
+            elapsed = time.monotonic() - _get_last_activity_time(stream_manager, fallback_handler)
             if elapsed >= timeout_seconds:
                 logger.info(
-                    "No user speech for %.1f seconds; closing conversation app.",
+                    "No conversation activity for %.1f seconds; closing conversation app.",
                     elapsed,
                 )
                 try:
