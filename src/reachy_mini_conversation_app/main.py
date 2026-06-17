@@ -28,7 +28,6 @@ from reachy_mini_conversation_app.utils import (
 
 APP_TIMEOUT_MINUTES_ENV = "REACHY_MINI_APP_TIMEOUT_MINUTES"
 DEFAULT_APP_TIMEOUT_MINUTES = 1440.0
-SECONDS_PER_MINUTE = 60.0
 
 
 def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -87,7 +86,7 @@ def _start_inactivity_timeout_thread(
     if timeout_minutes is None:
         return None
 
-    timeout_seconds = timeout_minutes * SECONDS_PER_MINUTE
+    timeout_seconds = timeout_minutes * 60.0
 
     def poll_inactivity_timeout() -> None:
         logger.info("App inactivity timeout enabled: %.1f minutes without conversation activity.", timeout_minutes)
@@ -99,7 +98,7 @@ def _start_inactivity_timeout_thread(
             if elapsed >= timeout_seconds:
                 logger.info(
                     "No conversation activity for %.1f minutes; closing conversation app.",
-                    elapsed / SECONDS_PER_MINUTE,
+                    elapsed / 60.0,
                 )
                 try:
                     stream_manager.close()
