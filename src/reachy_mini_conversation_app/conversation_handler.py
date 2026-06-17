@@ -1,4 +1,5 @@
 from __future__ import annotations
+import time
 import asyncio
 from abc import ABC, abstractmethod
 from typing import TypeAlias
@@ -22,6 +23,18 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     deps: ToolDependencies
     output_queue: asyncio.Queue[QueueItem]
     _clear_queue: Callable[[], None] | None = None
+
+    def get_last_user_activity_time(self) -> float:
+        """Return the monotonic timestamp of the latest user interaction."""
+        timestamp = getattr(self, "last_user_activity_time", None)
+        if isinstance(timestamp, (int, float)):
+            return float(timestamp)
+
+        start_time = getattr(self, "start_time", None)
+        if isinstance(start_time, (int, float)):
+            return float(start_time)
+
+        return time.monotonic()
 
     @abstractmethod
     def copy(self) -> ConversationHandler:

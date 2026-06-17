@@ -166,6 +166,7 @@ class GeminiLiveHandler(ConversationHandler):
         self.output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]" = asyncio.Queue()
 
         self.last_activity_time = time.monotonic()
+        self.last_user_activity_time = self.last_activity_time
         self.start_time = time.monotonic()
         self.is_idle_tool_call = False
 
@@ -200,6 +201,13 @@ class GeminiLiveHandler(ConversationHandler):
             return
         self._listening_state = listening
         self.deps.movement_manager.set_listening(listening)
+
+    def _mark_user_activity(self, reason: str) -> None:
+        """Record user speech activity for app-level inactivity shutdown."""
+        now = time.monotonic()
+        self.last_user_activity_time = now
+        self.last_activity_time = now
+        logger.debug("Gemini last user activity time updated to %s (%s)", self.last_user_activity_time, reason)
 
     async def _flush_transcript_chunks(self, role: str, chunks: list[str]) -> None:
         """Emit one finalized transcript message for the current turn."""
@@ -612,6 +620,7 @@ class GeminiLiveHandler(ConversationHandler):
 
                                 # Handle input transcription (user speech)
                                 if content.input_transcription and content.input_transcription.text:
+                                    self._mark_user_activity("user_input_transcription")
                                     transcript = content.input_transcription.text
                                     logger.debug("User transcript chunk: %s", transcript)
                                     self._pending_user_transcript_chunks.append(transcript)

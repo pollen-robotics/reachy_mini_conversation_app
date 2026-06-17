@@ -26,10 +26,87 @@ from reachy_mini_conversation_app.utils import (
 )
 
 
+APP_TIMEOUT_SECONDS_ENV = "REACHY_MINI_APP_TIMEOUT_SECONDS"
+
+
 def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Update the chatbot with AdditionalOutputs."""
     chatbot.append(response)
     return chatbot
+
+
+def _resolve_app_timeout_seconds(args: argparse.Namespace, logger: Any) -> float | None:
+    """Resolve the app inactivity timeout from CLI args or environment."""
+    raw_value = getattr(args, "app_timeout_seconds", None)
+    if raw_value is None:
+        env_value = os.getenv(APP_TIMEOUT_SECONDS_ENV)
+        if env_value is None or not env_value.strip():
+            return None
+        try:
+            raw_value = float(env_value)
+        except ValueError:
+            logger.warning("Ignoring invalid %s=%r; app inactivity timeout disabled.", APP_TIMEOUT_SECONDS_ENV, env_value)
+            return None
+
+    timeout_seconds = float(raw_value)
+    if timeout_seconds <= 0:
+        return None
+    return timeout_seconds
+
+
+def _get_last_user_activity_time(stream_manager: Any, fallback_handler: Any) -> float:
+    """Return latest user activity from the active handler."""
+    active_handler = getattr(stream_manager, "handler", fallback_handler)
+    getter = getattr(active_handler, "get_last_user_activity_time", None)
+    if callable(getter):
+        return float(getter())
+
+    timestamp = getattr(active_handler, "last_user_activity_time", None)
+    if isinstance(timestamp, (int, float)):
+        return float(timestamp)
+
+    start_time = getattr(active_handler, "start_time", None)
+    if isinstance(start_time, (int, float)):
+        return float(start_time)
+
+    return time.monotonic()
+
+
+def _start_inactivity_timeout_thread(
+    *,
+    timeout_seconds: float | None,
+    stream_manager: Any,
+    fallback_handler: Any,
+    logger: Any,
+    app_stop_event: threading.Event | None,
+) -> threading.Thread | None:
+    """Close the app after a configured period without user speech."""
+    if timeout_seconds is None:
+        return None
+
+    def poll_inactivity_timeout() -> None:
+        logger.info("App inactivity timeout enabled: %.1f seconds without user speech.", timeout_seconds)
+        while True:
+            if app_stop_event is not None and app_stop_event.is_set():
+                return
+
+            elapsed = time.monotonic() - _get_last_user_activity_time(stream_manager, fallback_handler)
+            if elapsed >= timeout_seconds:
+                logger.info(
+                    "No user speech for %.1f seconds; closing conversation app.",
+                    elapsed,
+                )
+                try:
+                    stream_manager.close()
+                except Exception as e:
+                    logger.error("Error while closing stream manager after inactivity timeout: %s", e)
+                return
+
+            time.sleep(min(1.0, max(0.1, timeout_seconds - elapsed)))
+
+    thread = threading.Thread(target=poll_inactivity_timeout, daemon=True)
+    thread.start()
+    return thread
 
 
 def main() -> None:
@@ -309,6 +386,15 @@ def run(
             saved_speaker_volume = None
     if camera_worker:
         camera_worker.start()
+
+    app_timeout_seconds = _resolve_app_timeout_seconds(args, logger)
+    _start_inactivity_timeout_thread(
+        timeout_seconds=app_timeout_seconds,
+        stream_manager=stream_manager,
+        fallback_handler=handler,
+        logger=logger,
+        app_stop_event=app_stop_event,
+    )
 
     def poll_stop_event() -> None:
         """Poll the stop event to allow graceful shutdown."""

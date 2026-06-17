@@ -41,6 +41,15 @@ def parse_args() -> tuple[argparse.Namespace, list]:  # type: ignore
     parser.add_argument("--gradio", default=False, action="store_true", help="Open gradio interface")
     parser.add_argument("--debug", default=False, action="store_true", help="Enable debug logging")
     parser.add_argument(
+        "--app-timeout-seconds",
+        type=float,
+        default=None,
+        help=(
+            "Close the conversation app after this many seconds without user speech. "
+            "Set to 0 to disable. Defaults to REACHY_MINI_APP_TIMEOUT_SECONDS, or disabled when unset."
+        ),
+    )
+    parser.add_argument(
         "--robot-name",
         type=str,
         default=None,

@@ -1,5 +1,6 @@
 """Tests for utility helpers."""
 
+import sys
 import argparse
 from unittest.mock import MagicMock, patch
 
@@ -7,8 +8,18 @@ import pytest
 
 from reachy_mini_conversation_app.utils import (
     CameraVisionInitializationError,
+    parse_args,
     initialize_camera_and_vision,
 )
+
+
+def test_parse_args_accepts_app_timeout_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The app inactivity timeout should be configurable from the CLI."""
+    monkeypatch.setattr(sys, "argv", ["reachy-app", "--app-timeout-seconds", "12.5"])
+
+    args, _ = parse_args()
+
+    assert args.app_timeout_seconds == 12.5
 
 
 def test_initialize_camera_and_vision_propagates_local_vision_init_failures() -> None:

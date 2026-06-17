@@ -111,6 +111,7 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
         movement_manager=movement_manager,
     )
     handler = GeminiLiveHandler(deps)
+    handler.last_user_activity_time = 1.0
     monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
     monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
 
@@ -173,6 +174,7 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
         {"role": "user", "content": "How's it going, Reachy?"},
         {"role": "assistant", "content": "Doing great."},
     ]
+    assert handler.last_user_activity_time > 1.0
     assert any(isinstance(output, tuple) for output in outputs), "audio output was not emitted"
     movement_manager.set_listening.assert_has_calls([call(True), call(False)])
     assert movement_manager.set_listening.call_args_list[-1] == call(False)

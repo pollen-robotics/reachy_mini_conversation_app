@@ -133,6 +133,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         self.output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]" = asyncio.Queue()
 
         self.last_activity_time = time.monotonic()
+        self.last_user_activity_time = self.last_activity_time
         self.start_time = time.monotonic()
         self.is_idle_tool_call = False
         self.gradio_mode = gradio_mode
@@ -258,6 +259,13 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         """Record non-idle conversation activity for the idle timer."""
         self.last_activity_time = time.monotonic()
         logger.debug("last activity time updated to %s (%s)", self.last_activity_time, reason)
+
+    def _mark_user_activity(self, reason: str) -> None:
+        """Record user speech activity for app-level inactivity shutdown."""
+        now = time.monotonic()
+        self.last_user_activity_time = now
+        self.last_activity_time = now
+        logger.debug("last user activity time updated to %s (%s)", self.last_user_activity_time, reason)
 
     def _tap_audio_for_daemon_wobbler(self, decoded_pcm: NDArray[np.int16]) -> None:
         # Gradio plays audio in the browser, so the daemon's wobbler — which
@@ -771,7 +779,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                     logger.debug("Realtime event: %s", event.type)
                     if event.type == "input_audio_buffer.speech_started":
                         self.is_idle_tool_call = False
-                        self._mark_activity("user_speech_started")
+                        self._mark_user_activity("user_speech_started")
                         self._turn_user_done_at = None
                         self._turn_response_created_at = None
                         self._turn_first_audio_at = None
@@ -781,7 +789,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         logger.debug("User speech started")
 
                     if event.type == "input_audio_buffer.speech_stopped":
-                        self._mark_activity("user_speech_stopped")
+                        self._mark_user_activity("user_speech_stopped")
                         self.deps.movement_manager.set_listening(False)
                         logger.debug("User speech stopped - server will auto-commit with VAD")
 
@@ -820,7 +828,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                             logger.warning("No usage data available for cost tracking")
 
                     if event.type == "conversation.item.input_audio_transcription.delta":
-                        self._mark_activity("user_transcription_delta")
+                        self._mark_user_activity("user_transcription_delta")
                         logger.debug(f"User partial transcript: {event.delta}")
 
                         item_id = event.item_id
@@ -842,7 +850,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                     # Handle completed transcription (user finished speaking)
                     if event.type == "conversation.item.input_audio_transcription.completed":
                         self.is_idle_tool_call = False
-                        self._mark_activity("user_transcription_completed")
+                        self._mark_user_activity("user_transcription_completed")
                         raw_transcript = event.transcript or ""
                         transcript = raw_transcript.strip()
                         logger.debug("User transcript: %s", raw_transcript)

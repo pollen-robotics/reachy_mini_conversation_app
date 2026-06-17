@@ -223,6 +223,7 @@ async def test_completed_user_transcript_resets_idle_state(monkeypatch: Any) -> 
     def setup_idle_state(handler: OpenaiRealtimeHandler) -> None:
         handler.is_idle_tool_call = True
         handler.last_activity_time = 1.0
+        handler.last_user_activity_time = 1.0
 
     handler = await _run_openai_handler_with_events(
         monkeypatch,
@@ -237,6 +238,7 @@ async def test_completed_user_transcript_resets_idle_state(monkeypatch: Any) -> 
 
     assert handler.is_idle_tool_call is False
     assert handler.last_activity_time > 1.0
+    assert handler.last_user_activity_time > 1.0
 
 
 @pytest.mark.asyncio
@@ -405,8 +407,10 @@ async def test_user_speech_events_reset_idle_timer(monkeypatch: Any) -> None:
 
     def setup_old_activity(handler: OpenaiRealtimeHandler) -> None:
         handler.last_activity_time = asyncio.get_running_loop().time() - 60.0
+        handler.last_user_activity_time = asyncio.get_running_loop().time() - 60.0
 
     previous_activity_time = asyncio.get_running_loop().time() - 60.0
+    previous_user_activity_time = asyncio.get_running_loop().time() - 60.0
     handler = await _run_openai_handler_with_events(
         monkeypatch,
         [
@@ -418,6 +422,7 @@ async def test_user_speech_events_reset_idle_timer(monkeypatch: Any) -> None:
     )
 
     assert handler.last_activity_time > previous_activity_time
+    assert handler.last_user_activity_time > previous_user_activity_time
     movement_manager.set_listening.assert_any_call(True)
 
 
