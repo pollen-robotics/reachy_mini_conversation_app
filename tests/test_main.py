@@ -35,7 +35,7 @@ def test_resolve_app_timeout_reads_env(monkeypatch) -> None:
     assert timeout == 45.0
 
 
-def test_resolve_app_timeout_defaults_to_3600_minutes(monkeypatch) -> None:
+def test_resolve_app_timeout_defaults_to_1440_minutes(monkeypatch) -> None:
     """Unset timeout config should use the default minute value."""
     monkeypatch.delenv(main_mod.APP_TIMEOUT_MINUTES_ENV, raising=False)
 
@@ -44,7 +44,7 @@ def test_resolve_app_timeout_defaults_to_3600_minutes(monkeypatch) -> None:
         MagicMock(),
     )
 
-    assert timeout == 3600.0
+    assert timeout == 1440.0
 
 
 def test_resolve_app_timeout_disables_non_positive_values(monkeypatch) -> None:

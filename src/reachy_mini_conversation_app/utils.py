@@ -46,7 +46,7 @@ def parse_args() -> tuple[argparse.Namespace, list]:  # type: ignore
         default=None,
         help=(
             "Close the conversation app after this many minutes without user speech. "
-            "Set to 0 to disable. Defaults to REACHY_MINI_APP_TIMEOUT_MINUTES, or 3600 when unset."
+            "Set to 0 to disable. Defaults to REACHY_MINI_APP_TIMEOUT_MINUTES, or 1440 when unset."
         ),
     )
     parser.add_argument(
