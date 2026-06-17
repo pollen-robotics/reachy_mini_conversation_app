@@ -688,12 +688,13 @@ class GeminiLiveHandler(ConversationHandler):
         idle_duration = now - self.last_activity_time
         idle_behavior_duration = now - self.last_idle_behavior_time
         if idle_duration > 15.0 and idle_behavior_duration > 15.0 and self.deps.movement_manager.is_idle():
-            self.last_idle_behavior_time = now
             try:
                 await self.send_idle_signal(idle_duration)
             except Exception as e:
                 logger.warning("Idle tool skipped: %s", e)
                 return None
+
+            self.last_idle_behavior_time = now
 
         return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
 

@@ -1030,12 +1030,13 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             and self._response_done_event.is_set()
             and self.deps.movement_manager.is_idle()
         ):
-            self.last_idle_behavior_time = now
             try:
                 await self.send_idle_signal(idle_duration)
             except Exception as e:
                 logger.warning("Idle tool skipped (connection closed?): %s", e)
                 return None
+
+            self.last_idle_behavior_time = now
 
         return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
 
