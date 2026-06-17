@@ -745,6 +745,12 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                     if event.type == "response.output_audio.done":
                         logger.debug("response completed")
 
+                    if event.type == "response.output_text.delta":
+                        logger.debug("response text delta")
+
+                    if event.type == "response.output_text.done":
+                        logger.debug("response text done: %s", event.text)
+
                     if event.type == "response.created":
                         self._mark_activity("response_created")
                         self._response_done_event.clear()
