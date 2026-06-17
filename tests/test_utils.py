@@ -13,13 +13,13 @@ from reachy_mini_conversation_app.utils import (
 )
 
 
-def test_parse_args_accepts_app_timeout_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_parse_args_accepts_app_timeout_minutes(monkeypatch: pytest.MonkeyPatch) -> None:
     """The app inactivity timeout should be configurable from the CLI."""
-    monkeypatch.setattr(sys, "argv", ["reachy-app", "--app-timeout-seconds", "12.5"])
+    monkeypatch.setattr(sys, "argv", ["reachy-app", "--app-timeout-minutes", "12.5"])
 
     args, _ = parse_args()
 
-    assert args.app_timeout_seconds == 12.5
+    assert args.app_timeout_minutes == 12.5
 
 
 def test_initialize_camera_and_vision_propagates_local_vision_init_failures() -> None:

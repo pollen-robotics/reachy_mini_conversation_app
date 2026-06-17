@@ -26,7 +26,9 @@ from reachy_mini_conversation_app.utils import (
 )
 
 
-APP_TIMEOUT_SECONDS_ENV = "REACHY_MINI_APP_TIMEOUT_SECONDS"
+APP_TIMEOUT_MINUTES_ENV = "REACHY_MINI_APP_TIMEOUT_MINUTES"
+DEFAULT_APP_TIMEOUT_MINUTES = 3600.0
+SECONDS_PER_MINUTE = 60.0
 
 
 def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -35,25 +37,28 @@ def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> L
     return chatbot
 
 
-def _resolve_app_timeout_seconds(args: argparse.Namespace, logger: Any) -> float | None:
-    """Resolve the app inactivity timeout from CLI args or environment."""
-    raw_value = getattr(args, "app_timeout_seconds", None)
+def _resolve_app_timeout_minutes(args: argparse.Namespace, logger: Any) -> float | None:
+    """Resolve the app inactivity timeout from minute-based CLI args or environment."""
+    raw_value = getattr(args, "app_timeout_minutes", None)
     if raw_value is None:
-        env_value = os.getenv(APP_TIMEOUT_SECONDS_ENV)
+        env_value = os.getenv(APP_TIMEOUT_MINUTES_ENV)
         if env_value is None or not env_value.strip():
-            return None
-        try:
-            raw_value = float(env_value)
-        except ValueError:
-            logger.warning(
-                "Ignoring invalid %s=%r; app inactivity timeout disabled.", APP_TIMEOUT_SECONDS_ENV, env_value
-            )
-            return None
+            raw_value = DEFAULT_APP_TIMEOUT_MINUTES
+        else:
+            try:
+                raw_value = float(env_value)
+            except ValueError:
+                logger.warning(
+                    "Ignoring invalid %s=%r; using default app inactivity timeout.",
+                    APP_TIMEOUT_MINUTES_ENV,
+                    env_value,
+                )
+                raw_value = DEFAULT_APP_TIMEOUT_MINUTES
 
-    timeout_seconds = float(raw_value)
-    if timeout_seconds <= 0:
+    timeout_minutes = float(raw_value)
+    if timeout_minutes <= 0:
         return None
-    return timeout_seconds
+    return timeout_minutes
 
 
 def _get_last_activity_time(stream_manager: Any, fallback_handler: Any) -> float:
@@ -72,18 +77,20 @@ def _get_last_activity_time(stream_manager: Any, fallback_handler: Any) -> float
 
 def _start_inactivity_timeout_thread(
     *,
-    timeout_seconds: float | None,
+    timeout_minutes: float | None,
     stream_manager: Any,
     fallback_handler: Any,
     logger: Any,
     app_stop_event: threading.Event | None,
 ) -> threading.Thread | None:
     """Close the app after a configured period without activity."""
-    if timeout_seconds is None:
+    if timeout_minutes is None:
         return None
 
+    timeout_seconds = timeout_minutes * SECONDS_PER_MINUTE
+
     def poll_inactivity_timeout() -> None:
-        logger.info("App inactivity timeout enabled: %.1f seconds without conversation activity.", timeout_seconds)
+        logger.info("App inactivity timeout enabled: %.1f minutes without conversation activity.", timeout_minutes)
         while True:
             if app_stop_event is not None and app_stop_event.is_set():
                 return
@@ -91,8 +98,8 @@ def _start_inactivity_timeout_thread(
             elapsed = time.monotonic() - _get_last_activity_time(stream_manager, fallback_handler)
             if elapsed >= timeout_seconds:
                 logger.info(
-                    "No conversation activity for %.1f seconds; closing conversation app.",
-                    elapsed,
+                    "No conversation activity for %.1f minutes; closing conversation app.",
+                    elapsed / SECONDS_PER_MINUTE,
                 )
                 try:
                     stream_manager.close()
@@ -385,9 +392,9 @@ def run(
     if camera_worker:
         camera_worker.start()
 
-    app_timeout_seconds = _resolve_app_timeout_seconds(args, logger)
+    app_timeout_minutes = _resolve_app_timeout_minutes(args, logger)
     _start_inactivity_timeout_thread(
-        timeout_seconds=app_timeout_seconds,
+        timeout_minutes=app_timeout_minutes,
         stream_manager=stream_manager,
         fallback_handler=handler,
         logger=logger,
