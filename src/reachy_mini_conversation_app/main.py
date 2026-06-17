@@ -45,7 +45,9 @@ def _resolve_app_timeout_seconds(args: argparse.Namespace, logger: Any) -> float
         try:
             raw_value = float(env_value)
         except ValueError:
-            logger.warning("Ignoring invalid %s=%r; app inactivity timeout disabled.", APP_TIMEOUT_SECONDS_ENV, env_value)
+            logger.warning(
+                "Ignoring invalid %s=%r; app inactivity timeout disabled.", APP_TIMEOUT_SECONDS_ENV, env_value
+            )
             return None
 
     timeout_seconds = float(raw_value)
