@@ -17,6 +17,7 @@ from reachy_mini_conversation_app.config import (
     get_default_voice_for_backend,
     get_available_voices_for_backend,
 )
+from reachy_mini_conversation_app.tools.tool_constants import SystemTool
 
 
 class PersonalityUI:
@@ -93,7 +94,9 @@ class PersonalityUI:
         shared: list[str] = []
         try:
             for py in self._tools_dir.glob("*.py"):
-                if py.stem in {"__init__", "core_tools"}:
+                if py.stem in {"__init__", "core_tools", "background_tool_manager", "tool_constants"} or py.stem in {
+                    t.value for t in SystemTool
+                }:
                     continue
                 shared.append(py.stem)
         except Exception:
