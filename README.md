@@ -36,7 +36,7 @@ Conversational app for the Reachy Mini robot combining realtime voice backends, 
   - **Gemini Live** (`gemini-3.1-flash-live-preview`) - requires `GEMINI_API_KEY`.
 - Vision processing uses the selected realtime backend by default (when the camera tool is used), with optional on-device local vision using SmolVLM2 (CPU/GPU/MPS) via `--local-vision`.
 - Layered motion system queues primary moves (dances, emotions, goto poses, breathing) while blending speech-reactive wobble and head-tracking.
-- Async tool dispatch integrates robot motion, camera capture, and optional head-tracking capabilities through a Gradio web UI with live transcripts.
+- Async tool dispatch integrates robot motion, camera capture, and optional head-tracking capabilities. An optional web UI (`--ui`) provides personality selection, mic control, and settings.
 
 ## Architecture
 
@@ -193,7 +193,7 @@ reachy-mini-conversation-app
 > [!TIP]
 > Make sure the Reachy Mini daemon is running before launching the app. If you see a `TimeoutError`, it means the daemon isn't started. See [Reachy Mini's SDK](https://github.com/pollen-robotics/reachy_mini/) for setup instructions.
 
-The app runs in console mode by default. Add `--gradio` to launch a web UI at http://127.0.0.1:7860/ (required for simulation mode). Vision and head-tracking options are described in the CLI table below.
+The app runs in console mode by default. Add `--ui` to also serve a web UI at http://127.0.0.1:7860/ for picking a personality, controlling the mic, and changing settings. Vision and head-tracking options are described in the CLI table below.
 
 ### CLI options
 
@@ -202,7 +202,7 @@ The app runs in console mode by default. Add `--gradio` to launch a web UI at ht
 | `--head-tracker {yolo,mediapipe}` | `None` | Select a head-tracking backend when a camera is available. `yolo` uses a local YOLO face detector, `mediapipe` comes from the `reachy_mini_toolbox` package. Requires the matching optional extra. |
 | `--no-camera` | `False` | Run without camera capture or head tracking. |
 | `--local-vision` | `False` | Use the local vision model (SmolVLM2) for camera-tool requests instead of the selected realtime backend. Requires `local_vision` extra to be installed. |
-| `--gradio` | `False` | Launch the Gradio web UI. Without this flag, runs in console mode. Required when running in simulation mode. |
+| `--ui` | `False` | Serve the web UI at http://127.0.0.1:7860/, in addition to console mode. |
 | `--robot-name` | `None` | Optional. Connect to a specific robot by name when running multiple daemons on the same subnet. See [Multiple robots on the same subnet](#advanced-features). |
 | `--debug` | `False` | Enable verbose logging for troubleshooting. |
 
@@ -221,8 +221,8 @@ reachy-mini-conversation-app --local-vision
 # Audio-only conversation (no camera)
 reachy-mini-conversation-app --no-camera
 
-# Launch with Gradio web interface
-reachy-mini-conversation-app --gradio
+# Launch with the minimal web UI for personality/mic/settings control
+reachy-mini-conversation-app --ui
 ```
 
 > [!WARNING]
@@ -267,10 +267,10 @@ Each profile should include `instructions.txt` (prompt text). `tools.txt` (list 
 
 Write plain-text prompts in `instructions.txt`. To reuse shared prompt pieces, add lines like:
 ```
-[passion_for_lobster_jokes]
 [identities/witty_identity]
+[behaviors/silent_robot]
 ```
-Each placeholder pulls the matching file under `src/reachy_mini_conversation_app/prompts/` (nested paths allowed). See `profiles/example/` for a reference layout.
+Each placeholder pulls the matching file under `src/reachy_mini_conversation_app/prompts/` (nested paths allowed).
 
 **Enabling tools:**
 
@@ -288,16 +288,15 @@ Installed public Hugging Face Space tools can also be enabled here after you add
 **Custom tools:**
 
 On top of built-in tools found in the core library, you can implement custom tools specific to your profile by adding Python files in the profile folder.
-Custom tools must subclass `reachy_mini_conversation_app.tools.core_tools.Tool` (see `profiles/example/sweep_look.py`).
+Custom tools must subclass `reachy_mini_conversation_app.tools.core_tools.Tool` (see that module for the interface).
 
 **Edit personalities from the UI:**
 
-When running with `--gradio`, open the "Personality" accordion:
-- Select among available profiles (folders under `profiles/`) or the built‑in default.
-- Click "Apply" to update the current session instructions live.
-- Create a new personality by entering a name and instructions text. It stores files under `profiles/<name>/` and copies `tools.txt` from the `default` profile.
+When running with `--ui`, the Home view lists available profiles (folders under `profiles/`) plus the built-in default:
+- Tap a card to apply that personality and start talking.
+- Tap "Custom" to create a new personality by entering a name and instructions. It copies `tools.txt` from the `default` profile and stores the files under `user_personalities/<name>/` in the app instance directory (next to `.env`/`startup_settings.json`).
 
-Note: The "Personality" panel updates the conversation instructions. Tool sets are loaded at startup from `tools.txt` and are not hot‑reloaded.
+Note: switching a personality reloads its instructions and tools in place via a quick backend reconnect — no app restart. Editing the active profile's files on disk needs a re-select (or restart) to apply.
 
 </details>
 
@@ -308,7 +307,7 @@ To create a locked variant of the app that cannot switch profiles, edit `src/rea
 ```python
 LOCKED_PROFILE: str | None = "mars_rover"  # Lock to this profile
 ```
-When `LOCKED_PROFILE` is set, the app always uses that profile, ignoring saved startup settings, `REACHY_MINI_CUSTOM_PROFILE`, and the Gradio UI. The UI shows "(locked)" and disables all profile editing controls.
+When `LOCKED_PROFILE` is set, the app always uses that profile, ignoring saved startup settings, `REACHY_MINI_CUSTOM_PROFILE`, and the web UI. The UI shows "(locked)" and disables all profile editing controls.
 This is useful for creating dedicated clones of the app with a fixed personality. Clone scripts can simply edit this constant to lock the variant.
 
 </details>

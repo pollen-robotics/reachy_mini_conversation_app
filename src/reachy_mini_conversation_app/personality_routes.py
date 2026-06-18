@@ -1,9 +1,8 @@
-"""Settings UI routes for headless personality management.
+"""FastAPI routes for personality and voice management.
 
-Exposes REST endpoints on the provided FastAPI settings app. The
-implementation schedules backend actions (apply personality, fetch voices)
-onto the running LocalStream asyncio loop using the supplied get_loop
-callable to avoid cross-thread issues.
+Exposes REST endpoints on the provided FastAPI app. Backend actions
+(apply personality, fetch voices) are scheduled onto the running
+LocalStream asyncio loop via the supplied get_loop callable.
 """
 
 from __future__ import annotations
@@ -12,6 +11,7 @@ import logging
 from typing import Any, Callable, Optional, Awaitable
 
 from fastapi import Query, FastAPI, Request
+from pydantic import BaseModel
 
 from .config import (
     LOCKED_PROFILE,
@@ -19,8 +19,7 @@ from .config import (
     get_default_voice_for_backend,
     get_available_voices_for_backend,
 )
-from .conversation_handler import ConversationHandler
-from .headless_personality import (
+from .personality import (
     DEFAULT_OPTION,
     _sanitize_name,
     _write_profile,
@@ -30,9 +29,21 @@ from .headless_personality import (
     resolve_profile_dir,
     read_instructions_for,
 )
+from .conversation_handler import ConversationHandler
 
 
 logger = logging.getLogger(__name__)
+
+
+class ApplyPayload(BaseModel):
+    """Body of POST /personalities/apply.
+
+    Module-level: under postponed annotations, FastAPI can't resolve a
+    function-local model and silently treats it as a query param.
+    """
+
+    name: str
+    persist: bool = False
 
 
 def mount_personality_routes(
@@ -48,15 +59,7 @@ def mount_personality_routes(
     change_voice: Callable[[str], Awaitable[str]] | None = None,
 ) -> None:
     """Register personality management endpoints on a FastAPI app."""
-    try:
-        from pydantic import BaseModel
-        from fastapi.responses import JSONResponse
-    except Exception:  # pragma: no cover - only when settings app not available
-        return
-
-    class ApplyPayload(BaseModel):
-        name: str
-        persist: Optional[bool] = False
+    from fastapi.responses import JSONResponse
 
     def _startup_choice() -> Any:
         """Return the persisted startup personality or default."""
@@ -130,97 +133,26 @@ def mount_personality_routes(
             else get_default_voice_for_backend()
         )
 
-        name_s = _sanitize_name(name)
-        if not name_s:
+        sanitized_name = _sanitize_name(name)
+        if not sanitized_name:
             return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)  # type: ignore
         try:
             logger.info(
-                "Headless save: name=%r voice=%r instr_len=%d tools_len=%d",
-                name_s,
+                "save: name=%r voice=%r instr_len=%d tools_len=%d",
+                sanitized_name,
                 voice,
                 len(instructions),
                 len(tools_text),
             )
-            _write_profile(name_s, instructions, tools_text, voice or get_default_voice_for_backend())
-            value = f"user_personalities/{name_s}"
-            choices = [DEFAULT_OPTION, *list_personalities()]
-            return {"ok": True, "value": value, "choices": choices}
-        except Exception as e:
-            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
-
-    @app.post("/personalities/save_raw")
-    async def _save_raw(
-        request: Request,
-        name: Optional[str] = None,
-        instructions: Optional[str] = None,
-        tools_text: Optional[str] = None,
-        voice: Optional[str] = None,
-    ) -> dict:  # type: ignore
-        # Accept query params, form-encoded, or raw JSON
-        data = {"name": name, "instructions": instructions, "tools_text": tools_text, "voice": voice}
-        # Prefer form if present
-        try:
-            form = await request.form()
-            for k in ("name", "instructions", "tools_text", "voice"):
-                if k in form and form[k] is not None:
-                    data[k] = str(form[k])
-        except Exception:
-            pass
-        # Try JSON
-        try:
-            raw = await request.json()
-            if isinstance(raw, dict):
-                for k in ("name", "instructions", "tools_text", "voice"):
-                    if raw.get(k) is not None:
-                        data[k] = str(raw.get(k))
-        except Exception:
-            pass
-
-        name_s = _sanitize_name(str(data.get("name") or ""))
-        if not name_s:
-            return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)  # type: ignore
-        instr = str(data.get("instructions") or "")
-        tools = str(data.get("tools_text") or "")
-        v = str(data.get("voice") or get_default_voice_for_backend())
-        try:
-            logger.info(
-                "Headless save_raw: name=%r voice=%r instr_len=%d tools_len=%d", name_s, v, len(instr), len(tools)
-            )
-            _write_profile(name_s, instr, tools, v)
-            value = f"user_personalities/{name_s}"
-            choices = [DEFAULT_OPTION, *list_personalities()]
-            return {"ok": True, "value": value, "choices": choices}
-        except Exception as e:
-            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
-
-    @app.get("/personalities/save_raw")
-    async def _save_raw_get(name: str, instructions: str = "", tools_text: str = "", voice: str | None = None) -> dict:  # type: ignore
-        name_s = _sanitize_name(name)
-        if not name_s:
-            return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)  # type: ignore
-        try:
-            normalized_voice = voice or get_default_voice_for_backend()
-            logger.info(
-                "Headless save_raw(GET): name=%r voice=%r instr_len=%d tools_len=%d",
-                name_s,
-                normalized_voice,
-                len(instructions),
-                len(tools_text),
-            )
-            _write_profile(name_s, instructions, tools_text, normalized_voice)
-            value = f"user_personalities/{name_s}"
+            _write_profile(sanitized_name, instructions, tools_text, voice or get_default_voice_for_backend())
+            value = f"user_personalities/{sanitized_name}"
             choices = [DEFAULT_OPTION, *list_personalities()]
             return {"ok": True, "value": value, "choices": choices}
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
 
     @app.post("/personalities/apply")
-    async def _apply(
-        request: Request,
-        payload: ApplyPayload | None = None,
-        name: str | None = None,
-        persist: Optional[bool] = None,
-    ) -> dict:  # type: ignore
+    async def _apply(payload: ApplyPayload) -> dict:  # type: ignore
         if LOCKED_PROFILE is not None:
             return JSONResponse(
                 {"ok": False, "error": "profile_locked", "locked_to": LOCKED_PROFILE},
@@ -230,31 +162,8 @@ def mount_personality_routes(
         if loop is None:
             return JSONResponse({"ok": False, "error": "loop_unavailable"}, status_code=503)  # type: ignore
 
-        # Accept both JSON payload and query param for convenience
-        sel_name: Optional[str] = None
-        persist_flag = bool(persist) if persist is not None else False
-        if payload and getattr(payload, "name", None):
-            sel_name = payload.name
-            persist_flag = bool(getattr(payload, "persist", False))
-        elif name:
-            sel_name = name
-        else:
-            try:
-                body = await request.json()
-                if isinstance(body, dict) and body.get("name"):
-                    sel_name = str(body.get("name"))
-                if isinstance(body, dict) and "persist" in body:
-                    persist_flag = bool(body.get("persist"))
-            except Exception:
-                sel_name = None
-        try:
-            q_persist = request.query_params.get("persist")
-            if q_persist is not None:
-                persist_flag = str(q_persist).lower() in {"1", "true", "yes", "on"}
-        except Exception:
-            pass
-        if not sel_name:
-            sel_name = DEFAULT_OPTION
+        sel_name = payload.name or DEFAULT_OPTION
+        persist_flag = bool(payload.persist)
 
         async def _do_apply() -> tuple[str, Optional[str]]:
             sel = None if sel_name == DEFAULT_OPTION else sel_name
@@ -267,7 +176,7 @@ def mount_personality_routes(
             return status, voice_override
 
         try:
-            logger.info("Headless apply: requested name=%r", sel_name)
+            logger.info("apply: requested name=%r", sel_name)
             fut = asyncio.run_coroutine_threadsafe(_do_apply(), loop)
             status, voice_override = fut.result(timeout=10)
             persisted_choice = _startup_choice()
@@ -302,25 +211,13 @@ def mount_personality_routes(
             return get_available_voices_for_backend()
 
     @app.get("/voices/current")
-    async def _current_voice() -> dict[str, str]:
-        loop = get_loop()
-        fallback_voice = get_default_voice_for_backend()
-        if loop is None:
-            return {"voice": fallback_voice}
-
-        def _get_current() -> str:
-            try:
-                if get_current_voice is not None:
-                    return get_current_voice()
-                return handler.get_current_voice()
-            except Exception:
-                return fallback_voice
-
+    def _current_voice() -> dict[str, str]:
         try:
-            fut = asyncio.run_coroutine_threadsafe(asyncio.to_thread(_get_current), loop)
-            return {"voice": fut.result(timeout=10)}
+            if get_current_voice is not None:
+                return {"voice": get_current_voice()}
+            return {"voice": handler.get_current_voice()}
         except Exception:
-            return {"voice": fallback_voice}
+            return {"voice": get_default_voice_for_backend()}
 
     @app.post("/voices/apply")
     async def _apply_voice(request: Request, voice: str | None = Query(None)) -> dict:  # type: ignore

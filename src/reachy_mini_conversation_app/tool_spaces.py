@@ -139,7 +139,7 @@ def _append_tools_to_profile(profile: str, tool_ids: list[str]) -> list[str]:
     """Append tool IDs to a profile's tools.txt. Returns the IDs that were added."""
     from reachy_mini_conversation_app.config import config
 
-    tools_txt = config.PROFILES_DIRECTORY / profile / "tools.txt"
+    tools_txt = config.resolve_profile_dir(profile) / "tools.txt"
     if not tools_txt.parent.is_dir():
         raise RuntimeError(
             f"Profile '{profile}' not found at {tools_txt.parent}. Use --install-only to skip profile wiring."

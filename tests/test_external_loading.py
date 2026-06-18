@@ -117,7 +117,7 @@ def test_builtin_profile_can_load_profile_local_tools(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Built-in profile-local tools should load from the packaged profiles root."""
-    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "example")
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "default")
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", config_mod.DEFAULT_PROFILES_DIRECTORY)
     monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
     monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
@@ -129,7 +129,7 @@ def test_builtin_profile_can_load_profile_local_tools(
 
 def test_tool_registry_reloads_when_profile_changes(monkeypatch: pytest.MonkeyPatch) -> None:
     """Runtime profile changes should refresh enabled tools without restarting Python."""
-    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "example")
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "default")
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", config_mod.DEFAULT_PROFILES_DIRECTORY)
     monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
     monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
@@ -138,9 +138,9 @@ def test_tool_registry_reloads_when_profile_changes(monkeypatch: pytest.MonkeyPa
 
     initial_tool_names = {spec["name"] for spec in core_tools_mod.get_tool_specs()}
     assert "sweep_look" in initial_tool_names
-    assert "camera" not in initial_tool_names
+    assert "camera" in initial_tool_names
 
-    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "default")
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "mars_rover")
 
     reloaded_tool_names = {spec["name"] for spec in core_tools_mod.get_tool_specs()}
     assert "camera" in reloaded_tool_names
@@ -154,7 +154,7 @@ def test_forced_tool_registry_reload_does_not_duplicate_profile_local_tool(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Reloading a profile-local tool should ignore stale class objects from the previous load."""
-    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "example")
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "default")
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", config_mod.DEFAULT_PROFILES_DIRECTORY)
     monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
     monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)

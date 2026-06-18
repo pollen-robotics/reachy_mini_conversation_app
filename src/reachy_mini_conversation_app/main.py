@@ -6,17 +6,13 @@ import time
 import asyncio
 import argparse
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from pathlib import Path
+from collections.abc import Callable, Awaitable
 
-import httpx
-import gradio as gr
-from fastapi import FastAPI
-from fastrtc import Stream
-from gradio.utils import get_space
+from fastapi import FastAPI, Request, Response
 
 from reachy_mini import ReachyMini, ReachyMiniApp
-from reachy_mini.io.protocol import SetVolumeCmd
 from reachy_mini_conversation_app.utils import (
     CameraVisionInitializationError,
     parse_args,
@@ -28,12 +24,6 @@ from reachy_mini_conversation_app.utils import (
 
 APP_TIMEOUT_MINUTES_ENV = "REACHY_MINI_APP_TIMEOUT_MINUTES"
 DEFAULT_APP_TIMEOUT_MINUTES = 1440.0
-
-
-def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Update the chatbot with AdditionalOutputs."""
-    chatbot.append(response)
-    return chatbot
 
 
 def _resolve_app_timeout_minutes(args: argparse.Namespace, logger: Any) -> float | None:
@@ -140,12 +130,11 @@ def run(
     from reachy_mini_conversation_app.moves import MovementManager
     from reachy_mini_conversation_app.config import (
         HF_BACKEND,
-        GEMINI_BACKEND,
-        OPENAI_BACKEND,
         HF_LOCAL_CONNECTION_MODE,
         config,
         is_gemini_model,
         get_backend_label,
+        set_instance_path,
         get_hf_connection_selection,
         refresh_runtime_config_from_env,
     )
@@ -156,6 +145,7 @@ def run(
 
     logger = setup_logger(args.debug)
     logger.info("Starting Reachy Mini Conversation App")
+    set_instance_path(instance_path)
     startup_settings = StartupSettings()
 
     if instance_path is not None:
@@ -245,17 +235,6 @@ def run(
         camera_worker=camera_worker,
         vision_processor=vision_processor,
     )
-    current_file_path = os.path.dirname(os.path.abspath(__file__))
-    logger.debug(f"Current file absolute path: {current_file_path}")
-    chatbot = gr.Chatbot(
-        type="messages",
-        resizable=True,
-        avatar_images=(
-            os.path.join(current_file_path, "images", "user_avatar.png"),
-            os.path.join(current_file_path, "images", "reachymini_avatar.png"),
-        ),
-    )
-    logger.debug(f"Chatbot avatar images: {chatbot.avatar_images}")
 
     def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
         """Build a realtime handler for the current runtime backend config."""
@@ -268,7 +247,6 @@ def run(
             )
             return GeminiLiveHandler(
                 deps,
-                gradio_mode=args.gradio,
                 instance_path=instance_path,
                 startup_voice=startup_voice,
             )
@@ -288,7 +266,6 @@ def run(
             )
             return HuggingFaceRealtimeHandler(
                 deps,
-                gradio_mode=args.gradio,
                 instance_path=instance_path,
                 startup_voice=startup_voice,
             )
@@ -301,93 +278,53 @@ def run(
         )
         return OpenaiRealtimeHandler(
             deps,
-            gradio_mode=args.gradio,
             instance_path=instance_path,
             startup_voice=startup_voice,
         )
 
     handler = build_handler(startup_settings.voice)
 
-    stream_manager: gr.Blocks | LocalStream | None = None
+    stream_manager: LocalStream | None = None
+    own_ui_server = None
 
-    if args.gradio:
-        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
+    effective_settings_app = settings_app
+    if args.ui and settings_app is None:
+        effective_settings_app = FastAPI()
 
-        personality_ui = PersonalityUI()
-        personality_ui.create_components()
-        additional_inputs: list[Any] = [chatbot, *personality_ui.additional_inputs_ordered()]
+        @effective_settings_app.middleware("http")
+        async def _no_cache(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+            """Serve everything no-store so browsers don't keep stale UI modules."""
+            response = await call_next(request)
+            response.headers["Cache-Control"] = "no-store"
+            return response
 
-        if config.BACKEND_PROVIDER in {OPENAI_BACKEND, GEMINI_BACKEND}:
-            uses_gemini_backend = is_gemini_model()
-            api_key_textbox = gr.Textbox(
-                label="GEMINI_API_KEY" if uses_gemini_backend else "OPENAI API Key",
-                type="password",
-                value=(os.getenv("GEMINI_API_KEY") if uses_gemini_backend else os.getenv("OPENAI_API_KEY"))
-                if not get_space()
-                else "",
-            )
-            additional_inputs.insert(1, api_key_textbox)
+    stream_manager = LocalStream(
+        handler,
+        robot,
+        settings_app=effective_settings_app,
+        instance_path=instance_path,
+        handler_factory=build_handler,
+        startup_voice=startup_settings.voice,
+    )
 
-        stream = Stream(
-            handler=handler,
-            mode="send-receive",
-            modality="audio",
-            additional_inputs=additional_inputs,
-            additional_outputs=[chatbot],
-            additional_outputs_handler=update_chatbot,
-            ui_args={"title": "Talk with Reachy Mini"},
+    if args.ui and settings_app is None and effective_settings_app is not None:
+        import uvicorn
+
+        # Routes must exist before uvicorn starts serving, launch() repeats this as a no-op.
+        stream_manager._init_settings_ui_if_needed()
+
+        own_ui_server = uvicorn.Server(
+            uvicorn.Config(effective_settings_app, host="0.0.0.0", port=7860, log_level="warning")
         )
-        stream_manager = stream.ui
-        if not settings_app:
-            app = FastAPI()
-        else:
-            app = settings_app
-
-        personality_ui.wire_events(handler, stream_manager)
-
-        app = gr.mount_gradio_app(app, stream.ui, path="/")
-    else:
-        # In headless mode, wire settings_app + instance_path to console LocalStream
-        stream_manager = LocalStream(
-            handler,
-            robot,
-            settings_app=settings_app,
-            instance_path=instance_path,
-            handler_factory=build_handler,
-            startup_voice=startup_settings.voice,
-        )
+        threading.Thread(target=own_ui_server.run, daemon=True, name="ui-server").start()
+        logger.info("Web UI available at http://localhost:7860")
 
     # Each async service → its own thread/loop
     movement_manager.start()
     # Audio-reactive head motion is driven by the daemon's wobbler, which
-    # taps the media pipeline at push_audio_sample. In headless mode the
-    # console stream pushes assistant audio through that pipeline directly.
-    # In Gradio mode audio plays in the browser; the handler additionally
-    # taps the same call to keep the wobbler fed (see
-    # BaseRealtimeHandler._tap_audio_for_daemon_wobbler) — mute the robot
-    # speaker to avoid double playback.
+    # taps the media pipeline at push_audio_sample. The console stream pushes
+    # assistant audio through that pipeline directly.
     robot.enable_wobbling()
-    saved_speaker_volume: int | None = None
-    if args.gradio:
-        # LocalStream.launch() starts the playback pipeline in headless mode.
-        # In Gradio mode nothing else does, and push_audio_sample is a no-op
-        # until the pipeline is in PLAYING state — so the wobbler stays idle.
-        try:
-            robot.media.start_playing()
-        except Exception as exc:
-            logger.warning(f"Failed to start media playback for Gradio mode: {exc}")
-        # Audio plays in the browser; silence the robot speaker so we don't
-        # hear it twice. GET via REST to read the current level (no side
-        # effects), SET via the WS protocol so the daemon does not fire its
-        # "test sound" played by POST /api/volume/set on each call.
-        try:
-            volume_url = f"http://{robot.client.host}:{robot.client.port}/api/volume/current"
-            saved_speaker_volume = int(httpx.get(volume_url, timeout=2).json()["volume"])
-            robot.client.send_command(SetVolumeCmd(volume=0))
-            logger.info(f"Muted robot speaker for Gradio mode (saved volume: {saved_speaker_volume})")
-        except Exception as exc:
-            logger.warning(f"Could not mute robot speaker: {exc}")
-            saved_speaker_volume = None
     if camera_worker:
         camera_worker.start()
 
@@ -419,17 +356,14 @@ def run(
     except KeyboardInterrupt:
         logger.info("Keyboard interruption in main thread... closing server.")
     finally:
+        if own_ui_server is not None:
+            own_ui_server.should_exit = True
+
         movement_manager.stop()
         try:
             robot.disable_wobbling()
         except Exception as e:
             logger.debug(f"Error disabling wobbling during shutdown: {e}")
-        if saved_speaker_volume is not None:
-            try:
-                robot.client.send_command(SetVolumeCmd(volume=saved_speaker_volume))
-                logger.info(f"Restored robot speaker volume to {saved_speaker_volume}")
-            except Exception as e:
-                logger.debug(f"Error restoring speaker volume during shutdown: {e}")
         if camera_worker:
             camera_worker.stop()
 

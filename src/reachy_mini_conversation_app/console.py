@@ -1,13 +1,7 @@
-"""Bidirectional local audio stream with optional settings UI.
+"""Bidirectional local audio stream with optional web settings UI.
 
-In headless mode, there is no Gradio UI. If the selected backend is missing
-its required API key, we expose a minimal settings page via the Reachy Mini
-Apps settings server so users can pick a backend and provide any missing
-credentials.
-
-The settings UI is served from this package's ``static/`` folder. It persists
-the selected backend and any provided API keys into the app instance's ``.env``
-file when available.
+If the selected backend is missing its required API key, a settings page is
+served via the Reachy Mini Apps settings server so users can configure it.
 """
 
 import os
@@ -15,13 +9,16 @@ import sys
 import time
 import asyncio
 import logging
-from typing import List, Callable, Optional
+import threading
+from typing import List, Optional
 from pathlib import Path
+from collections.abc import Callable, AsyncGenerator
 
 from fastrtc import AdditionalOutputs, audio_to_float32
 from scipy.signal import resample
 
 from reachy_mini import ReachyMini
+from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.config import (
     HF_BACKEND,
     GEMINI_BACKEND,
@@ -45,26 +42,122 @@ from reachy_mini_conversation_app.config import (
     get_available_voices_for_backend,
 )
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
+from reachy_mini_conversation_app.personality_routes import mount_personality_routes
 from reachy_mini_conversation_app.audio.startup_config import apply_audio_startup_config
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
-from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
 
 
 try:
     # FastAPI is provided by the Reachy Mini Apps runtime
-    from fastapi import FastAPI, Response
+    from fastapi import FastAPI, Request, Response
     from pydantic import BaseModel
-    from fastapi.responses import FileResponse, JSONResponse
+    from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
     from starlette.staticfiles import StaticFiles
 except Exception:  # pragma: no cover - only loaded when settings_app is used
     FastAPI = object  # type: ignore
     FileResponse = object  # type: ignore
     JSONResponse = object  # type: ignore
+    StreamingResponse = object  # type: ignore
     StaticFiles = object  # type: ignore
     BaseModel = object  # type: ignore
-
+    Request = object  # type: ignore
 
 logger = logging.getLogger(__name__)
+
+_SSE_KEEPALIVE_INTERVAL_SECONDS = 15.0  # below typical 60s proxy idle timeout
+
+
+def _detach_framework_root_routes(app: "FastAPI") -> None:
+    """Strip framework-registered GET / and /static routes so ours aren't silently shadowed."""
+    routes = getattr(app, "router", None)
+    routes = getattr(routes, "routes", None) if routes else getattr(app, "routes", None)
+    if routes is None:
+        return
+    survivors = []
+    for route in routes:
+        path = getattr(route, "path", None)
+        if path in ("/", "/static"):
+            logger.debug("detaching framework-provided route %r (%s)", path, type(route).__name__)
+            continue
+        survivors.append(route)
+    routes[:] = survivors
+
+
+class ConversationEventBus:
+    """Thread-safe fan-out bus that delivers conversation activity events to SSE subscribers."""
+
+    MAX_QUEUE_SIZE = 64
+
+    def __init__(self) -> None:
+        """Initialize the bus."""
+        # Each entry is (loop, queue); loop captured at subscribe() time for cross-thread delivery.
+        self._subscribers: list[tuple[asyncio.AbstractEventLoop, "asyncio.Queue[str]"]] = []
+        self._lock = threading.Lock()
+
+    def subscribe(self) -> tuple["asyncio.Queue[str]", Callable[[], None]]:
+        """Return a per-subscriber queue and its unsubscribe callback. Must be called from a coroutine."""
+        loop = asyncio.get_running_loop()
+        queue: "asyncio.Queue[str]" = asyncio.Queue(maxsize=self.MAX_QUEUE_SIZE)
+        entry = (loop, queue)
+        with self._lock:
+            self._subscribers.append(entry)
+
+        def unsubscribe() -> None:
+            with self._lock:
+                try:
+                    self._subscribers.remove(entry)
+                except ValueError:
+                    pass
+
+        return queue, unsubscribe
+
+    def publish(self, event: str) -> None:
+        """Broadcast to all subscribers via call_soon_threadsafe. Drops events for full or closed queues."""
+        with self._lock:
+            snapshot = list(self._subscribers)
+        for loop, queue in snapshot:
+            try:
+                loop.call_soon_threadsafe(self._enqueue_safely, queue, event)
+            except RuntimeError:
+                pass  # loop closed; subscriber will clean itself up on disconnect
+
+    @staticmethod
+    def _enqueue_safely(queue: "asyncio.Queue[str]", event: str) -> None:
+        try:
+            queue.put_nowait(event)
+        except asyncio.QueueFull:
+            logger.debug("conversation event dropped (subscriber queue full): %s", event)
+
+
+async def _conversation_events_stream(
+    bus: ConversationEventBus,
+    request: "Request",
+) -> "AsyncGenerator[str, None]":
+    """Yield SSE lines for one subscriber; emits keep-alive comments during idle periods."""
+    queue, unsubscribe = bus.subscribe()
+    try:
+        yield "retry: 2000\n\n"
+        yield "event: ready\ndata: connected\n\n"
+
+        while True:
+            if await request.is_disconnected():
+                return
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=_SSE_KEEPALIVE_INTERVAL_SECONDS)
+            except asyncio.TimeoutError:
+                yield ": keep-alive\n\n"
+                continue
+            yield f"event: activity\ndata: {event}\n\n"
+    finally:
+        unsubscribe()
+
+
+LOCAL_PLAYER_BACKEND = (
+    getattr(MediaBackend, "LOCAL", None)
+    or getattr(MediaBackend, "GSTREAMER", None)
+    or getattr(MediaBackend, "DEFAULT", None)
+)
+
 HandlerFactory = Callable[[Optional[str]], ConversationHandler]
 
 LEGACY_STARTUP_ENV_NAMES = (
@@ -103,18 +196,28 @@ class LocalStream:
         self._instance_path: Optional[str] = instance_path
         self._settings_initialized = False
         self._asyncio_loop = None
+        self._mic_muted = False  # mic starts live; the UI toggles it via /mic
         self._active_backend_name = get_backend_choice()
         self._backend_connection_state = "not_started"
         self._backend_error: str | None = None
         self._backend_retry_delay = BACKEND_RETRY_DELAY_SECONDS
+        # One bus for the stream's lifetime: the /conversation_events route
+        # closes over it, so handler rebuilds must keep publishing into it.
+        self._event_bus = ConversationEventBus()
         self._install_handler(handler)
 
     def _install_handler(self, handler: ConversationHandler) -> None:
         """Set the active handler and wire LocalStream-owned helpers into it."""
         self.handler = handler
         self.handler._clear_queue = self.clear_audio_queue
+        self._attach_event_bus_to_handler()
 
-    # ---- Settings UI ----
+    def _attach_event_bus_to_handler(self) -> None:
+        """Wire the event bus as the handler's activity observer, if supported."""
+        setter = getattr(self.handler, "set_activity_observer", None)
+        if callable(setter):
+            setter(self._event_bus.publish)
+
     def _read_env_lines(self, env_path: Path) -> list[str]:
         """Load env file contents or a template as a list of lines."""
         inst = env_path.parent
@@ -460,7 +563,19 @@ class LocalStream:
                 self._voice_override = current_voice
         except Exception as e:
             logger.debug("Could not sync LocalStream voice override after voice change: %s", e)
+        if self._voice_override:
+            self._persist_voice_override(self._voice_override)
         return status
+
+    def _persist_voice_override(self, voice: str) -> None:
+        """Persist the chosen voice as the startup voice, keeping the startup profile."""
+        if not self._instance_path:
+            return
+        try:
+            existing = read_startup_settings(self._instance_path)
+            write_startup_settings(self._instance_path, profile=existing.profile, voice=voice)
+        except Exception as e:
+            logger.warning("Failed to persist startup voice: %s", e)
 
     def _init_settings_ui_if_needed(self) -> None:
         """Attach minimal settings UI to the settings app.
@@ -475,16 +590,16 @@ class LocalStream:
 
         static_dir = Path(__file__).parent / "static"
         index_file = static_dir / "index.html"
+        logger.info("Serving settings UI from %s", static_dir)
+
+        # Framework pre-registers GET / and /static; strip them so our routes aren't shadowed.
+        _detach_framework_root_routes(self._settings_app)
 
         if hasattr(self._settings_app, "mount"):
             try:
-                # Serve /static/* assets
                 self._settings_app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
             except Exception:
                 pass
-
-        class ApiKeyPayload(BaseModel):
-            openai_api_key: str
 
         class BackendPayload(BaseModel):
             backend: str
@@ -558,14 +673,34 @@ class LocalStream:
                 ready = False
             return JSONResponse({"ready": ready})
 
-        # POST /openai_api_key -> set/persist key
-        @self._settings_app.post("/openai_api_key")
-        def _set_key(payload: ApiKeyPayload) -> JSONResponse:
-            key = (payload.openai_api_key or "").strip()
-            if not key:
-                return JSONResponse({"ok": False, "error": "empty_key"}, status_code=400)
-            self._persist_api_key(key)
-            return JSONResponse({"ok": True, **_status_payload()})
+        event_bus = self._event_bus
+
+        @self._settings_app.get("/conversation_events")
+        async def _conversation_events(request: Request) -> StreamingResponse:
+            return StreamingResponse(
+                _conversation_events_stream(event_bus, request),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",  # disable proxy buffering (e.g. nginx)
+                    "Connection": "keep-alive",
+                },
+            )
+
+        class MicPayload(BaseModel):
+            muted: bool
+
+        # GET /mic -> current mic mute state
+        @self._settings_app.get("/mic")
+        def _mic_state() -> JSONResponse:
+            return JSONResponse({"muted": self._mic_muted})
+
+        # POST /mic -> mute/unmute the user's microphone (Reachy Mini keeps speaking)
+        @self._settings_app.post("/mic")
+        def _set_mic(payload: MicPayload) -> JSONResponse:
+            self._mic_muted = bool(payload.muted)
+            logger.info("Microphone %s via web UI", "muted" if self._mic_muted else "unmuted")
+            return JSONResponse({"muted": self._mic_muted})
 
         @self._settings_app.post("/backend_config")
         def _set_backend(payload: BackendPayload) -> JSONResponse:
@@ -620,32 +755,6 @@ class LocalStream:
                     **payload_data,
                 }
             )
-
-        # POST /validate_api_key -> validate key without persisting it
-        @self._settings_app.post("/validate_api_key")
-        async def _validate_key(payload: ApiKeyPayload) -> JSONResponse:
-            key = (payload.openai_api_key or "").strip()
-            if not key:
-                return JSONResponse({"valid": False, "error": "empty_key"}, status_code=400)
-
-            # Try to validate by checking if we can fetch the models
-            try:
-                import httpx
-
-                headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    response = await client.get("https://api.openai.com/v1/models", headers=headers)
-                    if response.status_code == 200:
-                        return JSONResponse({"valid": True})
-                    elif response.status_code == 401:
-                        return JSONResponse({"valid": False, "error": "invalid_api_key"}, status_code=401)
-                    else:
-                        return JSONResponse(
-                            {"valid": False, "error": "validation_failed"}, status_code=response.status_code
-                        )
-            except Exception as e:
-                logger.warning(f"API key validation failed: {e}")
-                return JSONResponse({"valid": False, "error": "validation_error"}, status_code=500)
 
         self._settings_initialized = True
 
@@ -793,7 +902,7 @@ class LocalStream:
                         change_voice=self.change_voice,
                     )
             except Exception:
-                pass
+                logger.exception("Failed to mount personality routes; the personality UI will be unavailable")
             self._tasks = [
                 asyncio.create_task(self._run_handler_startup_loop(), name="realtime-handler"),
                 asyncio.create_task(self.record_loop(), name="stream-record-loop"),
@@ -877,7 +986,7 @@ class LocalStream:
 
         while not self._stop_event.is_set():
             audio_frame = self._robot.media.get_audio_sample()
-            if audio_frame is not None:
+            if audio_frame is not None and not self._mic_muted:
                 await self.handler.receive((input_sample_rate, audio_frame))
             await asyncio.sleep(0)  # avoid busy loop
 
