@@ -5,7 +5,6 @@ const DEFAULT_TIMEOUT_MS = 8000;
 class HttpError extends Error {
   constructor(status, body, message) {
     super(message || `HTTP ${status}`);
-    this.status = status;
     this.body = body;
   }
 }

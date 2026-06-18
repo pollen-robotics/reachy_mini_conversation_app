@@ -170,12 +170,10 @@ function subscribeConversationEvents({ onActivity, onReady, onError } = {}) {
       if (reason) onActivity(reason);
     });
 
-    if (typeof onReady === "function") {
-      source.addEventListener("ready", () => onReady());
-    }
+    source.addEventListener("ready", () => onReady());
 
     source.addEventListener("error", (err) => {
-      if (typeof onError === "function") onError(err);
+      onError(err);
       // EventSource gives up on HTTP errors (e.g. 404 while the backend is
       // still registering routes); recreate it until the route exists.
       if (!closed && source.readyState === EventSource.CLOSED) {

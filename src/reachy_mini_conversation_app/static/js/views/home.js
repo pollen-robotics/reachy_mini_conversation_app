@@ -14,7 +14,7 @@ import {
   ROUTES,
   avatarFor,
 } from "../constants.js";
-import { $, clear, h, prettifyProfileName } from "../ui.js";
+import { $, h, prettifyProfileName } from "../ui.js";
 import { openCustomProfileModal } from "../components/profile-modal.js";
 import { setPendingApply } from "../pending-apply.js";
 import { setPersonality } from "../personality-badge.js";
@@ -44,12 +44,12 @@ export async function mountHomeView({ outlet, signal, navigate }) {
   let personalities;
   try {
     personalities = await untilReady(listPersonalities, signal, () => {
-      clear(grid);
+      grid.replaceChildren();
       grid.appendChild(h("p", { class: "muted" }, "Waiting for Reachy to finish starting…"));
     });
   } catch (error) {
     if (signal.aborted) return;
-    clear(grid);
+    grid.replaceChildren();
     grid.appendChild(renderError("Could not list personalities", error));
     return;
   }
@@ -59,7 +59,7 @@ export async function mountHomeView({ outlet, signal, navigate }) {
   const current = personalities?.current;
   const lockedTo = personalities?.locked ? personalities.locked_to : null;
 
-  clear(grid);
+  grid.replaceChildren();
   for (const name of choices) {
     grid.appendChild(
       buildPersonalityCard({

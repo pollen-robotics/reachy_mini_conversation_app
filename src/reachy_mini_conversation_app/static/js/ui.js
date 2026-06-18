@@ -1,4 +1,4 @@
-/** Tiny DOM helpers: h(tag, attrs, ...children), $, clear, prettifyProfileName. */
+/** Tiny DOM helpers: h(tag, attrs, ...children), $, prettifyProfileName. */
 export function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs || {})) {
@@ -37,10 +37,6 @@ function appendChildren(parent, children) {
 
 export function $(selector, root = document) {
   return root.querySelector(selector);
-}
-
-export function clear(parent) {
-  while (parent.firstChild) parent.removeChild(parent.firstChild);
 }
 
 export function prettifyProfileName(name) {
