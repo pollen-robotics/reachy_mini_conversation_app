@@ -695,15 +695,11 @@ class LocalStream:
         def _mic_state() -> JSONResponse:
             return JSONResponse({"muted": self._mic_muted})
 
-        # POST /mic -> pause/resume the conversation
+        # POST /mic -> mute/unmute the user's microphone (Reachy keeps speaking)
         @self._settings_app.post("/mic")
         def _set_mic(payload: MicPayload) -> JSONResponse:
             self._mic_muted = bool(payload.muted)
             logger.info("Microphone %s via web UI", "muted" if self._mic_muted else "unmuted")
-            if self._mic_muted:
-                loop = self._asyncio_loop
-                if loop is not None and loop.is_running():
-                    loop.call_soon_threadsafe(self.clear_audio_queue)
             return JSONResponse({"muted": self._mic_muted})
 
         @self._settings_app.post("/backend_config")
@@ -1014,10 +1010,6 @@ class LocalStream:
                         )
 
             elif isinstance(handler_output, tuple):
-                # Paused conversation stays silent: drop assistant audio (e.g. idle-timer chatter)
-                if self._mic_muted:
-                    continue
-
                 input_sample_rate, audio_data = handler_output
                 output_sample_rate = self._robot.media.get_output_audio_samplerate()
 

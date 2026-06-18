@@ -1,7 +1,7 @@
 /**
  * Talk view: conversation orb driven by the SSE activity stream.
  * Audio I/O runs entirely in Python; the orb doubles as the mic toggle.
- * The conversation starts muted — tapping the orb unmutes/pauses it.
+ * Reachy stays live; tapping the orb only mutes or unmutes the user's mic.
  */
 
 import { getMicState, listPersonalities, setMicMuted } from "../api.js";
@@ -13,15 +13,14 @@ import { h, prettifyProfileName } from "../ui.js";
 
 const SSE_ENDPOINT = "/conversation_events";
 
-/** Human-readable label below the orb for each visual state. */
 const CAPTION_BY_STATE = Object.freeze({
-  [ORB_STATES.MUTED]: "Tap the mic to start the conversation.",
-  [ORB_STATES.IDLE]: "Ready — just speak to Reachy. Tap the mic to pause.",
-  [ORB_STATES.CONNECTING]: "Connecting to the conversation event stream…",
-  [ORB_STATES.LISTENING]: "Listening…",
-  [ORB_STATES.THINKING]: "Thinking…",
-  [ORB_STATES.SPEAKING]: "Speaking…",
-  [ORB_STATES.ERROR]: "Conversation event stream disconnected.",
+  [ORB_STATES.MUTED]: "Muted",
+  [ORB_STATES.IDLE]: "Ready",
+  [ORB_STATES.CONNECTING]: "Connecting",
+  [ORB_STATES.LISTENING]: "Listening",
+  [ORB_STATES.THINKING]: "Thinking",
+  [ORB_STATES.SPEAKING]: "Speaking",
+  [ORB_STATES.ERROR]: "Reconnecting",
 });
 
 export async function mountTalkView({ outlet, signal }) {
@@ -137,7 +136,7 @@ export async function mountTalkView({ outlet, signal }) {
 
   function syncMicAria() {
     orb.root.setAttribute("aria-pressed", String(!muted));
-    orb.root.setAttribute("aria-label", muted ? "Start the conversation" : "Pause the conversation");
+    orb.root.setAttribute("aria-label", muted ? "Unmute microphone" : "Mute microphone");
   }
 }
 
