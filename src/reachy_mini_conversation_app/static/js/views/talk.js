@@ -1,7 +1,7 @@
 /**
  * Talk view: conversation orb driven by the SSE activity stream.
  * Audio I/O runs entirely in Python; the orb doubles as the mic toggle.
- * Reachy stays live; tapping the orb only mutes or unmutes the user's mic.
+ * Robot stays live, tapping the orb only mutes or unmutes the user's mic.
  */
 
 import { getMicState, listPersonalities, setMicMuted } from "../api.js";

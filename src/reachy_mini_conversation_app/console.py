@@ -695,7 +695,7 @@ class LocalStream:
         def _mic_state() -> JSONResponse:
             return JSONResponse({"muted": self._mic_muted})
 
-        # POST /mic -> mute/unmute the user's microphone (Reachy keeps speaking)
+        # POST /mic -> mute/unmute the user's microphone (Reachy Mini keeps speaking)
         @self._settings_app.post("/mic")
         def _set_mic(payload: MicPayload) -> JSONResponse:
             self._mic_muted = bool(payload.muted)
