@@ -4160,7 +4160,7 @@ wheels = [
 
 [[package]]
 name = "reachy-mini"
-version = "1.8.1"
+version = "1.8.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -4196,9 +4196,9 @@ dependencies = [
     { name = "websockets" },
     { name = "zeroconf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ae/9a/351dfb738d206be5f959af038159fb3e3a1283dc7b07cb7efef2b3a3fc2d/reachy_mini-1.8.1.tar.gz", hash = "sha256:06d7c3719ece81317d72b5bccb42050633119fd897a3ffd3039cd0d4b54656de", size = 24766800, upload-time = "2026-06-10T10:09:10.361Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8e/e9/4eefe938e794b360b37a4f100015763566576fd34d58bec7a17179f13ab4/reachy_mini-1.8.3.tar.gz", hash = "sha256:09d9372b4c47eb8291a74f29b91605c87a494e4f707d9993754065bf27a7c058", size = 24792246, upload-time = "2026-06-16T16:18:01.516Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cf/7c/a6ef1adb9dda8a5cf4c5061926661edbc14e80648f8e21bd0b23188eea8f/reachy_mini-1.8.1-py3-none-any.whl", hash = "sha256:7a99caf148c19f8557fcd98f27397fe27b975cc37082ac57b836396e84891b6f", size = 24867986, upload-time = "2026-06-10T10:09:07.773Z" },
+    { url = "https://files.pythonhosted.org/packages/8a/20/f9476d69b5cac93eb4ec6683a2b64ee7c98cd359de51fe47c59f23104b52/reachy_mini-1.8.3-py3-none-any.whl", hash = "sha256:6bdc4227f4b811f5fdf0106e64bcbdb3f10a10b9dfa4a5704e52829f4d6383dd", size = 24890119, upload-time = "2026-06-16T16:17:58.769Z" },
 ]
 
 [[package]]
@@ -4270,7 +4270,7 @@ requires-dist = [
     { name = "opencv-python", marker = "extra == 'all-vision'", specifier = ">=4.13.0.92" },
     { name = "opencv-python", marker = "extra == 'yolo-vision'", specifier = ">=4.13.0.92" },
     { name = "python-dotenv" },
-    { name = "reachy-mini", specifier = ">=1.8.1" },
+    { name = "reachy-mini", specifier = ">=1.8.3" },
     { name = "reachy-mini-dances-library" },
     { name = "reachy-mini-toolbox" },
     { name = "supervision", marker = "extra == 'all-vision'", specifier = "<0.28" },

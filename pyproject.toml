@@ -29,7 +29,7 @@ dependencies = [
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
-    "reachy-mini>=1.8.1",
+    "reachy-mini>=1.8.3",
     "mcp>=1.27.1",
 ]
 
