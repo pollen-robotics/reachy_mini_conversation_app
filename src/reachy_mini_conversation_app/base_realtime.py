@@ -177,6 +177,20 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         """Return a valid persisted startup voice for this backend, or None."""
         return self._resolve_backend_voice(voice, source="persisted startup voice")
 
+    async def _wait_for_response_done_before_tool_result(self) -> bool:
+        """Return whether the function-call response finished before sending tool output."""
+        if self._response_done_event.is_set():
+            return True
+
+        try:
+            await asyncio.wait_for(
+                self._response_done_event.wait(),
+                timeout=self._response_done_timeout(),
+            )
+            return True
+        except asyncio.TimeoutError:
+            return False
+
     def _resolve_backend_voice(
         self,
         voice: str | None,
@@ -257,16 +271,27 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         )
 
     async def change_voice(self, voice: str) -> str:
-        """Change only the voice and restart the session."""
+        """Change only the voice, updating the active session when possible."""
         default_voice = get_default_voice_for_backend(self.BACKEND_PROVIDER)
-        resolved_voice = self._resolve_backend_voice(voice, source="requested voice", fallback=default_voice)
+        resolved_voice = (
+            self._resolve_backend_voice(voice, source="requested voice", fallback=default_voice) or default_voice
+        )
         self._voice_override = resolved_voice
-        if getattr(self, "client", None) is not None:
+        if self.connection is not None:
             try:
-                await self._restart_session()
+                await self.connection.session.update(
+                    session=RealtimeSessionCreateRequestParam(
+                        type="realtime",
+                        audio=RealtimeAudioConfigParam(
+                            output=RealtimeAudioConfigOutputParam(
+                                voice=resolved_voice,
+                            ),
+                        ),
+                    ),
+                )
                 return f"Voice changed to {resolved_voice}."
             except Exception as e:
-                logger.warning("Failed to restart session for voice change: %s", e)
+                logger.warning("Failed to update live session for voice change: %s", e)
                 return "Voice change failed. Will take effect on next connection."
         return "Voice changed. Will take effect on next connection."
 
@@ -575,14 +600,32 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         try:
             self._mark_activity("tool_result_ready")
             send_result_to_model = not bg_tool.is_idle_tool_call
+            model_result_submitted = False
             if send_result_to_model and isinstance(bg_tool.id, str):
-                await self.connection.conversation.item.create(
-                    item={
-                        "type": "function_call_output",
-                        "call_id": bg_tool.id,
-                        "output": json.dumps(tool_result_for_model),
-                    },
-                )
+                if not await self._wait_for_response_done_before_tool_result():
+                    send_result_to_model = False
+                if not send_result_to_model:
+                    logger.warning(
+                        "Dropping realtime model result for tool '%s' (id=%s) because response.done was not observed",
+                        bg_tool.tool_name,
+                        bg_tool.id,
+                    )
+                elif not self.connection:
+                    logger.warning(
+                        "Connection closed before sending tool '%s' (id=%s) result back",
+                        bg_tool.tool_name,
+                        bg_tool.id,
+                    )
+                    return
+                else:
+                    await self.connection.conversation.item.create(
+                        item={
+                            "type": "function_call_output",
+                            "call_id": bg_tool.id,
+                            "output": json.dumps(tool_result_for_model),
+                        },
+                    )
+                    model_result_submitted = True
 
             await self.output_queue.put(
                 AdditionalOutputs(
@@ -593,7 +636,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 ),
             )
 
-            if send_result_to_model and bg_tool.tool_name == "camera" and "b64_im" in tool_result:
+            if model_result_submitted and bg_tool.tool_name == "camera" and "b64_im" in tool_result:
                 # use raw base64, don't json.dumps (which adds quotes)
                 b64_im = tool_result["b64_im"]
                 if not isinstance(b64_im, str):
@@ -629,9 +672,8 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                     )
 
             tool = core_tools.ALL_TOOLS.get(bg_tool.tool_name)
-            # If this tool call was triggered by an idle signal, don't make the robot speak.
-            # Always surface errors; skip the spoken follow-up for tools that opt out.
-            if send_result_to_model and (bg_tool.error is not None or tool is None or tool.needs_response):
+            # Always surface errors, skip the spoken follow-up for tools that opt out.
+            if model_result_submitted and (bg_tool.error is not None or tool is None or tool.needs_response):
                 await self._safe_response_create()
 
         except self._connection_closed_errors():
@@ -705,6 +747,12 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
                     if event.type == "response.output_audio.done":
                         logger.debug("response completed")
+
+                    if event.type == "response.output_text.delta":
+                        logger.debug("response text delta")
+
+                    if event.type == "response.output_text.done":
+                        logger.debug("response text done: %s", event.text)
 
                     if event.type == "response.created":
                         self._mark_activity("response_created")
@@ -863,7 +911,10 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                             self.deps.movement_manager.set_listening(False)
 
                         # Only show user-facing errors, not internal state errors.
-                        if code not in ("input_audio_buffer_commit_empty", "conversation_already_has_active_response"):
+                        if code not in (
+                            "input_audio_buffer_commit_empty",
+                            "conversation_already_has_active_response",
+                        ):
                             await self.output_queue.put(
                                 AdditionalOutputs({"role": "assistant", "content": f"[error] {msg}"})
                             )
