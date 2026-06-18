@@ -145,7 +145,7 @@ async function fetchActivePersonality() {
   try {
     const data = await listPersonalities();
     const current = data?.current;
-    if (!current || current === BUILT_IN_DEFAULT_OPTION) return null;
+    if (!current || current === BUILT_IN_DEFAULT_OPTION) return "default";
     return current;
   } catch {
     return null;

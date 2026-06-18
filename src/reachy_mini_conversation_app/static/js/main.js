@@ -17,9 +17,9 @@ const SETTINGS_RETURN_KEY = "settings-return-route";
 /** Survives reloads while on /settings (sessionStorage may be unavailable when embedded). */
 function readSettingsReturn() {
   try {
-    return sessionStorage.getItem(SETTINGS_RETURN_KEY) === ROUTES.TALK ? ROUTES.TALK : ROUTES.HOME;
+    return sessionStorage.getItem(SETTINGS_RETURN_KEY) === ROUTES.PERSONALITIES ? ROUTES.PERSONALITIES : ROUTES.TALK;
   } catch {
-    return ROUTES.HOME;
+    return ROUTES.TALK;
   }
 }
 
@@ -50,11 +50,11 @@ function boot() {
 
   const router = createRouter(
     {
-      [ROUTES.HOME]: (ctx) => mountHomeView({ ...ctx, navigate: router.navigate }),
       [ROUTES.TALK]: (ctx) => mountTalkView(ctx),
+      [ROUTES.PERSONALITIES]: (ctx) => mountHomeView({ ...ctx, navigate: router.navigate }),
       [ROUTES.SETTINGS]: (ctx) => mountSettingsView(ctx),
     },
-    { fallback: ROUTES.HOME, outlet }
+    { fallback: ROUTES.TALK, outlet }
   );
 
   // Settings is an overlay: closing it returns to where it was opened
@@ -65,7 +65,7 @@ function boot() {
       if (window.location.hash === ROUTES.SETTINGS) {
         router.navigate(settingsReturn);
       } else {
-        settingsReturn = window.location.hash === ROUTES.TALK ? ROUTES.TALK : ROUTES.HOME;
+        settingsReturn = window.location.hash === ROUTES.PERSONALITIES ? ROUTES.PERSONALITIES : ROUTES.TALK;
         storeSettingsReturn(settingsReturn);
         router.navigate(ROUTES.SETTINGS);
       }
@@ -76,30 +76,35 @@ function boot() {
   if (brand) {
     brand.addEventListener("click", (event) => {
       event.preventDefault();
-      router.navigate(ROUTES.HOME);
+      router.navigate(ROUTES.TALK);
     });
+  }
+
+  const personalityBadge = $('[data-action="open-personalities"]');
+  if (personalityBadge) {
+    personalityBadge.addEventListener("click", () => router.navigate(ROUTES.PERSONALITIES));
   }
 
   const back = $('[data-action="go-back"]');
   if (back) {
     back.addEventListener("click", () => {
-      router.navigate(window.location.hash === ROUTES.SETTINGS ? settingsReturn : ROUTES.HOME);
+      router.navigate(window.location.hash === ROUTES.SETTINGS ? settingsReturn : ROUTES.TALK);
     });
   }
 
   mountPersonalityBadge(document);
 
   function syncHeaderForRoute() {
-    const route = window.location.hash;
+    const route = window.location.hash || ROUTES.TALK;
     if (gear) {
       const onSettings = route === ROUTES.SETTINGS;
       gear.classList.toggle("is-active", onSettings);
       gear.setAttribute("aria-label", onSettings ? "Close settings" : "Open settings");
     }
     if (back) {
-      back.hidden = route === ROUTES.HOME;
-      const toConversation = route === ROUTES.SETTINGS && settingsReturn === ROUTES.TALK;
-      back.setAttribute("aria-label", toConversation ? "Back to conversation" : "Back to personalities");
+      back.hidden = route === ROUTES.TALK;
+      const toPersonalities = route === ROUTES.SETTINGS && settingsReturn === ROUTES.PERSONALITIES;
+      back.setAttribute("aria-label", toPersonalities ? "Back to personalities" : "Back to conversation");
     }
     if (route === ROUTES.TALK) showPersonalityBadge();
     else hidePersonalityBadge();

@@ -176,11 +176,27 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 16px;
-  padding: 0;
+  padding: 8px 12px;
+  margin: -8px -12px;
   background: transparent;
   border: 0;
+  border-radius: 16px;
   min-width: 0;
   max-width: 320px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  appearance: none;
+  transition: background 0.15s ease;
+}
+
+.app-shell__personality:hover {
+  background: var(--bg-soft);
+}
+
+.app-shell__personality:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .app-shell__personality[hidden] {

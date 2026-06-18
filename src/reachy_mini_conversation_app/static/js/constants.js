@@ -45,8 +45,8 @@ export const GLOW_BY_STATE = Object.freeze({
 });
 
 export const ROUTES = Object.freeze({
-  HOME: "#/",
-  TALK: "#/talk",
+  TALK: "#/",
+  PERSONALITIES: "#/personalities",
   SETTINGS: "#/settings",
 });
 
