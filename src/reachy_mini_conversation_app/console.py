@@ -196,7 +196,7 @@ class LocalStream:
         self._instance_path: Optional[str] = instance_path
         self._settings_initialized = False
         self._asyncio_loop = None
-        self._mic_muted = settings_app is not None  # headless streams have no UI to unmute
+        self._mic_muted = False  # mic starts live; the UI toggles it via /mic
         self._active_backend_name = get_backend_choice()
         self._backend_connection_state = "not_started"
         self._backend_error: str | None = None

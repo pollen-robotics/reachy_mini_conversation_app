@@ -82,20 +82,20 @@ def test_clear_audio_queue_drains_queue_in_place() -> None:
 
 
 def test_mic_endpoints_report_and_toggle_mute_state() -> None:
-    """With a web UI the mic starts muted; /mic exposes and flips the pause state."""
+    """The mic starts live; /mic exposes and flips the pause state."""
     app = FastAPI()
     robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
     stream = LocalStream(MagicMock(), robot, settings_app=app)
     stream._init_settings_ui_if_needed()
     client = TestClient(app)
 
-    assert client.get("/mic").json() == {"muted": True}
-
-    assert client.post("/mic", json={"muted": False}).json() == {"muted": False}
-    assert stream._mic_muted is False
+    assert client.get("/mic").json() == {"muted": False}
 
     assert client.post("/mic", json={"muted": True}).json() == {"muted": True}
     assert stream._mic_muted is True
+
+    assert client.post("/mic", json={"muted": False}).json() == {"muted": False}
+    assert stream._mic_muted is False
 
     # headless streams keep the mic live
     assert LocalStream(MagicMock(), robot)._mic_muted is False
