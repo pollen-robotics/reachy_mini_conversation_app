@@ -199,6 +199,23 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return default
 
 
+APP_TIMEOUT_MINUTES_ENV = "REACHY_MINI_APP_TIMEOUT_MINUTES"
+DEFAULT_APP_TIMEOUT_MINUTES = 1440.0
+
+
+def resolve_app_timeout_minutes() -> float | None:
+    """Read the app inactivity timeout (minutes) from the environment; None means disabled."""
+    raw_value = os.getenv(APP_TIMEOUT_MINUTES_ENV, "").strip()
+    if not raw_value:
+        return DEFAULT_APP_TIMEOUT_MINUTES
+    try:
+        timeout_minutes = float(raw_value)
+    except ValueError:
+        logger.warning("Ignoring invalid %s=%r; using default.", APP_TIMEOUT_MINUTES_ENV, raw_value)
+        return DEFAULT_APP_TIMEOUT_MINUTES
+    return timeout_minutes if timeout_minutes > 0 else None
+
+
 def _normalize_hf_connection_mode(value: str | None) -> str | None:
     """Normalize the Hugging Face connection mode, if explicitly configured."""
     candidate = (value or "").strip().lower()
