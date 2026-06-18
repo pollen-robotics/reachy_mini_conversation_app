@@ -21,6 +21,7 @@ class ConversationHandler(AsyncStreamHandler, ABC):
 
     deps: ToolDependencies
     output_queue: asyncio.Queue[QueueItem]
+    last_activity_time: float
     _clear_queue: Callable[[], None] | None = None
     _activity_observer: Callable[[str], None] | None = None
 

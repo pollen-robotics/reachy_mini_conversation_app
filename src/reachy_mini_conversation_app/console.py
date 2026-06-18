@@ -218,6 +218,10 @@ class LocalStream:
         if callable(setter):
             setter(self._event_bus.publish)
 
+    def seconds_since_activity(self) -> float:
+        """Seconds since the live handler last saw conversation activity."""
+        return time.monotonic() - self.handler.last_activity_time
+
     def _read_env_lines(self, env_path: Path) -> list[str]:
         """Load env file contents or a template as a list of lines."""
         inst = env_path.parent

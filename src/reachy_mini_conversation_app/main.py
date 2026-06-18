@@ -1,12 +1,13 @@
 """Entrypoint for the Reachy Mini conversation app."""
 
-import os
+from __future__ import annotations
 import sys
 import time
 import asyncio
+import logging
 import argparse
 import threading
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Optional
 from pathlib import Path
 from collections.abc import Callable, Awaitable
 
@@ -22,81 +23,31 @@ from reachy_mini_conversation_app.utils import (
 )
 
 
-APP_TIMEOUT_MINUTES_ENV = "REACHY_MINI_APP_TIMEOUT_MINUTES"
-DEFAULT_APP_TIMEOUT_MINUTES = 1440.0
-
-
-def _resolve_app_timeout_minutes(args: argparse.Namespace, logger: Any) -> float | None:
-    """Resolve the app inactivity timeout from minute-based CLI args or environment."""
-    raw_value = getattr(args, "app_timeout_minutes", None)
-    if raw_value is None:
-        env_value = os.getenv(APP_TIMEOUT_MINUTES_ENV)
-        if env_value is None or not env_value.strip():
-            raw_value = DEFAULT_APP_TIMEOUT_MINUTES
-        else:
-            try:
-                raw_value = float(env_value)
-            except ValueError:
-                logger.warning(
-                    "Ignoring invalid %s=%r; using default app inactivity timeout.",
-                    APP_TIMEOUT_MINUTES_ENV,
-                    env_value,
-                )
-                raw_value = DEFAULT_APP_TIMEOUT_MINUTES
-
-    timeout_minutes = float(raw_value)
-    if timeout_minutes <= 0:
-        return None
-    return timeout_minutes
-
-
-def _get_last_activity_time(stream_manager: Any, fallback_handler: Any) -> float:
-    """Return latest activity from the active handler."""
-    active_handler = getattr(stream_manager, "handler", fallback_handler)
-    timestamp = getattr(active_handler, "last_activity_time", None)
-    if isinstance(timestamp, (int, float)):
-        return float(timestamp)
-
-    start_time = getattr(active_handler, "start_time", None)
-    if isinstance(start_time, (int, float)):
-        return float(start_time)
-
-    return time.monotonic()
+if TYPE_CHECKING:
+    from reachy_mini_conversation_app.console import LocalStream
 
 
 def _start_inactivity_timeout_thread(
-    *,
-    timeout_minutes: float | None,
-    stream_manager: Any,
-    fallback_handler: Any,
-    logger: Any,
+    timeout_minutes: float,
+    stream_manager: LocalStream,
+    logger: logging.Logger,
     app_stop_event: threading.Event | None,
-) -> threading.Thread | None:
-    """Close the app after a configured period without activity."""
-    if timeout_minutes is None:
-        return None
-
+) -> threading.Thread:
+    """Start a daemon that closes the app after `timeout_minutes` without activity."""
     timeout_seconds = timeout_minutes * 60.0
 
     def poll_inactivity_timeout() -> None:
-        logger.info("App inactivity timeout enabled: %.1f minutes without conversation activity.", timeout_minutes)
-        while True:
-            if app_stop_event is not None and app_stop_event.is_set():
-                return
-
-            elapsed = time.monotonic() - _get_last_activity_time(stream_manager, fallback_handler)
+        logger.info("App inactivity timeout enabled: %.1f minutes.", timeout_minutes)
+        while app_stop_event is None or not app_stop_event.is_set():
+            elapsed = stream_manager.seconds_since_activity()
             if elapsed >= timeout_seconds:
-                logger.info(
-                    "No conversation activity for %.1f minutes; closing conversation app.",
-                    elapsed / 60.0,
-                )
+                logger.info("No activity for %.1f minutes; closing conversation app.", elapsed / 60.0)
                 try:
                     stream_manager.close()
                 except Exception as e:
                     logger.error("Error while closing stream manager after inactivity timeout: %s", e)
                 return
-
-            time.sleep(min(1.0, max(0.1, timeout_seconds - elapsed)))
+            time.sleep(1.0)
 
     thread = threading.Thread(target=poll_inactivity_timeout, daemon=True)
     thread.start()
@@ -136,6 +87,7 @@ def run(
         get_backend_label,
         set_instance_path,
         get_hf_connection_selection,
+        resolve_app_timeout_minutes,
         refresh_runtime_config_from_env,
     )
     from reachy_mini_conversation_app.startup_settings import (
@@ -328,14 +280,9 @@ def run(
     if camera_worker:
         camera_worker.start()
 
-    app_timeout_minutes = _resolve_app_timeout_minutes(args, logger)
-    _start_inactivity_timeout_thread(
-        timeout_minutes=app_timeout_minutes,
-        stream_manager=stream_manager,
-        fallback_handler=handler,
-        logger=logger,
-        app_stop_event=app_stop_event,
-    )
+    timeout_minutes = resolve_app_timeout_minutes()
+    if timeout_minutes is not None:
+        _start_inactivity_timeout_thread(timeout_minutes, stream_manager, logger, app_stop_event)
 
     def poll_stop_event() -> None:
         """Poll the stop event to allow graceful shutdown."""
