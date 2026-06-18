@@ -7,7 +7,7 @@ import {
   mountPersonalityBadge,
   showPersonalityBadge,
 } from "./personality-badge.js";
-import { $, h } from "./ui.js";
+import { $ } from "./ui.js";
 import { mountHomeView } from "./views/home.js";
 import { mountTalkView } from "./views/talk.js";
 import { mountSettingsView } from "./views/settings.js";

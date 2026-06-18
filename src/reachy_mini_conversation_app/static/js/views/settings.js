@@ -10,7 +10,7 @@ import {
   untilReady,
 } from "../api.js";
 import { BACKENDS } from "../constants.js";
-import { $, h } from "../ui.js";
+import { h } from "../ui.js";
 
 const BACKEND_LABELS = Object.freeze({
   [BACKENDS.HUGGINGFACE]: "Hugging Face (built-in)",

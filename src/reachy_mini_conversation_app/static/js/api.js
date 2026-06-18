@@ -102,5 +102,3 @@ export function describeError(error) {
   const code = error?.body?.error;
   return ERROR_MESSAGES[code] || error?.message || String(error);
 }
-
-export { HttpError };
