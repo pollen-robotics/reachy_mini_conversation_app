@@ -642,6 +642,12 @@ button {
   gap: 6px;
 }
 
+.settings-field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(120px, 1fr);
+  gap: 12px;
+}
+
 .settings-label {
   font-size: 0.85rem;
   color: var(--text-muted);
@@ -724,6 +730,13 @@ button {
 .settings-status-value {
   margin: 0;
   font-weight: 500;
+}
+
+@media (max-width: 620px) {
+  .settings-field-row,
+  .settings-status-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* 7. Modal (profile-modal) */
