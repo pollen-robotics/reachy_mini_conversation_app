@@ -940,13 +940,15 @@ class LocalStream:
         except Exception as e:
             logger.debug(f"Error stopping playback (may already be stopped): {e}")
 
-        # Now signal async loops to stop
-        self._stop_event.set()
-
-        # Cancel all running tasks
+        # close() runs on watcher threads, loop-owned state must change on the loop.
+        loop = self._asyncio_loop
+        if loop is None or not loop.is_running():
+            self._stop_event.set()
+            return
+        loop.call_soon_threadsafe(self._stop_event.set)
         for task in self._tasks:
             if not task.done():
-                task.cancel()
+                loop.call_soon_threadsafe(task.cancel)
 
     def clear_audio_queue(self) -> None:
         """Flush queued playback audio immediately on user barge-in.
