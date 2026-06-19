@@ -3,7 +3,6 @@ import asyncio
 import logging
 from types import SimpleNamespace
 from typing import Any, Callable
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -13,6 +12,7 @@ import reachy_mini_conversation_app.idle_policy as idle_policy_mod
 import reachy_mini_conversation_app.base_realtime as base_rt_mod
 import reachy_mini_conversation_app.openai_realtime as rt_mod
 import reachy_mini_conversation_app.tools.core_tools as ct_mod
+import reachy_mini_conversation_app.conversation_handler as conv_mod
 import reachy_mini_conversation_app.tools.background_tool_manager as btm_mod
 from reachy_mini_conversation_app.config import OPENAI_BACKEND, config, get_default_voice_for_backend
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
@@ -22,12 +22,6 @@ from reachy_mini_conversation_app.tools.background_tool_manager import ToolCallR
 
 
 OPENAI_DEFAULT_VOICE = get_default_voice_for_backend(OPENAI_BACKEND)
-
-
-def _build_handler(loop: asyncio.AbstractEventLoop) -> OpenaiRealtimeHandler:
-    asyncio.set_event_loop(loop)
-    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
-    return OpenaiRealtimeHandler(deps)
 
 
 async def _run_openai_handler_with_events(
@@ -40,7 +34,7 @@ async def _run_openai_handler_with_events(
     """Run an OpenAI realtime handler against a fixed event sequence."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
-    monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
 
     class FakeSession:
         async def update(self, **_kw: Any) -> None:
@@ -122,7 +116,7 @@ async def test_non_idle_tool_call_does_not_queue_progress_response(monkeypatch: 
     """Tool-call startup should not enqueue a second speech response."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
-    monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
 
     class FakeEvent:
         def __init__(self, etype: str, **kwargs: Any) -> None:
@@ -213,29 +207,6 @@ async def test_non_idle_tool_call_does_not_queue_progress_response(monkeypatch: 
 
     start_tool.assert_awaited_once()
     safe_response_create.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_completed_user_transcript_resets_idle_state(monkeypatch: Any) -> None:
-    """A completed user turn should refresh activity and cancel stale idle intent."""
-
-    def setup_idle_state(handler: OpenaiRealtimeHandler) -> None:
-        handler.is_idle_tool_call = True
-        handler.last_activity_time = 1.0
-
-    handler = await _run_openai_handler_with_events(
-        monkeypatch,
-        [
-            SimpleNamespace(
-                type="conversation.item.input_audio_transcription.completed",
-                transcript="Can you check the weather?",
-            )
-        ],
-        handler_setup=setup_idle_state,
-    )
-
-    assert handler.is_idle_tool_call is False
-    assert handler.last_activity_time > 1.0
 
 
 @pytest.mark.asyncio
@@ -520,27 +491,6 @@ def test_copy_preserves_current_voice_override(monkeypatch: Any) -> None:
     assert copied_handler.get_current_voice() == "marin"
 
 
-def test_format_timestamp_uses_wall_clock() -> None:
-    """Test that format_timestamp uses wall clock time."""
-    try:
-        previous_loop = asyncio.get_event_loop()
-    except RuntimeError:
-        previous_loop = asyncio.new_event_loop()
-    loop = asyncio.new_event_loop()
-    try:
-        print("Testing format_timestamp...")
-        handler = _build_handler(loop)
-        formatted = handler.format_timestamp()
-        print(f"Formatted timestamp: {formatted}")
-    finally:
-        loop.close()
-        asyncio.set_event_loop(previous_loop)
-
-    # Extract year from "[YYYY-MM-DD ...]"
-    year = int(formatted[1:5])
-    assert year == datetime.now(timezone.utc).year
-
-
 @pytest.mark.asyncio
 async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -> None:
     """First connection dies with ConnectionClosedError during iteration -> retried.
@@ -653,7 +603,7 @@ async def test_run_realtime_session_propagates_session_update_failure(monkeypatc
     """A failed session.update must abort startup instead of looking like a clean session exit."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
-    monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
 
     class FakeSession:
         async def update(self, **_kw: Any) -> None:
@@ -768,7 +718,7 @@ async def test_response_sender_retries_when_active_response_error_uses_type_only
     monkeypatch.setattr(base_rt_mod, "_RESPONSE_REJECTION_RETRY_DELAY", 0.01)
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
-    monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
 
     class FakeError:
         def __init__(self, message: str) -> None:
@@ -913,7 +863,7 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
     monkeypatch.setattr(base_rt_mod, "ConnectionClosedError", FakeCCE)
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
-    monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
 
     # 400 near-simultaneous tool results coalesce into far fewer response.create sends.
     N_TOOL_RESULTS = 400

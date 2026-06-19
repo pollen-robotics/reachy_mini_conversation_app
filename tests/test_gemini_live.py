@@ -1,5 +1,6 @@
 """Behavior tests for the Gemini Live handler."""
 
+import time
 import base64
 import asyncio
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ from fastrtc import AdditionalOutputs
 import reachy_mini_conversation_app.gemini_live as gemini_mod
 import reachy_mini_conversation_app.idle_policy as idle_policy_mod
 import reachy_mini_conversation_app.tools.core_tools as ct_mod
+import reachy_mini_conversation_app.conversation_handler as conv_mod
 from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.tool_constants import ToolState
@@ -101,7 +103,7 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
     """Gemini turns should emit one transcript per role and let the wobbler reset after speech."""
     monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
-    monkeypatch.setattr(gemini_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
 
     movement_manager = MagicMock()
     movement_manager.is_idle.return_value = False
@@ -232,6 +234,29 @@ async def test_gemini_camera_tool_sends_snapshot_and_returns_json_result() -> No
             "content": '{"status": "image_captured"}',
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_emit_triggers_idle_through_shared_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Gemini drives idle behavior through the shared base emit and threshold, not the old 15s cadence."""
+    movement_manager = MagicMock()
+    movement_manager.is_idle.return_value = True
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement_manager)
+    handler = GeminiLiveHandler(deps)
+
+    send_idle_signal = AsyncMock()
+    monkeypatch.setattr(handler, "send_idle_signal", send_idle_signal)
+    monkeypatch.setattr(conv_mod, "wait_for_item", AsyncMock(return_value=None))
+
+    # Idle well past the old Gemini-only 15s cadence but under the shared threshold: must not fire.
+    handler.last_activity_time = time.monotonic() - (handler.IDLE_BEHAVIOR_THRESHOLD_S - 30.0)
+    await handler.emit()
+    send_idle_signal.assert_not_awaited()
+
+    # Past the shared threshold: fires once.
+    handler.last_activity_time = time.monotonic() - (handler.IDLE_BEHAVIOR_THRESHOLD_S + 10.0)
+    await handler.emit()
+    send_idle_signal.assert_awaited_once()
 
 
 @pytest.mark.asyncio

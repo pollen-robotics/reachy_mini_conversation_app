@@ -7,11 +7,10 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from typing import Any, Final, Tuple, ClassVar, Optional
-from datetime import datetime
 
 import numpy as np
 from openai import AsyncOpenAI
-from fastrtc import AdditionalOutputs, wait_for_item, audio_to_int16
+from fastrtc import AdditionalOutputs, audio_to_int16
 from pydantic import Field, BaseModel
 from numpy.typing import NDArray
 from scipy.signal import resample
@@ -31,8 +30,7 @@ from reachy_mini_conversation_app.config import (
     get_default_voice_for_backend,
     get_available_voices_for_backend,
 )
-from reachy_mini_conversation_app.idle_policy import start_idle_tool_call
-from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.tools.core_tools import ToolSpec, ToolDependencies
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolCallRoutine,
@@ -54,26 +52,18 @@ class InputTranscriptChunksByItem(BaseModel):
     deltas: list[str] = Field(default_factory=list)
 
 
-def to_realtime_tools_config(tool_specs: list[dict[str, Any]]) -> RealtimeToolsConfigParam:
+def to_realtime_tools_config(tool_specs: list[ToolSpec]) -> RealtimeToolsConfigParam:
     """Convert app tool specs to the OpenAI-compatible realtime session shape."""
     realtime_tools: RealtimeToolsConfigParam = []
     for spec in tool_specs:
-        tool_type = spec.get("type")
-        name = spec.get("name")
-        description = spec.get("description")
-        parameters = spec.get("parameters", {})
-
-        if tool_type != "function" or not isinstance(name, str):
-            raise ValueError(f"Unsupported realtime tool spec: {spec!r}")
-
-        realtime_tool = RealtimeFunctionToolParam(
-            type="function",
-            name=name,
-            parameters=parameters,
+        realtime_tools.append(
+            RealtimeFunctionToolParam(
+                type="function",
+                name=spec["name"],
+                description=spec["description"],
+                parameters=spec["parameters"],
+            )
         )
-        if isinstance(description, str):
-            realtime_tool["description"] = description
-        realtime_tools.append(realtime_tool)
     return realtime_tools
 
 
@@ -130,9 +120,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         self.connection: AsyncRealtimeConnection | None = None
         self.output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]" = asyncio.Queue()
 
-        self.last_activity_time = time.monotonic()
-        self.start_time = time.monotonic()
-        self.is_idle_tool_call = False
         self.instance_path = instance_path
         self._voice_override: str | None = self._normalize_startup_voice(startup_voice)
         self._realtime_connect_query: dict[str, str] = {}
@@ -236,12 +223,16 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         """Return the configured session voice for this backend."""
 
     @abstractmethod
-    def _get_active_tool_specs(self) -> list[dict[str, Any]]:
-        """Return active tool specs for the current session dependencies."""
-
-    @abstractmethod
-    def _get_session_config(self, tool_specs: list[dict[str, Any]]) -> RealtimeSessionCreateRequestParam:
+    def _get_session_config(self, tool_specs: list[ToolSpec]) -> RealtimeSessionCreateRequestParam:
         """Return the backend-specific realtime session config."""
+
+    def _is_connected(self) -> bool:
+        """Return whether the realtime connection is open."""
+        return self.connection is not None
+
+    def _idle_behavior_ready(self) -> bool:
+        """Hold idle behavior while a model response is still active."""
+        return self._response_done_event.is_set()
 
     async def _cancel_partial_transcript_task(self) -> None:
         if self.partial_transcript_task and not self.partial_transcript_task.done():
@@ -250,17 +241,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 await self.partial_transcript_task
             except asyncio.CancelledError:
                 pass
-
-    def _mark_activity(self, reason: str) -> None:
-        """Record non-idle conversation activity for the idle timer."""
-        self.last_activity_time = time.monotonic()
-        logger.debug("last activity time updated to %s (%s)", self.last_activity_time, reason)
-        observer = self._activity_observer
-        if observer is not None:
-            try:
-                observer(reason)
-            except Exception:
-                logger.debug("activity observer raised (ignored)", exc_info=True)
 
     def copy(self) -> "BaseRealtimeHandler":
         """Return a fresh handler of the same type, preserving deps and voice override."""
@@ -567,7 +547,12 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
     async def _handle_tool_result(self, completed_tool: ToolNotification) -> None:
         """Process the result of a tool call."""
         if completed_tool.error is not None:
-            logger.error("Tool '%s' (id=%s) failed with error: %s", completed_tool.tool_name, completed_tool.id, completed_tool.error)
+            logger.error(
+                "Tool '%s' (id=%s) failed with error: %s",
+                completed_tool.tool_name,
+                completed_tool.id,
+                completed_tool.error,
+            )
             tool_result = {"error": completed_tool.error}
             tool_result_for_model = tool_result
         elif completed_tool.result is not None:
@@ -584,7 +569,9 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             )
             logger.debug("Tool '%s' model-visible result: %s", completed_tool.tool_name, tool_result_for_model)
         else:
-            logger.warning("Tool '%s' (id=%s) returned no result and no error", completed_tool.tool_name, completed_tool.id)
+            logger.warning(
+                "Tool '%s' (id=%s) returned no result and no error", completed_tool.tool_name, completed_tool.id
+            )
             tool_result = {"error": "No result returned from tool execution"}
             tool_result_for_model = tool_result
 
@@ -730,7 +717,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 async for event in self.connection:
                     logger.debug("Realtime event: %s", event.type)
                     if event.type == "input_audio_buffer.speech_started":
-                        self.is_idle_tool_call = False
                         self._mark_activity("user_speech_started")
                         self._turn_user_done_at = None
                         self._turn_response_created_at = None
@@ -801,7 +787,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
                     # Handle completed transcription (user finished speaking)
                     if event.type == "conversation.item.input_audio_transcription.completed":
-                        self.is_idle_tool_call = False
                         self._mark_activity("user_transcription_completed")
                         raw_transcript = event.transcript or ""
                         transcript = raw_transcript.strip()
@@ -887,7 +872,10 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                             ),
                         )
                         logger.info(
-                            "Started background tool: %s (id=%s, call_id=%s)", tool_name, background_tool.tool_id, call_id
+                            "Started background tool: %s (id=%s, call_id=%s)",
+                            tool_name,
+                            background_tool.tool_id,
+                            call_id,
                         )
 
                     # server error
@@ -971,24 +959,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             logger.debug("Dropping audio frame: connection not ready (%s)", e)
             return
 
-    async def emit(self) -> Tuple[int, NDArray[np.int16]] | AdditionalOutputs | None:
-        """Emit audio frame to be played by the speaker."""
-        # Sends output queued by the realtime event handler to the stream.
-        # This is called periodically by the fastrtc Stream
-
-        # Handle idle
-        idle_duration = time.monotonic() - self.last_activity_time
-        if idle_duration > 180.0 and self._response_done_event.is_set() and self.deps.movement_manager.is_idle():
-            try:
-                await self.send_idle_signal(idle_duration)
-            except Exception as e:
-                logger.warning("Idle tool skipped (connection closed?): %s", e)
-                return None
-
-            self.last_activity_time = time.monotonic()  # avoid repeated resets
-
-        return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
-
     async def shutdown(self) -> None:
         """Shutdown the handler."""
         # Unblock the response sender worker so it can exit
@@ -1016,13 +986,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             except asyncio.QueueEmpty:
                 break
 
-    def format_timestamp(self) -> str:
-        """Format current timestamp with date, time, and elapsed seconds."""
-        loop_time = time.monotonic()
-        elapsed_seconds = loop_time - self.start_time
-        dt = datetime.now()  # wall-clock
-        return f"[{dt.strftime('%Y-%m-%d %H:%M:%S')} | +{elapsed_seconds:.1f}s]"
-
     async def get_available_voices(self) -> list[str]:
         """Return available voices for this backend."""
         return get_available_voices_for_backend(self.BACKEND_PROVIDER)
@@ -1030,21 +993,3 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
     @abstractmethod
     async def _build_realtime_client(self) -> AsyncOpenAI:
         """Build the realtime SDK client for this backend."""
-
-    async def send_idle_signal(self, idle_duration: float) -> None:
-        """Run a locally selected idle tool without sending an idle turn to the model."""
-        logger.debug("Selecting local idle tool")
-        if not self.connection:
-            logger.debug("No connection, cannot run idle tool")
-            return
-
-        available_tool_names = {
-            spec["name"] for spec in self._get_active_tool_specs() if isinstance(spec.get("name"), str)
-        }
-        await start_idle_tool_call(
-            deps=self.deps,
-            tool_manager=self.tool_manager,
-            output_queue=self.output_queue,
-            available_tool_names=available_tool_names,
-            idle_duration=idle_duration,
-        )

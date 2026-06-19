@@ -1,5 +1,4 @@
 import logging
-from typing import Any
 
 from openai import AsyncOpenAI
 from openai.types.realtime import (
@@ -15,7 +14,7 @@ from openai.types.realtime.realtime_audio_input_turn_detection_param import Serv
 from reachy_mini_conversation_app.config import OPENAI_BACKEND, config, get_default_voice_for_backend
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
 from reachy_mini_conversation_app.base_realtime import BaseRealtimeHandler, to_realtime_tools_config
-from reachy_mini_conversation_app.tools.core_tools import get_active_tool_specs
+from reachy_mini_conversation_app.tools.core_tools import ToolSpec
 
 
 logger = logging.getLogger(__name__)
@@ -43,11 +42,7 @@ class OpenaiRealtimeHandler(BaseRealtimeHandler):
         """Return the configured OpenAI session voice."""
         return get_session_voice(default)
 
-    def _get_active_tool_specs(self) -> list[dict[str, Any]]:
-        """Return active tool specs for the current session dependencies."""
-        return get_active_tool_specs(self.deps)
-
-    def _get_session_config(self, tool_specs: list[dict[str, Any]]) -> RealtimeSessionCreateRequestParam:
+    def _get_session_config(self, tool_specs: list[ToolSpec]) -> RealtimeSessionCreateRequestParam:
         """Return the OpenAI Realtime session config."""
         return RealtimeSessionCreateRequestParam(
             type="realtime",

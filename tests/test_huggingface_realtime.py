@@ -1,10 +1,10 @@
-import asyncio
+import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-import reachy_mini_conversation_app.base_realtime as base_rt_mod
+import reachy_mini_conversation_app.conversation_handler as conv_mod
 import reachy_mini_conversation_app.huggingface_realtime as hf_mod
 from reachy_mini_conversation_app.config import HF_BACKEND, config, get_default_voice_for_backend
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
@@ -48,7 +48,7 @@ async def test_partial_transcription_uses_latest_snapshot(monkeypatch: Any) -> N
     """Partial transcription snapshots should replace older snapshots for the same item."""
     monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "Aiden")
-    monkeypatch.setattr(hf_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
 
     class FakeEvent:
         def __init__(self, etype: str, **kwargs: Any) -> None:
@@ -145,12 +145,12 @@ async def test_emit_skips_idle_signal_while_response_active(monkeypatch: Any) ->
     movement_manager.is_idle.return_value = True
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement_manager)
     handler = HuggingFaceRealtimeHandler(deps)
-    handler.last_activity_time = asyncio.get_running_loop().time() - 60.0
+    handler.last_activity_time = time.monotonic() - (handler.IDLE_BEHAVIOR_THRESHOLD_S + 10.0)
     handler._response_done_event.clear()
 
     send_idle_signal = AsyncMock()
     monkeypatch.setattr(handler, "send_idle_signal", send_idle_signal)
-    monkeypatch.setattr(base_rt_mod, "wait_for_item", AsyncMock(return_value=None))
+    monkeypatch.setattr(conv_mod, "wait_for_item", AsyncMock(return_value=None))
 
     result = await handler.emit()
 
@@ -197,7 +197,7 @@ async def test_run_realtime_session_uses_default_voice_for_lb_allocated_sessions
     """Use the backend default speaker when no profile voice is selected for the hf LB."""
     monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: default)
-    monkeypatch.setattr(hf_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
     monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", "https://lb.example.test/session")
 
@@ -285,7 +285,7 @@ async def test_run_realtime_session_passes_allocated_session_query(monkeypatch: 
     """Hugging Face sessions must forward the allocated session token to the websocket connect call."""
     monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: default)
-    monkeypatch.setattr(hf_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
 
     captured_connect: dict[str, Any] = {}
 
