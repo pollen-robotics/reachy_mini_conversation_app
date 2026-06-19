@@ -87,21 +87,35 @@ def test_hf_default_session_url_uses_stable_space_proxy() -> None:
     assert ".aws.endpoints.huggingface.cloud" not in config_mod.HF_DEFAULTS.session_url
 
 
-def test_refresh_runtime_config_reloads_hf_runtime_fields(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Instance-local .env reloads should update every env-backed Hugging Face runtime field."""
+def test_refresh_runtime_config_reloads_runtime_fields(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Instance-local .env reloads should update env-backed runtime fields."""
+    hf_cache = tmp_path / "hf-cache"
+    memory_data = tmp_path / "memory-data"
     monkeypatch.setenv("HF_TOKEN", "hf-runtime-token")
-    monkeypatch.setenv("HF_HOME", "/tmp/reachy-hf-cache")
+    monkeypatch.setenv("HF_HOME", str(hf_cache))
     monkeypatch.setenv("LOCAL_VISION_MODEL", "test/local-vision-model")
+    monkeypatch.setenv("REACHY_MINI_MEMORY_ENABLED", "false")
+    monkeypatch.setenv("REACHY_MINI_DATA_DIRECTORY", str(memory_data))
+    monkeypatch.setenv("MEMORY_DREAMER_MODEL", "test-dreamer-model")
+    monkeypatch.setenv("MEMORY_DREAMER_REFLECTION", "true")
 
     monkeypatch.setattr(config_mod.config, "HF_TOKEN", None)
     monkeypatch.setattr(config_mod.config, "HF_HOME", "./old-cache")
     monkeypatch.setattr(config_mod.config, "LOCAL_VISION_MODEL", "old/model")
+    monkeypatch.setattr(config_mod.config, "MEMORY_ENABLED", True)
+    monkeypatch.setattr(config_mod.config, "DATA_DIRECTORY", Path("old-data"))
+    monkeypatch.setattr(config_mod.config, "MEMORY_DREAMER_MODEL", None)
+    monkeypatch.setattr(config_mod.config, "MEMORY_DREAMER_REFLECTION", False)
 
     config_mod.refresh_runtime_config_from_env()
 
     assert config_mod.config.HF_TOKEN == "hf-runtime-token"
-    assert config_mod.config.HF_HOME == "/tmp/reachy-hf-cache"
+    assert config_mod.config.HF_HOME == str(hf_cache)
     assert config_mod.config.LOCAL_VISION_MODEL == "test/local-vision-model"
+    assert config_mod.config.MEMORY_ENABLED is False
+    assert config_mod.config.DATA_DIRECTORY == memory_data
+    assert config_mod.config.MEMORY_DREAMER_MODEL == "test-dreamer-model"
+    assert config_mod.config.MEMORY_DREAMER_REFLECTION is True
 
 
 @pytest.mark.parametrize(

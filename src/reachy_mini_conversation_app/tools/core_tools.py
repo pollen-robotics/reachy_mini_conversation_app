@@ -43,6 +43,7 @@ class ToolDependencies:
     instance_path: str | Path | None = None
     camera_worker: Any | None = None  # CameraWorker for frame buffering
     vision_processor: Any | None = None
+    memory_manager: Any | None = None  # MemoryManager for persistent memory
     motion_duration_s: float = 1.0
 
 

@@ -46,7 +46,7 @@ def _make_usage(
 @pytest.mark.asyncio
 async def test_partial_transcription_uses_latest_snapshot(monkeypatch: Any) -> None:
     """Partial transcription snapshots should replace older snapshots for the same item."""
-    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda **_: "test")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "Aiden")
     monkeypatch.setattr(hf_mod, "get_active_tool_specs", lambda _: [])
 
@@ -195,7 +195,7 @@ def test_handler_normalizes_hf_voice_case(monkeypatch: Any) -> None:
 @pytest.mark.asyncio
 async def test_run_realtime_session_uses_default_voice_for_lb_allocated_sessions(monkeypatch: Any) -> None:
     """Use the backend default speaker when no profile voice is selected for the hf LB."""
-    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda **_: "test")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: default)
     monkeypatch.setattr(hf_mod, "get_active_tool_specs", lambda _: [])
     monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
@@ -283,7 +283,7 @@ def test_huggingface_session_uses_configured_transcription_language(monkeypatch:
 @pytest.mark.asyncio
 async def test_run_realtime_session_passes_allocated_session_query(monkeypatch: Any) -> None:
     """Hugging Face sessions must forward the allocated session token to the websocket connect call."""
-    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda **_: "test")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: default)
     monkeypatch.setattr(hf_mod, "get_active_tool_specs", lambda _: [])
 
@@ -503,7 +503,7 @@ async def test_build_realtime_client_does_not_send_openai_key_to_hf_allocator(mo
 @pytest.mark.asyncio
 async def test_apply_personality_uses_selected_voice_for_lb_allocated_sessions(monkeypatch: Any) -> None:
     """Live personality updates should honor the selected Qwen CustomVoice speaker."""
-    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "new instructions")
+    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda **_: "new instructions")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "Serena")
     monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", "https://lb.example.test/session")
@@ -563,3 +563,188 @@ def test_huggingface_response_cost_defaults_to_zero() -> None:
     handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
 
     assert handler._compute_response_cost(usage) == 0.0
+
+
+def _make_tool_turn_conn(call_ids: list[str], response_id: str) -> Any:
+    """Build a FakeConn whose event stream is one model turn of parallel tool calls.
+
+    Emits a ``response.function_call_arguments.done`` event per ``call_ids`` entry,
+    all sharing ``response_id``, followed by that response's ``response.done``.
+    """
+    from types import SimpleNamespace
+
+    def function_call_event(call_id: str) -> Any:
+        return SimpleNamespace(
+            type="response.function_call_arguments.done",
+            name="recall_memories",
+            arguments="{}",
+            call_id=call_id,
+            response_id=response_id,
+        )
+
+    events = [
+        *[function_call_event(call_id) for call_id in call_ids],
+        SimpleNamespace(type="response.done", response=SimpleNamespace(id=response_id, usage=None)),
+    ]
+
+    class FakeSession:
+        async def update(self, **_kw: Any) -> None:
+            pass
+
+    class FakeInputAudioBuffer:
+        async def append(self, **_kw: Any) -> None:
+            pass
+
+    class FakeItem:
+        async def create(self, **_kw: Any) -> None:
+            pass
+
+    class FakeConversation:
+        item = FakeItem()
+
+    class FakeResponse:
+        async def create(self, **_kw: Any) -> None:
+            pass
+
+        async def cancel(self, **_kw: Any) -> None:
+            pass
+
+    class FakeConn:
+        session = FakeSession()
+        input_audio_buffer = FakeInputAudioBuffer()
+        conversation = FakeConversation()
+        response = FakeResponse()
+
+        def __init__(self) -> None:
+            self._events = iter(events)
+
+        async def __aenter__(self) -> "FakeConn":
+            return self
+
+        async def __aexit__(self, *_args: Any) -> bool:
+            return False
+
+        async def close(self) -> None:
+            pass
+
+        def __aiter__(self) -> "FakeConn":
+            return self
+
+        async def __anext__(self) -> Any:
+            try:
+                return next(self._events)
+            except StopIteration:
+                raise StopAsyncIteration
+
+    return FakeConn
+
+
+async def _run_tool_burst(
+    monkeypatch: Any,
+    *,
+    call_ids: list[str],
+    response_id: str,
+    is_idle: bool = False,
+) -> Any:
+    """Drive one model turn of parallel tool calls and report the spoken responses.
+
+    Emits ``call_ids`` as parallel function calls in a single response, returns
+    each tool's result, and hands back the ``_safe_response_create`` mock so the
+    caller can assert how many spoken follow-ups were requested.
+    """
+    from types import SimpleNamespace
+
+    from reachy_mini_conversation_app.tools.tool_constants import ToolState
+    from reachy_mini_conversation_app.tools.background_tool_manager import ToolNotification
+
+    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda **_: "test")
+    monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "Aiden")
+    monkeypatch.setattr(hf_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
+
+    FakeConn = _make_tool_turn_conn(call_ids, response_id)
+
+    class FakeRealtime:
+        def connect(self, **_kw: Any) -> Any:
+            return FakeConn()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.realtime = FakeRealtime()
+
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = HuggingFaceRealtimeHandler(deps)
+    handler.client = FakeClient()
+
+    monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
+    monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
+    monkeypatch.setattr(
+        type(handler.tool_manager),
+        "start_tool",
+        AsyncMock(side_effect=lambda **kw: SimpleNamespace(tool_id=f"tool-{kw['call_id']}")),
+    )
+
+    safe_response_create = AsyncMock()
+    monkeypatch.setattr(handler, "_safe_response_create", safe_response_create)
+
+    # Idle turns force function-call-only behavior; mark the handler accordingly so
+    # the event loop treats the emitted calls as idle actions (which never speak).
+    handler.is_idle_tool_call = is_idle
+
+    # Process the model turn: emits the parallel function calls, then response.done.
+    await handler._run_realtime_session()
+
+    # Now the tools return their results (the manager would normally do this).
+    for call_id in call_ids:
+        await handler._handle_tool_result(
+            ToolNotification(
+                id=call_id,
+                tool_name="recall_memories",
+                args_json_str="{}",
+                is_idle_tool_call=is_idle,
+                status=ToolState.COMPLETED,
+                result={"ok": True},
+            )
+        )
+
+    return safe_response_create
+
+
+@pytest.mark.asyncio
+async def test_parallel_tool_calls_emit_single_spoken_response(monkeypatch: Any) -> None:
+    """Parallel tool calls in one turn must yield exactly ONE spoken follow-up.
+
+    Not one per tool, which is the duplicate-response bug this guards against.
+    """
+    safe_response_create = await _run_tool_burst(
+        monkeypatch,
+        call_ids=["c1", "c2", "c3", "c4"],
+        response_id="R1",
+    )
+
+    assert safe_response_create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_single_tool_call_emits_single_spoken_response(monkeypatch: Any) -> None:
+    """A lone tool call still triggers exactly one spoken follow-up."""
+    safe_response_create = await _run_tool_burst(
+        monkeypatch,
+        call_ids=["only"],
+        response_id="R1",
+    )
+
+    assert safe_response_create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_idle_tool_calls_emit_no_spoken_response(monkeypatch: Any) -> None:
+    """Idle-triggered tool calls must never make the robot speak."""
+    safe_response_create = await _run_tool_burst(
+        monkeypatch,
+        call_ids=["c1", "c2"],
+        response_id="R1",
+        is_idle=True,
+    )
+
+    assert safe_response_create.await_count == 0

@@ -38,7 +38,7 @@ async def _run_openai_handler_with_events(
     handler_setup: Callable[[OpenaiRealtimeHandler], None] | None = None,
 ) -> OpenaiRealtimeHandler:
     """Run an OpenAI realtime handler against a fixed event sequence."""
-    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda **_: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
     monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
 
@@ -120,7 +120,7 @@ async def _run_openai_handler_with_events(
 @pytest.mark.asyncio
 async def test_non_idle_tool_call_does_not_queue_progress_response(monkeypatch: Any) -> None:
     """Tool-call startup should not enqueue a second speech response."""
-    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda **_: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
     monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
 
@@ -463,7 +463,7 @@ async def test_empty_audio_buffer_error_exits_listening_without_chat_error(monke
 @pytest.mark.asyncio
 async def test_apply_personality_preserves_manual_voice_override(monkeypatch: Any) -> None:
     """Applying a profile should not discard a voice manually selected in the current session."""
-    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda **_: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda: "cedar")
     monkeypatch.setattr("reachy_mini_conversation_app.config.set_custom_profile", lambda _profile: None)
 
@@ -651,7 +651,7 @@ async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -
 @pytest.mark.asyncio
 async def test_run_realtime_session_propagates_session_update_failure(monkeypatch: Any) -> None:
     """A failed session.update must abort startup instead of looking like a clean session exit."""
-    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda **_: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
     monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
 
@@ -766,7 +766,7 @@ async def test_response_sender_retries_when_active_response_error_uses_type_only
     """
     caplog.set_level(logging.DEBUG)
     monkeypatch.setattr(base_rt_mod, "_RESPONSE_REJECTION_RETRY_DELAY", 0.01)
-    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda **_: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
     monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
 
@@ -911,7 +911,7 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
 
     FakeCCE = type("FakeCCE", (Exception,), {})
     monkeypatch.setattr(base_rt_mod, "ConnectionClosedError", FakeCCE)
-    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda **_: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
     monkeypatch.setattr(rt_mod, "get_active_tool_specs", lambda _: [])
 
@@ -1252,7 +1252,7 @@ async def test_response_sender_loop_times_out_waiting_for_previous_response(
 @pytest.mark.asyncio
 async def test_openai_excludes_head_tracking_when_no_head_tracker(monkeypatch: Any) -> None:
     """head_tracking tool must not appear in OpenAI session config when head_tracker is not active."""
-    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda **_: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=None: "alloy")
 
     # Mock the spec source while preserving get_active_tool_specs filtering.

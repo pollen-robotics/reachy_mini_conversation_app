@@ -398,6 +398,20 @@ class Config:
     AUTOLOAD_EXTERNAL_TOOLS = _env_flag("AUTOLOAD_EXTERNAL_TOOLS", default=False)
     REACHY_MINI_CUSTOM_PROFILE = LOCKED_PROFILE or os.getenv("REACHY_MINI_CUSTOM_PROFILE")
 
+    # Memory system
+    MEMORY_ENABLED: bool = _env_flag("REACHY_MINI_MEMORY_ENABLED", default=True)
+    _data_dir_env = os.getenv("REACHY_MINI_DATA_DIRECTORY")
+    DATA_DIRECTORY: Path = Path(_data_dir_env) if _data_dir_env else Path.home() / ".reachy_mini" / "data"
+    # Model used by the dreamer (offline memory consolidation). Falls back to
+    # DEFAULT_DREAMER_MODEL when unset. Realtime-only aliases like "gpt-realtime"
+    # don't work with the Responses API; pick a chat-capable model (e.g. "gpt-5.4")
+    # if you override this.
+    MEMORY_DREAMER_MODEL: str | None = os.getenv("MEMORY_DREAMER_MODEL") or None
+    # Dev-only: after each dream pass, make one extra LLM call asking the dreamer to
+    # reflect on its run and print that to the terminal. Off by default (it is not
+    # stored or acted on, so it is pure cost in production).
+    MEMORY_DREAMER_REFLECTION: bool = _env_flag("MEMORY_DREAMER_REFLECTION", default=False)
+
     logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")
 
     def __init__(self) -> None:
@@ -496,6 +510,11 @@ def refresh_runtime_config_from_env() -> None:
     config.HF_HOME = os.getenv("HF_HOME", "./cache")
     config.LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "HuggingFaceTB/SmolVLM2-2.2B-Instruct")
     config.HF_TOKEN = os.getenv("HF_TOKEN")
+    config.MEMORY_ENABLED = _env_flag("REACHY_MINI_MEMORY_ENABLED", default=True)
+    data_dir_env = os.getenv("REACHY_MINI_DATA_DIRECTORY")
+    config.DATA_DIRECTORY = Path(data_dir_env) if data_dir_env else Path.home() / ".reachy_mini" / "data"
+    config.MEMORY_DREAMER_MODEL = os.getenv("MEMORY_DREAMER_MODEL") or None
+    config.MEMORY_DREAMER_REFLECTION = _env_flag("MEMORY_DREAMER_REFLECTION", default=False)
     config.REACHY_MINI_CUSTOM_PROFILE = LOCKED_PROFILE or os.getenv("REACHY_MINI_CUSTOM_PROFILE")
 
 

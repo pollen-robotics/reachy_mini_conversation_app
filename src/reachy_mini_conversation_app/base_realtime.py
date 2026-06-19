@@ -25,12 +25,14 @@ from openai.types.realtime import (
 from websockets.exceptions import ConnectionClosedError
 from openai.resources.realtime.realtime import AsyncRealtimeConnection
 
+from reachy_mini_conversation_app import sounds
 from reachy_mini_conversation_app.tools import core_tools
 from reachy_mini_conversation_app.config import (
     config,
     get_default_voice_for_backend,
     get_available_voices_for_backend,
 )
+from reachy_mini_conversation_app.memory import DEFAULT_DREAMER_MODEL, DreamSummary, DreamScheduler
 from reachy_mini_conversation_app.idle_policy import start_idle_tool_call
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
@@ -42,6 +44,18 @@ from reachy_mini_conversation_app.tools.background_tool_manager import (
 
 
 logger = logging.getLogger(__name__)
+
+DREAM_START_NOTE: Final[str] = (
+    "[Background event: a soft chime just played. Your memory-consolidation "
+    '"dreaming" process started in the background — you are quietly reprocessing '
+    "your recent conversations into long-term memory. Keep conversing normally; "
+    "do not mention this unless the user asks about the sound or your memory.]"
+)
+DREAM_FINISH_NOTE: Final[str] = (
+    "[Background event: a soft chime just played. Dreaming finished — your "
+    "memories are now up to date. Do not mention this unless the user asks "
+    "about the sound or your memory.]"
+)
 
 _RESPONSE_DONE_TIMEOUT: Final[float] = 30.0
 _RESPONSE_REJECTION_RETRY_DELAY: Final[float] = 0.5
@@ -137,18 +151,17 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         self._voice_override: str | None = self._normalize_startup_voice(startup_voice)
         self._realtime_connect_query: dict[str, str] = {}
 
-        # Debouncing for partial transcripts
         self.partial_transcript_task: asyncio.Task[None] | None = None
         self.partial_debounce_delay = 0.5  # seconds
         self.input_transcript_chunks_by_item = InputTranscriptChunksByItem()
 
-        # Internal lifecycle flags
         self._connected_event: asyncio.Event = asyncio.Event()
 
-        # Background tool manager
         self.tool_manager = BackgroundToolManager()
 
-        # Cost tracking
+        # Background memory consolidation ("dreaming"), launched per session.
+        self._dream_scheduler: DreamScheduler | None = None
+
         self.cumulative_cost: float = 0.0
 
         # Response-in-progress guard: the Realtime API only allows one active
@@ -162,6 +175,18 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         self._turn_user_done_at: float | None = None
         self._turn_response_created_at: float | None = None
         self._turn_first_audio_at: float | None = None
+
+        # Coalesce the spoken follow-up after tool calls. A single model response
+        # can emit several parallel function calls (e.g. multiple memory recalls);
+        # they must yield exactly ONE follow-up response.create — fired once that
+        # response is done emitting calls and all its tool outputs are back — not
+        # one per tool, which made the robot repeat the same answer N times. The
+        # Realtime API only has one active response at a time, so a single
+        # in-flight tool turn is all we ever need to track.
+        self._tool_turn_response_id: str | None = None
+        self._tool_turn_outstanding: int = 0
+        self._tool_turn_calls_done: bool = False
+        self._tool_turn_wants_response: bool = False
 
     @staticmethod
     def _sanitize_tool_result_for_model(tool_name: str, tool_result: dict[str, Any]) -> dict[str, Any]:
@@ -311,7 +336,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         Returns a short status message for UI feedback.
         """
         try:
-            # Update the in-process config value and env
             from reachy_mini_conversation_app.config import config as _config
             from reachy_mini_conversation_app.config import set_custom_profile
 
@@ -345,7 +369,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 except Exception as e:
                     logger.warning("Live update failed; will restart session: %s", e)
 
-                # Force a real restart to guarantee the new instructions/voice
                 try:
                     await self._restart_session()
                     return "Applied personality and restarted realtime session."
@@ -455,12 +478,10 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 finally:
                     self.connection = None
 
-            # Ensure we have a client (start_up must have run once)
             if getattr(self, "client", None) is None:
                 logger.warning("Cannot restart: realtime client not initialized yet.")
                 return
 
-            # Fire-and-forget new session and wait briefly for connection
             try:
                 self._connected_event.clear()
             except Exception:
@@ -564,6 +585,84 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
                 sent = True
 
+    def _start_background_dreaming(self) -> None:
+        memory_manager = self.deps.memory_manager
+        if memory_manager is None:
+            return
+        # _run_realtime_session re-runs on every reconnect; don't launch a second
+        # dream over the same pending logs while the first is still going.
+        if self._dream_scheduler is not None and self._dream_scheduler.is_running():
+            logger.info("[DREAM] A dream from this session is still running; not starting another.")
+            return
+        api_key = config.OPENAI_API_KEY
+        if not api_key:
+            logger.info("[DREAM] No OpenAI API key configured; skipping background dreaming.")
+            return
+
+        model = config.MEMORY_DREAMER_MODEL or DEFAULT_DREAMER_MODEL
+        if not config.MEMORY_DREAMER_MODEL:
+            logger.info("[DREAM] MEMORY_DREAMER_MODEL unset; using default dreamer model %r.", model)
+
+        loop = asyncio.get_running_loop()
+
+        def on_start() -> None:
+            asyncio.run_coroutine_threadsafe(self._announce_dream_started(), loop)
+
+        def on_finish(summary: DreamSummary) -> None:
+            asyncio.run_coroutine_threadsafe(self._announce_dream_finished(summary), loop)
+
+        self._dream_scheduler = DreamScheduler(
+            memory_manager,
+            model=model,
+            api_key=api_key,
+            on_start=on_start,
+            on_finish=on_finish,
+            self_reflect=config.MEMORY_DREAMER_REFLECTION,
+        )
+        self._dream_scheduler.start()
+
+    async def _announce_dream_started(self) -> None:
+        await self._play_dream_chime("dream_start.wav")
+        await self._inject_background_context(DREAM_START_NOTE)
+
+    async def _announce_dream_finished(self, summary: DreamSummary) -> None:
+        logger.info(
+            "[DREAM] Announcing dream finished: %d log(s), created %d, updated %d, errored=%s.",
+            summary.logs_processed,
+            summary.created,
+            summary.updated,
+            summary.errored,
+        )
+        await self._play_dream_chime("dream_end.wav")
+        await self._inject_background_context(DREAM_FINISH_NOTE)
+
+    async def _play_dream_chime(self, filename: str) -> None:
+        robot = getattr(self.deps, "reachy_mini", None)
+        media = getattr(robot, "media", None)
+        if media is None:
+            logger.debug("[DREAM] No media device available; skipping chime %s.", filename)
+            return
+        try:
+            # play_sound blocks until the clip is queued/played, so offload it.
+            await asyncio.to_thread(sounds.play, media, filename)
+        except Exception:
+            logger.warning("[DREAM] Failed to play chime %s.", filename, exc_info=True)
+
+    async def _inject_background_context(self, text: str) -> None:
+        if not self.connection:
+            logger.debug("[DREAM] No active connection; skipping context injection.")
+            return
+        try:
+            await self.connection.conversation.item.create(
+                item={
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": text}],
+                },
+            )
+        except self._connection_closed_errors():
+            logger.warning("[DREAM] Connection closed; could not inject dream context.")
+
     async def _handle_tool_result(self, bg_tool: ToolNotification) -> None:
         """Process the result of a tool call."""
         if bg_tool.error is not None:
@@ -588,7 +687,17 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             tool_result = {"error": "No result returned from tool execution"}
             tool_result_for_model = tool_result
 
-        # Connection may have closed while tool was running
+        if self.deps.memory_manager is not None:
+            try:
+                args = json.loads(bg_tool.args_json_str) if bg_tool.args_json_str else {}
+                self.deps.memory_manager.log_tool_call(bg_tool.tool_name, args=args, result=tool_result)
+            except Exception:
+                logger.debug(
+                    "Failed to log tool call '%s' to memory; continuing.",
+                    bg_tool.tool_name,
+                    exc_info=True,
+                )
+
         if not self.connection:
             logger.warning(
                 "Connection closed during tool '%s' (id=%s) execution; cannot send result back",
@@ -671,15 +780,47 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         jpeg_bytes,
                     )
 
-            tool = core_tools.ALL_TOOLS.get(bg_tool.tool_name)
-            # Always surface errors, skip the spoken follow-up for tools that opt out.
-            if model_result_submitted and (bg_tool.error is not None or tool is None or tool.needs_response):
-                await self._safe_response_create()
+            # Idle tool calls never speak. Coalesce the parallel tool calls in one
+            # model turn into a single spoken follow-up, honoring each tool's
+            # needs_response opt-out (errors always speak).
+            if not bg_tool.is_idle_tool_call:
+                tool = core_tools.ALL_TOOLS.get(bg_tool.tool_name)
+                wants_response = model_result_submitted and (
+                    bg_tool.error is not None or tool is None or tool.needs_response
+                )
+                if self._tool_turn_response_id is not None:
+                    if wants_response:
+                        self._tool_turn_wants_response = True
+                    self._tool_turn_outstanding = max(0, self._tool_turn_outstanding - 1)
+                    await self._maybe_fire_turn_response()
+                elif wants_response:
+                    # No tracked turn for this result (e.g. reconnect mid-turn):
+                    # fall back to the original one-response-per-tool behavior.
+                    await self._safe_response_create()
 
         except self._connection_closed_errors():
             logger.warning("Connection closed while sending tool result")
             self.connection = None
             self._response_done_event.set()
+
+    async def _maybe_fire_turn_response(self) -> None:
+        """Request one spoken follow-up once the current tool turn is fully resolved.
+
+        Fires only when the function-call response is done emitting calls and every
+        one of its tool outputs has been returned — so several parallel function
+        calls yield ONE ``response.create``, not one per call.
+        """
+        if self._tool_turn_response_id is None or not self._tool_turn_calls_done:
+            return
+        if self._tool_turn_outstanding > 0:
+            return
+        wants_response = self._tool_turn_wants_response
+        self._tool_turn_response_id = None
+        self._tool_turn_calls_done = False
+        self._tool_turn_wants_response = False
+        if not wants_response:
+            return
+        await self._safe_response_create()
 
     async def _run_realtime_session(self) -> None:
         """Establish and manage a single realtime session."""
@@ -709,8 +850,12 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
             logger.info("Realtime session updated successfully")
 
-            # Reset the partial-transcript accumulator for each new session
             self.input_transcript_chunks_by_item = InputTranscriptChunksByItem()
+
+            self._tool_turn_response_id = None
+            self._tool_turn_outstanding = 0
+            self._tool_turn_calls_done = False
+            self._tool_turn_wants_response = False
 
             # Manage events received from the realtime server.
             self.connection = conn
@@ -719,12 +864,16 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             except Exception:
                 pass
 
+            if self.deps.memory_manager is not None:
+                self.deps.memory_manager.new_session()
+                # Consolidate previous sessions' logs in the background, in
+                # parallel with this conversation.
+                self._start_background_dreaming()
+
             response_sender_task: asyncio.Task[None] | None = None
             try:
-                # Start the background tool manager
                 self.tool_manager.start_up(tool_callbacks=[self._handle_tool_result])
 
-                # Start the response sender worker
                 response_sender_task = asyncio.create_task(self._response_sender_loop(), name="response-sender")
 
                 async for event in self.connection:
@@ -770,6 +919,14 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         self._response_started_or_rejected_event.set()
                         logger.debug("Response done")
 
+                        # This response is done emitting items. If it is the current
+                        # tool turn, mark its calls complete and fire the single
+                        # coalesced follow-up once all outputs are back (maybe now).
+                        fc_response_id = str(getattr(getattr(event, "response", None), "id", "") or "")
+                        if fc_response_id == self._tool_turn_response_id:
+                            self._tool_turn_calls_done = True
+                            await self._maybe_fire_turn_response()
+
                         response = getattr(event, "response", None)
                         usage = getattr(response, "usage", None) if response else None
                         if usage:
@@ -794,12 +951,10 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
                         await self._cancel_partial_transcript_task()
 
-                        # Start new debounce timer with the last delta
                         self.partial_transcript_task = asyncio.create_task(
                             self._emit_debounced_partial(current_partial, item_id, sequence_counter)
                         )
 
-                    # Handle completed transcription (user finished speaking)
                     if event.type == "conversation.item.input_audio_transcription.completed":
                         self.is_idle_tool_call = False
                         self._mark_activity("user_transcription_completed")
@@ -819,16 +974,18 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         self._turn_first_audio_at = None
 
                         await self.output_queue.put(AdditionalOutputs({"role": "user", "content": transcript}))
+                        if self.deps.memory_manager is not None:
+                            self.deps.memory_manager.log_turn("user", transcript)
 
-                    # Handle assistant transcription
                     if event.type == "response.output_audio_transcript.done":
                         self._mark_activity("assistant_transcript_done")
                         logger.debug(f"Assistant transcript: {event.transcript}")
                         await self.output_queue.put(
                             AdditionalOutputs({"role": "assistant", "content": event.transcript})
                         )
+                        if self.deps.memory_manager is not None:
+                            self.deps.memory_manager.log_turn("assistant", event.transcript or "")
 
-                    # Handle audio delta
                     if event.type == "response.output_audio.delta":
                         decoded_pcm_bytes = base64.b64decode(event.delta)
                         decoded_pcm = np.frombuffer(decoded_pcm_bytes, dtype=np.int16).reshape(1, -1)
@@ -843,7 +1000,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                                 decoded_pcm,
                             ),
                         )
-                    # ---- tool-calling plumbing ----
                     if event.type == "response.function_call_arguments.done":
                         self._mark_activity("tool_call_received")
                         tool_name = getattr(event, "name", None)
@@ -867,6 +1023,18 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                                 call_id,
                             )
                             continue
+
+                        # Track this call against its model turn so we can coalesce
+                        # the spoken follow-up. Idle tool calls never speak, so they
+                        # are deliberately not counted.
+                        if not self.is_idle_tool_call:
+                            response_id = str(getattr(event, "response_id", "") or "")
+                            if response_id != self._tool_turn_response_id:
+                                self._tool_turn_response_id = response_id
+                                self._tool_turn_outstanding = 0
+                                self._tool_turn_calls_done = False
+                                self._tool_turn_wants_response = False
+                            self._tool_turn_outstanding += 1
 
                         bg_tool = await self.tool_manager.start_tool(
                             call_id=call_id,
@@ -930,7 +1098,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 # Stop background tool manager tasks (listener + cleanup) in all paths.
                 await self.tool_manager.shutdown()
 
-    # Microphone receive
     async def receive(self, frame: Tuple[int, NDArray[np.int16]]) -> None:
         """Receive audio frame from the microphone and send it to the realtime server.
 
@@ -947,20 +1114,15 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
         input_sample_rate, audio_frame = frame
 
-        # Reshape if needed
         if audio_frame.ndim == 2:
-            # Scipy channels last convention
             if audio_frame.shape[1] > audio_frame.shape[0]:
                 audio_frame = audio_frame.T
-            # Multiple channels -> Mono channel
             if audio_frame.shape[1] > 1:
                 audio_frame = audio_frame[:, 0]
 
-        # Resample if needed
         if self.input_sample_rate != input_sample_rate:
             audio_frame = resample(audio_frame, int(len(audio_frame) * self.input_sample_rate / input_sample_rate))
 
-        # Cast if needed
         audio_frame = audio_to_int16(audio_frame)
 
         # Send to the realtime input buffer (guard against races during reconnect).
@@ -973,10 +1135,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
     async def emit(self) -> Tuple[int, NDArray[np.int16]] | AdditionalOutputs | None:
         """Emit audio frame to be played by the speaker."""
-        # Sends output queued by the realtime event handler to the stream.
-        # This is called periodically by the fastrtc Stream
-
-        # Handle idle
         idle_duration = time.monotonic() - self.last_activity_time
         if idle_duration > 180.0 and self._response_done_event.is_set() and self.deps.movement_manager.is_idle():
             try:
@@ -991,7 +1149,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
     async def shutdown(self) -> None:
         """Shutdown the handler."""
-        # Unblock the response sender worker so it can exit
         self._response_done_event.set()
 
         # Stop background tool manager tasks (listener + cleanup)
@@ -1009,7 +1166,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             finally:
                 self.connection = None
 
-        # Clear any remaining items in the output queue
         while not self.output_queue.empty():
             try:
                 self.output_queue.get_nowait()

@@ -254,7 +254,7 @@ class GeminiLiveHandler(ConversationHandler):
             logger.info("Set custom profile to %r", profile)
 
             try:
-                _ = get_session_instructions(self.instance_path)
+                _ = get_session_instructions()
                 _ = get_session_voice()
             except BaseException as e:
                 logger.error("Failed to resolve personality content: %s", e)
@@ -359,7 +359,7 @@ class GeminiLiveHandler(ConversationHandler):
 
     def _build_live_config(self) -> types.LiveConnectConfig:
         """Build the LiveConnectConfig for a Gemini Live session."""
-        instructions = get_session_instructions(self.instance_path)
+        instructions = get_session_instructions()
         voice = _resolve_gemini_voice(self._voice_override or get_session_voice())
 
         # Convert OpenAI-style tool specs to Gemini function declarations

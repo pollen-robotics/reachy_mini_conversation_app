@@ -37,7 +37,7 @@ class OpenaiRealtimeHandler(BaseRealtimeHandler):
 
     def _get_session_instructions(self) -> str:
         """Return OpenAI session instructions."""
-        return get_session_instructions(self.instance_path)
+        return get_session_instructions(memory_manager=self.deps.memory_manager)
 
     def _get_session_voice(self, default: str | None = None) -> str:
         """Return the configured OpenAI session voice."""

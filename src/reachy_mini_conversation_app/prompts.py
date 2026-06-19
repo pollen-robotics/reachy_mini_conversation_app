@@ -1,10 +1,11 @@
 import re
 import sys
 import logging
+from typing import Any
 from pathlib import Path
+from datetime import datetime, timezone
 
 from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY, config, get_default_voice_for_backend
-from reachy_mini_conversation_app.memory import format_memory_for_prompt
 
 
 logger = logging.getLogger(__name__)
@@ -13,6 +14,23 @@ logger = logging.getLogger(__name__)
 PROMPTS_LIBRARY_DIRECTORY = Path(__file__).parent / "prompts"
 INSTRUCTIONS_FILENAME = "instructions.txt"
 VOICE_FILENAME = "voice.txt"
+
+
+def _current_date_line() -> str:
+    """One-line current-date anchor for the model, in UTC.
+
+    LLMs don't reliably know today's date; this gives them an anchor so they can
+    resolve "yesterday" / "a few weeks ago" into concrete dates for recall_memories.
+    UTC is used deliberately so it matches the memory system's clock: session logs
+    and memory event dates are all UTC (see memory/dates.py). [Caveat: in a non-UTC
+    timezone, near local midnight "today" can differ from the user's wall-clock day.]
+    Best-effort: any failure degrades to "unknown" rather than crashing.
+    """
+    try:
+        return f"The current date is {datetime.now(timezone.utc).strftime('%Y-%m-%d')} (UTC)."
+    except Exception as e:  # pragma: no cover - clock failures are exceptional
+        logger.warning("Could not read current date: %s", e)
+        return "The current date is unknown."
 
 
 def _expand_prompt_includes(content: str) -> str:
@@ -59,8 +77,14 @@ def _expand_prompt_includes(content: str) -> str:
     return "\n".join(expanded_lines)
 
 
-def get_session_instructions(instance_path: str | Path | None = None) -> str:
-    """Get session instructions, loading from REACHY_MINI_CUSTOM_PROFILE if set."""
+def get_session_instructions(memory_manager: Any | None = None) -> str:
+    """Get session instructions, loading from REACHY_MINI_CUSTOM_PROFILE if set.
+
+    Args:
+        memory_manager: Optional MemoryManager instance. When provided and active
+            memory is non-empty, the memory block is appended to the instructions.
+
+    """
     profile = config.REACHY_MINI_CUSTOM_PROFILE
     if not profile:
         logger.info(f"Loading default prompt from {PROMPTS_LIBRARY_DIRECTORY / 'default_prompt.txt'}")
@@ -82,9 +106,19 @@ def get_session_instructions(instance_path: str | Path | None = None) -> str:
             if instructions:
                 # Expand [<name>] placeholders with content from prompts library
                 expanded_instructions = _expand_prompt_includes(instructions)
-                memory_prompt = format_memory_for_prompt(instance_path)
-                if memory_prompt:
-                    return f"{memory_prompt}\n\n{expanded_instructions}"
+
+                # Anchor the model to today's date (for date-aware recall).
+                expanded_instructions += "\n\n" + _current_date_line()
+
+                # Append persistent memory block if available
+                if memory_manager is not None:
+                    try:
+                        memory_block = memory_manager.get_memory_block()
+                        if memory_block:
+                            expanded_instructions += memory_block
+                    except Exception as e:
+                        logger.warning("Failed to inject memory block: %s", e)
+
                 return expanded_instructions
             logger.error(f"Profile '{profile}' has empty {INSTRUCTIONS_FILENAME}")
             sys.exit(1)

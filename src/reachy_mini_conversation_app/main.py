@@ -146,12 +146,23 @@ def run(
         camera_worker=camera_worker,
     )
 
+    # Memory system
+    memory_manager = None
+    if config.MEMORY_ENABLED:
+        from reachy_mini_conversation_app.memory import MemoryManager
+
+        memory_manager = MemoryManager(data_dir=config.DATA_DIRECTORY)
+        logger.info("Memory enabled, data_dir=%s", config.DATA_DIRECTORY)
+    else:
+        logger.info("Memory disabled (REACHY_MINI_MEMORY_ENABLED=false)")
+
     deps = ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
         instance_path=instance_path,
         camera_worker=camera_worker,
         vision_processor=vision_processor,
+        memory_manager=memory_manager,
     )
 
     def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
@@ -245,6 +256,9 @@ def run(
     robot.enable_wobbling()
     if camera_worker:
         camera_worker.start()
+
+    # Memory consolidation ("dreaming") runs in the background per session,
+    # launched from base_realtime.py (see DreamScheduler); it never blocks startup.
 
     def poll_stop_event() -> None:
         """Poll the stop event to allow graceful shutdown."""
