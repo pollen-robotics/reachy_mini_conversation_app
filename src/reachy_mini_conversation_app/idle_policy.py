@@ -108,7 +108,7 @@ async def start_idle_tool_call(
     tool_name, arguments = selected_tool
     args_json_str = json.dumps(arguments)
     call_id = f"idle-{uuid.uuid4()}"
-    bg_tool = await tool_manager.start_tool(
+    background_tool = await tool_manager.start_tool(
         call_id=call_id,
         tool_call_routine=ToolCallRoutine(
             tool_name=tool_name,
@@ -123,7 +123,7 @@ async def start_idle_tool_call(
                 "role": "assistant",
                 "content": (
                     f"🛠️ Idle tool {tool_name} with args {args_json_str}. "
-                    f"The tool is now running. Tool ID: {bg_tool.tool_id}"
+                    f"The tool is now running. Tool ID: {background_tool.tool_id}"
                 ),
             },
         ),
@@ -132,8 +132,8 @@ async def start_idle_tool_call(
         "Started local idle tool after %.1fs idle: %s (id=%s, call_id=%s, args=%s)",
         idle_duration,
         tool_name,
-        bg_tool.tool_id,
+        background_tool.tool_id,
         call_id,
         args_json_str,
     )
-    return bg_tool
+    return background_tool

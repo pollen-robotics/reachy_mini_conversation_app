@@ -564,27 +564,27 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
                 sent = True
 
-    async def _handle_tool_result(self, bg_tool: ToolNotification) -> None:
+    async def _handle_tool_result(self, completed_tool: ToolNotification) -> None:
         """Process the result of a tool call."""
-        if bg_tool.error is not None:
-            logger.error("Tool '%s' (id=%s) failed with error: %s", bg_tool.tool_name, bg_tool.id, bg_tool.error)
-            tool_result = {"error": bg_tool.error}
+        if completed_tool.error is not None:
+            logger.error("Tool '%s' (id=%s) failed with error: %s", completed_tool.tool_name, completed_tool.id, completed_tool.error)
+            tool_result = {"error": completed_tool.error}
             tool_result_for_model = tool_result
-        elif bg_tool.result is not None:
-            tool_result = bg_tool.result
+        elif completed_tool.result is not None:
+            tool_result = completed_tool.result
             tool_result_for_model = (
-                self._sanitize_tool_result_for_model(bg_tool.tool_name, tool_result)
+                self._sanitize_tool_result_for_model(completed_tool.tool_name, tool_result)
                 if isinstance(tool_result, dict)
                 else tool_result
             )
             logger.info(
                 "Tool '%s' (id=%s) executed successfully.",
-                bg_tool.tool_name,
-                bg_tool.id,
+                completed_tool.tool_name,
+                completed_tool.id,
             )
-            logger.debug("Tool '%s' model-visible result: %s", bg_tool.tool_name, tool_result_for_model)
+            logger.debug("Tool '%s' model-visible result: %s", completed_tool.tool_name, tool_result_for_model)
         else:
-            logger.warning("Tool '%s' (id=%s) returned no result and no error", bg_tool.tool_name, bg_tool.id)
+            logger.warning("Tool '%s' (id=%s) returned no result and no error", completed_tool.tool_name, completed_tool.id)
             tool_result = {"error": "No result returned from tool execution"}
             tool_result_for_model = tool_result
 
@@ -592,36 +592,36 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         if not self.connection:
             logger.warning(
                 "Connection closed during tool '%s' (id=%s) execution; cannot send result back",
-                bg_tool.tool_name,
-                bg_tool.id,
+                completed_tool.tool_name,
+                completed_tool.id,
             )
             return
 
         try:
             self._mark_activity("tool_result_ready")
-            send_result_to_model = not bg_tool.is_idle_tool_call
+            send_result_to_model = not completed_tool.is_idle_tool_call
             model_result_submitted = False
-            if send_result_to_model and isinstance(bg_tool.id, str):
+            if send_result_to_model and isinstance(completed_tool.id, str):
                 if not await self._wait_for_response_done_before_tool_result():
                     send_result_to_model = False
                 if not send_result_to_model:
                     logger.warning(
                         "Dropping realtime model result for tool '%s' (id=%s) because response.done was not observed",
-                        bg_tool.tool_name,
-                        bg_tool.id,
+                        completed_tool.tool_name,
+                        completed_tool.id,
                     )
                 elif not self.connection:
                     logger.warning(
                         "Connection closed before sending tool '%s' (id=%s) result back",
-                        bg_tool.tool_name,
-                        bg_tool.id,
+                        completed_tool.tool_name,
+                        completed_tool.id,
                     )
                     return
                 else:
                     await self.connection.conversation.item.create(
                         item={
                             "type": "function_call_output",
-                            "call_id": bg_tool.id,
+                            "call_id": completed_tool.id,
                             "output": json.dumps(tool_result_for_model),
                         },
                     )
@@ -636,7 +636,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 ),
             )
 
-            if model_result_submitted and bg_tool.tool_name == "camera" and "b64_im" in tool_result:
+            if model_result_submitted and completed_tool.tool_name == "camera" and "b64_im" in tool_result:
                 # use raw base64, don't json.dumps (which adds quotes)
                 b64_im = tool_result["b64_im"]
                 if not isinstance(b64_im, str):
@@ -671,9 +671,9 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                         jpeg_bytes,
                     )
 
-            tool = core_tools.ALL_TOOLS.get(bg_tool.tool_name)
+            tool = core_tools.ALL_TOOLS.get(completed_tool.tool_name)
             # Always surface errors, skip the spoken follow-up for tools that opt out.
-            if model_result_submitted and (bg_tool.error is not None or tool is None or tool.needs_response):
+            if model_result_submitted and (completed_tool.error is not None or tool is None or tool.needs_response):
                 await self._safe_response_create()
 
         except self._connection_closed_errors():
@@ -868,7 +868,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                             )
                             continue
 
-                        bg_tool = await self.tool_manager.start_tool(
+                        background_tool = await self.tool_manager.start_tool(
                             call_id=call_id,
                             tool_call_routine=ToolCallRoutine(
                                 tool_name=tool_name,
@@ -882,12 +882,12 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                             AdditionalOutputs(
                                 {
                                     "role": "assistant",
-                                    "content": f"🛠️ Used tool {tool_name} with args {args_json_str}. The tool is now running. Tool ID: {bg_tool.tool_id}",
+                                    "content": f"🛠️ Used tool {tool_name} with args {args_json_str}. The tool is now running. Tool ID: {background_tool.tool_id}",
                                 },
                             ),
                         )
                         logger.info(
-                            "Started background tool: %s (id=%s, call_id=%s)", tool_name, bg_tool.tool_id, call_id
+                            "Started background tool: %s (id=%s, call_id=%s)", tool_name, background_tool.tool_id, call_id
                         )
 
                     # server error
