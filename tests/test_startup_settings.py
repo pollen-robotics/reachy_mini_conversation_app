@@ -51,7 +51,7 @@ def test_load_startup_settings_into_runtime_saved_settings_override_inherited_en
     """Saved startup settings should override a profile inherited from another `.env`."""
     write_startup_settings(tmp_path, profile="nature_documentarian", voice="cedar")
     applied_profiles: list[str | None] = []
-    monkeypatch.setenv("REACHY_MINI_CUSTOM_PROFILE", "example")
+    monkeypatch.setenv("REACHY_MINI_CUSTOM_PROFILE", "env_profile")
     monkeypatch.setattr(
         "reachy_mini_conversation_app.config.set_custom_profile",
         lambda profile: applied_profiles.append(profile),
@@ -68,7 +68,7 @@ def test_load_startup_settings_into_runtime_preserves_inherited_env_without_save
 ) -> None:
     """Inherited env config should still apply when no startup settings have been saved."""
     applied_profiles: list[str | None] = []
-    monkeypatch.setenv("REACHY_MINI_CUSTOM_PROFILE", "example")
+    monkeypatch.setenv("REACHY_MINI_CUSTOM_PROFILE", "env_profile")
     monkeypatch.setattr(
         "reachy_mini_conversation_app.config.set_custom_profile",
         lambda profile: applied_profiles.append(profile),

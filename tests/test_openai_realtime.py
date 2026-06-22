@@ -1,3 +1,4 @@
+import time
 import random
 import asyncio
 import logging
@@ -35,7 +36,6 @@ async def _run_openai_handler_with_events(
     events: list[Any],
     *,
     movement_manager: MagicMock | None = None,
-    gradio_mode: bool = False,
     handler_setup: Callable[[OpenaiRealtimeHandler], None] | None = None,
 ) -> OpenaiRealtimeHandler:
     """Run an OpenAI realtime handler against a fixed event sequence."""
@@ -104,7 +104,7 @@ async def _run_openai_handler_with_events(
         reachy_mini=MagicMock(),
         movement_manager=movement_manager or MagicMock(),
     )
-    handler = OpenaiRealtimeHandler(deps, gradio_mode=gradio_mode)
+    handler = OpenaiRealtimeHandler(deps)
     handler.client = FakeClient()
     if handler_setup is not None:
         handler_setup(handler)
@@ -286,6 +286,29 @@ async def test_idle_signal_starts_local_tool_without_model_turn(monkeypatch: Any
 
 
 @pytest.mark.asyncio
+async def test_idle_emit_updates_idle_clock_without_refreshing_activity(monkeypatch: Any) -> None:
+    """Idle behavior should not postpone app inactivity timeout."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    deps.movement_manager.is_idle.return_value = True
+    handler = OpenaiRealtimeHandler(deps)
+    now = time.monotonic()
+    previous_activity_time = now - 181.0
+    previous_idle_behavior_time = now - 181.0
+    handler.last_activity_time = previous_activity_time
+    handler.last_idle_behavior_time = previous_idle_behavior_time
+    handler._response_done_event.set()
+    send_idle_signal = AsyncMock()
+    monkeypatch.setattr(handler, "send_idle_signal", send_idle_signal)
+    monkeypatch.setattr(base_rt_mod, "wait_for_item", AsyncMock(return_value=None))
+
+    await handler.emit()
+
+    send_idle_signal.assert_awaited_once()
+    assert handler.last_activity_time == previous_activity_time
+    assert handler.last_idle_behavior_time > previous_idle_behavior_time
+
+
+@pytest.mark.asyncio
 async def test_idle_tool_result_is_not_sent_to_realtime_model(monkeypatch: Any) -> None:
     """Locally selected idle tool completions should stay out of the model conversation."""
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
@@ -293,6 +316,7 @@ async def test_idle_tool_result_is_not_sent_to_realtime_model(monkeypatch: Any) 
 
     fake_item = SimpleNamespace(create=AsyncMock())
     handler.connection = SimpleNamespace(conversation=SimpleNamespace(item=fake_item))
+    handler.last_activity_time = 1.0
     safe_response_create = AsyncMock()
     monkeypatch.setattr(handler, "_safe_response_create", safe_response_create)
 
@@ -308,6 +332,7 @@ async def test_idle_tool_result_is_not_sent_to_realtime_model(monkeypatch: Any) 
 
     fake_item.create.assert_not_awaited()
     safe_response_create.assert_not_awaited()
+    assert handler.last_activity_time == 1.0
 
 
 @pytest.mark.asyncio
@@ -475,7 +500,7 @@ async def test_apply_personality_preserves_manual_voice_override(monkeypatch: An
     restart = AsyncMock()
     monkeypatch.setattr(handler, "_restart_session", restart)
 
-    status = await handler.apply_personality("example")
+    status = await handler.apply_personality("mars_rover")
 
     assert status == "Applied personality and restarted realtime session."
     assert handler.get_current_voice() == "marin"
@@ -665,32 +690,6 @@ async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -
     # Optional: confirm we logged the unexpected close once
     warnings = [r for r in caplog.records if r.levelname == "WARNING" and "closed unexpectedly" in r.msg]
     assert len(warnings) == 1
-
-
-@pytest.mark.asyncio
-async def test_start_up_openai_gradio_collects_textbox_api_key(monkeypatch: Any) -> None:
-    """OpenAI should own Gradio textbox credential collection."""
-    monkeypatch.setattr(config, "BACKEND_PROVIDER", "openai")
-    monkeypatch.setattr(config, "OPENAI_API_KEY", None)
-
-    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
-    handler = rt_mod.OpenaiRealtimeHandler(deps, gradio_mode=True)
-    handler.latest_args = ["profile", "voice", "unused", "sk-textbox-secret"]
-
-    build_client = AsyncMock(return_value=MagicMock())
-    run_realtime_session = AsyncMock(return_value=None)
-    wait_for_args = AsyncMock(return_value=None)
-
-    monkeypatch.setattr(handler, "_build_realtime_client", build_client)
-    monkeypatch.setattr(handler, "_run_realtime_session", run_realtime_session)
-    monkeypatch.setattr(handler, "wait_for_args", wait_for_args)
-
-    await handler.start_up()
-
-    wait_for_args.assert_awaited_once()
-    build_client.assert_awaited_once_with()
-    run_realtime_session.assert_awaited_once()
-    assert handler._provided_api_key == "sk-textbox-secret"
 
 
 @pytest.mark.asyncio

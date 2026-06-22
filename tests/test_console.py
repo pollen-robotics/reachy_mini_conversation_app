@@ -1,6 +1,5 @@
 """Tests for the headless console stream."""
 
-import sys
 import asyncio
 import threading
 from types import SimpleNamespace
@@ -19,7 +18,7 @@ from reachy_mini_conversation_app.startup_settings import (
     StartupSettings,
     load_startup_settings_into_runtime,
 )
-from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
+from reachy_mini_conversation_app.personality_routes import mount_personality_routes
 
 
 async def _wait_until(predicate: Any, timeout: float = 1.0) -> None:
@@ -80,6 +79,49 @@ def test_clear_audio_queue_drains_queue_in_place() -> None:
 
     assert handler.output_queue is queue  # same object, not replaced
     assert queue.empty()
+
+
+def test_mic_endpoints_report_and_toggle_mute_state() -> None:
+    """The mic starts live; /mic exposes and flips the pause state."""
+    app = FastAPI()
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(MagicMock(), robot, settings_app=app)
+    stream._init_settings_ui_if_needed()
+    client = TestClient(app)
+
+    assert client.get("/mic").json() == {"muted": False}
+
+    assert client.post("/mic", json={"muted": True}).json() == {"muted": True}
+    assert stream._mic_muted is True
+
+    assert client.post("/mic", json={"muted": False}).json() == {"muted": False}
+    assert stream._mic_muted is False
+
+    # headless streams keep the mic live
+    assert LocalStream(MagicMock(), robot)._mic_muted is False
+
+
+@pytest.mark.asyncio
+async def test_conversation_events_survive_handler_rebuild() -> None:
+    """Activity from a rebuilt handler must reach subscribers of the original event bus."""
+
+    class FakeHandler:
+        def __init__(self) -> None:
+            self.observer = None
+
+        def set_activity_observer(self, observer: Any) -> None:
+            self.observer = observer
+
+    rebuilt = FakeHandler()
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(FakeHandler(), robot, settings_app=FastAPI(), handler_factory=lambda voice: rebuilt)
+
+    queue, unsubscribe = stream._event_bus.subscribe()
+    stream._build_handler_for_current_backend()
+    rebuilt.observer("assistant_audio_delta")
+
+    assert await asyncio.wait_for(queue.get(), timeout=1.0) == "assistant_audio_delta"
+    unsubscribe()
 
 
 def test_backend_config_persists_gemini_selection_and_status(
@@ -585,7 +627,7 @@ async def test_startup_loop_rebuilds_handler_for_backend_change(monkeypatch: pyt
             pass
 
 
-def test_headless_personality_routes_return_gemini_voices_when_backend_selected(
+def test_personality_routes_return_gemini_voices_when_backend_selected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Headless personality UI should expose Gemini voices when Gemini is selected."""
@@ -603,7 +645,7 @@ def test_headless_personality_routes_return_gemini_voices_when_backend_selected(
     assert response.json() == GEMINI_AVAILABLE_VOICES
 
 
-def test_headless_personality_routes_load_builtin_default_tools() -> None:
+def test_personality_routes_load_builtin_default_tools() -> None:
     """Headless personality UI should expose built-in default tools on initial load."""
     app = FastAPI()
     handler = MagicMock()
@@ -619,7 +661,7 @@ def test_headless_personality_routes_load_builtin_default_tools() -> None:
     assert "camera" in data["enabled_tools"]
 
 
-def test_headless_personality_routes_apply_voice_accepts_query_param() -> None:
+def test_personality_routes_apply_voice_accepts_query_param() -> None:
     """Headless personality UI should apply a voice change from a POST query param."""
     app = FastAPI()
     handler = MagicMock()
@@ -652,7 +694,7 @@ def test_headless_personality_routes_apply_voice_accepts_query_param() -> None:
         loop.close()
 
 
-def test_headless_personality_routes_persist_startup_with_voice_override() -> None:
+def test_personality_routes_persist_startup_with_voice_override() -> None:
     """Saving a startup personality should persist the active manual voice override."""
     app = FastAPI()
     handler = MagicMock()
@@ -676,7 +718,7 @@ def test_headless_personality_routes_persist_startup_with_voice_override() -> No
         mount_personality_routes(app, handler, lambda: loop, persist_personality=persist_personality)
 
         client = TestClient(app)
-        response = client.post("/personalities/apply?name=sorry_bro&persist=1")
+        response = client.post("/personalities/apply", json={"name": "sorry_bro", "persist": True})
 
         assert response.status_code == 200
         assert response.json()["ok"] is True
@@ -717,7 +759,7 @@ def test_headless_personality_routes_can_use_stream_callbacks() -> None:
             get_current_voice=get_current_voice,
         )
 
-        response = TestClient(app).post("/personalities/apply?name=sorry_bro")
+        response = TestClient(app).post("/personalities/apply", json={"name": "sorry_bro"})
 
         assert response.status_code == 200
         assert response.json()["status"] == "Applied personality and restarting backend."
@@ -818,9 +860,6 @@ def test_local_stream_launch_waits_for_manual_openai_key_without_download(
     monkeypatch.setenv("BACKEND_PROVIDER", "openai")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
-    fake_client_ctor = MagicMock(side_effect=AssertionError("launch() should not try to download an OpenAI key"))
-    monkeypatch.setitem(sys.modules, "gradio_client", SimpleNamespace(Client=fake_client_ctor))
-
     media = SimpleNamespace(
         start_recording=MagicMock(),
         start_playing=MagicMock(),
@@ -836,7 +875,6 @@ def test_local_stream_launch_waits_for_manual_openai_key_without_download(
 
     stream.launch()
 
-    fake_client_ctor.assert_not_called()
     init_settings_ui.assert_called_once()
     media.start_recording.assert_not_called()
     media.start_playing.assert_not_called()

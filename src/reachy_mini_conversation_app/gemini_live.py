@@ -19,7 +19,6 @@ from typing import Any, Dict, List, Final, Tuple, Literal, Optional
 from datetime import datetime
 
 import numpy as np
-import gradio as gr
 from google import genai
 from fastrtc import AdditionalOutputs, wait_for_item, audio_to_int16
 from google.genai import types
@@ -147,7 +146,6 @@ class GeminiLiveHandler(ConversationHandler):
     def __init__(
         self,
         deps: ToolDependencies,
-        gradio_mode: bool = False,
         instance_path: Optional[str] = None,
         startup_voice: Optional[str] = None,
     ):
@@ -159,7 +157,6 @@ class GeminiLiveHandler(ConversationHandler):
         )
 
         self.deps = deps
-        self.gradio_mode = gradio_mode
         self.instance_path = instance_path
         self._voice_override: str | None = _resolve_gemini_startup_voice(startup_voice)
 
@@ -167,6 +164,7 @@ class GeminiLiveHandler(ConversationHandler):
         self.output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]" = asyncio.Queue()
 
         self.last_activity_time = time.monotonic()
+        self.last_idle_behavior_time = self.last_activity_time
         self.start_time = time.monotonic()
         self.is_idle_tool_call = False
 
@@ -187,10 +185,9 @@ class GeminiLiveHandler(ConversationHandler):
         self._listening_state = False
 
     def copy(self) -> "GeminiLiveHandler":
-        """Create a copy of the handler."""
+        """Return a fresh handler, preserving deps and voice override."""
         return GeminiLiveHandler(
             self.deps,
-            self.gradio_mode,
             self.instance_path,
             startup_voice=self._voice_override,
         )
@@ -214,10 +211,22 @@ class GeminiLiveHandler(ConversationHandler):
 
         await self.output_queue.put(AdditionalOutputs({"role": role, "content": transcript}))
 
+    def _mark_activity(self, reason: str) -> None:
+        """Refresh the idle timestamp and notify the activity observer."""
+        self.last_activity_time = asyncio.get_event_loop().time()
+        logger.debug("last activity time updated to %s (%s)", self.last_activity_time, reason)
+        observer = self._activity_observer
+        if observer is not None:
+            try:
+                observer(reason)
+            except Exception:
+                logger.debug("activity observer raised (ignored)", exc_info=True)
+
     async def _mark_model_response_started(self) -> None:
         """Switch out of user-listening mode when the model begins responding."""
         await self._flush_transcript_chunks("user", self._pending_user_transcript_chunks)
         self._set_listening_state(False)
+        self._mark_activity("response_created")
 
     async def _handle_interruption(self) -> None:
         """Stop current playback and preserve any transcript already spoken."""
@@ -289,20 +298,9 @@ class GeminiLiveHandler(ConversationHandler):
     async def start_up(self) -> None:
         """Start the handler with retries on unexpected closure."""
         gemini_api_key = config.GEMINI_API_KEY
-        if self.gradio_mode and not gemini_api_key:
-            await self.wait_for_args()  # type: ignore[no-untyped-call]
-            args = list(self.latest_args)
-            textbox_api_key = args[3] if len(args) > 3 and len(args[3]) > 0 else None
-            if textbox_api_key is not None:
-                gemini_api_key = textbox_api_key
-                self._key_source = "textbox"
-                self._provided_api_key = textbox_api_key
-            else:
-                gemini_api_key = config.GEMINI_API_KEY
-        else:
-            if not gemini_api_key or not gemini_api_key.strip():
-                logger.warning("GEMINI_API_KEY missing. Proceeding with a placeholder (tests/offline).")
-                gemini_api_key = "DUMMY"
+        if not gemini_api_key or not gemini_api_key.strip():
+            logger.warning("GEMINI_API_KEY missing. Proceeding with a placeholder (tests/offline).")
+            gemini_api_key = "DUMMY"
 
         self.client = genai.Client(api_key=gemini_api_key)
 
@@ -484,6 +482,7 @@ class GeminiLiveHandler(ConversationHandler):
 
             console_content = json.dumps(tool_result)
 
+            self._mark_activity("tool_result_ready")
             if send_result_to_model:
                 function_response = types.FunctionResponse(
                     id=bg_tool.id if isinstance(bg_tool.id, str) else str(bg_tool.id),
@@ -497,24 +496,9 @@ class GeminiLiveHandler(ConversationHandler):
                     {
                         "role": "assistant",
                         "content": console_content,
-                        "metadata": {
-                            "title": f"🛠️ Used tool {bg_tool.tool_name}",
-                            "status": "done",
-                        },
                     },
                 ),
             )
-
-            if send_result_to_model and bg_tool.tool_name == "camera" and self.deps.camera_worker is not None:
-                np_img = self.deps.camera_worker.get_latest_frame()
-                if np_img is not None:
-                    rgb_frame = np.ascontiguousarray(np_img[..., ::-1])
-                else:
-                    rgb_frame = None
-                img = gr.Image(value=rgb_frame)
-                await self.output_queue.put(
-                    AdditionalOutputs({"role": "assistant", "content": img}),
-                )
 
         except Exception as e:
             logger.warning("Error sending tool result to Gemini: %s", e)
@@ -608,7 +592,7 @@ class GeminiLiveHandler(ConversationHandler):
                                             if len(audio_array) == 0:
                                                 continue
 
-                                            self.last_activity_time = time.monotonic()
+                                            self._mark_activity("assistant_audio_delta")
 
                                             await self.output_queue.put(
                                                 (GEMINI_OUTPUT_SAMPLE_RATE, audio_array),
@@ -616,10 +600,12 @@ class GeminiLiveHandler(ConversationHandler):
 
                                 # Handle input transcription (user speech)
                                 if content.input_transcription and content.input_transcription.text:
+                                    self.last_activity_time = time.monotonic()
                                     transcript = content.input_transcription.text
                                     logger.debug("User transcript chunk: %s", transcript)
                                     self._pending_user_transcript_chunks.append(transcript)
                                     self._set_listening_state(True)
+                                    self._mark_activity("user_transcription_delta")
 
                                 # Handle output transcription (model speech)
                                 if content.output_transcription and content.output_transcription.text:
@@ -630,10 +616,12 @@ class GeminiLiveHandler(ConversationHandler):
 
                                 # Turn complete
                                 if content.turn_complete:
+                                    self._mark_activity("assistant_transcript_done")
                                     await self._handle_turn_complete()
 
                             # Handle tool calls
                             if response.tool_call:
+                                self._mark_activity("tool_call_received")
                                 await self._handle_tool_call(response)
 
                     except Exception as e:
@@ -686,14 +674,17 @@ class GeminiLiveHandler(ConversationHandler):
     async def emit(self) -> Tuple[int, NDArray[np.int16]] | AdditionalOutputs | None:
         """Emit audio frame to be played by the speaker."""
         # Handle idle
-        idle_duration = time.monotonic() - self.last_activity_time
-        if idle_duration > 15.0 and self.deps.movement_manager.is_idle():
+        now = time.monotonic()
+        idle_duration = now - self.last_activity_time
+        idle_behavior_duration = now - self.last_idle_behavior_time
+        if idle_duration > 15.0 and idle_behavior_duration > 15.0 and self.deps.movement_manager.is_idle():
             try:
                 await self.send_idle_signal(idle_duration)
             except Exception as e:
                 logger.warning("Idle tool skipped: %s", e)
                 return None
-            self.last_activity_time = time.monotonic()
+
+            self.last_idle_behavior_time = now
 
         return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
 

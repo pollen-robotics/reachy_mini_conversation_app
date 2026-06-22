@@ -10,9 +10,8 @@ from typing import Any, Final, Tuple, ClassVar, Optional
 from datetime import datetime
 
 import numpy as np
-import gradio as gr
 from openai import AsyncOpenAI
-from fastrtc import AdditionalOutputs, wait_for_item, audio_to_int16, audio_to_float32
+from fastrtc import AdditionalOutputs, wait_for_item, audio_to_int16
 from pydantic import Field, BaseModel
 from numpy.typing import NDArray
 from scipy.signal import resample
@@ -111,7 +110,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
     def __init__(
         self,
         deps: ToolDependencies,
-        gradio_mode: bool = False,
         instance_path: Optional[str] = None,
         startup_voice: Optional[str] = None,
     ):
@@ -133,9 +131,9 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         self.output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]" = asyncio.Queue()
 
         self.last_activity_time = time.monotonic()
+        self.last_idle_behavior_time = self.last_activity_time
         self.start_time = time.monotonic()
         self.is_idle_tool_call = False
-        self.gradio_mode = gradio_mode
         self.instance_path = instance_path
         self._voice_override: str | None = self._normalize_startup_voice(startup_voice)
         self._realtime_connect_query: dict[str, str] = {}
@@ -258,31 +256,17 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         """Record non-idle conversation activity for the idle timer."""
         self.last_activity_time = time.monotonic()
         logger.debug("last activity time updated to %s (%s)", self.last_activity_time, reason)
-
-    def _tap_audio_for_daemon_wobbler(self, decoded_pcm: NDArray[np.int16]) -> None:
-        # Gradio plays audio in the browser, so the daemon's wobbler — which
-        # taps `push_audio_sample` — never sees it. Push the same samples to
-        # the daemon to drive head motion; mute the robot speaker locally if
-        # you don't want double playback.
-        try:
-            robot = self.deps.reachy_mini
-            output_rate = robot.media.get_output_audio_samplerate()
-            audio = audio_to_float32(decoded_pcm).reshape(-1)
-            if self.output_sample_rate != output_rate:
-                num_samples = int(len(audio) * output_rate / self.output_sample_rate)
-                if num_samples == 0:
-                    return
-                audio = resample(audio, num_samples)
-                logger.info("push audio")
-            robot.media.push_audio_sample(audio.astype(np.float32))
-        except Exception as exc:
-            logger.debug("Daemon wobbler audio tap failed: %s", exc)
+        observer = self._activity_observer
+        if observer is not None:
+            try:
+                observer(reason)
+            except Exception:
+                logger.debug("activity observer raised (ignored)", exc_info=True)
 
     def copy(self) -> "BaseRealtimeHandler":
-        """Create a copy of the handler."""
+        """Return a fresh handler of the same type, preserving deps and voice override."""
         return type(self)(
             self.deps,
-            self.gradio_mode,
             self.instance_path,
             startup_voice=self._voice_override,
         )
@@ -618,8 +602,9 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             return
 
         try:
-            self._mark_activity("tool_result_ready")
             send_result_to_model = not bg_tool.is_idle_tool_call
+            if send_result_to_model:
+                self._mark_activity("tool_result_ready")
             model_result_submitted = False
             if send_result_to_model and isinstance(bg_tool.id, str):
                 if not await self._wait_for_response_done_before_tool_result():
@@ -652,11 +637,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                     {
                         "role": "assistant",
                         "content": json.dumps(tool_result_for_model),
-                        # Gradio UI metadata.status accept only "pending" and "done". Do not accept bg.tool.status values.
-                        "metadata": {
-                            "title": f"🛠️ Used tool {bg_tool.tool_name}",
-                            "status": "done",
-                        },
                     },
                 ),
             )
@@ -694,24 +674,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                     logger.info(
                         "Added camera image to conversation jpeg_bytes=%s",
                         jpeg_bytes,
-                    )
-
-                if self.deps.camera_worker is not None:
-                    np_img = self.deps.camera_worker.get_latest_frame()
-                    if np_img is not None:
-                        # Camera frames are BGR; reverse channels without requiring OpenCV in core installs.
-                        rgb_frame = np_img[:, :, ::-1].copy() if np_img.ndim == 3 and np_img.shape[-1] == 3 else np_img
-                    else:
-                        rgb_frame = None
-                    img = gr.Image(value=rgb_frame)
-
-                    await self.output_queue.put(
-                        AdditionalOutputs(
-                            {
-                                "role": "assistant",
-                                "content": img,
-                            },
-                        ),
                     )
 
             tool = core_tools.ALL_TOOLS.get(bg_tool.tool_name)
@@ -875,8 +837,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                     if event.type == "response.output_audio.delta":
                         decoded_pcm_bytes = base64.b64decode(event.delta)
                         decoded_pcm = np.frombuffer(decoded_pcm_bytes, dtype=np.int16).reshape(1, -1)
-                        if self.gradio_mode:
-                            self._tap_audio_for_daemon_wobbler(decoded_pcm)
                         self._mark_activity("assistant_audio_delta")
                         if self._turn_user_done_at is not None and self._turn_first_audio_at is None:
                             self._turn_first_audio_at = time.perf_counter()
@@ -1022,15 +982,22 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         # This is called periodically by the fastrtc Stream
 
         # Handle idle
-        idle_duration = time.monotonic() - self.last_activity_time
-        if idle_duration > 180.0 and self._response_done_event.is_set() and self.deps.movement_manager.is_idle():
+        now = time.monotonic()
+        idle_duration = now - self.last_activity_time
+        idle_behavior_duration = now - self.last_idle_behavior_time
+        if (
+            idle_duration > 180.0
+            and idle_behavior_duration > 180.0
+            and self._response_done_event.is_set()
+            and self.deps.movement_manager.is_idle()
+        ):
             try:
                 await self.send_idle_signal(idle_duration)
             except Exception as e:
                 logger.warning("Idle tool skipped (connection closed?): %s", e)
                 return None
 
-            self.last_activity_time = time.monotonic()  # avoid repeated resets
+            self.last_idle_behavior_time = now
 
         return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
 

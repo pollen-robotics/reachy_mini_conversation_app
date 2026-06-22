@@ -21,7 +21,13 @@ class ConversationHandler(AsyncStreamHandler, ABC):
 
     deps: ToolDependencies
     output_queue: asyncio.Queue[QueueItem]
+    last_activity_time: float
     _clear_queue: Callable[[], None] | None = None
+    _activity_observer: Callable[[str], None] | None = None
+
+    def set_activity_observer(self, observer: Callable[[str], None] | None) -> None:
+        """Attach or detach an activity observer. Pass None to clear."""
+        self._activity_observer = observer
 
     @abstractmethod
     def copy(self) -> ConversationHandler:

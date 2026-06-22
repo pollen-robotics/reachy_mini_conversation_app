@@ -193,30 +193,6 @@ def test_handler_normalizes_hf_voice_case(monkeypatch: Any) -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_up_hf_gradio_does_not_wait_for_api_key(monkeypatch: Any) -> None:
-    """Hugging Face backend should not wait for gradio key input."""
-    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
-    monkeypatch.setattr(config, "OPENAI_API_KEY", "sk-openai-secret")
-
-    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
-    handler = hf_mod.HuggingFaceRealtimeHandler(deps, gradio_mode=True)
-
-    build_client = AsyncMock(return_value=MagicMock())
-    run_realtime_session = AsyncMock(return_value=None)
-    wait_for_args = AsyncMock(side_effect=AssertionError("wait_for_args should not be called"))
-
-    monkeypatch.setattr(handler, "_build_realtime_client", build_client)
-    monkeypatch.setattr(handler, "_run_realtime_session", run_realtime_session)
-    monkeypatch.setattr(handler, "wait_for_args", wait_for_args)
-
-    await handler.start_up()
-
-    wait_for_args.assert_not_awaited()
-    build_client.assert_awaited_once_with()
-    run_realtime_session.assert_awaited_once()
-
-
-@pytest.mark.asyncio
 async def test_run_realtime_session_uses_default_voice_for_lb_allocated_sessions(monkeypatch: Any) -> None:
     """Use the backend default speaker when no profile voice is selected for the hf LB."""
     monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
@@ -545,7 +521,7 @@ async def test_apply_personality_uses_selected_voice_for_lb_allocated_sessions(m
     handler.connection = FakeConnection()
     monkeypatch.setattr(handler, "_restart_session", AsyncMock(return_value=None))
 
-    result = await handler.apply_personality("example")
+    result = await handler.apply_personality("mars_rover")
 
     assert "restarted realtime session" in result.lower()
     session = captured_update["session"]

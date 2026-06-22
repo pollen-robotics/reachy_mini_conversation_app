@@ -290,7 +290,7 @@ def _resolve_profile_tools_txt_path() -> tuple[str, Path]:
     profile = config.REACHY_MINI_CUSTOM_PROFILE or "default"
     logger.info(f"Loading tools for profile: {profile}")
 
-    profile_dir = config.PROFILES_DIRECTORY / profile
+    profile_dir = config.resolve_profile_dir(profile)
     tools_txt_path = profile_dir / "tools.txt"
     default_tools_txt_path = DEFAULT_PROFILES_PATH / "default" / "tools.txt"
 
@@ -426,7 +426,7 @@ def _load_profile_tools(tool_names: list[str], remote_tool_names: set[str]) -> L
 
         loaded = False
         profile_error = None
-        profile_tool_file = config.PROFILES_DIRECTORY / profile / f"{tool_name}.py"
+        profile_tool_file = config.resolve_profile_dir(profile) / f"{tool_name}.py"
 
         try:
             tool_classes, reused_cache = _load_cached_tool_classes(

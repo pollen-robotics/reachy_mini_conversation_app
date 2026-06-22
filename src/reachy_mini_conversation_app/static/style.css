@@ -1,516 +1,1156 @@
+/* Sectioned stylesheet, scoped by class name (no global element selectors). */
+
+/* 1. Tokens & reset */
+
 :root {
-  --bg: #060b1a;
-  --bg-2: #071023;
-  --panel: rgba(11, 18, 36, 0.8);
-  --border: rgba(255, 255, 255, 0.08);
-  --text: #eaf2ff;
-  --muted: #9fb6d7;
-  --ok: #4ce0b3;
-  --warn: #ffb547;
-  --error: #ff5c70;
-  --accent: #45c4ff;
-  --accent-2: #5ef0c1;
-  --shadow: 0 20px 70px rgba(0, 0, 0, 0.45);
+  --bg: #0e0f12;
+  --bg-soft: #15171c;
+  --bg-elev: #1c1f26;
+  --bg-elev-hover: #232730;
+  --border: #2a2f3a;
+  --border-strong: #3a4150;
+  --text: #f4f5f7;
+  --text-soft: #b8bdc7;
+  --text-muted: #7d8390;
+  --accent: #ff9500;
+  --accent-soft: rgba(255, 149, 0, 0.18);
+  --danger: #ff6a75;
+  --success: #34d399;
+  --warn: #f59e0b;
+
+  --radius-sm: 8px;
+  --radius: 14px;
+  --radius-lg: 22px;
+
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.45);
+
+  --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", "SF Pro Text",
+    "Inter", system-ui, sans-serif;
+
+  --transition-fast: 0.18s ease;
+  --transition: 0.25s ease;
 }
 
-* { box-sizing: border-box; }
+/* ?theme= (set by the desktop app) overrides the OS preference below. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --bg: #f6f7fa;
+    --bg-soft: #eceff5;
+    --bg-elev: #ffffff;
+    --bg-elev-hover: #f0f3fa;
+    --border: #d8dde6;
+    --border-strong: #b9c0cd;
+    --text: #1c2028;
+    --text-soft: #4a525f;
+    --text-muted: #7e8695;
+    --shadow-sm: 0 2px 8px rgba(20, 25, 40, 0.08);
+    --shadow-lg: 0 16px 48px rgba(20, 25, 40, 0.18);
+  }
+}
+
+:root[data-theme="light"] {
+  --bg: #f6f7fa;
+  --bg-soft: #eceff5;
+  --bg-elev: #ffffff;
+  --bg-elev-hover: #f0f3fa;
+  --border: #d8dde6;
+  --border-strong: #b9c0cd;
+  --text: #1c2028;
+  --text-soft: #4a525f;
+  --text-muted: #7e8695;
+  --shadow-sm: 0 2px 8px rgba(20, 25, 40, 0.08);
+  --shadow-lg: 0 16px 48px rgba(20, 25, 40, 0.18);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
 body {
   margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-stack);
+  font-size: 16px;
+  line-height: 1.5;
   min-height: 100vh;
-  font-family: "Space Grotesk", "Inter", "Segoe UI", sans-serif;
-  background: radial-gradient(circle at 20% 20%, rgba(69, 196, 255, 0.16), transparent 35%),
-              radial-gradient(circle at 80% 0%, rgba(94, 240, 193, 0.16), transparent 32%),
-              linear-gradient(135deg, var(--bg), var(--bg-2));
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+a {
+  color: inherit;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* 2. App shell */
+
+.app-shell__header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 24px;
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+}
+
+.app-shell__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--text);
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+  transition: background var(--transition-fast);
+}
+
+.app-shell__brand:hover {
+  background: var(--bg-elev);
+}
+
+/* SVG offset upward so the head sits centered in the disc, not the body. */
+.app-shell__brand-mark {
+  position: relative;
+  display: inline-block;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--bg-soft);
+  overflow: visible;
+  flex-shrink: 0;
+}
+
+.app-shell__brand-mark img {
+  position: absolute;
+  width: 140%;
+  height: auto;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -57%);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  display: block;
+}
+
+.app-shell__brand-text {
+  font-size: 0.95rem;
+}
+
+/* Lets the Back button toggle via `hidden` without shifting the brand. */
+.app-shell__lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Fixed below the topbar, outside the header, so the lead/gear layout
+   stays untouched. Borderless so it reads as a label, not a control. */
+.app-shell__personality {
+  position: fixed;
+  top: 90px;
+  left: 32px;
+  z-index: 9;
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 12px;
+  margin: -8px -12px;
+  background: transparent;
+  border: 0;
+  border-radius: 16px;
+  min-width: 0;
+  max-width: 320px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  appearance: none;
+  transition: background 0.15s ease;
+}
+
+.app-shell__personality:hover {
+  background: var(--bg-soft);
+}
+
+.app-shell__personality:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.app-shell__personality[hidden] {
+  display: none;
+}
+
+.app-shell__personality-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.app-shell__personality-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.app-shell__personality-name {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+
+/* Larger than the brand mark for presence outside the topbar. */
+.app-shell__personality-avatar {
+  position: relative;
+  display: inline-block;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--bg-soft);
+  overflow: visible;
+  flex-shrink: 0;
+}
+
+.app-shell__personality-avatar img {
+  position: absolute;
+  width: 140%;
+  height: auto;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -57%);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  display: block;
+}
+
+/* Shared by the Back and gear buttons so both read as the same control. */
+.app-shell__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text-soft);
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+  transition: color var(--transition-fast), background var(--transition-fast),
+    border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.app-shell__icon-btn[hidden] {
+  display: none;
+}
+
+.app-shell__icon-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.app-shell__icon-btn:hover {
+  color: var(--text);
+  background: var(--bg-elev-hover);
+  border-color: var(--border-strong);
+}
+
+.app-shell__icon-btn:active {
+  transform: scale(0.96);
+}
+
+.app-shell__icon-btn:focus-visible,
+.app-shell__brand:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Accent tint + rotation signal the gear also closes Settings when active. */
+.app-shell__gear.is-active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-elev));
+}
+
+.app-shell__gear.is-active svg {
+  transform: rotate(60deg);
+  transition: transform var(--transition);
+}
+
+.app-shell__outlet {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+  /* Flex column so the Talk view can claim full height via flex:1 and
+     center vertically; other views just sit at the top. */
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 3. Generic primitives */
+
+.view-header {
+  margin-bottom: 28px;
+}
+
+.view-title {
+  margin: 0 0 6px;
+  font-size: 1.6rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.view-subtitle {
+  margin: 0;
+  color: var(--text-soft);
+}
+
+.view-status {
+  margin-top: 18px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.view-status.is-warning {
+  color: var(--warn);
+}
+
+.view-status.is-error {
+  color: var(--danger);
+}
+
+.view-error {
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  padding: 16px;
+  background: var(--bg-elev);
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.muted.small {
+  font-size: 0.85rem;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  background: var(--bg-elev);
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 500;
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--bg-elev-hover);
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: var(--accent);
+  color: #1a0f00;
+  font-weight: 600;
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 90%, white);
+}
+
+.btn--ghost {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-soft);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  border-color: var(--border-strong);
   color: var(--text);
 }
 
-.ambient {
+.route-error {
+  margin: 32px;
+  padding: 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--text);
+}
+
+/* 4. Home view - personality grid */
+
+.view--home .personality-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 18px;
+}
+
+.personality-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  min-height: 196px;
+  padding: 20px 16px 18px;
+  background: var(--bg-elev);
+  border: 0;
+  border-radius: var(--radius);
+  /* Hairline border via inset shadow stays crisp where 1px CSS borders
+     anti-alias, especially at non-integer device pixel ratios. */
+  box-shadow: inset 0 0 0 1px var(--border);
+  cursor: pointer;
+  color: inherit;
+  text-align: center;
+  font: inherit;
+  transition: background var(--transition-fast), box-shadow var(--transition-fast),
+    transform 0.1s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.personality-card:hover:not(:disabled) {
+  background: var(--bg-elev-hover);
+}
+
+.personality-card:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.personality-card:focus-visible {
+  box-shadow:
+    inset 0 0 0 2px var(--accent),
+    0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+  outline: none;
+}
+
+.personality-card.is-active {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-elev));
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.personality-card.is-active:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-elev));
+}
+
+.personality-card.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* overflow: visible - avatars are full-body illustrations anchored on the
+   head; antennas/hats spill above the disc rim. */
+.personality-card__avatar {
+  position: relative;
+  width: 110px;
+  height: 110px;
+  border-radius: 50%;
+  background: var(--bg-soft);
+  overflow: visible;
+  flex-shrink: 0;
+}
+
+.personality-card__avatar img {
+  position: absolute;
+  width: 140%;
+  height: auto;
+  left: 50%;
+  top: 50%;
+  /* Slight upward bias so the SVG's "head" lands at disc center while
+     the antennas escape above. */
+  transform: translate(-50%, -57%);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  display: block;
+}
+
+.personality-card__avatar img.personality-card__avatar--fallback {
+  opacity: 0.7;
+}
+
+.personality-card__name {
+  font-weight: 600;
+  font-size: 0.95rem;
+  line-height: 1.2;
+  color: var(--text);
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.personality-card.is-active .personality-card__name {
+  color: var(--accent);
+}
+
+/* Outlined, not filled - the wash + ring + tinted name already signal
+   "selected". */
+.personality-card__badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--bg-elev);
+  color: var(--accent);
+  display: grid;
+  place-items: center;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.personality-card__badge svg {
+  width: 12px;
+  height: 12px;
+}
+
+.personality-card--custom {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px transparent;
+  /* Dashed insets aren't a thing, so use a real border to override the shadow. */
+  border: 1px dashed var(--border-strong);
+}
+
+.personality-card--custom:hover:not(:disabled) {
+  background: var(--bg-elev);
+  border-color: var(--accent);
+}
+
+.personality-card__plus {
+  width: 110px;
+  height: 110px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 2.6rem;
+  font-weight: 300;
+  color: var(--text-soft);
+  background: var(--bg-soft);
+}
+
+.personality-card__hint {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+/* 5. Talk view - orb wrapper, caption, back button */
+
+/* flex: 1 claims the outlet's remaining height so justify-content: center
+   parks the orb in the middle regardless of viewport height. */
+.view--talk {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+}
+
+.talk__profile {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  min-height: 1em;
+}
+
+.talk__orb-wrap {
+  display: grid;
+  place-items: center;
+  margin-top: 12px;
+}
+
+.talk__caption {
+  margin: 12px 0 0;
+  color: var(--text-soft);
+  font-size: 1rem;
+  text-align: center;
+  min-height: 1.4em;
+}
+
+/* 6. Settings view */
+
+.view--settings {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.settings-section {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 22px;
+}
+
+.settings-section-title {
+  margin: 0 0 14px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(120px, 1fr);
+  gap: 12px;
+}
+
+.settings-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
+.settings-input,
+.settings-select {
+  width: 100%;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 0.95rem;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.settings-input:focus,
+.settings-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg-elev);
+}
+
+.settings-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.settings-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.settings-status {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  min-height: 1em;
+}
+
+.settings-status.is-error {
+  color: var(--danger);
+}
+
+.settings-status-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin: 0;
+}
+
+.settings-status-row {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+}
+
+.settings-status-row.is-warn {
+  background: color-mix(in srgb, var(--warn) 12%, var(--bg-soft));
+}
+
+.settings-status-row.is-ok {
+  background: color-mix(in srgb, var(--success) 10%, var(--bg-soft));
+}
+
+.settings-status-label {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.settings-status-value {
+  margin: 0;
+  font-weight: 500;
+}
+
+@media (max-width: 620px) {
+  .settings-field-row,
+  .settings-status-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 7. Modal (profile-modal) */
+
+.modal-overlay {
   position: fixed;
   inset: 0;
-  background: radial-gradient(circle at 30% 60%, rgba(255, 255, 255, 0.05), transparent 35%),
-              radial-gradient(circle at 75% 30%, rgba(69, 196, 255, 0.08), transparent 32%);
-  filter: blur(60px);
-  z-index: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.55);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  animation: modal-fade-in 0.18s ease;
+}
+
+@keyframes modal-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.modal {
+  width: min(560px, 100%);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 24px 26px 22px;
+  animation: modal-pop-in 0.22s ease;
+}
+
+@keyframes modal-pop-in {
+  from { transform: translateY(8px) scale(0.98); opacity: 0; }
+  to   { transform: translateY(0)   scale(1);    opacity: 1; }
+}
+
+.modal__title {
+  margin: 0 0 4px;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.modal__subtitle {
+  margin: 0 0 16px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.modal__form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.modal__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.modal__label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
+.modal__input,
+.modal__textarea {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.95rem;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  resize: vertical;
+}
+
+.modal__input:focus,
+.modal__textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg-elev);
+}
+
+.modal__error {
+  margin: 0;
+  min-height: 1em;
+  font-size: 0.85rem;
+  color: var(--danger);
+  visibility: hidden;
+}
+
+.modal__error.is-visible {
+  visibility: visible;
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+/* 8. Conversation orb
+ * Indicators are mounted statically (orb.js) and switched via [data-state]
+ * + the inline --glow colour; Python drives the state, not audio. */
+
+.convo-orb {
+  --glow: #34d399;
+
+  position: relative;
+  width: clamp(220px, 38vw, 320px);
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: var(--glow);
+  /* The orb is the mic toggle button (see talk.js). */
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.18s ease, filter 0.18s ease;
+}
+
+.convo-orb:active {
+  transform: scale(0.97);
+}
+
+.convo-orb:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 6px;
+}
+
+.convo-orb__glow {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at center, var(--glow) 0%, transparent 65%);
+  filter: blur(28px);
+  opacity: 0.5;
+  pointer-events: none;
+  transition: opacity 0.25s, background 0.25s, transform 1.4s ease-in-out;
+}
+
+.convo-orb__ring,
+.convo-orb__ring-outer {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition: opacity 0.4s ease, border-color 0.4s ease, transform 0.3s ease;
+}
+
+.convo-orb__ring {
+  width: 82%;
+  height: 82%;
+  border: 1.5px solid color-mix(in srgb, var(--glow) 35%, transparent);
+  opacity: 0.35;
+}
+
+.convo-orb__ring-outer {
+  width: 94%;
+  height: 94%;
+  border: 1px solid color-mix(in srgb, var(--glow) 22%, transparent);
+  opacity: 0;
+}
+
+.convo-orb__core {
+  position: relative;
+  width: 72%;
+  height: 72%;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 35% 28%,
+    color-mix(in srgb, var(--glow) 28%, transparent),
+    color-mix(in srgb, var(--glow) 10%, transparent) 55%,
+    color-mix(in srgb, var(--glow) 5%, transparent)
+  );
+  border: 2px solid color-mix(in srgb, var(--glow) 40%, transparent);
+  box-shadow:
+    0 0 32px color-mix(in srgb, var(--glow) 22%, transparent),
+    inset 0 0 28px color-mix(in srgb, var(--glow) 18%, transparent);
+  display: grid;
+  place-items: center;
+  color: var(--glow);
+  transition: background 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease, transform 0.4s ease;
+}
+
+/* Every .ind child stacks in this grid cell; opacity rules below pick
+   the visible one, so the subtree never needs rebuilding. */
+.convo-orb__indicator {
+  position: relative;
+  width: 44%;
+  height: 44%;
+  display: grid;
+  place-items: center;
+  color: var(--glow);
+}
+
+/* Without this, <span> defaults to display: inline and the SVG inside
+   sizes against an undefined-width container, rendering off-center. */
+.convo-orb__indicator > .ind {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity 0.25s ease, transform 0.25s ease;
   pointer-events: none;
 }
 
-/* Loading overlay */
-.loading {
-  position: fixed;
-  inset: 0;
-  background: rgba(5, 10, 24, 0.92);
-  backdrop-filter: blur(4px);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
+/* display: block strips the inline baseline gap that would otherwise
+   nudge the icon off-center vertically. */
+.convo-orb__indicator > .ind > svg {
+  width: 60%;
+  height: 60%;
+  display: block;
 }
-.loading .spinner {
-  width: 46px;
-  height: 46px;
-  border: 4px solid rgba(255,255,255,0.15);
-  border-top-color: var(--accent);
+
+/* Keyframes carry both scale(1) and the rotation so the browser doesn't
+   interpolate between two different transform functions. */
+.convo-orb__indicator > .ind-spinner {
+  display: block;
+  place-self: center;
+  width: 32%;
+  height: 32%;
+  border: 3px solid currentColor;
+  border-right-color: transparent;
   border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin-bottom: 12px;
-}
-.loading p { color: var(--muted); margin: 0; letter-spacing: 0.4px; }
-@keyframes spin { to { transform: rotate(360deg); } }
-
-.container {
-  position: relative;
-  max-width: 960px;
-  margin: 7vh auto;
-  padding: 0 24px 40px;
-  z-index: 1;
 }
 
-.hero {
-  margin-bottom: 24px;
-}
-.hero h1 {
-  margin: 6px 0 6px;
-  font-size: 32px;
-  letter-spacing: -0.4px;
-}
-.subtitle {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.5;
-}
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  background: rgba(94, 240, 193, 0.1);
-  color: var(--accent-2);
-  font-size: 12px;
-  letter-spacing: 0.3px;
-  border: 1px solid rgba(94, 240, 193, 0.25);
+@keyframes orb-spin {
+  from { transform: scale(1) rotate(0deg); }
+  to   { transform: scale(1) rotate(360deg); }
 }
 
-.privacy-notice {
-  margin: 0 0 18px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 181, 71, 0.35);
-  background: linear-gradient(135deg, rgba(255, 181, 71, 0.12), rgba(255, 255, 255, 0.02));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.privacy-notice p {
-  margin: 0;
-  color: inherit;
-  font-size: inherit;
-  line-height: inherit;
-}
-
-.privacy-notice p + p {
-  margin-top: 8px;
-}
-
-.privacy-notice strong {
-  color: var(--warn);
-  font-weight: 700;
-}
-
-.privacy-notice a {
-  color: #7c3aed;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.privacy-notice code {
-  padding: 2px 6px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.2);
-  color: var(--text);
-  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
-  font-size: 12px;
-}
-
-.privacy-notice details {
-  margin-top: 8px;
-}
-
-.privacy-notice summary {
-  cursor: pointer;
-  color: var(--accent);
-  font-size: 12px;
-}
-
-.privacy-notice summary:focus-visible {
-  outline: 2px solid rgba(69, 196, 255, 0.6);
-  outline-offset: 2px;
-  border-radius: 4px;
-}
-
-.privacy-notice details[open] summary {
-  margin-bottom: 6px;
-}
-
-.privacy-notice details > p {
-  font-size: 12.5px;
-  line-height: 1.5;
-}
-
-.backend-note {
-  margin: 0;
-}
-
-.connection-alert {
-  margin-top: 14px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 181, 71, 0.38);
-  background: rgba(255, 181, 71, 0.1);
-  color: var(--warn);
-}
-
-.connection-alert strong {
-  display: block;
-  margin-bottom: 4px;
-  color: inherit;
-  font-size: 14px;
-}
-
-.connection-alert p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.connection-alert.error {
-  border-color: rgba(255, 92, 112, 0.42);
-  background: rgba(255, 92, 112, 0.1);
-  color: var(--error);
-}
-
-.backend-note code,
-.backend-choice-copy code {
-  padding: 2px 6px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.2);
-  color: var(--text);
-  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
-  font-size: 12px;
-}
-
-.backend-choice-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
-  margin-top: 14px;
-}
-
-.backend-choice {
+/* Per-dot animation, staggered ~160ms, so it composes cleanly with the
+   parent's show/hide scale(.85 -> 1). */
+.convo-orb__indicator > .ind-thinking {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 14px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.03);
-  cursor: pointer;
-  transition: border 0.12s ease, background 0.12s ease, transform 0.12s ease;
-}
-
-.backend-choice:hover {
-  border-color: rgba(94, 240, 193, 0.35);
-  transform: translateY(-1px);
-}
-
-.backend-choice.is-selected {
-  border-color: rgba(94, 240, 193, 0.45);
-  background: rgba(94, 240, 193, 0.08);
-  box-shadow: inset 0 0 0 1px rgba(94, 240, 193, 0.12);
-}
-
-.backend-choice input[type="radio"] {
-  margin: 4px 0 0;
-  accent-color: var(--accent);
-}
-
-.backend-choice-body {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.backend-choice-title {
-  color: var(--text);
-  font-weight: 600;
-  letter-spacing: -0.1px;
-}
-
-.backend-choice-copy {
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.panel {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 18px 18px 16px;
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(10px);
-  margin-top: 16px;
-}
-.panel-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-.panel-heading h2 {
-  margin: 2px 0;
-  font-size: 22px;
-}
-.eyebrow {
-  margin: 0;
-  text-transform: uppercase;
-  font-size: 11px;
-  letter-spacing: 0.5px;
-  color: var(--muted);
-}
-.muted { color: var(--muted); }
-.chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  color: var(--text);
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid var(--border);
-}
-.chip-ok {
-  background: rgba(76, 224, 179, 0.15);
-  color: var(--ok);
-  border-color: rgba(76, 224, 179, 0.4);
-}
-
-.hidden { display: none !important; }
-label {
-  display: block;
-  margin: 8px 0 6px;
-  font-size: 13px;
-  color: var(--muted);
-  letter-spacing: 0.2px;
-}
-input[type="password"],
-input[type="text"],
-select,
-textarea {
-  width: 100%;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text);
-  transition: border 0.15s ease, box-shadow 0.15s ease;
-}
-input:focus,
-select:focus,
-textarea:focus {
-  border-color: rgba(94, 240, 193, 0.7);
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(94, 240, 193, 0.15);
-}
-input.error {
-  border-color: var(--error);
-  box-shadow: 0 0 0 3px rgba(255, 92, 112, 0.15);
-}
-select option {
-  background: #0b152a;
-  color: var(--text);
-}
-textarea { resize: vertical; }
-
-button {
-  display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin-top: 12px;
-  padding: 11px 16px;
-  border: none;
-  border-radius: 10px;
-  background: linear-gradient(120deg, var(--accent), var(--accent-2));
-  color: #031022;
-  cursor: pointer;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  box-shadow: 0 14px 40px rgba(69, 196, 255, 0.25);
-  transition: transform 0.12s ease, filter 0.12s ease, box-shadow 0.12s ease;
-}
-button:hover { filter: brightness(1.06); transform: translateY(-1px); }
-button:active { transform: translateY(0); }
-button.ghost {
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text);
-  box-shadow: none;
-  border: 1px solid var(--border);
-}
-button.ghost:hover { border-color: rgba(94, 240, 193, 0.4); }
-.actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.status {
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-}
-.status.ok { color: var(--ok); }
-.status.warn { color: var(--warn); }
-.status.error { color: var(--error); }
-.hf-help {
-  margin: 8px 0 0;
-  font-size: 13px;
-  line-height: 1.5;
-}
-.hf-help a {
-  color: var(--accent);
-  text-underline-offset: 2px;
-}
-.hf-config-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 10px;
-}
-.hf-local-note {
-  grid-column: 1 / -1;
-  margin: 0;
-}
-.hf-field {
-  min-width: 0;
-}
-
-/* Personality layout */
-.row {
-  display: grid;
-  grid-template-columns: 160px 1fr;
-  gap: 12px 18px;
-  align-items: center;
-  margin-top: 12px;
-}
-.row > * { min-width: 0; }
-.row > label { margin: 0; }
-.row > button { margin: 0; }
-
-/* First row: controls inline */
-#personality-panel .row-top {
-  grid-template-columns: 160px 1fr auto auto auto;
-}
-#personality-panel .row-voice {
-  grid-template-columns: 160px 1fr auto;
-}
-
-#tools-available {
-  max-height: 240px;
-  overflow: auto;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
-}
-
-/* Checkbox grid for tools */
-.checkbox-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 10px 14px;
-}
-.startup-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.row-save .actions {
-  justify-content: flex-start;
-}
-.section {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 12px 14px;
-  margin-top: 14px;
-  background: rgba(255, 255, 255, 0.02);
-}
-.section-heading {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  justify-content: space-between;
-}
-.section-heading h3 {
-  margin: 6px 0;
-  font-size: 16px;
-  letter-spacing: -0.1px;
-}
-.section-heading .small {
-  margin: 0;
-  font-size: 12px;
-}
-.checkbox-grid .chk {
-  display: flex;
-  align-items: center;
   gap: 8px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid transparent;
-  transition: border 0.12s ease, background 0.12s ease;
 }
-.checkbox-grid .chk:hover { border-color: rgba(94, 240, 193, 0.3); background: rgba(255, 255, 255, 0.04); }
-.checkbox-grid input[type="checkbox"] {
-  width: 16px; height: 16px;
-  accent-color: var(--accent);
+.ind-thinking .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.3;
 }
-.checkbox-grid label {
-  margin: 0; font-size: 13px; color: var(--text);
-}
+.ind-thinking .dot:nth-child(1) { animation: orb-thinking-dot 1.25s ease-in-out infinite; animation-delay: 0s; }
+.ind-thinking .dot:nth-child(2) { animation: orb-thinking-dot 1.25s ease-in-out infinite; animation-delay: 0.16s; }
+.ind-thinking .dot:nth-child(3) { animation: orb-thinking-dot 1.25s ease-in-out infinite; animation-delay: 0.32s; }
 
-@media (max-width: 900px) {
-  #personality-panel .row-top,
-  #personality-panel .row-voice {
-    grid-template-columns: 1fr;
-  }
-
-  #personality-panel .row-top button,
-  #personality-panel .row-voice button {
-    width: 100%;
-    justify-content: center;
-  }
-
-  .section-heading {
-    flex-direction: column;
-    align-items: flex-start;
-  }
+@keyframes orb-thinking-dot {
+  0%, 60%, 100% { transform: scale(0.7); opacity: 0.3; }
+  30%           { transform: scale(1.15); opacity: 1; }
 }
 
-@media (max-width: 760px) {
-  .hero h1 { font-size: 26px; }
-  .privacy-notice { padding: 10px 12px; }
-  .backend-choice-grid { grid-template-columns: 1fr; }
-  .hf-config-grid { grid-template-columns: 1fr; }
-  .row { grid-template-columns: 1fr; }
-  button { width: 100%; justify-content: center; }
-  .actions { flex-direction: column; align-items: flex-start; }
+/* Height capped at 42% so bars animating up to 100% of this container
+   never overflow into the core's inner edge. */
+.convo-orb__indicator > .ind-bars {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 42%;
+}
+.ind-bars .bar {
+  width: 4px;
+  min-height: 4px;
+  height: 35%;
+  border-radius: 3px;
+  background: currentColor;
+  opacity: 0.7;
+}
+.convo-orb[data-state="listening"] .ind-bars .bar {
+  animation: orb-bar 0.9s ease-in-out infinite;
+}
+.ind-bars .bar:nth-child(1) { animation-delay: -0.2s; }
+.ind-bars .bar:nth-child(2) { animation-delay: -0.05s; }
+.ind-bars .bar:nth-child(3) { animation-delay: -0.35s; }
+.ind-bars .bar:nth-child(4) { animation-delay: -0.1s; }
+.ind-bars .bar:nth-child(5) { animation-delay: -0.25s; }
+
+@keyframes orb-bar {
+  0%, 100% { height: 35%; opacity: 0.7; }
+  50%      { height: 100%; opacity: 1; }
+}
+
+.ind-voice .wave {
+  transform-origin: 50% 50%;
+  opacity: 0;
+}
+.convo-orb[data-state="speaking"] .ind-voice .wave {
+  animation: orb-voice-wave 1.35s ease-out infinite;
+}
+.ind-voice .wave-1 { animation-delay: 0s; }
+.ind-voice .wave-2 { animation-delay: 0.35s; }
+
+@keyframes orb-voice-wave {
+  0%   { opacity: 0; transform: scale(0.7); }
+  30%  { opacity: 1; transform: scale(1); }
+  70%  { opacity: 0.2; transform: scale(1.12); }
+  100% { opacity: 0; transform: scale(0.7); }
+}
+
+/* Per-state visibility & ambient animations */
+
+/* .ind-mic (idle) is never set to opacity:1 explicitly, so any
+   [data-state] rule below wins via cascade. */
+.convo-orb[data-state="idle"] .ind-mic,
+.convo-orb[data-state="muted"] .ind-mic-off,
+.convo-orb[data-state="connecting"] .ind-spinner,
+.convo-orb[data-state="listening"] .ind-bars,
+.convo-orb[data-state="thinking"] .ind-thinking,
+.convo-orb[data-state="speaking"] .ind-voice,
+.convo-orb[data-state="error"] .ind-error {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* !important: without it, the show/hide scale(1) rule above would fight
+   the spinner's own rotation keyframes. */
+.convo-orb[data-state="connecting"] .ind-spinner {
+  opacity: 1 !important;
+  animation: orb-spin 0.9s linear infinite;
+}
+
+/* Idle: gentle breath on the inner ring; off in connecting/error. */
+.convo-orb[data-state="idle"] .convo-orb__ring {
+  animation: orb-breathe 2.4s ease-in-out infinite;
+}
+
+/* Listening: brighter rings, both visible. */
+.convo-orb[data-state="listening"] .convo-orb__ring {
+  opacity: 0.85;
+  animation: orb-breathe 2s ease-in-out infinite;
+}
+.convo-orb[data-state="listening"] .convo-orb__ring-outer {
+  opacity: 0.45;
+}
+
+/* Thinking: dimmer than speaking so the 3-dot indicator stays the focus. */
+.convo-orb[data-state="thinking"] .convo-orb__core {
+  animation: orb-thinking-throb 1.4s ease-in-out infinite;
+}
+
+/* Speaking: outer ring fades in to convey audio radiating out. */
+.convo-orb[data-state="speaking"] .convo-orb__core {
+  animation: orb-speak 1.6s ease-in-out infinite;
+}
+.convo-orb[data-state="speaking"] .convo-orb__ring-outer {
+  opacity: 0.4;
+  animation: orb-ring-out 1.8s ease-out infinite;
+}
+
+/* Muted: perfectly still and dimmed so "paused" reads at a glance. */
+.convo-orb[data-state="muted"] .convo-orb__glow {
+  opacity: 0.25;
+}
+
+/* Error: no animation, just a stronger edge to read as a stop signal. */
+.convo-orb[data-state="error"] .convo-orb__core {
+  border-color: var(--glow);
+}
+
+/* Keyframes */
+
+@keyframes orb-breathe {
+  0%, 100% { transform: translate(-50%, -50%) scale(1);    opacity: 0.35; }
+  50%      { transform: translate(-50%, -50%) scale(1.06); opacity: 0.7; }
+}
+
+@keyframes orb-ring-out {
+  0%   { transform: translate(-50%, -50%) scale(1);    opacity: 0.4; }
+  100% { transform: translate(-50%, -50%) scale(1.18); opacity: 0; }
+}
+
+@keyframes orb-thinking-throb {
+  0%, 100% { transform: scale(1);    box-shadow: 0 0 32px color-mix(in srgb, var(--glow) 18%, transparent),
+                                                inset 0 0 28px color-mix(in srgb, var(--glow) 14%, transparent); }
+  50%      { transform: scale(0.97); box-shadow: 0 0 26px color-mix(in srgb, var(--glow) 12%, transparent),
+                                                inset 0 0 22px color-mix(in srgb, var(--glow) 8%, transparent); }
+}
+
+@keyframes orb-speak {
+  0%, 100% { transform: scale(1);    box-shadow: 0 0 32px color-mix(in srgb, var(--glow) 22%, transparent),
+                                                inset 0 0 28px color-mix(in srgb, var(--glow) 18%, transparent); }
+  50%      { transform: scale(1.04); box-shadow: 0 0 44px color-mix(in srgb, var(--glow) 35%, transparent),
+                                                inset 0 0 36px color-mix(in srgb, var(--glow) 30%, transparent); }
 }

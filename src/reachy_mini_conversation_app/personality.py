@@ -1,21 +1,21 @@
-"""Headless personality management (console-based).
+"""Personality (profile) data layer.
 
-Provides an interactive CLI to browse, preview, apply, create and edit
-"personalities" (profiles) when running without Gradio.
-
-This module is intentionally not shared with the Gradio implementation to
-avoid coupling and keep responsibilities clear for headless mode.
+Provides functions to list, read, and write personality profiles stored
+on disk. No HTTP or framework dependencies — importable anywhere.
 """
 
 from __future__ import annotations
 from typing import List
 from pathlib import Path
 
-from .config import DEFAULT_PROFILES_DIRECTORY, get_default_voice_for_backend
+from .config import USER_PERSONALITIES_DIRNAME, config, get_default_voice_for_backend
 from .tools.tool_constants import SystemTool
 
 
 DEFAULT_OPTION = "(built-in default)"
+
+# Dev-only profiles, hidden from the UI, but still loadable via REACHY_MINI_CUSTOM_PROFILE
+UNLISTED_PROFILES = {"tedai"}
 
 
 def _prompts_dir() -> Path:
@@ -38,19 +38,19 @@ def _sanitize_name(name: str) -> str:
 def list_personalities() -> List[str]:
     """List available personality profile names."""
     names: List[str] = []
-    root = DEFAULT_PROFILES_DIRECTORY
     try:
-        if root.exists():
-            for p in sorted(root.iterdir()):
-                if p.name == "user_personalities":
+        builtin_root = config.PROFILES_DIRECTORY
+        if builtin_root.exists():
+            for p in sorted(builtin_root.iterdir()):
+                if p.name == USER_PERSONALITIES_DIRNAME or p.name in UNLISTED_PROFILES:
                     continue
                 if p.is_dir() and (p / "instructions.txt").exists():
                     names.append(p.name)
-        udir = root / "user_personalities"
+        udir = config.user_personalities_root()
         if udir.exists():
             for p in sorted(udir.iterdir()):
                 if p.is_dir() and (p / "instructions.txt").exists():
-                    names.append(f"user_personalities/{p.name}")
+                    names.append(f"{USER_PERSONALITIES_DIRNAME}/{p.name}")
     except Exception:
         pass
     return names
@@ -58,7 +58,7 @@ def list_personalities() -> List[str]:
 
 def resolve_profile_dir(selection: str) -> Path:
     """Resolve the directory path for the given profile selection."""
-    return DEFAULT_PROFILES_DIRECTORY / selection
+    return config.resolve_profile_dir(selection)
 
 
 def read_instructions_for(name: str) -> str:
@@ -105,9 +105,9 @@ def available_tools_for(selected: str) -> List[str]:
     return sorted(set(shared + local))
 
 
-def _write_profile(name_s: str, instructions: str, tools_text: str, voice: str | None = None) -> None:
+def _write_profile(sanitized_name: str, instructions: str, tools_text: str, voice: str | None = None) -> None:
     default_voice = get_default_voice_for_backend()
-    target_dir = DEFAULT_PROFILES_DIRECTORY / "user_personalities" / name_s
+    target_dir = config.user_personalities_root() / sanitized_name
     target_dir.mkdir(parents=True, exist_ok=True)
     (target_dir / "instructions.txt").write_text(instructions.strip() + "\n", encoding="utf-8")
     (target_dir / "tools.txt").write_text((tools_text or "").strip() + "\n", encoding="utf-8")

@@ -38,7 +38,9 @@ def parse_args() -> tuple[argparse.Namespace, list]:  # type: ignore
         action="store_true",
         help="Use local vision model instead of the selected realtime backend vision",
     )
-    parser.add_argument("--gradio", default=False, action="store_true", help="Open gradio interface")
+    parser.add_argument(
+        "--ui", default=False, action="store_true", help="Serve the modern web UI at http://localhost:7860"
+    )
     parser.add_argument("--debug", default=False, action="store_true", help="Enable debug logging")
     parser.add_argument(
         "--robot-name",
