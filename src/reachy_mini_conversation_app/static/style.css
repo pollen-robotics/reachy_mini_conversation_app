@@ -438,6 +438,53 @@ button {
   gap: 18px;
 }
 
+/* Slot wraps a card button + its (optional) edit button so the edit control
+   is a sibling, never a <button> nested inside the card button. */
+.personality-card-slot {
+  position: relative;
+  display: flex;
+}
+
+.personality-card-slot .personality-card {
+  flex: 1;
+  width: 100%;
+}
+
+.personality-card__edit {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--bg-soft);
+  color: var(--text-muted);
+  box-shadow: inset 0 0 0 1px var(--border);
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity var(--transition-fast), background var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.personality-card-slot:hover .personality-card__edit,
+.personality-card__edit:focus-visible {
+  opacity: 1;
+}
+
+.personality-card__edit:hover {
+  background: var(--bg-elev-hover);
+  color: var(--text);
+}
+
+.personality-card__edit svg {
+  width: 15px;
+  height: 15px;
+}
+
 .personality-card {
   position: relative;
   display: flex;
@@ -839,6 +886,11 @@ button {
   outline: none;
   border-color: var(--accent);
   background: var(--bg-elev);
+}
+
+.modal__input.is-readonly {
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 
 .modal__error {
