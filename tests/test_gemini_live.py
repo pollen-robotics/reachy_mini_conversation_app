@@ -320,6 +320,24 @@ async def test_apply_personality_preserves_manual_voice_override(monkeypatch) ->
     restart.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_apply_personality_forces_tool_registry_reload(monkeypatch) -> None:
+    """Applying a profile must rebuild the tool roster even when the profile name is unchanged."""
+    monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
+    monkeypatch.setattr("reachy_mini_conversation_app.config.set_custom_profile", lambda _profile: None)
+    reload = MagicMock()
+    monkeypatch.setattr(gemini_mod, "initialize_tools", reload)
+
+    handler = GeminiLiveHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.session = object()
+    monkeypatch.setattr(handler, "_restart_session", AsyncMock())
+
+    await handler.apply_personality("example")
+
+    reload.assert_called_once_with(force=True)
+
+
 def test_handler_uses_startup_voice_at_startup() -> None:
     """Gemini handler startup should restore a persisted startup voice."""
     handler = GeminiLiveHandler(

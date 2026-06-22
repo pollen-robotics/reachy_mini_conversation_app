@@ -484,6 +484,24 @@ async def test_apply_personality_preserves_manual_voice_override(monkeypatch: An
     assert session["audio"]["output"]["voice"] == "marin"
 
 
+@pytest.mark.asyncio
+async def test_apply_personality_forces_tool_registry_reload(monkeypatch: Any) -> None:
+    """Applying a profile must rebuild the tool roster even when the profile name is unchanged."""
+    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=None: "cedar")
+    monkeypatch.setattr("reachy_mini_conversation_app.config.set_custom_profile", lambda _profile: None)
+    reload = MagicMock()
+    monkeypatch.setattr(ct_mod, "initialize_tools", reload)
+
+    handler = OpenaiRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.connection = SimpleNamespace(session=SimpleNamespace(update=AsyncMock()))
+    monkeypatch.setattr(handler, "_restart_session", AsyncMock())
+
+    await handler.apply_personality("example")
+
+    reload.assert_called_once_with(force=True)
+
+
 def test_handler_uses_startup_voice_at_startup(monkeypatch: Any) -> None:
     """OpenAI handler startup should restore a persisted startup voice."""
     monkeypatch.setattr(config, "BACKEND_PROVIDER", "openai")

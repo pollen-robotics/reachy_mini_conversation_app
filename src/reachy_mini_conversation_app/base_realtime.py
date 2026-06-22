@@ -344,6 +344,9 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 logger.error("Failed to resolve personality content: %s", e)
                 return f"Failed to apply personality: {e}"
 
+            # Rebuild the tool registry
+            core_tools.initialize_tools(force=True)
+
             # Attempt a live update first, then force a full restart to ensure it sticks
             if self.connection is not None:
                 try:

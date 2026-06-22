@@ -36,6 +36,7 @@ from reachy_mini_conversation_app.prompts import get_session_voice, get_session_
 from reachy_mini_conversation_app.idle_policy import start_idle_tool_call
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
+    initialize_tools,
     get_active_tool_specs,
 )
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
@@ -251,6 +252,9 @@ class GeminiLiveHandler(ConversationHandler):
             except BaseException as e:
                 logger.error("Failed to resolve personality content: %s", e)
                 return f"Failed to apply personality: {e}"
+
+            # Rebuild the tool registry
+            initialize_tools(force=True)
 
             # Force a restart to apply new config
             if self.session is not None:
