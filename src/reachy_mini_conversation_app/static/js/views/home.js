@@ -88,18 +88,31 @@ export async function mountHomeView({ outlet, signal, navigate }) {
   }
 
   async function handleCustomClick() {
-    const created = await openCustomProfileModal({ signal });
+    // Load the available tool palette so the modal can offer a checklist.
+    let defaults;
+    try {
+      defaults = await loadPersonality(BUILT_IN_DEFAULT_OPTION);
+    } catch (error) {
+      if (signal.aborted) return;
+      status.textContent = `Could not load tools: ${describeError(error)}`;
+      status.classList.add("is-error");
+      return;
+    }
+    if (signal.aborted) return;
+
+    const created = await openCustomProfileModal({
+      availableTools: defaults?.available_tools || [],
+      signal,
+    });
     if (!created || signal.aborted) return;
     status.classList.remove("is-warning", "is-error");
     status.textContent = `Saving "${created.name}"…`;
     let newName;
     try {
-      // Custom profiles start with the built-in default profile's tool set.
-      const defaults = await loadPersonality(BUILT_IN_DEFAULT_OPTION);
       const saveResult = await savePersonality({
         name: created.name,
         instructions: created.instructions,
-        tools_text: defaults?.tools_text || "",
+        tools_text: created.tools.join("\n"),
         voice: "", // falls back to backend default; user can change in Settings
       });
       if (signal.aborted) return;

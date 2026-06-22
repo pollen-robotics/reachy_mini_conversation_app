@@ -1,17 +1,20 @@
-/** Modal to collect name + instructions for a new custom personality. Returns { name, instructions } or null. */
+/** Modal to collect name + instructions + tools for a new custom personality. Returns { name, instructions, tools } or null. */
 
 import { h } from "../ui.js";
 
 const NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
 /**
- * @param {{ signal?: AbortSignal }} [options]
- * @returns {Promise<{ name: string, instructions: string }|null>}
+ * @param {{ availableTools?: string[], signal?: AbortSignal }} [options]
+ * @returns {Promise<{ name: string, instructions: string, tools: string[] }|null>}
  */
-export function openCustomProfileModal({ signal } = {}) {
+export function openCustomProfileModal({ availableTools = [], signal } = {}) {
+  // A new personality starts from the available tool palette, all enabled; the user unchecks what it shouldn't have.
+  const toolChoices = [...availableTools].sort();
+
   return new Promise((resolve) => {
     const overlay = buildOverlay();
-    const dialog = buildDialog();
+    const dialog = buildDialog(toolChoices);
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
 
@@ -85,7 +88,8 @@ export function openCustomProfileModal({ signal } = {}) {
       }
       if (!instructions) return showError(errorBox, "Please write some instructions.");
 
-      close({ name, instructions });
+      const tools = Array.from(dialog.querySelectorAll('input[name="tool"]:checked')).map((el) => el.value);
+      close({ name, instructions, tools });
     });
   });
 }
@@ -97,7 +101,7 @@ function buildOverlay() {
   });
 }
 
-function buildDialog() {
+function buildDialog(toolChoices) {
   return h(
     "div",
     {
@@ -113,7 +117,7 @@ function buildDialog() {
       h(
         "p",
         { class: "modal__subtitle" },
-        "Define how Reachy should behave. The full standard tool set (dance, emotions, head tracking, ...) will be enabled by default."
+        "Define how Reachy should behave and which tools it can use."
       )
     ),
     h(
@@ -147,12 +151,34 @@ function buildDialog() {
           class: "modal__textarea",
         })
       ),
+      buildToolsField(toolChoices),
       h("p", { class: "modal__error", role: "alert", "aria-live": "polite" }),
       h(
         "div",
         { class: "modal__actions" },
         h("button", { type: "button", class: "btn btn--ghost", "data-action": "cancel" }, "Cancel"),
         h("button", { type: "submit", class: "btn btn--primary" }, "Create & start")
+      )
+    )
+  );
+}
+
+/** Render the tool checklist; every available tool is pre-checked. */
+function buildToolsField(toolChoices) {
+  return h(
+    "fieldset",
+    { class: "modal__field modal__tools" },
+    h("legend", { class: "modal__label" }, "Tools"),
+    h(
+      "div",
+      { class: "modal__tools-grid" },
+      ...toolChoices.map((tool) =>
+        h(
+          "label",
+          { class: "modal__tool" },
+          h("input", { type: "checkbox", name: "tool", value: tool, checked: "checked" }),
+          h("span", null, tool)
+        )
       )
     )
   );
