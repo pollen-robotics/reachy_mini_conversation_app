@@ -730,6 +730,42 @@ def test_personality_routes_persist_startup_with_voice_override() -> None:
         loop.close()
 
 
+def test_personality_routes_apply_same_profile_does_not_restart(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Re-applying the active personality should be a no-op for the realtime handler."""
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "sorry_bro")
+    app = FastAPI()
+    handler = MagicMock()
+    handler.apply_personality = AsyncMock(return_value="should not be called")
+    handler.get_current_voice = MagicMock(return_value="shimmer")
+    mount_personality_routes(app, handler, lambda: None)
+
+    response = TestClient(app).post("/personalities/apply", json={"name": "sorry_bro"})
+
+    assert response.status_code == 200
+    assert response.json()["changed"] is False
+    assert response.json()["status"] == "Personality unchanged."
+    handler.apply_personality.assert_not_awaited()
+    handler.get_current_voice.assert_not_called()
+
+
+def test_personality_routes_persist_same_profile_without_restart(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Saving the active personality as startup should not restart the conversation."""
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "sorry_bro")
+    app = FastAPI()
+    handler = MagicMock()
+    handler.apply_personality = AsyncMock(return_value="should not be called")
+    handler.get_current_voice = MagicMock(return_value="shimmer")
+    persist_personality = MagicMock()
+    mount_personality_routes(app, handler, lambda: None, persist_personality=persist_personality)
+
+    response = TestClient(app).post("/personalities/apply", json={"name": "sorry_bro", "persist": True})
+
+    assert response.status_code == 200
+    assert response.json()["changed"] is False
+    handler.apply_personality.assert_not_awaited()
+    persist_personality.assert_called_once_with("sorry_bro", "shimmer")
+
+
 def test_headless_personality_routes_can_use_stream_callbacks() -> None:
     """Headless personality routes can delegate apply/restart ownership to LocalStream."""
     app = FastAPI()
