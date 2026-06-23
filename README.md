@@ -414,6 +414,7 @@ reachy-mini-conversation-app --robot-name <name>
 
 We welcome bug fixes, features, profiles, and documentation improvements. Please review our
 [contribution guide](CONTRIBUTING.md) for branch conventions, quality checks, and PR workflow.
+Working with an AI coding assistant? Point it at [`AGENTS.md`](AGENTS.md) — it codifies our engineering standards for agents.
 
 Quick start:
 - Fork and clone the repo
