@@ -81,6 +81,12 @@ export async function mountHomeView({ outlet, signal, navigate }) {
   }
 
   function handleSelection(name) {
+    if (name === current) {
+      setPersonality(name);
+      setPendingApply(null);
+      navigate(ROUTES.TALK);
+      return;
+    }
     // Optimistic header update so the badge already reads the chosen
     // personality while the apply request is still in flight.
     setPersonality(name);
