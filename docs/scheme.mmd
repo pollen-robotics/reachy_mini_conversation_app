@@ -7,7 +7,7 @@ config:
 flowchart TB
     User(["<span style='font-size:16px;font-weight:bold;'>User</span><br><span style='font-size:13px;color:#01579b;'>Person interacting with system</span>"]) 
       -- audio stream --> 
-    UI@{ label: "<span style='font-size:16px;font-weight:bold;'>UI Layer</span><br><span style='font-size:13px;color:#0277bd;'>Gradio/Console</span>" }
+    UI@{ label: "<span style='font-size:16px;font-weight:bold;'>UI Layer</span><br><span style='font-size:13px;color:#0277bd;'>Web UI / Console</span>" }
 
     UI -- audio stream --> 
     Backend@{ label: "<span style='font-size:16px;font-weight:bold;'>Realtime Backend</span><br><span style='font-size:12px; color:#7b1fa2;'>Audio + Tool Calls + Vision</span>" }

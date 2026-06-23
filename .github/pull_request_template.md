@@ -20,9 +20,8 @@
 <details>
 <summary><strong>UI / run modes</strong> — expand if your PR touches these</summary>
 
-- [ ] Headless mode (default)
-- [ ] Gradio UI (`--gradio`)
-- [ ] Simulation (`--gradio` required)
+- [ ] Console mode (default)
+- [ ] Web UI (`--ui`)
 </details>
 
 <details>
@@ -32,7 +31,6 @@
 - [ ] Head tracker (`--head-tracker {yolo,mediapipe}`)
 - [ ] Camera pipeline (with/without `--no-camera`)
 - [ ] Movement manager (dances, emotions, head motion)
-- [ ] Head wobble
 - [ ] Profiles or custom tools
 </details>
 
