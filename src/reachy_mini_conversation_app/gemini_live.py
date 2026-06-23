@@ -435,13 +435,14 @@ class GeminiLiveHandler(ConversationHandler):
         if self._startup_greeting_sent or not self.session:
             return
 
-        greeting_prompt = get_session_greeting_prompt(self.instance_path).strip()
+        greeting_prompt = get_session_greeting_prompt().strip()
         if not greeting_prompt:
             self._startup_greeting_sent = True
             return
 
         send_client_content = getattr(self.session, "send_client_content", None)
         if not callable(send_client_content):
+            self._startup_greeting_sent = True
             logger.warning("Gemini session does not support send_client_content; startup greeting skipped")
             return
 

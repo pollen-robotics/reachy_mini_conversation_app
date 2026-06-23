@@ -193,7 +193,7 @@ function buildDialog({ isEdit, initial, toolChoices, isToolChecked }) {
             placeholder: "Start the conversation with a short greeting in character.",
             class: "modal__textarea",
           },
-          initial.greeting || "Start the conversation with one short greeting in character. Vary the wording each time."
+          initial.greeting || ""
         )
       ),
       buildToolsField(toolChoices, isToolChecked),

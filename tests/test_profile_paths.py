@@ -118,6 +118,35 @@ def test_session_greeting_prompt_loads_from_selected_profile(
     assert prompts_mod.get_session_greeting_prompt() == "Greet me like a tiny stage host."
 
 
+def test_session_greeting_prompt_uses_builtin_default_without_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The no-profile greeting should come from the built-in constant only."""
+    default_dir = tmp_path / "default"
+    default_dir.mkdir()
+    (default_dir / "greeting.txt").write_text("Do not use this default file.\n", encoding="utf-8")
+
+    monkeypatch.setattr(config, "PROFILES_DIRECTORY", tmp_path)
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
+
+    assert prompts_mod.get_session_greeting_prompt() == prompts_mod.DEFAULT_GREETING_PROMPT
+
+
+def test_read_greeting_for_missing_file_returns_empty_for_ui(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The profile editor should show only explicitly saved greeting text."""
+    profile_dir = tmp_path / "friendly"
+    profile_dir.mkdir()
+    (profile_dir / "instructions.txt").write_text("test instructions\n", encoding="utf-8")
+
+    monkeypatch.setattr(config, "PROFILES_DIRECTORY", tmp_path)
+
+    assert read_greeting_for("friendly") == ""
+
+
 def test_headless_profile_write_can_store_greeting(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -135,6 +164,19 @@ def test_headless_profile_write_can_store_greeting(
     greeting_file = tmp_path / "user_personalities" / "with_greeting" / "greeting.txt"
     assert greeting_file.read_text(encoding="utf-8") == "Open with a quick astronomy joke.\n"
     assert read_greeting_for("user_personalities/with_greeting") == "Open with a quick astronomy joke."
+
+
+def test_headless_profile_write_skips_empty_greeting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty custom greetings should fall back without creating greeting.txt."""
+    monkeypatch.setattr(config, "INSTANCE_PATH", tmp_path)
+
+    headless_mod._write_profile("without_greeting", "test instructions", "", greeting="")
+
+    greeting_file = tmp_path / "user_personalities" / "without_greeting" / "greeting.txt"
+    assert not greeting_file.exists()
 
 
 def test_headless_profile_write_defaults_voice_at_call_time(

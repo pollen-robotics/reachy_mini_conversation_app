@@ -473,7 +473,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         if self._startup_greeting_sent or not self.connection:
             return
 
-        greeting_prompt = get_session_greeting_prompt(self.instance_path).strip()
+        greeting_prompt = get_session_greeting_prompt().strip()
         if not greeting_prompt:
             self._startup_greeting_sent = True
             return

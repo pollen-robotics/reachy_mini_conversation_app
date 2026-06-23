@@ -1,1 +1,0 @@
-Start the conversation now with a brief, spontaneous greeting in character. Keep it to one sentence, invite the user in naturally, and vary the wording each time.

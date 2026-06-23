@@ -9,7 +9,6 @@ from typing import List
 from pathlib import Path
 
 from .config import USER_PERSONALITIES_DIRNAME, config, get_default_voice_for_backend
-from .prompts import DEFAULT_GREETING_PROMPT
 from .tools.tool_constants import SystemTool
 
 
@@ -93,9 +92,9 @@ def read_greeting_for(name: str) -> str:
             greeting = target.read_text(encoding="utf-8").strip()
             if greeting:
                 return greeting
-        return DEFAULT_GREETING_PROMPT
+        return ""
     except Exception:
-        return DEFAULT_GREETING_PROMPT
+        return ""
 
 
 def available_tools_for(selected: str) -> List[str]:
@@ -134,4 +133,9 @@ def _write_profile(
     (target_dir / "tools.txt").write_text((tools_text or "").strip() + "\n", encoding="utf-8")
     (target_dir / "voice.txt").write_text((voice or default_voice).strip() + "\n", encoding="utf-8")
     if greeting is not None:
-        (target_dir / "greeting.txt").write_text(greeting.strip() + "\n", encoding="utf-8")
+        greeting_file = target_dir / "greeting.txt"
+        greeting_text = greeting.strip()
+        if greeting_text:
+            greeting_file.write_text(greeting_text + "\n", encoding="utf-8")
+        elif greeting_file.exists():
+            greeting_file.unlink()

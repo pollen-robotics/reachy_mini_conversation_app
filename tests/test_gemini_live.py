@@ -3,6 +3,7 @@
 import time
 import base64
 import asyncio
+import logging
 from types import SimpleNamespace
 from typing import Any, Callable, AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, call
@@ -193,9 +194,7 @@ async def test_gemini_live_session_queues_startup_greeting(monkeypatch: pytest.M
     monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
     monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
-    monkeypatch.setattr(
-        gemini_mod, "get_session_greeting_prompt", lambda _instance_path=None: "Greet me like a tiny stage host."
-    )
+    monkeypatch.setattr(gemini_mod, "get_session_greeting_prompt", lambda: "Greet me like a tiny stage host.")
 
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
     handler = GeminiLiveHandler(deps)
@@ -215,6 +214,26 @@ async def test_gemini_live_session_queues_startup_greeting(monkeypatch: pytest.M
     assert sent["turns"].role == "user"
     assert sent["turns"].parts[0].text == "Greet me like a tiny stage host."
     assert handler._startup_greeting_sent is True
+
+
+@pytest.mark.asyncio
+async def test_gemini_startup_greeting_missing_client_content_warns_once(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: Any,
+) -> None:
+    """Gemini sessions without text-turn support should not warn on every retry."""
+    monkeypatch.setattr(gemini_mod, "get_session_greeting_prompt", lambda: "Greet the user.")
+
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = GeminiLiveHandler(deps)
+    handler.session = SimpleNamespace()
+
+    with caplog.at_level(logging.WARNING):
+        await handler._send_startup_greeting_prompt()
+        await handler._send_startup_greeting_prompt()
+
+    assert handler._startup_greeting_sent is True
+    assert caplog.text.count("Gemini session does not support send_client_content") == 1
 
 
 @pytest.mark.asyncio

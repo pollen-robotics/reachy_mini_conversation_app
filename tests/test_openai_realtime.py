@@ -217,9 +217,7 @@ async def test_run_realtime_session_queues_startup_greeting(monkeypatch: Any) ->
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
     monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
-    monkeypatch.setattr(
-        base_rt_mod, "get_session_greeting_prompt", lambda _instance_path=None: "Greet the user as a comet captain."
-    )
+    monkeypatch.setattr(base_rt_mod, "get_session_greeting_prompt", lambda: "Greet the user as a comet captain.")
 
     created_items: list[dict[str, Any]] = []
 

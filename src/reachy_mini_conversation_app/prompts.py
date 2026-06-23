@@ -122,10 +122,12 @@ def get_session_voice(default: str | None = None) -> str:
     return fallback
 
 
-def get_session_greeting_prompt(instance_path: str | Path | None = None) -> str:
+def get_session_greeting_prompt() -> str:
     """Resolve the startup greeting prompt for the selected profile."""
-    _ = instance_path
-    profile = config.REACHY_MINI_CUSTOM_PROFILE or "default"
+    profile = config.REACHY_MINI_CUSTOM_PROFILE
+    if not profile:
+        return DEFAULT_GREETING_PROMPT
+
     try:
         greeting_file = config.resolve_profile_dir(profile) / GREETING_FILENAME
         if greeting_file.exists():

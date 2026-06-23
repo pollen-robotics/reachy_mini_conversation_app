@@ -122,7 +122,7 @@ export async function mountHomeView({ outlet, signal, navigate }) {
       const saveResult = await savePersonality({
         name: created.name,
         instructions: created.instructions,
-        greeting: created.greeting || defaults?.greeting || "",
+        greeting: created.greeting || null,
         tools_text: created.tools.join("\n"),
         voice: "", // falls back to backend default; user can change in Settings
       });
