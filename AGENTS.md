@@ -17,7 +17,6 @@ This is a small project maintained by a small team. Low-quality, auto-generated,
 4. **No dead code, no LLM verbosity** in code, comments, or PR text.
 5. **Errors are logged, never swallowed.** Use `logger`, not `print`.
 6. **Run the full gate before review.** Don't waste a reviewer's time, and never open a PR with a red pipeline.
-7. **The human owns git** and opens the PR. Can't meet this bar? **Don't open the PR.**
 
 Everything below expands these.
 
@@ -61,15 +60,15 @@ These are the cleanups we make in review over and over. Write code that wouldn't
 - A bug fix needs a regression test. A feature needs at least a happy-path test.
 - Deliberately skipping a test (e.g. pure hardening)? Say so and let the human decide.
 
-## Pull requests and git
+## Pull requests
 
 - **Respect the reviewer's time.** Run the gate, self-review your own diff, keep the change small and focused. Reply to comments in your own words and address the point. No AI walls of text, no unrelated churn that forces a re-review.
 - **Branch:** `<type>/<short-description>`, adding the issue number when there is one (`<type>/<issue-number>-<short-description>`). Types: `feat` `fix` `docs` `test` `refactor` `chore`.
 - **Issue first for a feature or any non-trivial change**, so we agree on the approach before the code exists and you don't build something we can't merge. A small, obvious fix (typo, one-line bug) can go straight to a PR.
 - **Fill in the PR template, never overwrite it.** `.github/pull_request_template.md` exists for humans to read and to manually check their own work. Tick the boxes that apply and complete the sections. Do not rewrite, restructure, or delete any of it.
-- **Commit message:** one clear, descriptive line (imperative). No body, no AI or attribution trailers (e.g. `Co-Authored-By`).
-- **PR description:** concise and concrete. State what changed and why. Update `.env.example` for new config vars. Never commit secrets or `.env`.
-- **The human runs git and opens the PR.** Don't push or open one without an explicit go-ahead.
+- **PR title:** explain the work. Do not put agent or model names in it (no `codex`, `claude`, and so on).
+- **PR description:** concise and concrete. State what changed and why. 
+- **Update `.env.example` for new config vars**. Never commit secrets or `.env`.
 
 ## Documentation
 
