@@ -438,6 +438,53 @@ button {
   gap: 18px;
 }
 
+/* Slot wraps a card button + its (optional) edit button so the edit control
+   is a sibling, never a <button> nested inside the card button. */
+.personality-card-slot {
+  position: relative;
+  display: flex;
+}
+
+.personality-card-slot .personality-card {
+  flex: 1;
+  width: 100%;
+}
+
+.personality-card__edit {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--bg-soft);
+  color: var(--text-muted);
+  box-shadow: inset 0 0 0 1px var(--border);
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity var(--transition-fast), background var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.personality-card-slot:hover .personality-card__edit,
+.personality-card__edit:focus-visible {
+  opacity: 1;
+}
+
+.personality-card__edit:hover {
+  background: var(--bg-elev-hover);
+  color: var(--text);
+}
+
+.personality-card__edit svg {
+  width: 15px;
+  height: 15px;
+}
+
 .personality-card {
   position: relative;
   display: flex;
@@ -775,6 +822,8 @@ button {
 
 .modal {
   width: min(560px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
   background: var(--bg-elev);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
@@ -839,6 +888,11 @@ button {
   background: var(--bg-elev);
 }
 
+.modal__input.is-readonly {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
 .modal__error {
   margin: 0;
   min-height: 1em;
@@ -856,6 +910,40 @@ button {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 4px;
+}
+
+/* Tool checklist (personality creation/editing) */
+.modal__tools {
+  border: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0; /* let the grid shrink inside the flex form */
+}
+
+.modal__tools-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 16px;
+  margin-top: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.modal__tool {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.modal__tool input {
+  accent-color: var(--accent);
 }
 
 /* 8. Conversation orb

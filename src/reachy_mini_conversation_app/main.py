@@ -1,11 +1,13 @@
 """Entrypoint for the Reachy Mini conversation app."""
 
+from __future__ import annotations
 import sys
 import time
 import asyncio
+import logging
 import argparse
 import threading
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from pathlib import Path
 from collections.abc import Callable, Awaitable
 
@@ -19,6 +21,37 @@ from reachy_mini_conversation_app.utils import (
     initialize_camera_and_vision,
     log_connection_troubleshooting,
 )
+
+
+if TYPE_CHECKING:
+    from reachy_mini_conversation_app.console import LocalStream
+
+
+def _start_inactivity_timeout_thread(
+    timeout_minutes: float,
+    stream_manager: LocalStream,
+    logger: logging.Logger,
+    app_stop_event: threading.Event | None,
+) -> threading.Thread:
+    """Start a daemon that closes the app after `timeout_minutes` without activity."""
+    timeout_seconds = timeout_minutes * 60.0
+
+    def poll_inactivity_timeout() -> None:
+        logger.info("App inactivity timeout enabled: %.1f minutes.", timeout_minutes)
+        while app_stop_event is None or not app_stop_event.is_set():
+            elapsed = stream_manager.seconds_since_activity()
+            if elapsed >= timeout_seconds:
+                logger.info("No activity for %.1f minutes; closing conversation app.", elapsed / 60.0)
+                try:
+                    stream_manager.close()
+                except Exception as e:
+                    logger.error("Error while closing stream manager after inactivity timeout: %s", e)
+                return
+            time.sleep(1.0)
+
+    thread = threading.Thread(target=poll_inactivity_timeout, daemon=True)
+    thread.start()
+    return thread
 
 
 def main() -> None:
@@ -54,6 +87,7 @@ def run(
         get_backend_label,
         set_instance_path,
         get_hf_connection_selection,
+        resolve_app_timeout_minutes,
         refresh_runtime_config_from_env,
     )
     from reachy_mini_conversation_app.startup_settings import (
@@ -245,6 +279,10 @@ def run(
     robot.enable_wobbling()
     if camera_worker:
         camera_worker.start()
+
+    timeout_minutes = resolve_app_timeout_minutes()
+    if timeout_minutes is not None:
+        _start_inactivity_timeout_thread(timeout_minutes, stream_manager, logger, app_stop_event)
 
     def poll_stop_event() -> None:
         """Poll the stop event to allow graceful shutdown."""

@@ -42,6 +42,7 @@ from reachy_mini_conversation_app.config import (
     get_available_voices_for_backend,
 )
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
+from reachy_mini_conversation_app.tools.core_tools import initialize_tools
 from reachy_mini_conversation_app.personality_routes import mount_personality_routes
 from reachy_mini_conversation_app.audio.startup_config import apply_audio_startup_config
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
@@ -217,6 +218,10 @@ class LocalStream:
         setter = getattr(self.handler, "set_activity_observer", None)
         if callable(setter):
             setter(self._event_bus.publish)
+
+    def seconds_since_activity(self) -> float:
+        """Seconds since the live handler last saw conversation activity."""
+        return time.monotonic() - self.handler.last_activity_time
 
     def _read_env_lines(self, env_path: Path) -> list[str]:
         """Load env file contents or a template as a list of lines."""
@@ -529,6 +534,9 @@ class LocalStream:
         except BaseException as e:
             logger.error("Failed to resolve personality content: %s", e)
             return f"Failed to apply personality: {e}"
+
+        # Rebuild the tool registry
+        initialize_tools(force=True)
         await self.request_backend_restart("personality_changed")
         return "Applied personality and restarting backend."
 

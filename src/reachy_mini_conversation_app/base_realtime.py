@@ -307,6 +307,9 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
                 logger.error("Failed to resolve personality content: %s", e)
                 return f"Failed to apply personality: {e}"
 
+            # Rebuild the tool registry
+            core_tools.initialize_tools(force=True)
+
             # Attempt a live update first, then force a full restart to ensure it sticks
             if self.connection is not None:
                 try:
@@ -585,8 +588,9 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             return
 
         try:
-            self._mark_activity("tool_result_ready")
             send_result_to_model = not completed_tool.is_idle_tool_call
+            if send_result_to_model:
+                self._mark_activity("tool_result_ready")
             model_result_submitted = False
             if send_result_to_model and isinstance(completed_tool.id, str):
                 if not await self._wait_for_response_done_before_tool_result():

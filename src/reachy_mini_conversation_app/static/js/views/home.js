@@ -15,7 +15,7 @@ import {
   avatarFor,
 } from "../constants.js";
 import { $, h, prettifyProfileName } from "../ui.js";
-import { openCustomProfileModal } from "../components/profile-modal.js";
+import { openProfileModal } from "../components/profile-modal.js";
 import { setPendingApply } from "../pending-apply.js";
 import { setPersonality } from "../personality-badge.js";
 
@@ -61,12 +61,15 @@ export async function mountHomeView({ outlet, signal, navigate }) {
 
   grid.replaceChildren();
   for (const name of choices) {
+    const disabled = Boolean(lockedTo) && name !== lockedTo;
+    const editable = name.startsWith("user_personalities/") && !disabled;
     grid.appendChild(
       buildPersonalityCard({
         name,
         isActive: name === current,
-        disabled: Boolean(lockedTo) && name !== lockedTo,
+        disabled,
         onSelect: () => handleSelection(name),
+        onEdit: editable ? () => handleEditClick(name) : null,
       })
     );
   }
@@ -88,18 +91,32 @@ export async function mountHomeView({ outlet, signal, navigate }) {
   }
 
   async function handleCustomClick() {
-    const created = await openCustomProfileModal({ signal });
+    // Load the available tool palette so the modal can offer a checklist.
+    let defaults;
+    try {
+      defaults = await loadPersonality(BUILT_IN_DEFAULT_OPTION);
+    } catch (error) {
+      if (signal.aborted) return;
+      status.textContent = `Could not load tools: ${describeError(error)}`;
+      status.classList.add("is-error");
+      return;
+    }
+    if (signal.aborted) return;
+
+    const created = await openProfileModal({
+      mode: "create",
+      availableTools: defaults?.available_tools || [],
+      signal,
+    });
     if (!created || signal.aborted) return;
     status.classList.remove("is-warning", "is-error");
     status.textContent = `Saving "${created.name}"…`;
     let newName;
     try {
-      // Custom profiles start with the built-in default profile's tool set.
-      const defaults = await loadPersonality(BUILT_IN_DEFAULT_OPTION);
       const saveResult = await savePersonality({
         name: created.name,
         instructions: created.instructions,
-        tools_text: defaults?.tools_text || "",
+        tools_text: created.tools.join("\n"),
         voice: "", // falls back to backend default; user can change in Settings
       });
       if (signal.aborted) return;
@@ -114,16 +131,68 @@ export async function mountHomeView({ outlet, signal, navigate }) {
     setPendingApply({ name: newName, promise: applyPersonality(newName, { persist: false }) });
     navigate(ROUTES.TALK);
   }
+
+  async function handleEditClick(name) {
+    status.classList.remove("is-warning", "is-error");
+    let data;
+    try {
+      data = await loadPersonality(name);
+    } catch (error) {
+      if (signal.aborted) return;
+      status.textContent = `Could not load "${prettifyProfileName(name)}": ${describeError(error)}`;
+      status.classList.add("is-error");
+      return;
+    }
+    if (signal.aborted) return;
+
+    const edited = await openProfileModal({
+      mode: "edit",
+      availableTools: data?.available_tools || [],
+      initial: {
+        name,
+        instructions: data?.instructions || "",
+        enabledTools: data?.enabled_tools || [],
+      },
+      signal,
+    });
+    if (!edited || signal.aborted) return;
+
+    status.textContent = `Saving "${prettifyProfileName(name)}"…`;
+    try {
+      await savePersonality({
+        // Strip the prefix: the save endpoint always writes under user_personalities/<name>.
+        name: stripUserPrefix(name),
+        instructions: edited.instructions,
+        tools_text: edited.tools.join("\n"),
+        voice: data?.voice || "", // keep the profile's existing voice
+      });
+    } catch (error) {
+      if (signal.aborted) return;
+      status.textContent = `Failed to save: ${describeError(error)}`;
+      status.classList.add("is-error");
+      return;
+    }
+    if (signal.aborted) return;
+
+    // Editing the live personality restarts the conversation and reloads the tool registry;
+    // otherwise the changes take effect the next time it is selected.
+    if (name === current) {
+      setPersonality(name);
+      setPendingApply({ name, promise: applyPersonality(name, { persist: false }) });
+      navigate(ROUTES.TALK);
+    } else {
+      status.textContent = `Saved "${prettifyProfileName(name)}". It will apply next time you select it.`;
+    }
+  }
 }
 
-function buildPersonalityCard({ name, isActive, disabled, onSelect }) {
+function buildPersonalityCard({ name, isActive, disabled, onSelect, onEdit }) {
   const hasAvatar = Object.prototype.hasOwnProperty.call(AVATAR_BY_PROFILE, stripUserPrefix(name));
-  return h(
+  const card = h(
     "button",
     {
       type: "button",
       class: ["personality-card", isActive && "is-active", disabled && "is-disabled"],
-      role: "listitem",
       disabled: disabled ? "disabled" : null,
       "aria-pressed": isActive ? "true" : "false",
       "aria-label": `Use personality ${prettifyProfileName(name)}`,
@@ -144,6 +213,28 @@ function buildPersonalityCard({ name, isActive, disabled, onSelect }) {
     h("span", { class: "personality-card__name" }, prettifyProfileName(name)),
     isActive && checkBadge()
   );
+  // Wrap so the edit button is a sibling, not a nested <button> inside the card button.
+  return h(
+    "div",
+    { class: "personality-card-slot", role: "listitem" },
+    card,
+    onEdit ? buildEditButton({ name, onEdit }) : null
+  );
+}
+
+/** Small overlay button to edit a user personality, anchored to the card corner. */
+function buildEditButton({ name, onEdit }) {
+  return h("button", {
+    type: "button",
+    class: "personality-card__edit",
+    "aria-label": `Edit personality ${prettifyProfileName(name)}`,
+    onClick: onEdit,
+    html: `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 20h9"/>
+        <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+      </svg>`,
+  });
 }
 
 function checkBadge() {

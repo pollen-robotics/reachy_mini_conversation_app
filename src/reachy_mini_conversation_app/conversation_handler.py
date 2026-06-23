@@ -31,6 +31,8 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     deps: ToolDependencies
     tool_manager: BackgroundToolManager
     output_queue: asyncio.Queue[QueueItem]
+    last_activity_time: float
+    last_idle_behavior_time: float
     _clear_queue: Callable[[], None] | None = None
     _activity_observer: Callable[[str], None] | None = None
 
@@ -51,6 +53,7 @@ class ConversationHandler(AsyncStreamHandler, ABC):
             fps=fps,
         )
         self.last_activity_time = time.monotonic()
+        self.last_idle_behavior_time = self.last_activity_time
 
     def set_activity_observer(self, observer: Callable[[str], None] | None) -> None:
         """Attach or detach an activity observer. Pass None to clear."""
@@ -72,9 +75,12 @@ class ConversationHandler(AsyncStreamHandler, ABC):
 
     async def emit(self) -> HandlerOutput:
         """Emit the next queued output, triggering local idle behavior when due."""
-        idle_duration = time.monotonic() - self.last_activity_time
+        now = time.monotonic()
+        idle_duration = now - self.last_activity_time
+        idle_behavior_duration = now - self.last_idle_behavior_time
         if (
             idle_duration > self.IDLE_BEHAVIOR_THRESHOLD_S
+            and idle_behavior_duration > self.IDLE_BEHAVIOR_THRESHOLD_S
             and self._idle_behavior_ready()
             and self.deps.movement_manager.is_idle()
         ):
@@ -83,7 +89,7 @@ class ConversationHandler(AsyncStreamHandler, ABC):
             except Exception as e:
                 logger.warning("Idle tool skipped (connection closed?): %s", e)
                 return None
-            self.last_activity_time = time.monotonic()  # avoid repeated resets
+            self.last_idle_behavior_time = now
         return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
 
     async def send_idle_signal(self, idle_duration: float) -> None:

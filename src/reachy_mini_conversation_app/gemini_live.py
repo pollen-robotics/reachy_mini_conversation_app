@@ -33,6 +33,7 @@ from reachy_mini_conversation_app.prompts import get_session_voice, get_session_
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolSpec,
     ToolDependencies,
+    initialize_tools,
 )
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.camera_frame_encoding import encode_bgr_frame_as_jpeg
@@ -244,6 +245,9 @@ class GeminiLiveHandler(ConversationHandler):
             except BaseException as e:
                 logger.error("Failed to resolve personality content: %s", e)
                 return f"Failed to apply personality: {e}"
+
+            # Rebuild the tool registry
+            initialize_tools(force=True)
 
             # Force a restart to apply new config
             if self.session is not None:
@@ -466,8 +470,8 @@ class GeminiLiveHandler(ConversationHandler):
 
             console_content = json.dumps(tool_result)
 
-            self._mark_activity("tool_result_ready")
             if send_result_to_model:
+                self._mark_activity("tool_result_ready")
                 function_response = types.FunctionResponse(
                     id=completed_tool.id if isinstance(completed_tool.id, str) else str(completed_tool.id),
                     name=completed_tool.tool_name,
