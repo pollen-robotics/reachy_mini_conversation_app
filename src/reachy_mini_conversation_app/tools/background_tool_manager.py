@@ -145,51 +145,53 @@ class BackgroundToolManager(BaseModel):
         """
         tool_name = tool_call_routine.tool_name
         id = call_id
-        bg_tool = BackgroundTool(
+        background_tool = BackgroundTool(
             id=id,
             tool_name=tool_name,
             is_idle_tool_call=is_idle_tool_call,
             progress=ToolProgress(progress=0.0) if with_progress else None,
             status=ToolState.RUNNING,
         )
-        self._tools[bg_tool.tool_id] = bg_tool
+        self._tools[background_tool.tool_id] = background_tool
 
         async_task = asyncio.create_task(
-            self._run_tool(bg_tool, tool_call_routine),
+            self._run_tool(background_tool, tool_call_routine),
             name=f"bg-{tool_name}-{id}",
         )
-        bg_tool._task = async_task
+        background_tool._task = async_task
 
-        logger.info(f"Started background tool: {bg_tool.tool_name} (id={id})")
+        logger.info(f"Started background tool: {background_tool.tool_name} (id={id})")
 
-        return bg_tool
+        return background_tool
 
     async def _run_tool(
         self,
-        bg_tool: BackgroundTool,
+        background_tool: BackgroundTool,
         tool_call_routine: ToolCallRoutine,
     ) -> None:
         """Execute the tool and handle completion."""
         result: dict[str, Any] = await tool_call_routine(self)
-        bg_tool.completed_at = time.monotonic()
+        background_tool.completed_at = time.monotonic()
         error = result.get("error")
 
         if error is not None:
             if error == "Tool cancelled":
-                bg_tool.status = ToolState.CANCELLED
-                logger.debug(f"Background tool cancelled: {bg_tool.tool_name} (id={bg_tool.id})")
+                background_tool.status = ToolState.CANCELLED
+                logger.debug(f"Background tool cancelled: {background_tool.tool_name} (id={background_tool.id})")
             else:
-                bg_tool.status = ToolState.FAILED
-                logger.debug(f"Background tool failed: {bg_tool.tool_name} (id={bg_tool.id}): {bg_tool.error}")
-            bg_tool.error = result["error"]
+                background_tool.status = ToolState.FAILED
+                logger.debug(
+                    f"Background tool failed: {background_tool.tool_name} (id={background_tool.id}): {background_tool.error}"
+                )
+            background_tool.error = result["error"]
 
         else:
-            bg_tool.result = result
-            bg_tool.status = ToolState.COMPLETED
-            logger.debug(f"Background tool completed: {bg_tool.tool_name} (id={bg_tool.id})")
+            background_tool.result = result
+            background_tool.status = ToolState.COMPLETED
+            logger.debug(f"Background tool completed: {background_tool.tool_name} (id={background_tool.id})")
 
-        await self._notification_queue.put(bg_tool.get_notification())
-        logger.debug(f"Queued notification for tool: {bg_tool.tool_name} (id={bg_tool.id})")
+        await self._notification_queue.put(background_tool.get_notification())
+        logger.debug(f"Queued notification for tool: {background_tool.tool_name} (id={background_tool.id})")
 
     async def update_progress(
         self,
@@ -265,9 +267,9 @@ class BackgroundToolManager(BaseModel):
 
         async def _listener() -> None:
             while True:
-                bg_tool = await self._notification_queue.get()
+                background_tool = await self._notification_queue.get()
                 for callback in tool_callbacks:
-                    await callback(bg_tool)
+                    await callback(background_tool)
 
         async def _cleanup(interval_seconds: float = 5 * 60) -> None:
             while True:

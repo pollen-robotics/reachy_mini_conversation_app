@@ -1,22 +1,41 @@
-/** Modal to collect fields for a new custom personality. Returns { name, instructions, greeting } or null. */
+/** Modal to create or edit a personality. Returns { name, instructions, greeting, tools } or null. */
 
 import { h } from "../ui.js";
 
 const NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
 /**
- * @param {{ signal?: AbortSignal }} [options]
- * @returns {Promise<{ name: string, instructions: string, greeting: string }|null>}
+ * @param {{
+ *   mode?: "create" | "edit",
+ *   initial?: { name?: string, instructions?: string, greeting?: string, enabledTools?: string[] },
+ *   availableTools?: string[],
+ *   signal?: AbortSignal,
+ * }} [options]
+ * @returns {Promise<{ name: string, instructions: string, greeting: string, tools: string[] }|null>}
  */
-export function openCustomProfileModal({ signal } = {}) {
+export function openProfileModal({ mode = "create", initial = {}, availableTools = [], signal } = {}) {
+  const isEdit = mode === "edit";
+  const enabledTools = initial.enabledTools || [];
+  // Create starts from the available palette with everything enabled. Edit shows the union of
+  // available and currently-enabled tools (so tools that aren't importable modules, e.g. a profile's
+  // own files, still appear pre-checked) and never silently drops an enabled tool on save.
+  const enabledSet = new Set(enabledTools);
+  const toolChoices = isEdit
+    ? [...new Set([...availableTools, ...enabledTools])].sort()
+    : [...availableTools].sort();
+  const isToolChecked = isEdit ? (tool) => enabledSet.has(tool) : () => true;
+
   return new Promise((resolve) => {
     const overlay = buildOverlay();
-    const dialog = buildDialog();
+    const dialog = buildDialog({ isEdit, initial, toolChoices, isToolChecked });
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
 
-    // Focus the first text input on next paint so the user can type immediately.
-    requestAnimationFrame(() => dialog.querySelector("input")?.focus());
+    // Focus the first editable field on next paint (the name in create mode, the textarea in edit).
+    requestAnimationFrame(() => {
+      const target = isEdit ? dialog.querySelector("textarea") : dialog.querySelector("input");
+      target?.focus();
+    });
 
     function close(value) {
       cleanup();
@@ -76,17 +95,21 @@ export function openCustomProfileModal({ signal } = {}) {
     dialog.querySelector("form").addEventListener("submit", (event) => {
       event.preventDefault();
       const formData = new FormData(event.target);
-      const name = String(formData.get("name") || "").trim();
+      // The name is locked in edit mode (renaming would mean a new profile dir), so keep the original.
+      const name = isEdit ? String(initial.name || "") : String(formData.get("name") || "").trim();
       const instructions = String(formData.get("instructions") || "").trim();
       const greeting = String(formData.get("greeting") || "").trim();
 
-      if (!name) return showError(errorBox, "Please pick a name.");
-      if (!NAME_PATTERN.test(name)) {
-        return showError(errorBox, "Use only letters, numbers, dashes or underscores.");
+      if (!isEdit) {
+        if (!name) return showError(errorBox, "Please pick a name.");
+        if (!NAME_PATTERN.test(name)) {
+          return showError(errorBox, "Use only letters, numbers, dashes or underscores.");
+        }
       }
       if (!instructions) return showError(errorBox, "Please write some instructions.");
 
-      close({ name, instructions, greeting });
+      const tools = Array.from(dialog.querySelectorAll('input[name="tool"]:checked')).map((el) => el.value);
+      close({ name, instructions, greeting, tools });
     });
   });
 }
@@ -98,7 +121,7 @@ function buildOverlay() {
   });
 }
 
-function buildDialog() {
+function buildDialog({ isEdit, initial, toolChoices, isToolChecked }) {
   return h(
     "div",
     {
@@ -110,11 +133,15 @@ function buildDialog() {
     h(
       "header",
       { class: "modal__header" },
-      h("h2", { id: "custom-profile-title", class: "modal__title" }, "Create a custom personality"),
+      h(
+        "h2",
+        { id: "custom-profile-title", class: "modal__title" },
+        isEdit ? `Edit ${initial.name || "personality"}` : "Create a custom personality"
+      ),
       h(
         "p",
         { class: "modal__subtitle" },
-        "Define how Reachy should behave. The full standard tool set (dance, emotions, head tracking, ...) will be enabled by default."
+        "Define how Reachy should behave and which tools it can use."
       )
     ),
     h(
@@ -127,26 +154,32 @@ function buildDialog() {
         h("input", {
           type: "text",
           name: "name",
-          required: "required",
+          required: isEdit ? null : "required",
+          readonly: isEdit ? "readonly" : null,
           autocomplete: "off",
           spellcheck: "false",
           placeholder: "e.g. zen_master",
           pattern: "[a-zA-Z0-9_-]+",
-          class: "modal__input",
+          value: isEdit ? initial.name || "" : null,
+          class: ["modal__input", isEdit && "is-readonly"],
         })
       ),
       h(
         "label",
         { class: "modal__field" },
         h("span", { class: "modal__label" }, "Instructions"),
-        h("textarea", {
-          name: "instructions",
-          required: "required",
-          rows: "8",
-          placeholder:
-            "You are a calm, slow-speaking zen guide. Pause between sentences. Encourage the user to breathe.",
-          class: "modal__textarea",
-        })
+        h(
+          "textarea",
+          {
+            name: "instructions",
+            required: "required",
+            rows: "8",
+            placeholder:
+              "You are a calm, slow-speaking zen guide. Pause between sentences. Encourage the user to breathe.",
+            class: "modal__textarea",
+          },
+          initial.instructions || ""
+        )
       ),
       h(
         "label",
@@ -160,15 +193,37 @@ function buildDialog() {
             placeholder: "Start the conversation with a short greeting in character.",
             class: "modal__textarea",
           },
-          "Start the conversation with one short greeting in character. Vary the wording each time."
+          initial.greeting || "Start the conversation with one short greeting in character. Vary the wording each time."
         )
       ),
+      buildToolsField(toolChoices, isToolChecked),
       h("p", { class: "modal__error", role: "alert", "aria-live": "polite" }),
       h(
         "div",
         { class: "modal__actions" },
         h("button", { type: "button", class: "btn btn--ghost", "data-action": "cancel" }, "Cancel"),
-        h("button", { type: "submit", class: "btn btn--primary" }, "Create & start")
+        h("button", { type: "submit", class: "btn btn--primary" }, isEdit ? "Save changes" : "Create & start")
+      )
+    )
+  );
+}
+
+/** Render the tool checklist; isToolChecked decides each box's initial state. */
+function buildToolsField(toolChoices, isToolChecked) {
+  return h(
+    "fieldset",
+    { class: "modal__field modal__tools" },
+    h("legend", { class: "modal__label" }, "Tools"),
+    h(
+      "div",
+      { class: "modal__tools-grid" },
+      ...toolChoices.map((tool) =>
+        h(
+          "label",
+          { class: "modal__tool" },
+          h("input", { type: "checkbox", name: "tool", value: tool, checked: isToolChecked(tool) ? "checked" : null }),
+          h("span", null, tool)
+        )
       )
     )
   );

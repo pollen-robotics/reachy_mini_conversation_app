@@ -14,6 +14,7 @@ from fastrtc import AdditionalOutputs
 import reachy_mini_conversation_app.gemini_live as gemini_mod
 import reachy_mini_conversation_app.idle_policy as idle_policy_mod
 import reachy_mini_conversation_app.tools.core_tools as ct_mod
+import reachy_mini_conversation_app.conversation_handler as conv_mod
 from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.tool_constants import ToolState
@@ -107,7 +108,7 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
     """Gemini turns should emit one transcript per role and let the wobbler reset after speech."""
     monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
-    monkeypatch.setattr(gemini_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
 
     movement_manager = MagicMock()
     movement_manager.is_idle.return_value = False
@@ -191,7 +192,7 @@ async def test_gemini_live_session_queues_startup_greeting(monkeypatch: pytest.M
     """Gemini sessions should send the profile greeting as the first text turn."""
     monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
-    monkeypatch.setattr(gemini_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
     monkeypatch.setattr(
         gemini_mod, "get_session_greeting_prompt", lambda _instance_path=None: "Greet me like a tiny stage host."
     )
@@ -273,6 +274,30 @@ async def test_gemini_camera_tool_sends_snapshot_and_returns_json_result() -> No
 
 
 @pytest.mark.asyncio
+async def test_emit_triggers_idle_through_shared_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Gemini drives idle behavior through the shared base emit and threshold, not the old 15s cadence."""
+    movement_manager = MagicMock()
+    movement_manager.is_idle.return_value = True
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement_manager)
+    handler = GeminiLiveHandler(deps)
+
+    send_idle_signal = AsyncMock()
+    monkeypatch.setattr(handler, "send_idle_signal", send_idle_signal)
+    monkeypatch.setattr(conv_mod, "wait_for_item", AsyncMock(return_value=None))
+
+    # Idle well past the old Gemini-only 15s cadence but under the shared threshold: must not fire.
+    handler.last_activity_time = time.monotonic() - (handler.IDLE_BEHAVIOR_THRESHOLD_S - 30.0)
+    handler.last_idle_behavior_time = time.monotonic() - (handler.IDLE_BEHAVIOR_THRESHOLD_S + 10.0)
+    await handler.emit()
+    send_idle_signal.assert_not_awaited()
+
+    # Past the shared threshold: fires once.
+    handler.last_activity_time = time.monotonic() - (handler.IDLE_BEHAVIOR_THRESHOLD_S + 10.0)
+    await handler.emit()
+    send_idle_signal.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_gemini_idle_signal_starts_local_tool_without_model_input(monkeypatch: pytest.MonkeyPatch) -> None:
     """Gemini idle behavior should not send an idle text turn to the model."""
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
@@ -324,13 +349,13 @@ async def test_gemini_idle_emit_updates_idle_clock_without_refreshing_activity(
     deps.movement_manager.is_idle.return_value = True
     handler = GeminiLiveHandler(deps)
     now = time.monotonic()
-    previous_activity_time = now - 16.0
-    previous_idle_behavior_time = now - 16.0
+    previous_activity_time = now - (handler.IDLE_BEHAVIOR_THRESHOLD_S + 1.0)
+    previous_idle_behavior_time = now - (handler.IDLE_BEHAVIOR_THRESHOLD_S + 1.0)
     handler.last_activity_time = previous_activity_time
     handler.last_idle_behavior_time = previous_idle_behavior_time
     send_idle_signal = AsyncMock()
     monkeypatch.setattr(handler, "send_idle_signal", send_idle_signal)
-    monkeypatch.setattr(gemini_mod, "wait_for_item", AsyncMock(return_value=None))
+    monkeypatch.setattr(conv_mod, "wait_for_item", AsyncMock(return_value=None))
 
     await handler.emit()
 
@@ -379,6 +404,24 @@ async def test_apply_personality_preserves_manual_voice_override(monkeypatch) ->
     assert status == "Applied personality and restarted Gemini session."
     assert handler.get_current_voice() == "Orus"
     restart.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_apply_personality_forces_tool_registry_reload(monkeypatch) -> None:
+    """Applying a profile must rebuild the tool roster even when the profile name is unchanged."""
+    monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
+    monkeypatch.setattr("reachy_mini_conversation_app.config.set_custom_profile", lambda _profile: None)
+    reload = MagicMock()
+    monkeypatch.setattr(gemini_mod, "initialize_tools", reload)
+
+    handler = GeminiLiveHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.session = object()
+    monkeypatch.setattr(handler, "_restart_session", AsyncMock())
+
+    await handler.apply_personality("example")
+
+    reload.assert_called_once_with(force=True)
 
 
 def test_handler_uses_startup_voice_at_startup() -> None:

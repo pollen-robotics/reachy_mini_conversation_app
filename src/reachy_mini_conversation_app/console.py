@@ -42,6 +42,7 @@ from reachy_mini_conversation_app.config import (
     get_available_voices_for_backend,
 )
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
+from reachy_mini_conversation_app.tools.core_tools import initialize_tools
 from reachy_mini_conversation_app.personality_routes import mount_personality_routes
 from reachy_mini_conversation_app.audio.startup_config import apply_audio_startup_config
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
@@ -533,6 +534,9 @@ class LocalStream:
         except BaseException as e:
             logger.error("Failed to resolve personality content: %s", e)
             return f"Failed to apply personality: {e}"
+
+        # Rebuild the tool registry
+        initialize_tools(force=True)
         await self.request_backend_restart("personality_changed")
         return "Applied personality and restarting backend."
 
