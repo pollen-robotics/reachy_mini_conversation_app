@@ -178,7 +178,6 @@ def mount_personality_routes(
                 "ok": True,
                 "status": "Personality unchanged.",
                 "startup": persisted_choice,
-                "changed": False,
             }
 
         loop = get_loop()
@@ -203,7 +202,7 @@ def mount_personality_routes(
                     persisted_choice = _startup_choice()
                 except Exception as e:
                     logger.warning("Failed to persist startup personality: %s", e)
-            return {"ok": True, "status": status, "startup": persisted_choice, "changed": True}
+            return {"ok": True, "status": status, "startup": persisted_choice}
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
 
