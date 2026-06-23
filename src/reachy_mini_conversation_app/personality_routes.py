@@ -162,15 +162,15 @@ def mount_personality_routes(
                 {"ok": False, "error": "profile_locked", "locked_to": LOCKED_PROFILE},
                 status_code=403,
             )  # type: ignore
-        sel_name = payload.name or DEFAULT_OPTION
-        persist_flag = bool(payload.persist)
+        selected_name = payload.name or DEFAULT_OPTION
+        persist = bool(payload.persist)
         persisted_choice = _startup_choice()
 
-        if sel_name == _current_choice():
-            if persist_flag and persist_personality is not None:
+        if selected_name == _current_choice():
+            if persist and persist_personality is not None:
                 try:
                     voice_override = _voice_override()
-                    persist_personality(None if sel_name == DEFAULT_OPTION else sel_name, voice_override)
+                    persist_personality(None if selected_name == DEFAULT_OPTION else selected_name, voice_override)
                     persisted_choice = _startup_choice()
                 except Exception as e:
                     logger.warning("Failed to persist startup personality: %s", e)
@@ -185,20 +185,20 @@ def mount_personality_routes(
             return JSONResponse({"ok": False, "error": "loop_unavailable"}, status_code=503)  # type: ignore
 
         async def _do_apply() -> tuple[str, Optional[str]]:
-            sel = None if sel_name == DEFAULT_OPTION else sel_name
+            profile = None if selected_name == DEFAULT_OPTION else selected_name
             if apply_personality is not None:
-                status = await apply_personality(sel)
+                status = await apply_personality(profile)
             else:
-                status = await handler.apply_personality(sel)
+                status = await handler.apply_personality(profile)
             return status, _voice_override()
 
         try:
-            logger.info("apply: requested name=%r", sel_name)
+            logger.info("apply: requested name=%r", selected_name)
             fut = asyncio.run_coroutine_threadsafe(_do_apply(), loop)
             status, voice_override = fut.result(timeout=10)
-            if persist_flag and persist_personality is not None:
+            if persist and persist_personality is not None:
                 try:
-                    persist_personality(None if sel_name == DEFAULT_OPTION else sel_name, voice_override)
+                    persist_personality(None if selected_name == DEFAULT_OPTION else selected_name, voice_override)
                     persisted_choice = _startup_choice()
                 except Exception as e:
                     logger.warning("Failed to persist startup personality: %s", e)
