@@ -32,6 +32,7 @@ The bar we hold, and the *why* behind the rules:
 - **Tests cover essential behavior**, not every line.
 - **The CI gate is the floor, not the ceiling.** Never degrade quality to land faster.
 - **Reuse over duplication.** No copy-paste, no single-use helpers, no secrets in code.
+- **Build for the merged project, not the PR.** A PR is temporary. Once it lands, its context is gone, so write features and comments that read as a natural part of the whole codebase, never as a diff.
 
 ---
 
