@@ -25,15 +25,12 @@ flowchart TB
     Handlers -- movement 
     requests --> Motion
 
-    Handlers -- camera frames -->
-    Camera@{ label: "<span style='font-size:16px;font-weight:bold;'>Camera Worker</span><br><span style='font-size:13px;color:#f57f17;'>Frame Buffer</span>" }
-
     Handlers -. image for
     analysis .-> Backend
 
     Robot@{ label: "<span style='font-size:16px;font-weight:bold;'>reachy_mini</span><br><span style='font-size:13px;color:#c62828;'>Robot Control Library</span>" }
     -- camera 
-    frames --> Camera
+    frames --> Handlers
 
     Motion -- commands --> Robot
 
@@ -45,7 +42,6 @@ flowchart TB
      Motion:::coreStyle
      Profiles:::toolStyle
      Handlers:::toolStyle
-     Camera:::coreStyle
      Robot:::hardwareStyle
     classDef userStyle fill:#e1f5fe,stroke:#01579b,stroke-width:3px
     classDef uiStyle fill:#b3e5fc,stroke:#0277bd,stroke-width:2px
