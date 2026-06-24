@@ -132,10 +132,8 @@ jobs:
             cp history/history.jsonl allure-report/history/history.jsonl
           fi
 
-      # Only publish from main; PR runs build the report to validate it but must
-      # not overwrite the live gh-pages report with branch results.
       - name: Publish to GitHub Pages
-        if: always() && github.event_name == 'push'
+        if: always()
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
