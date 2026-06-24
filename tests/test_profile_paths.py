@@ -86,6 +86,42 @@ def test_prompts_load_from_compact_builtin_profile(tmp_path: Path, monkeypatch: 
     assert read_instructions_for("mad_scientist_assistant") == expected
 
 
+def test_default_session_instructions_load_from_default_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The no-profile session prompt should come from the built-in default profile."""
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
+
+    expected = (DEFAULT_PROFILES_DIRECTORY / "default" / "instructions.txt").read_text(encoding="utf-8").strip()
+
+    assert prompts_mod.get_session_instructions(instance_path=tmp_path) == expected
+    assert read_instructions_for(DEFAULT_OPTION) == expected
+
+
+def test_default_prompt_include_keeps_compatibility(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Existing profiles using [default_prompt] should still expand."""
+    profile_dir = tmp_path / "legacy"
+    profile_dir.mkdir()
+    (profile_dir / "instructions.txt").write_text("[default_prompt]\n\nStay extra brief.\n", encoding="utf-8")
+
+    monkeypatch.setattr(config, "PROFILES_DIRECTORY", tmp_path)
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "legacy")
+
+    expected_default = (
+        (DEFAULT_PROFILES_DIRECTORY / "default" / "instructions.txt")
+        .read_text(
+            encoding="utf-8",
+        )
+        .strip()
+    )
+
+    assert prompts_mod.get_session_instructions(instance_path=tmp_path) == f"{expected_default}\n\nStay extra brief."
+
+
 def test_builtin_default_profile_tools_load_for_ui() -> None:
     """The UI should read built-in default tools from the packaged default profile."""
     expected = (DEFAULT_PROFILES_DIRECTORY / "default" / "tools.txt").read_text(encoding="utf-8")

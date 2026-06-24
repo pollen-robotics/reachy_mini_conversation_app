@@ -91,7 +91,6 @@ where = ["src"]
 reachy_mini_conversation_app = [
   "static/**/*",
   ".env.example",
-  "prompts/**/*.txt",
 ]
 reachy_talk_data = [
   "profiles/**/*.txt",

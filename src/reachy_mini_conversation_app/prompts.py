@@ -10,10 +10,11 @@ from reachy_mini_conversation_app.memory import format_memory_for_prompt
 logger = logging.getLogger(__name__)
 
 
-PROMPTS_LIBRARY_DIRECTORY = Path(__file__).parent / "prompts"
 INSTRUCTIONS_FILENAME = "instructions.txt"
 VOICE_FILENAME = "voice.txt"
 GREETING_FILENAME = "greeting.txt"
+DEFAULT_PROFILE_NAME = "default"
+DEFAULT_PROMPT_INCLUDE = "default_prompt"
 
 DEFAULT_GREETING_PROMPT = (
     "Start the conversation now with a brief, spontaneous greeting in character. "
@@ -21,19 +22,12 @@ DEFAULT_GREETING_PROMPT = (
 )
 
 
+def _default_instructions_file() -> Path:
+    return DEFAULT_PROFILES_DIRECTORY / DEFAULT_PROFILE_NAME / INSTRUCTIONS_FILENAME
+
+
 def _expand_prompt_includes(content: str) -> str:
-    """Expand [<name>] placeholders with content from prompts library files.
-
-    Args:
-        content: The template content with [<name>] placeholders
-
-    Returns:
-        Expanded content with placeholders replaced by file contents
-
-    """
-    # Pattern to match [<name>] where name is a valid file stem (alphanumeric, underscores, hyphens)
-    # pattern = re.compile(r'^\[([a-zA-Z0-9_-]+)\]$')
-    # Allow slashes for subdirectories
+    """Expand supported prompt placeholders."""
     pattern = re.compile(r"^\[([a-zA-Z0-9/_-]+)\]$")
 
     lines = content.split("\n")
@@ -43,24 +37,25 @@ def _expand_prompt_includes(content: str) -> str:
         stripped = line.strip()
         match = pattern.match(stripped)
 
-        if match:
-            # Extract the name from [<name>]
-            template_name = match.group(1)
-            template_file = PROMPTS_LIBRARY_DIRECTORY / f"{template_name}.txt"
-
-            try:
-                if template_file.exists():
-                    template_content = template_file.read_text(encoding="utf-8").rstrip()
-                    expanded_lines.append(template_content)
-                    logger.debug("Expanded template: [%s]", template_name)
-                else:
-                    logger.warning("Template file not found: %s, keeping placeholder", template_file)
-                    expanded_lines.append(line)
-            except Exception as e:
-                logger.warning("Failed to read template '%s': %s, keeping placeholder", template_name, e)
-                expanded_lines.append(line)
-        else:
+        if not match:
             expanded_lines.append(line)
+            continue
+
+        template_name = match.group(1)
+        if template_name != DEFAULT_PROMPT_INCLUDE:
+            logger.warning("Prompt include not found: [%s], keeping placeholder", template_name)
+            expanded_lines.append(line)
+            continue
+
+        try:
+            template_content = _default_instructions_file().read_text(encoding="utf-8").rstrip()
+        except OSError as e:
+            logger.warning("Failed to read prompt include '%s': %s, keeping placeholder", template_name, e)
+            expanded_lines.append(line)
+            continue
+
+        expanded_lines.append(template_content)
+        logger.debug("Expanded template: [%s]", template_name)
 
     return "\n".join(expanded_lines)
 
@@ -68,9 +63,10 @@ def _expand_prompt_includes(content: str) -> str:
 def get_session_instructions(instance_path: str | Path | None = None) -> str:
     """Get session instructions, loading from REACHY_MINI_CUSTOM_PROFILE if set."""
     profile = config.REACHY_MINI_CUSTOM_PROFILE
+    profile_name = profile or DEFAULT_PROFILE_NAME
     if not profile:
-        logger.info(f"Loading default prompt from {PROMPTS_LIBRARY_DIRECTORY / 'default_prompt.txt'}")
-        instructions_file = PROMPTS_LIBRARY_DIRECTORY / "default_prompt.txt"
+        instructions_file = _default_instructions_file()
+        logger.info("Loading default prompt from %s", instructions_file)
     else:
         if config.PROFILES_DIRECTORY != DEFAULT_PROFILES_DIRECTORY:
             logger.info(
@@ -86,18 +82,17 @@ def get_session_instructions(instance_path: str | Path | None = None) -> str:
         if instructions_file.exists():
             instructions = instructions_file.read_text(encoding="utf-8").strip()
             if instructions:
-                # Expand [<name>] placeholders with content from prompts library
                 expanded_instructions = _expand_prompt_includes(instructions)
                 memory_prompt = format_memory_for_prompt(instance_path)
                 if memory_prompt:
                     return f"{memory_prompt}\n\n{expanded_instructions}"
                 return expanded_instructions
-            logger.error(f"Profile '{profile}' has empty {INSTRUCTIONS_FILENAME}")
+            logger.error("Profile '%s' has empty %s", profile_name, INSTRUCTIONS_FILENAME)
             sys.exit(1)
-        logger.error(f"Profile {profile} has no {INSTRUCTIONS_FILENAME}")
+        logger.error("Profile '%s' has no %s", profile_name, INSTRUCTIONS_FILENAME)
         sys.exit(1)
     except Exception as e:
-        logger.error(f"Failed to load instructions from profile '{profile}': {e}")
+        logger.error("Failed to load instructions from profile '%s': %s", profile_name, e)
         sys.exit(1)
 
 

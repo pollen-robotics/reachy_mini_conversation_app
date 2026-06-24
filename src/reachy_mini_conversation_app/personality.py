@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import List
 from pathlib import Path
 
-from .config import USER_PERSONALITIES_DIRNAME, config, get_default_voice_for_backend
+from .config import DEFAULT_PROFILES_DIRECTORY, USER_PERSONALITIES_DIRNAME, config, get_default_voice_for_backend
 from .tools.tool_constants import SystemTool
 
 
@@ -16,10 +16,6 @@ DEFAULT_OPTION = "(built-in default)"
 
 # Dev-only profiles, hidden from the UI, but still loadable via REACHY_MINI_CUSTOM_PROFILE
 UNLISTED_PROFILES = {"tedai"}
-
-
-def _prompts_dir() -> Path:
-    return Path(__file__).parent / "prompts"
 
 
 def _tools_dir() -> Path:
@@ -65,8 +61,8 @@ def read_instructions_for(name: str) -> str:
     """Read the instructions.txt content for the given profile name."""
     try:
         if name == DEFAULT_OPTION:
-            df = _prompts_dir() / "default_prompt.txt"
-            return df.read_text(encoding="utf-8").strip() if df.exists() else ""
+            target = DEFAULT_PROFILES_DIRECTORY / "default" / "instructions.txt"
+            return target.read_text(encoding="utf-8").strip() if target.exists() else ""
         target = resolve_profile_dir(name) / "instructions.txt"
         return target.read_text(encoding="utf-8").strip() if target.exists() else ""
     except Exception as e:
