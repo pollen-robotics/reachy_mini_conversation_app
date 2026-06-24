@@ -2,24 +2,24 @@ import re
 import random
 import logging
 import unicodedata
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
 
+if TYPE_CHECKING:
+    from reachy_mini.motion.recorded_move import RecordedMoves
+
+
 logger = logging.getLogger(__name__)
 
-# Initialize emotion library
 try:
     from reachy_mini.motion.recorded_move import RecordedMoves
     from reachy_mini_conversation_app.dance_emotion_moves import EmotionQueueMove
 
-    # Note: huggingface_hub automatically reads HF_TOKEN from environment variables
-    RECORDED_MOVES = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
     EMOTION_AVAILABLE = True
 except Exception as e:
     logger.warning(f"Emotion library not available: {e}")
-    RECORDED_MOVES = None
     EMOTION_AVAILABLE = False
 
 
@@ -231,25 +231,6 @@ def random_curated_emotion(available_emotions: list[str]) -> str:
     return random.choice(available_emotions)
 
 
-def get_available_emotions_and_descriptions() -> str:
-    """Get formatted list of available emotions with descriptions."""
-    if not EMOTION_AVAILABLE:
-        return "Emotions not available"
-
-    try:
-        emotion_names = RECORDED_MOVES.list_moves()
-        if not emotion_names:
-            return "No emotions currently available"
-
-        output = "Available emotions:\n"
-        for name in emotion_names:
-            description = RECORDED_MOVES.get(name).description
-            output += f" - {name}: {description}\n"
-        return output
-    except Exception as e:
-        return f"Error getting emotions: {e}"
-
-
 class PlayEmotion(Tool):
     """Play a pre-recorded emotion."""
 
@@ -271,6 +252,7 @@ class PlayEmotion(Tool):
         },
         "required": [],
     }
+    _library: "RecordedMoves | None" = None
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Play a pre-recorded emotion."""
@@ -282,7 +264,11 @@ class PlayEmotion(Tool):
         logger.info("Tool call: play_emotion emotion=%s", requested_emotion)
 
         try:
-            emotion_names = RECORDED_MOVES.list_moves()
+            if self._library is None:
+                # Constructing this downloads the dataset, so it must not run at import.
+                self._library = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
+            library = self._library
+            emotion_names = library.list_moves()
             if not emotion_names:
                 return {"error": "No emotions currently available"}
 
@@ -292,7 +278,7 @@ class PlayEmotion(Tool):
                 emotion_name = random_curated_emotion(emotion_names)
 
             movement_manager = deps.movement_manager
-            emotion_move = EmotionQueueMove(emotion_name, RECORDED_MOVES)
+            emotion_move = EmotionQueueMove(emotion_name, library)
             movement_manager.queue_move(emotion_move)
 
             return {"status": "queued", "emotion": emotion_name}

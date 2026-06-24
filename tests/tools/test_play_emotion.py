@@ -176,13 +176,14 @@ async def test_play_emotion_queues_resolved_emotion(monkeypatch: pytest.MonkeyPa
             self.recorded_moves = recorded_moves
 
     monkeypatch.setattr(play_emotion_module, "EMOTION_AVAILABLE", True)
-    monkeypatch.setattr(play_emotion_module, "RECORDED_MOVES", FakeRecordedMoves())
     monkeypatch.setattr(play_emotion_module, "EmotionQueueMove", FakeEmotionQueueMove)
 
     movement_manager = MagicMock()
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement_manager)
 
-    result = await PlayEmotion()(deps, emotion="sad no")
+    tool = PlayEmotion()
+    monkeypatch.setattr(tool, "_library", FakeRecordedMoves())
+    result = await tool(deps, emotion="sad no")
 
     assert result == {"status": "queued", "emotion": "no_sad1"}
     queued_move = movement_manager.queue_move.call_args.args[0]
@@ -206,7 +207,6 @@ async def test_play_emotion_queues_random_for_unknown_emotion(
             self.recorded_moves = recorded_moves
 
     monkeypatch.setattr(play_emotion_module, "EMOTION_AVAILABLE", True)
-    monkeypatch.setattr(play_emotion_module, "RECORDED_MOVES", FakeRecordedMoves())
     monkeypatch.setattr(play_emotion_module, "EmotionQueueMove", FakeEmotionQueueMove)
 
     def fake_choice(emotion_names: list[str]) -> str:
@@ -219,8 +219,10 @@ async def test_play_emotion_queues_random_for_unknown_emotion(
     movement_manager = MagicMock()
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement_manager)
 
+    tool = PlayEmotion()
+    monkeypatch.setattr(tool, "_library", FakeRecordedMoves())
     with caplog.at_level(logging.INFO, logger=play_emotion_module.logger.name):
-        result = await PlayEmotion()(deps, emotion="contento")
+        result = await tool(deps, emotion="contento")
 
     assert result == {"status": "queued", "emotion": "confused1"}
     assert "play_emotion: 'contento' did not resolve; using random curated" in caplog.text
