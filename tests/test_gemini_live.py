@@ -107,7 +107,7 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
     """Gemini turns should emit one transcript per role and let the wobbler reset after speech."""
     monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
-    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(gemini_mod, "get_tool_specs", lambda: [])
 
     movement_manager = MagicMock()
     movement_manager.is_idle.return_value = False
@@ -191,7 +191,7 @@ async def test_gemini_live_session_queues_startup_greeting(monkeypatch: pytest.M
     """Gemini sessions should send the profile greeting as the first text turn."""
     monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
-    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(gemini_mod, "get_tool_specs", lambda: [])
     monkeypatch.setattr(gemini_mod, "get_session_greeting_prompt", lambda: "Greet me like a tiny stage host.")
 
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())

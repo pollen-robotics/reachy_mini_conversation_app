@@ -37,6 +37,7 @@ from reachy_mini_conversation_app.prompts import (
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolSpec,
     ToolDependencies,
+    get_tool_specs,
     initialize_tools,
 )
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
@@ -357,7 +358,7 @@ class GeminiLiveHandler(ConversationHandler):
         voice = _resolve_gemini_voice(self._voice_override or get_session_voice())
 
         # Convert OpenAI-style tool specs to Gemini function declarations
-        tool_specs = self._get_active_tool_specs()
+        tool_specs = get_tool_specs()
         logger.info(
             "Tools to be used in conversation: %s",
             [tool["name"] for tool in tool_specs],

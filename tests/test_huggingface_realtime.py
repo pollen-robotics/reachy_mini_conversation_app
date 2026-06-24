@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import reachy_mini_conversation_app.base_realtime as base_rt_mod
 import reachy_mini_conversation_app.conversation_handler as conv_mod
 import reachy_mini_conversation_app.huggingface_realtime as hf_mod
 from reachy_mini_conversation_app.config import HF_BACKEND, config, get_default_voice_for_backend
@@ -48,7 +49,7 @@ async def test_partial_transcription_uses_latest_snapshot(monkeypatch: Any) -> N
     """Partial transcription snapshots should replace older snapshots for the same item."""
     monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "Aiden")
-    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
 
     class FakeEvent:
         def __init__(self, etype: str, **kwargs: Any) -> None:
@@ -197,7 +198,7 @@ async def test_run_realtime_session_uses_default_voice_for_lb_allocated_sessions
     """Use the backend default speaker when no profile voice is selected for the hf LB."""
     monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: default)
-    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
     monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", "https://lb.example.test/session")
 
@@ -285,7 +286,7 @@ async def test_run_realtime_session_passes_allocated_session_query(monkeypatch: 
     """Hugging Face sessions must forward the allocated session token to the websocket connect call."""
     monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: default)
-    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
 
     captured_connect: dict[str, Any] = {}
 

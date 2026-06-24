@@ -35,7 +35,7 @@ async def _run_openai_handler_with_events(
     """Run an OpenAI realtime handler against a fixed event sequence."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
-    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
 
     class FakeSession:
         async def update(self, **_kw: Any) -> None:
@@ -117,7 +117,7 @@ async def test_non_idle_tool_call_does_not_queue_progress_response(monkeypatch: 
     """Tool-call startup should not enqueue a second speech response."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
-    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
 
     class FakeEvent:
         def __init__(self, etype: str, **kwargs: Any) -> None:
@@ -216,7 +216,7 @@ async def test_run_realtime_session_queues_startup_greeting(monkeypatch: Any) ->
     """OpenAI-compatible sessions should inject a profile-driven first turn after connect."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
-    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
     monkeypatch.setattr(base_rt_mod, "get_session_greeting_prompt", lambda: "Greet the user as a comet captain.")
 
     created_items: list[dict[str, Any]] = []
@@ -732,7 +732,7 @@ async def test_run_realtime_session_propagates_session_update_failure(monkeypatc
     """A failed session.update must abort startup instead of looking like a clean session exit."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
-    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
 
     class FakeSession:
         async def update(self, **_kw: Any) -> None:
@@ -848,7 +848,7 @@ async def test_response_sender_retries_when_active_response_error_uses_type_only
     monkeypatch.setattr(base_rt_mod, "_RESPONSE_REJECTION_RETRY_DELAY", 0.01)
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
-    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
 
     class FakeError:
         def __init__(self, message: str) -> None:
@@ -994,7 +994,7 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
     monkeypatch.setattr(base_rt_mod, "ConnectionClosedError", FakeCCE)
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
-    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
 
     # 400 near-simultaneous tool results coalesce into far fewer response.create sends.
     N_TOOL_RESULTS = 400

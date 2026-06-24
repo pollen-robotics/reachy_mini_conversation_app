@@ -530,11 +530,6 @@ def get_tool_specs(exclusion_list: list[str] | None = None) -> list[ToolSpec]:
     return [spec for spec in ALL_TOOL_SPECS if spec["name"] not in exclusion_list]
 
 
-def get_active_tool_specs(deps: ToolDependencies) -> list[ToolSpec]:
-    """Get tool specs filtered by what the current session deps support."""
-    return get_tool_specs()
-
-
 # Dispatcher
 def _safe_load_obj(args_json: str) -> Dict[str, Any]:
     try:
