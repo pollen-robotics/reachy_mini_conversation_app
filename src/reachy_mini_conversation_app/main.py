@@ -134,12 +134,6 @@ def run(
     from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, initialize_tools
     from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 
-    try:
-        initialize_tools(instance_path=instance_path)
-    except Exception as e:
-        logger.error("Failed to initialize tools: %s", e)
-        sys.exit(1)
-
     if robot is None:
         try:
             robot_kwargs = {}
