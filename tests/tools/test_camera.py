@@ -37,28 +37,3 @@ async def test_camera_tool_preserves_frame_color_for_uploaded_jpeg() -> None:
     assert red > 200
     assert green < 40
     assert blue < 40
-
-
-@pytest.mark.asyncio
-async def test_camera_tool_uses_local_vision_processor_when_available() -> None:
-    """The camera tool should use on-demand local vision when configured."""
-    camera_worker = MagicMock()
-    camera_worker.get_latest_frame.return_value = np.zeros((32, 32, 3), dtype=np.uint8)
-
-    vision_processor = MagicMock()
-    vision_processor.process_image.return_value = "A red cup on a table."
-
-    deps = ToolDependencies(
-        reachy_mini=MagicMock(),
-        movement_manager=MagicMock(),
-        camera_worker=camera_worker,
-        vision_processor=vision_processor,
-    )
-
-    result = await Camera()(deps, question="What do you see?")
-
-    assert result == {"image_description": "A red cup on a table."}
-    vision_processor.process_image.assert_called_once_with(
-        camera_worker.get_latest_frame.return_value,
-        "What do you see?",
-    )

@@ -1,5 +1,4 @@
 import base64
-import asyncio
 import logging
 from typing import Any, Dict
 
@@ -43,18 +42,6 @@ class Camera(Tool):
         else:
             logger.error("Camera worker not available")
             return {"error": "Camera worker not available"}
-
-        if deps.vision_processor is not None:
-            vision_result = await asyncio.to_thread(
-                deps.vision_processor.process_image,
-                frame,
-                question,
-            )
-            return (
-                {"image_description": vision_result}
-                if isinstance(vision_result, str)
-                else {"error": "vision returned non-string"}
-            )
 
         jpeg_bytes = encode_bgr_frame_as_jpeg(frame)
         return {"b64_im": base64.b64encode(jpeg_bytes).decode("utf-8")}

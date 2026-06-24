@@ -15,10 +15,9 @@ from fastapi import FastAPI, Request, Response
 
 from reachy_mini import ReachyMini, ReachyMiniApp
 from reachy_mini_conversation_app.utils import (
-    CameraVisionInitializationError,
     parse_args,
     setup_logger,
-    initialize_camera_and_vision,
+    initialize_camera,
     log_connection_troubleshooting,
 )
 
@@ -142,9 +141,6 @@ def run(
         logger.error("Failed to initialize tools: %s", e)
         sys.exit(1)
 
-    if args.no_camera and args.head_tracker is not None:
-        logger.warning("Head tracking disabled: --no-camera flag is set. Remove --no-camera to enable head tracking.")
-
     if robot is None:
         try:
             robot_kwargs = {}
@@ -169,23 +165,15 @@ def run(
             logger.error("Please check your configuration and try again.")
             sys.exit(1)
 
-    try:
-        camera_worker, vision_processor = initialize_camera_and_vision(args, robot)
-    except CameraVisionInitializationError as e:
-        logger.error("Failed to initialize camera/vision: %s", e)
-        sys.exit(1)
+    camera_worker = initialize_camera(args, robot)
 
-    movement_manager = MovementManager(
-        current_robot=robot,
-        camera_worker=camera_worker,
-    )
+    movement_manager = MovementManager(current_robot=robot)
 
     deps = ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
         instance_path=instance_path,
         camera_worker=camera_worker,
-        vision_processor=vision_processor,
     )
 
     def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:

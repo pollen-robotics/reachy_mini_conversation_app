@@ -391,19 +391,15 @@ class Config:
     HF_REALTIME_SESSION_URL = HF_DEFAULTS.session_url
     HF_REALTIME_WS_URL = os.getenv(HF_REALTIME_WS_URL_ENV)
     REALTIME_TRANSCRIPTION_LANGUAGE = _normalize_transcription_language(os.getenv(REALTIME_TRANSCRIPTION_LANGUAGE_ENV))
-    HF_HOME = os.getenv("HF_HOME", "./cache")
-    LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "HuggingFaceTB/SmolVLM2-2.2B-Instruct")
     HF_TOKEN = os.getenv("HF_TOKEN")  # Optional, falls back to hf auth login if not set
 
     logger.debug(
-        "Backend provider: %s, Model: %s, HF mode: %s, HF session URL set: %s, HF direct URL set: %s, HF_HOME: %s, Vision Model: %s",
+        "Backend provider: %s, Model: %s, HF mode: %s, HF session URL set: %s, HF direct URL set: %s",
         BACKEND_PROVIDER,
         MODEL_NAME,
         HF_REALTIME_CONNECTION_MODE,
         bool(HF_REALTIME_SESSION_URL and HF_REALTIME_SESSION_URL.strip()),
         bool(HF_REALTIME_WS_URL and HF_REALTIME_WS_URL.strip()),
-        HF_HOME,
-        LOCAL_VISION_MODEL,
     )
 
     # Filesystem root containing profile directories, not a Python import path.
@@ -510,8 +506,6 @@ def refresh_runtime_config_from_env() -> None:
     config.REALTIME_TRANSCRIPTION_LANGUAGE = _normalize_transcription_language(
         os.getenv(REALTIME_TRANSCRIPTION_LANGUAGE_ENV)
     )
-    config.HF_HOME = os.getenv("HF_HOME", "./cache")
-    config.LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "HuggingFaceTB/SmolVLM2-2.2B-Instruct")
     config.HF_TOKEN = os.getenv("HF_TOKEN")
     config.REACHY_MINI_CUSTOM_PROFILE = LOCKED_PROFILE or os.getenv("REACHY_MINI_CUSTOM_PROFILE")
 

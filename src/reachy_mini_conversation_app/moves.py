@@ -1,10 +1,8 @@
-"""Movement system with sequential primary moves and additive secondary moves.
+"""Movement system driving sequential primary moves.
 
 Design overview
 - Primary moves (emotions, dances, goto, breathing) are mutually exclusive and run
   sequentially.
-- Secondary moves (speech sway, face tracking) are additive offsets applied on top
-  of the current primary pose.
 - There is a single control point to the robot: `ReachyMini.set_target`.
 - The control loop runs near 100 Hz and is phase-aligned via a monotonic clock.
 - Idle behaviour starts an infinite `BreathingMove` after a short inactivity delay
@@ -15,15 +13,9 @@ Threading model
   commands.
 - Other threads communicate via a command queue (enqueue moves, mark activity,
   toggle listening).
-- Secondary offset producers set pending values guarded by locks; the worker
-  snaps them atomically.
 
 Units and frames
-- Secondary offsets are interpreted as metres for x/y/z and radians for
-  roll/pitch/yaw in the world frame (unless noted by `compose_world_offset`).
 - Antennas and `body_yaw` are in radians.
-- Head pose composition uses `compose_world_offset(primary_head, secondary_head)`;
-  the secondary offset must therefore be expressed in the world frame.
 
 Safety
 - Listening freezes antennas, then blends them back on unfreeze.
@@ -46,10 +38,7 @@ from numpy.typing import NDArray
 from reachy_mini import ReachyMini
 from reachy_mini.utils import create_head_pose
 from reachy_mini.motion.move import Move
-from reachy_mini.utils.interpolation import (
-    compose_world_offset,
-    linear_pose_interpolation,
-)
+from reachy_mini.utils.interpolation import linear_pose_interpolation
 
 
 logger = logging.getLogger(__name__)
@@ -132,35 +121,6 @@ class BreathingMove(Move):  # type: ignore
         return (head_pose, antennas, 0.0)
 
 
-def combine_full_body(primary_pose: FullBodyPose, secondary_pose: FullBodyPose) -> FullBodyPose:
-    """Combine primary and secondary full body poses.
-
-    Args:
-        primary_pose: (head_pose, antennas, body_yaw) - primary move
-        secondary_pose: (head_pose, antennas, body_yaw) - secondary offsets
-
-    Returns:
-        Combined full body pose (head_pose, antennas, body_yaw)
-
-    """
-    primary_head, primary_antennas, primary_body_yaw = primary_pose
-    secondary_head, secondary_antennas, secondary_body_yaw = secondary_pose
-
-    # Combine head poses using compose_world_offset; the secondary pose must be an
-    # offset expressed in the world frame (T_off_world) applied to the absolute
-    # primary transform (T_abs).
-    combined_head = compose_world_offset(primary_head, secondary_head, reorthonormalize=False)
-
-    # Sum antennas and body_yaw
-    combined_antennas = (
-        primary_antennas[0] + secondary_antennas[0],
-        primary_antennas[1] + secondary_antennas[1],
-    )
-    combined_body_yaw = primary_body_yaw + secondary_body_yaw
-
-    return (combined_head, combined_antennas, combined_body_yaw)
-
-
 def clone_full_body_pose(pose: FullBodyPose) -> FullBodyPose:
     """Create a deep copy of a full body pose tuple."""
     head, antennas, body_yaw = pose
@@ -175,16 +135,6 @@ class MovementState:
     current_move: Move | None = None
     move_start_time: float | None = None
     last_activity_time: float = 0.0
-
-    # Secondary move state (offsets)
-    face_tracking_offsets: Tuple[float, float, float, float, float, float] = (
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-    )
 
     # Status flags
     last_primary_pose: FullBodyPose | None = None
@@ -214,15 +164,15 @@ class LoopFrequencyStats:
 
 
 class MovementManager:
-    """Coordinate sequential moves, additive offsets, and robot output at 100 Hz.
+    """Coordinate sequential moves and robot output at 100 Hz.
 
     Responsibilities:
-    - Own a real-time loop that samples the current primary move (if any), fuses
-      secondary offsets, and calls `set_target` exactly once per tick.
+    - Own a real-time loop that samples the current primary move (if any) and calls
+      `set_target` exactly once per tick.
     - Start an idle `BreathingMove` after `idle_inactivity_delay` when not
       listening and no moves are queued.
-    - Expose thread-safe APIs so other threads can enqueue moves, mark activity,
-      or feed secondary offsets without touching internal state.
+    - Expose thread-safe APIs so other threads can enqueue moves or mark activity
+      without touching internal state.
 
     Timing:
     - All elapsed-time calculations rely on `time.monotonic()` through `self._now`
@@ -231,18 +181,14 @@ class MovementManager:
 
     Concurrency:
     - External threads communicate via `_command_queue` messages.
-    - Secondary offsets are staged via dirty flags guarded by locks and consumed
-      atomically inside the worker loop.
     """
 
     def __init__(
         self,
         current_robot: ReachyMini,
-        camera_worker: "Any" = None,
     ):
         """Initialize movement manager."""
         self.current_robot = current_robot
-        self.camera_worker = camera_worker
 
         # Single timing source for durations
         self._now = time.monotonic
@@ -275,21 +221,9 @@ class MovementManager:
         self._last_set_target_err = 0.0
         self._set_target_err_interval = 1.0  # seconds between error logs
         self._set_target_err_suppressed = 0
-        self._cached_secondary_offsets: tuple[float, ...] = ()  # force miss on first call
-        self._cached_secondary_pose: FullBodyPose = (np.eye(4, dtype=np.float32), (0.0, 0.0), 0.0)
 
         # Cross-thread signalling
         self._command_queue: "Queue[Tuple[str, Any]]" = Queue()
-        self._face_offsets_lock = threading.Lock()
-        self._pending_face_offsets: Tuple[float, float, float, float, float, float] = (
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        )
-        self._face_offsets_dirty = False
 
         self._shared_state_lock = threading.Lock()
         self._shared_last_activity_time = self.state.last_activity_time
@@ -348,27 +282,13 @@ class MovementManager:
         self._command_queue.put(("set_listening", listening))
 
     def _poll_signals(self, current_time: float) -> None:
-        """Apply queued commands and pending offset updates."""
-        self._apply_pending_offsets()
-
+        """Apply queued commands."""
         while True:
             try:
                 command, payload = self._command_queue.get_nowait()
             except Empty:
                 break
             self._handle_command(command, payload, current_time)
-
-    def _apply_pending_offsets(self) -> None:
-        """Apply the most recent face offset update."""
-        face_offsets: Tuple[float, float, float, float, float, float] | None = None
-        with self._face_offsets_lock:
-            if self._face_offsets_dirty:
-                face_offsets = self._pending_face_offsets
-                self._face_offsets_dirty = False
-
-        if face_offsets is not None:
-            self.state.face_tracking_offsets = face_offsets
-            self.state.update_activity()
 
     def _handle_command(self, command: str, payload: Any, current_time: float) -> None:
         """Handle a single cross-thread command."""
@@ -526,34 +446,6 @@ class MovementManager:
 
         return primary_full_body_pose
 
-    def _get_secondary_pose(self) -> FullBodyPose:
-        """Get the secondary full body pose from face tracking offsets."""
-        current_offsets = self.state.face_tracking_offsets
-
-        # Skip expensive create_head_pose if offsets unchanged since last tick
-        if current_offsets == self._cached_secondary_offsets:
-            return self._cached_secondary_pose
-
-        secondary_head_pose = create_head_pose(
-            x=current_offsets[0],
-            y=current_offsets[1],
-            z=current_offsets[2],
-            roll=current_offsets[3],
-            pitch=current_offsets[4],
-            yaw=current_offsets[5],
-            degrees=False,
-            mm=False,
-        )
-        self._cached_secondary_offsets = current_offsets
-        self._cached_secondary_pose = (secondary_head_pose, (0.0, 0.0), 0.0)
-        return self._cached_secondary_pose
-
-    def _compose_full_body_pose(self, current_time: float) -> FullBodyPose:
-        """Compose primary and secondary poses into a single command pose."""
-        primary = self._get_primary_pose(current_time)
-        secondary = self._get_secondary_pose()
-        return combine_full_body(primary, secondary)
-
     def _update_primary_motion(self, current_time: float) -> None:
         """Advance queue state and idle behaviours for this tick."""
         self._manage_move_queue(current_time)
@@ -598,7 +490,7 @@ class MovementManager:
     def _issue_control_command(
         self, head: NDArray[np.float32], antennas: Tuple[float, float], body_yaw: float
     ) -> None:
-        """Send the fused pose to the robot with throttled error logging."""
+        """Send the pose to the robot with throttled error logging."""
         try:
             self.current_robot.set_target(head=head, antennas=antennas, body_yaw=body_yaw)
         except Exception as e:
@@ -669,16 +561,6 @@ class MovementManager:
             self.target_frequency,
         )
         stats.reset()
-
-    def _update_face_tracking(self, current_time: float) -> None:
-        """Get face tracking offsets from camera worker thread."""
-        if self.camera_worker is not None:
-            # Get face tracking offsets from camera worker thread
-            offsets = self.camera_worker.get_face_tracking_offsets()
-            self.state.face_tracking_offsets = offsets
-        else:
-            # No camera worker, use neutral offsets
-            self.state.face_tracking_offsets = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
     def start(self) -> None:
         """Start the worker thread that drives the 100 Hz control loop."""
@@ -766,10 +648,7 @@ class MovementManager:
         }
 
     def working_loop(self) -> None:
-        """Control loop main movements - reproduces main_works.py control architecture.
-
-        Single set_target() call with pose fusion.
-        """
+        """Run the primary-move control loop with a single set_target() call per tick."""
         logger.debug("Starting enhanced movement control loop (100Hz)")
 
         loop_count = 0
@@ -785,30 +664,27 @@ class MovementManager:
                 freq_stats = self._update_frequency_stats(loop_start, prev_loop_start, freq_stats)
             prev_loop_start = loop_start
 
-            # 1) Poll external commands and apply pending offsets (atomic snapshot)
+            # 1) Poll external commands
             self._poll_signals(loop_start)
 
             # 2) Manage the primary move queue (start new move, end finished move, breathing)
             self._update_primary_motion(loop_start)
 
-            # 3) Update vision-based secondary offsets
-            self._update_face_tracking(loop_start)
+            # 3) Build the primary full-body pose for this tick
+            head, antennas, body_yaw = self._get_primary_pose(loop_start)
 
-            # 4) Build primary and secondary full-body poses, then fuse them
-            head, antennas, body_yaw = self._compose_full_body_pose(loop_start)
-
-            # 5) Apply listening antenna freeze or blend-back
+            # 4) Apply listening antenna freeze or blend-back
             antennas_cmd = self._calculate_blended_antennas(antennas)
 
-            # 6) Single set_target call - the only control point
+            # 5) Single set_target call - the only control point
             self._issue_control_command(head, antennas_cmd, body_yaw)
 
-            # 7) Adaptive sleep to align to next tick, then publish shared state
+            # 6) Adaptive sleep to align to next tick, then publish shared state
             sleep_time, freq_stats = self._schedule_next_tick(loop_start, freq_stats)
             self._publish_shared_state()
             self._record_frequency_snapshot(freq_stats)
 
-            # 8) Periodic telemetry on loop frequency
+            # 7) Periodic telemetry on loop frequency
             self._maybe_log_frequency(loop_count, print_interval_loops, freq_stats)
 
             if sleep_time > 0:

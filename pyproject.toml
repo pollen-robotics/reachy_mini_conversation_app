@@ -33,30 +33,6 @@ dependencies = [
     "mcp>=1.27.1",
 ]
 
-[project.optional-dependencies]
-local_vision = [
-  "accelerate>=1.13.0",
-  "torch>=2.1",
-  "transformers==5.3.0",
-]
-yolo_vision = [
-  "ultralytics",
-  "supervision<0.28",
-  "opencv-python>=4.13.0.92",
-]
-mediapipe_vision = [
-  "mediapipe==0.10.14",
-]
-all_vision = [
-  "accelerate>=1.13.0",
-  "torch>=2.1",
-  "transformers==5.3.0",
-  "ultralytics",
-  "supervision<0.28",
-  "opencv-python>=4.13.0.92",
-  "mediapipe==0.10.14",
-]
-
 [dependency-groups]
 dev = [
   "pytest",

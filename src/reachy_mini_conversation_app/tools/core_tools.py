@@ -42,7 +42,6 @@ class ToolDependencies:
     # Optional deps
     instance_path: str | Path | None = None
     camera_worker: Any | None = None  # CameraWorker for frame buffering
-    vision_processor: Any | None = None
     motion_duration_s: float = 1.0
 
 
@@ -533,10 +532,7 @@ def get_tool_specs(exclusion_list: list[str] | None = None) -> list[ToolSpec]:
 
 def get_active_tool_specs(deps: ToolDependencies) -> list[ToolSpec]:
     """Get tool specs filtered by what the current session deps support."""
-    exclusion_list: list[str] = []
-    if not (deps.camera_worker and deps.camera_worker.head_tracker):
-        exclusion_list.append("head_tracking")
-    return get_tool_specs(exclusion_list)
+    return get_tool_specs()
 
 
 # Dispatcher

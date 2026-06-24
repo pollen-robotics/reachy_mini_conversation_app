@@ -14,7 +14,7 @@ tags:
 
 # Reachy Mini conversation app
 
-Conversational app for the Reachy Mini robot combining realtime voice backends, vision pipelines, and choreographed motion libraries.
+Conversational app for the Reachy Mini robot combining realtime voice backends and choreographed motion libraries.
 
 ![Reachy Mini Dance](docs/assets/reachy_mini_dance.gif)
 
@@ -34,9 +34,9 @@ Conversational app for the Reachy Mini robot combining realtime voice backends, 
   - **Hugging Face** - default, using the built-in Hugging Face server or your own local endpoint.
   - **OpenAI Realtime** (`gpt-realtime-2`) - requires `OPENAI_API_KEY`.
   - **Gemini Live** (`gemini-3.1-flash-live-preview`) - requires `GEMINI_API_KEY`.
-- Vision processing uses the selected realtime backend by default (when the camera tool is used), with optional on-device local vision using SmolVLM2 (CPU/GPU/MPS) via `--local-vision`.
-- Layered motion system queues primary moves (dances, emotions, goto poses, breathing) while blending speech-reactive wobble and head-tracking.
-- Async tool dispatch integrates robot motion, camera capture, and optional head-tracking capabilities. An optional web UI (`--ui`) provides personality selection, mic control, and settings.
+- Vision is handled by the selected realtime backend when the `camera` tool is used.
+- Layered motion system queues primary moves (dances, emotions, goto poses, breathing) while blending speech-reactive wobble.
+- Async tool dispatch integrates robot motion and camera capture. An optional web UI (`--ui`) provides personality selection, mic control, and settings.
 
 ## Architecture
 
@@ -70,17 +70,9 @@ uv sync
 
 > **Note:** To reproduce the exact dependency set from this repo's `uv.lock`, run `uv sync --frozen`. This ensures `uv` installs directly from the lockfile without re-resolving or updating any versions.
 
-**Install optional features:**
+Include dev dependencies:
 ```bash
-uv sync --extra local_vision         # Local PyTorch/Transformers vision
-uv sync --extra yolo_vision          # YOLO face-detection backend for head tracking
-uv sync --extra mediapipe_vision     # MediaPipe-based head-tracking
-uv sync --extra all_vision           # All vision features
-```
-
-Combine extras or include dev dependencies:
-```bash
-uv sync --extra all_vision --group dev
+uv sync --group dev
 ```
 
 </details>
@@ -94,31 +86,18 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-**Install optional features:**
+**Install dev dependencies:**
 ```bash
-pip install -e .[local_vision]          # Local vision stack
-pip install -e .[yolo_vision]           # YOLO face-detection backend for head tracking
-pip install -e .[mediapipe_vision]      # MediaPipe-based vision
-pip install -e .[remote_tools]          # Hugging Face Space tools over MCP
-pip install -e .[all_vision]            # All vision features
 pip install -e .[dev]                   # Development tools
 ```
 
-Some wheels (like PyTorch) are large and require compatible CUDA or CPU builds—make sure your platform matches the binaries pulled in by each extra.
-
 </details>
 
-### Optional dependency groups
+### Dependency groups
 
-| Extra | Purpose | Notes |
+| Group | Purpose | Notes |
 |-------|---------|-------|
-| `local_vision` | Run the local VLM (SmolVLM2) through PyTorch/Transformers | GPU recommended. Ensure compatible PyTorch builds for your platform. |
-| `yolo_vision` | YOLOv11n face detection via `ultralytics` and `supervision` | Used as the `yolo` head-tracking backend. Runs on CPU (default). GPU improves performance. |
-| `mediapipe_vision` | Lightweight landmark tracking with MediaPipe | Works on CPU. Enables `--head-tracker mediapipe`. |
-| `all_vision` | Convenience alias installing every vision extra | Install when you want the flexibility to experiment with every provider. |
 | `dev` | Developer tooling (`pytest`, `ruff`, `mypy`) | Development-only dependencies. Use `--group dev` with uv or `[dev]` with pip. |
-
-**Note:** `dev` is a dependency group (not an optional dependency). With uv, use `--group dev`. With pip, use `[dev]`.
 
 ## Configuration
 
@@ -135,9 +114,7 @@ Copy `.env.example` to `.env` when you want to switch backends, provide API keys
 | `REALTIME_TRANSCRIPTION_LANGUAGE` | Optional input transcription language for realtime backends. Defaults to `en`; set to a backend-supported code such as `zh` for Chinese. |
 | `HF_REALTIME_CONNECTION_MODE` | Hugging Face connection selector: `deployed` uses the built-in Hugging Face server; `local` uses `HF_REALTIME_WS_URL`. Defaults to `deployed`. |
 | `HF_REALTIME_WS_URL` | Direct websocket endpoint for your own Hugging Face backend. Accepts either a base URL like `ws://127.0.0.1:8765/v1` or the full websocket URL `ws://127.0.0.1:8765/v1/realtime`. Used when `HF_REALTIME_CONNECTION_MODE=local`. |
-| `HF_HOME` | Cache directory for local Hugging Face downloads (only used with `--local-vision` flag, defaults to `./cache`). |
 | `HF_TOKEN` | Optional token for Hugging Face access (for gated/private assets). |
-| `LOCAL_VISION_MODEL` | Hugging Face model path for local vision processing (only used with `--local-vision` flag, defaults to `HuggingFaceTB/SmolVLM2-2.2B-Instruct`). |
 | `REACHY_MINI_APP_TIMEOUT_MINUTES` | Minutes of inactivity before the app closes. Defaults to `1440` (one day); set to `0` to disable. |
 
 ### Hugging Face Connection Modes
@@ -194,15 +171,13 @@ reachy-mini-conversation-app
 > [!TIP]
 > Make sure the Reachy Mini daemon is running before launching the app. If you see a `TimeoutError`, it means the daemon isn't started. See [Reachy Mini's SDK](https://github.com/pollen-robotics/reachy_mini/) for setup instructions.
 
-The app runs in console mode by default. Add `--ui` to also serve a web UI at http://127.0.0.1:7860/ for picking a personality, controlling the mic, and changing settings. Vision and head-tracking options are described in the CLI table below.
+The app runs in console mode by default. Add `--ui` to also serve a web UI at http://127.0.0.1:7860/ for picking a personality, controlling the mic, and changing settings. All options are described in the CLI table below.
 
 ### CLI options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--head-tracker {yolo,mediapipe}` | `None` | Select a head-tracking backend when a camera is available. `yolo` uses a local YOLO face detector, `mediapipe` comes from the `reachy_mini_toolbox` package. Requires the matching optional extra. |
-| `--no-camera` | `False` | Run without camera capture or head tracking. |
-| `--local-vision` | `False` | Use the local vision model (SmolVLM2) for camera-tool requests instead of the selected realtime backend. Requires `local_vision` extra to be installed. |
+| `--no-camera` | `False` | Run without camera capture. |
 | `--ui` | `False` | Serve the web UI at http://127.0.0.1:7860/, in addition to console mode. |
 | `--robot-name` | `None` | Optional. Connect to a specific robot by name when running multiple daemons on the same subnet. See [Multiple robots on the same subnet](#advanced-features). |
 | `--debug` | `False` | Enable verbose logging for troubleshooting. |
@@ -210,15 +185,6 @@ The app runs in console mode by default. Add `--ui` to also serve a web UI at ht
 ### Examples
 
 ```bash
-# Run with MediaPipe head tracking
-reachy-mini-conversation-app --head-tracker mediapipe
-
-# Run with the YOLO face-detection backend for head tracking
-reachy-mini-conversation-app --head-tracker yolo
-
-# Run with local vision processing (requires local_vision extra)
-reachy-mini-conversation-app --local-vision
-
 # Audio-only conversation (no camera)
 reachy-mini-conversation-app --no-camera
 
@@ -226,16 +192,12 @@ reachy-mini-conversation-app --no-camera
 reachy-mini-conversation-app --ui
 ```
 
-> [!WARNING]
-> `--local-vision` is not supported when running the conversation app directly on Reachy Mini Wireless / the Raspberry Pi. For local vision, keep the daemon running on the robot and start the conversation app from your laptop or workstation instead.
-
 ## LLM tools exposed to the assistant
 
 | Tool | Action | Dependencies |
 |------|--------|--------------|
 | `move_head` | Queue a head pose change (left/right/up/down/front). | Core install only. |
-| `camera` | Capture the latest camera frame and analyze it with the selected realtime backend or the local vision model. | Requires camera worker. Uses local vision when `--local-vision` is enabled. |
-| `head_tracking` | Enable or disable head-tracking offsets (not identity recognition - only detects and tracks head position). | Camera worker with configured head tracker (`--head-tracker`). |
+| `camera` | Capture the latest camera frame and analyze it with the selected realtime backend. | Requires camera worker. |
 | `dance` | Queue a dance from `reachy_mini_dances_library`. | Core install only. |
 | `stop_dance` | Clear queued dances. | Core install only. |
 | `play_emotion` | Play a recorded emotion clip via Hugging Face datasets. | Core install only. Uses the default open emotions dataset: [`pollen-robotics/reachy-mini-emotions-library`](https://huggingface.co/datasets/pollen-robotics/reachy-mini-emotions-library). |
@@ -291,7 +253,7 @@ play_emotion
 # My custom tool defined locally
 sweep_look
 ```
-Tools are resolved first from Python files in the profile folder (custom tools), then from the core library `src/reachy_mini_conversation_app/tools/` (like `dance`, `head_tracking`).
+Tools are resolved first from Python files in the profile folder (custom tools), then from the core library `src/reachy_mini_conversation_app/tools/` (like `dance`, `camera`).
 Installed public Hugging Face Space tools can also be enabled here after you add them with `tool-spaces`.
 
 **Custom tools:**
