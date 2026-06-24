@@ -264,10 +264,6 @@ If no startup settings have been saved yet, you can still seed startup from the 
 
 Each profile should include `instructions.txt` (prompt text). `greeting.txt` is optional and controls how the robot should start the conversation after the backend connects. `tools.txt` (list of allowed tools) is recommended. If missing for a non-default profile, the app falls back to `profiles/default/tools.txt`. Profiles can optionally contain custom tool implementations.
 
-**Custom instructions:**
-
-Write plain-text prompts directly in `instructions.txt`.
-
 **Startup greeting:**
 
 On startup, once the realtime backend is connected and ready, the app sends the active profile's `greeting.txt` as an internal text turn so the model opens with a fresh spoken greeting. Keep this file as a short instruction, not a fixed script, for example:
