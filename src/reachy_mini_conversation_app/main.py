@@ -244,7 +244,7 @@ def run(
         startup_voice=startup_settings.voice,
     )
 
-    # Mount the API before the robot init below, which can block; launch() repeats this as a no-op.
+    # The page is served immediately, so the API must be live before the slow startup work below.
     if effective_settings_app is not None:
         stream_manager._init_settings_ui_if_needed()
 
@@ -256,6 +256,12 @@ def run(
         )
         threading.Thread(target=own_ui_server.run, daemon=True, name="ui-server").start()
         logger.info("Web UI available at http://localhost:7860")
+
+    try:
+        initialize_tools(instance_path=instance_path)
+    except Exception as e:
+        logger.error("Failed to initialize tools: %s", e)
+        sys.exit(1)
 
     # Each async service → its own thread/loop
     movement_manager.start()
