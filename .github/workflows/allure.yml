@@ -3,6 +3,7 @@ name: Allure Report
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 # Needed for the gh-pages publish step.
@@ -131,8 +132,10 @@ jobs:
             cp history/history.jsonl allure-report/history/history.jsonl
           fi
 
+      # Only publish from main; PR runs build the report to validate it but must
+      # not overwrite the live gh-pages report with branch results.
       - name: Publish to GitHub Pages
-        if: always()
+        if: always() && github.event_name == 'push'
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
