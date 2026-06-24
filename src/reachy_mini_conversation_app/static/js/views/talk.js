@@ -16,11 +16,11 @@ const SSE_ENDPOINT = "/conversation_events";
 const CAPTION_BY_STATE = Object.freeze({
   [ORB_STATES.MUTED]: "Muted",
   [ORB_STATES.IDLE]: "Ready",
-  [ORB_STATES.CONNECTING]: "Connecting",
+  [ORB_STATES.CONNECTING]: "Connecting to the backend...",
   [ORB_STATES.LISTENING]: "Listening",
   [ORB_STATES.THINKING]: "Thinking",
   [ORB_STATES.SPEAKING]: "Speaking",
-  [ORB_STATES.ERROR]: "Reconnecting",
+  [ORB_STATES.ERROR]: "Connection error",
 });
 
 export async function mountTalkView({ outlet, signal }) {
@@ -76,9 +76,11 @@ export async function mountTalkView({ outlet, signal }) {
   if (signal.aborted) return;
   syncMicAria();
 
+  let everConnected = false;
   const subscription = subscribeConversationEvents({
     // Re-sync mic state on (re)connect: another tab may have toggled it.
     onReady: async () => {
+      everConnected = true;
       if (!togglePending) {
         try {
           muted = Boolean((await getMicState())?.muted);
@@ -98,9 +100,9 @@ export async function mountTalkView({ outlet, signal }) {
       orb.setState(next);
     },
     onError: () => {
-      // The subscription keeps reconnecting, show the error meanwhile.
-      orb.setState(ORB_STATES.ERROR);
-      caption.textContent = CAPTION_BY_STATE[ORB_STATES.ERROR];
+      // SSE auto-retries (e.g. 404 before routes exist), so a failure here is transient.
+      orb.setState(ORB_STATES.CONNECTING);
+      caption.textContent = everConnected ? "Reconnecting..." : CAPTION_BY_STATE[ORB_STATES.CONNECTING];
     },
   });
 
