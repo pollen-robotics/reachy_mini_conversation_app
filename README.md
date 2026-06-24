@@ -266,10 +266,9 @@ Each profile should include `instructions.txt` (prompt text). `greeting.txt` is 
 
 **Custom instructions:**
 
-Write plain-text prompts in `instructions.txt`. To reuse shared prompt pieces, add lines like:
+Write plain-text prompts in `instructions.txt`. To start from the built-in default prompt, add:
 ```
-[identities/basic_info]
-[identities/witty_identity]
+[default_prompt]
 ```
 Each placeholder pulls the matching file under `src/reachy_mini_conversation_app/prompts/` (nested paths allowed).
 
