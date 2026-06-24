@@ -259,11 +259,12 @@ def run(
         startup_voice=startup_settings.voice,
     )
 
+    # Mount the API before the robot init below, which can block; launch() repeats this as a no-op.
+    if effective_settings_app is not None:
+        stream_manager._init_settings_ui_if_needed()
+
     if args.ui and settings_app is None and effective_settings_app is not None:
         import uvicorn
-
-        # Routes must exist before uvicorn starts serving, launch() repeats this as a no-op.
-        stream_manager._init_settings_ui_if_needed()
 
         own_ui_server = uvicorn.Server(
             uvicorn.Config(effective_settings_app, host="0.0.0.0", port=7860, log_level="warning")
