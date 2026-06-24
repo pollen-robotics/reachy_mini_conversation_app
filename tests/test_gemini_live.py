@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from typing import Any, Callable, AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, call
 
-import numpy as np
 import pytest
 from fastrtc import AdditionalOutputs
 
@@ -238,12 +237,10 @@ async def test_gemini_startup_greeting_missing_client_content_warns_once(
 @pytest.mark.asyncio
 async def test_gemini_camera_tool_sends_snapshot_and_returns_json_result() -> None:
     """Camera tool should push the snapshot via realtime video input and return a JSON-safe tool result."""
-    camera_worker = MagicMock()
-    camera_worker.get_latest_frame.return_value = np.zeros((8, 8, 3), dtype=np.uint8)
     deps = ToolDependencies(
         reachy_mini=MagicMock(),
         movement_manager=MagicMock(),
-        camera_worker=camera_worker,
+        camera_enabled=True,
     )
     handler = GeminiLiveHandler(deps)
     session = _FakeSession([], handler._stop_event)

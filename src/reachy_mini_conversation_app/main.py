@@ -17,7 +17,6 @@ from reachy_mini import ReachyMini, ReachyMiniApp
 from reachy_mini_conversation_app.utils import (
     parse_args,
     setup_logger,
-    initialize_camera,
     log_connection_troubleshooting,
 )
 
@@ -165,15 +164,13 @@ def run(
             logger.error("Please check your configuration and try again.")
             sys.exit(1)
 
-    camera_worker = initialize_camera(args, robot)
-
     movement_manager = MovementManager(current_robot=robot)
 
     deps = ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
         instance_path=instance_path,
-        camera_worker=camera_worker,
+        camera_enabled=not args.no_camera,
     )
 
     def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
@@ -266,8 +263,6 @@ def run(
     # taps the media pipeline at push_audio_sample. The console stream pushes
     # assistant audio through that pipeline directly.
     robot.enable_wobbling()
-    if camera_worker:
-        camera_worker.start()
 
     timeout_minutes = resolve_app_timeout_minutes()
     if timeout_minutes is not None:
@@ -300,8 +295,6 @@ def run(
             robot.disable_wobbling()
         except Exception as e:
             logger.debug(f"Error disabling wobbling during shutdown: {e}")
-        if camera_worker:
-            camera_worker.stop()
 
         # Ensure media is explicitly closed before disconnecting
         try:

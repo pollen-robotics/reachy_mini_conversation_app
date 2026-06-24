@@ -4,9 +4,6 @@ import argparse
 import warnings
 from typing import Optional
 
-from reachy_mini import ReachyMini
-from reachy_mini_conversation_app.camera_worker import CameraWorker
-
 
 def parse_args() -> tuple[argparse.Namespace, list]:  # type: ignore
     """Parse command line arguments."""
@@ -50,16 +47,6 @@ def parse_args() -> tuple[argparse.Namespace, list]:  # type: ignore
 
     tool_spaces_subparsers.add_parser("list", help="List installed Space tool sources")
     return parser.parse_known_args()
-
-
-def initialize_camera(
-    args: argparse.Namespace,
-    current_robot: ReachyMini,
-) -> CameraWorker | None:
-    """Initialize camera capture unless disabled with --no-camera."""
-    if args.no_camera:
-        return None
-    return CameraWorker(current_robot)
 
 
 def setup_logger(debug: bool) -> logging.Logger:

@@ -34,14 +34,14 @@ class Camera(Tool):
 
         logger.info("Tool call: camera question=%s", question[:120])
 
-        if deps.camera_worker is not None:
-            frame = deps.camera_worker.get_latest_frame()
-            if frame is None:
-                logger.error("No frame available from camera worker")
-                return {"error": "No frame available"}
-        else:
-            logger.error("Camera worker not available")
-            return {"error": "Camera worker not available"}
+        if not deps.camera_enabled:
+            logger.error("Camera is disabled")
+            return {"error": "Camera is disabled"}
+
+        frame = deps.reachy_mini.media.get_frame()
+        if frame is None:
+            logger.error("No frame available from camera")
+            return {"error": "No frame available"}
 
         jpeg_bytes = encode_bgr_frame_as_jpeg(frame)
         return {"b64_im": base64.b64encode(jpeg_bytes).decode("utf-8")}
