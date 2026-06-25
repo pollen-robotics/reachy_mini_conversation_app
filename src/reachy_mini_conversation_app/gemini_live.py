@@ -37,6 +37,7 @@ from reachy_mini_conversation_app.prompts import (
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolSpec,
     ToolDependencies,
+    get_tool_specs,
     initialize_tools,
 )
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
@@ -357,7 +358,7 @@ class GeminiLiveHandler(ConversationHandler):
         voice = _resolve_gemini_voice(self._voice_override or get_session_voice())
 
         # Convert OpenAI-style tool specs to Gemini function declarations
-        tool_specs = self._get_active_tool_specs()
+        tool_specs = get_tool_specs()
         logger.info(
             "Tools to be used in conversation: %s",
             [tool["name"] for tool in tool_specs],
@@ -529,14 +530,14 @@ class GeminiLiveHandler(ConversationHandler):
     async def _video_sender_loop(self) -> None:
         """Send camera frames to Gemini Live at ~1 FPS for continuous visual context.
 
-        Only runs when a camera_worker is available. Frames are JPEG-encoded
+        Only runs when the camera is enabled. Frames are JPEG-encoded
         and sent via send_realtime_input(video=...).
         """
         logger.info("Video sender loop started (1 FPS)")
         while not self._stop_event.is_set():
             try:
-                if self.session and self.deps.camera_worker is not None:
-                    frame = self.deps.camera_worker.get_latest_frame()
+                if self.session and self.deps.camera_enabled:
+                    frame = self.deps.reachy_mini.media.get_frame()
                     if frame is not None:
                         jpeg_bytes = encode_bgr_frame_as_jpeg(frame)
                         await self.session.send_realtime_input(
@@ -573,7 +574,7 @@ class GeminiLiveHandler(ConversationHandler):
                 self.tool_manager.start_up(tool_callbacks=[self._handle_tool_result])
 
                 # Start video sender if camera is available
-                if self.deps.camera_worker is not None:
+                if self.deps.camera_enabled:
                     video_task = asyncio.create_task(self._video_sender_loop(), name="gemini-video-sender")
 
                 await self._send_startup_greeting_prompt()

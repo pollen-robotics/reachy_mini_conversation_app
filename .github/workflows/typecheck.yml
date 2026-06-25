@@ -39,8 +39,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install deps (locked) incl. vision extras
-        run: uv sync --frozen --group dev --extra all_vision
+      - name: Install deps (locked)
+        run: uv sync --frozen --group dev
 
       - name: Run mypy
         run: uv run mypy

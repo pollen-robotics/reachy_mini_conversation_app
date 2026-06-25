@@ -11,7 +11,7 @@ from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item
 from numpy.typing import NDArray
 
 from reachy_mini_conversation_app.idle_policy import start_idle_tool_call
-from reachy_mini_conversation_app.tools.core_tools import ToolSpec, ToolDependencies, get_active_tool_specs
+from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, get_tool_specs
 from reachy_mini_conversation_app.tools.background_tool_manager import BackgroundToolManager
 
 
@@ -98,7 +98,7 @@ class ConversationHandler(AsyncStreamHandler, ABC):
             logger.debug("No active session; cannot run idle tool")
             return
 
-        available_tool_names = {spec["name"] for spec in self._get_active_tool_specs()}
+        available_tool_names = {spec["name"] for spec in get_tool_specs()}
         await start_idle_tool_call(
             deps=self.deps,
             tool_manager=self.tool_manager,
@@ -106,10 +106,6 @@ class ConversationHandler(AsyncStreamHandler, ABC):
             available_tool_names=available_tool_names,
             idle_duration=idle_duration,
         )
-
-    def _get_active_tool_specs(self) -> list[ToolSpec]:
-        """Return active tool specs for the current session dependencies."""
-        return get_active_tool_specs(self.deps)
 
     @abstractmethod
     def _is_connected(self) -> bool:

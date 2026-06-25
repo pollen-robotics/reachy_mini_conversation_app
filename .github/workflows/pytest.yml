@@ -90,13 +90,8 @@ jobs:
           printf "OPENAI_API_KEY=test-dummy\n" > .env
 
       # Install
-      - name: Install (frozen) – Linux / macOS
-        if: runner.os != 'Windows'
-        run: uv sync --frozen --all-extras --group dev
-
-      - name: Install (frozen) – Windows (no mediapipe)
-        if: runner.os == 'Windows'
-        run: uv sync --frozen --extra local_vision --extra yolo_vision --group dev
+      - name: Install (frozen)
+        run: uv sync --frozen --group dev
 
       # Prefetch HF dataset
       - name: Prefetch HF dataset (Linux / macOS)

@@ -41,8 +41,7 @@ class ToolDependencies:
     movement_manager: Any  # MovementManager from moves.py
     # Optional deps
     instance_path: str | Path | None = None
-    camera_worker: Any | None = None  # CameraWorker for frame buffering
-    vision_processor: Any | None = None
+    camera_enabled: bool = False
     motion_duration_s: float = 1.0
 
 
@@ -529,14 +528,6 @@ def get_tool_specs(exclusion_list: list[str] | None = None) -> list[ToolSpec]:
     initialize_tools()
     exclusion_list = exclusion_list or []
     return [spec for spec in ALL_TOOL_SPECS if spec["name"] not in exclusion_list]
-
-
-def get_active_tool_specs(deps: ToolDependencies) -> list[ToolSpec]:
-    """Get tool specs filtered by what the current session deps support."""
-    exclusion_list: list[str] = []
-    if not (deps.camera_worker and deps.camera_worker.head_tracker):
-        exclusion_list.append("head_tracking")
-    return get_tool_specs(exclusion_list)
 
 
 # Dispatcher

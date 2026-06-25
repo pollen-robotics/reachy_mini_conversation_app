@@ -35,7 +35,7 @@ async def _run_openai_handler_with_events(
     """Run an OpenAI realtime handler against a fixed event sequence."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
-    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
 
     class FakeSession:
         async def update(self, **_kw: Any) -> None:
@@ -117,7 +117,7 @@ async def test_non_idle_tool_call_does_not_queue_progress_response(monkeypatch: 
     """Tool-call startup should not enqueue a second speech response."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
-    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
 
     class FakeEvent:
         def __init__(self, etype: str, **kwargs: Any) -> None:
@@ -216,7 +216,7 @@ async def test_run_realtime_session_queues_startup_greeting(monkeypatch: Any) ->
     """OpenAI-compatible sessions should inject a profile-driven first turn after connect."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
-    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
     monkeypatch.setattr(base_rt_mod, "get_session_greeting_prompt", lambda: "Greet the user as a comet captain.")
 
     created_items: list[dict[str, Any]] = []
@@ -732,7 +732,7 @@ async def test_run_realtime_session_propagates_session_update_failure(monkeypatc
     """A failed session.update must abort startup instead of looking like a clean session exit."""
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
-    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
 
     class FakeSession:
         async def update(self, **_kw: Any) -> None:
@@ -848,7 +848,7 @@ async def test_response_sender_retries_when_active_response_error_uses_type_only
     monkeypatch.setattr(base_rt_mod, "_RESPONSE_REJECTION_RETRY_DELAY", 0.01)
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
-    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
 
     class FakeError:
         def __init__(self, message: str) -> None:
@@ -994,7 +994,7 @@ async def test_response_sender_retries_on_active_response_rejection(monkeypatch:
     monkeypatch.setattr(base_rt_mod, "ConnectionClosedError", FakeCCE)
     monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=OPENAI_DEFAULT_VOICE: "alloy")
-    monkeypatch.setattr(conv_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
 
     # 400 near-simultaneous tool results coalesce into far fewer response.create sends.
     N_TOOL_RESULTS = 400
@@ -1329,106 +1329,3 @@ async def test_response_sender_loop_times_out_waiting_for_previous_response(
 
     timeout_logs = [r for r in caplog.records if "Timed out waiting for previous response" in r.getMessage()]
     assert len(timeout_logs) == 1, f"Expected 1 pre-condition timeout warning, got {len(timeout_logs)}"
-
-
-@pytest.mark.asyncio
-async def test_openai_excludes_head_tracking_when_no_head_tracker(monkeypatch: Any) -> None:
-    """head_tracking tool must not appear in OpenAI session config when head_tracker is not active."""
-    monkeypatch.setattr(rt_mod, "get_session_instructions", lambda _instance_path=None: "test")
-    monkeypatch.setattr(rt_mod, "get_session_voice", lambda default=None: "alloy")
-
-    # Mock the spec source while preserving get_active_tool_specs filtering.
-    fake_tool_specs = [
-        {"type": "function", "name": "head_tracking", "description": "head_tracking", "parameters": {}},
-        {"type": "function", "name": "fake_tool", "description": "fake_tool", "parameters": {}},
-    ]
-
-    def fake_get_tool_specs(exclusion_list: list[str] | None = None) -> list[dict[str, object]]:
-        excluded = set(exclusion_list or [])
-        return [spec for spec in fake_tool_specs if spec["name"] not in excluded]
-
-    monkeypatch.setattr(ct_mod, "get_tool_specs", fake_get_tool_specs)
-
-    session_kwargs: dict = {}
-
-    class FakeSession:
-        async def update(self, **kwargs: Any) -> None:
-            session_kwargs["session"] = kwargs.get("session")
-
-    class FakeInputAudioBuffer:
-        async def append(self, **_kw: Any) -> None:
-            pass
-
-    class FakeItem:
-        async def create(self, **_kw: Any) -> None:
-            pass
-
-    class FakeConversation:
-        item = FakeItem()
-
-    class FakeResponse:
-        async def create(self, **_kw: Any) -> None:
-            pass
-
-        async def cancel(self, **_kw: Any) -> None:
-            pass
-
-    class FakeConn:
-        session = FakeSession()
-        input_audio_buffer = FakeInputAudioBuffer()
-        conversation = FakeConversation()
-        response = FakeResponse()
-
-        async def __aenter__(self) -> "FakeConn":
-            return self
-
-        async def __aexit__(self, *_: Any) -> bool:
-            return False
-
-        async def close(self) -> None:
-            pass
-
-        def __aiter__(self) -> "FakeConn":
-            return self
-
-        async def __anext__(self) -> Any:
-            raise StopAsyncIteration
-
-    class FakeRealtime:
-        def connect(self, **_kw: Any) -> FakeConn:
-            return FakeConn()
-
-    class FakeClient:
-        def __init__(self) -> None:
-            self.realtime = FakeRealtime()
-
-    # case 1: no camera at all, --no-camera flag passed
-    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock(), camera_worker=None)
-    handler = OpenaiRealtimeHandler(deps)
-    handler.client = FakeClient()
-    monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
-    monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
-
-    await handler._run_realtime_session()
-
-    session_tools = session_kwargs.get("session", {}).get("tools", [])
-    tool_names = [t["name"] for t in session_tools]
-    assert "head_tracking" not in tool_names, "case 1 failed: camera_worker=None"
-    assert "fake_tool" in tool_names, "case 1 failed: a non-head-tracking tool was unexpectedly excluded"
-
-    # case 2: camera is running but --head-tracker flag was not passed
-    session_kwargs.clear()
-    camera_worker = MagicMock()
-    camera_worker.head_tracker = None
-    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock(), camera_worker=camera_worker)
-    handler = OpenaiRealtimeHandler(deps)
-    handler.client = FakeClient()
-    monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
-    monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
-
-    await handler._run_realtime_session()
-
-    session_tools = session_kwargs.get("session", {}).get("tools", [])
-    tool_names = [t["name"] for t in session_tools]
-    assert "head_tracking" not in tool_names, "case 2 failed: camera_worker.head_tracker=None"
-    assert "fake_tool" in tool_names, "case 2 failed: a non-head-tracking tool was unexpectedly excluded"

@@ -15,10 +15,8 @@ from fastapi import FastAPI, Request, Response
 
 from reachy_mini import ReachyMini, ReachyMiniApp
 from reachy_mini_conversation_app.utils import (
-    CameraVisionInitializationError,
     parse_args,
     setup_logger,
-    initialize_camera_and_vision,
     log_connection_troubleshooting,
 )
 
@@ -136,15 +134,6 @@ def run(
     from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, initialize_tools
     from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 
-    try:
-        initialize_tools(instance_path=instance_path)
-    except Exception as e:
-        logger.error("Failed to initialize tools: %s", e)
-        sys.exit(1)
-
-    if args.no_camera and args.head_tracker is not None:
-        logger.warning("Head tracking disabled: --no-camera flag is set. Remove --no-camera to enable head tracking.")
-
     if robot is None:
         try:
             robot_kwargs = {}
@@ -169,23 +158,13 @@ def run(
             logger.error("Please check your configuration and try again.")
             sys.exit(1)
 
-    try:
-        camera_worker, vision_processor = initialize_camera_and_vision(args, robot)
-    except CameraVisionInitializationError as e:
-        logger.error("Failed to initialize camera/vision: %s", e)
-        sys.exit(1)
-
-    movement_manager = MovementManager(
-        current_robot=robot,
-        camera_worker=camera_worker,
-    )
+    movement_manager = MovementManager(current_robot=robot)
 
     deps = ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
         instance_path=instance_path,
-        camera_worker=camera_worker,
-        vision_processor=vision_processor,
+        camera_enabled=not args.no_camera,
     )
 
     def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
@@ -259,11 +238,12 @@ def run(
         startup_voice=startup_settings.voice,
     )
 
+    # The page is served immediately, so the API must be live before the slow startup work below.
+    if effective_settings_app is not None:
+        stream_manager._init_settings_ui_if_needed()
+
     if args.ui and settings_app is None and effective_settings_app is not None:
         import uvicorn
-
-        # Routes must exist before uvicorn starts serving, launch() repeats this as a no-op.
-        stream_manager._init_settings_ui_if_needed()
 
         own_ui_server = uvicorn.Server(
             uvicorn.Config(effective_settings_app, host="0.0.0.0", port=7860, log_level="warning")
@@ -271,14 +251,18 @@ def run(
         threading.Thread(target=own_ui_server.run, daemon=True, name="ui-server").start()
         logger.info("Web UI available at http://localhost:7860")
 
+    try:
+        initialize_tools(instance_path=instance_path)
+    except Exception as e:
+        logger.error("Failed to initialize tools: %s", e)
+        sys.exit(1)
+
     # Each async service → its own thread/loop
     movement_manager.start()
     # Audio-reactive head motion is driven by the daemon's wobbler, which
     # taps the media pipeline at push_audio_sample. The console stream pushes
     # assistant audio through that pipeline directly.
     robot.enable_wobbling()
-    if camera_worker:
-        camera_worker.start()
 
     timeout_minutes = resolve_app_timeout_minutes()
     if timeout_minutes is not None:
@@ -311,8 +295,6 @@ def run(
             robot.disable_wobbling()
         except Exception as e:
             logger.debug(f"Error disabling wobbling during shutdown: {e}")
-        if camera_worker:
-            camera_worker.stop()
 
         # Ensure media is explicitly closed before disconnecting
         try:

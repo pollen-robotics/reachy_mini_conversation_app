@@ -31,7 +31,7 @@ from reachy_mini_conversation_app.config import (
     get_available_voices_for_backend,
 )
 from reachy_mini_conversation_app.prompts import get_session_greeting_prompt
-from reachy_mini_conversation_app.tools.core_tools import ToolSpec, ToolDependencies
+from reachy_mini_conversation_app.tools.core_tools import ToolSpec, ToolDependencies, get_tool_specs
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolCallRoutine,
@@ -706,7 +706,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
     async def _run_realtime_session(self) -> None:
         """Establish and manage a single realtime session."""
-        tool_specs = self._get_active_tool_specs()
+        tool_specs = get_tool_specs()
         logger.info(
             "Tools to be used in conversation: %s",
             [tool["name"] for tool in tool_specs],
