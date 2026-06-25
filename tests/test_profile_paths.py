@@ -99,27 +99,19 @@ def test_default_session_instructions_load_from_default_profile(
     assert read_instructions_for(DEFAULT_OPTION) == expected
 
 
-def test_default_prompt_include_keeps_compatibility(
+def test_bracketed_prompt_line_stays_plain_text(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Existing profiles using [default_prompt] should still expand."""
-    profile_dir = tmp_path / "legacy"
+    """Bracketed prompt text should not be treated as an include."""
+    profile_dir = tmp_path / "literal_prompt"
     profile_dir.mkdir()
-    (profile_dir / "instructions.txt").write_text("[default_prompt]\n\nStay extra brief.\n", encoding="utf-8")
+    (profile_dir / "instructions.txt").write_text("[custom_prompt]\n\nStay extra brief.\n", encoding="utf-8")
 
     monkeypatch.setattr(config, "PROFILES_DIRECTORY", tmp_path)
-    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "legacy")
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "literal_prompt")
 
-    expected_default = (
-        (DEFAULT_PROFILES_DIRECTORY / "default" / "instructions.txt")
-        .read_text(
-            encoding="utf-8",
-        )
-        .strip()
-    )
-
-    assert prompts_mod.get_session_instructions(instance_path=tmp_path) == f"{expected_default}\n\nStay extra brief."
+    assert prompts_mod.get_session_instructions(instance_path=tmp_path) == "[custom_prompt]\n\nStay extra brief."
 
 
 def test_builtin_default_profile_tools_load_for_ui() -> None:
