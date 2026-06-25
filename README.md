@@ -115,7 +115,7 @@ Copy `.env.example` to `.env` when you want to switch backends, provide API keys
 | `HF_REALTIME_CONNECTION_MODE` | Hugging Face connection selector: `deployed` uses the built-in Hugging Face server; `local` uses `HF_REALTIME_WS_URL`. Defaults to `deployed`. |
 | `HF_REALTIME_WS_URL` | Direct websocket endpoint for your own Hugging Face backend. Accepts either a base URL like `ws://127.0.0.1:8765/v1` or the full websocket URL `ws://127.0.0.1:8765/v1/realtime`. Used when `HF_REALTIME_CONNECTION_MODE=local`. |
 | `HF_TOKEN` | Optional token for Hugging Face access (for gated/private assets). |
-| `REACHY_MINI_APP_TIMEOUT_MINUTES` | Minutes of inactivity before the app closes. Defaults to `1440` (one day); set to `0` to disable. |
+| `REACHY_MINI_APP_TIMEOUT_MINUTES` | Minutes of inactivity before Reachy goes to sleep and the app stops. Defaults to `1440` (one day); set to `0` to disable. |
 
 ### Hugging Face Connection Modes
 
@@ -204,6 +204,7 @@ reachy-mini-conversation-app --ui
 | `stop_emotion` | Clear queued emotions. | Core install only. |
 | `remember` | Save one short, stable fact about the user for future sessions. | Core install only. Stored in the app instance data directory. |
 | `forget` | Remove a saved memory fact by matching a short query. | Core install only. |
+| `go_to_sleep` | Run Reachy's sleep movement and stop the current app after an explicit user request. | Core install only. |
 | `idle_do_nothing` | Explicitly remain idle during an idle turn. Not intended for normal conversation turns. | Core install only. |
 
 > [!NOTE]
