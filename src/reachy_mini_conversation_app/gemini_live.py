@@ -152,7 +152,6 @@ class GeminiLiveHandler(ConversationHandler):
     ):
         """Initialize the handler."""
         super().__init__(
-            expected_layout="mono",
             output_sample_rate=GEMINI_OUTPUT_SAMPLE_RATE,
             input_sample_rate=GEMINI_INPUT_SAMPLE_RATE,
         )

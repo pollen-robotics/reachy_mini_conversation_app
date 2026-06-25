@@ -3,7 +3,7 @@ import time
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Literal, ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias
 from collections.abc import Callable
 
 import numpy as np
@@ -33,24 +33,17 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     output_queue: asyncio.Queue[QueueItem]
     last_activity_time: float
     last_idle_behavior_time: float
-    _clear_queue: Callable[[], None] | None = None
     _activity_observer: Callable[[str], None] | None = None
 
     def __init__(
         self,
-        expected_layout: Literal["mono", "stereo"] = "mono",
         output_sample_rate: int = 24000,
-        output_frame_size: int | None = None,
         input_sample_rate: int = 48000,
-        fps: int = 30,
     ) -> None:
         """Initialize the stream handler and shared idle/activity tracking."""
         super().__init__(
-            expected_layout=expected_layout,
             output_sample_rate=output_sample_rate,
-            output_frame_size=output_frame_size,
             input_sample_rate=input_sample_rate,
-            fps=fps,
         )
         self.last_activity_time = time.monotonic()
         self.last_idle_behavior_time = self.last_activity_time

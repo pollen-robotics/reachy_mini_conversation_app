@@ -5,7 +5,6 @@ import pytest
 
 from reachy_mini_conversation_app.streaming import (
     AdditionalOutputs,
-    AsyncStreamHandler,
     wait_for_item,
     audio_to_int16,
     audio_to_float32,
@@ -19,13 +18,6 @@ def test_additional_outputs_stores_messages() -> None:
     outputs = AdditionalOutputs(message)
 
     assert outputs.args == (message,)
-
-
-def test_async_stream_handler_derives_output_frame_size() -> None:
-    """Stream handlers should derive 20 ms output frames from sample rate."""
-    handler = AsyncStreamHandler(output_sample_rate=24000)
-
-    assert handler.output_frame_size == 480
 
 
 @pytest.mark.asyncio

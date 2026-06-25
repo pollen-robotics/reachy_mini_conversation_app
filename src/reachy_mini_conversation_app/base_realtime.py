@@ -111,15 +111,11 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         """Initialize the handler."""
         sample_rate = self.SAMPLE_RATE
         super().__init__(
-            expected_layout="mono",
             output_sample_rate=sample_rate,
             input_sample_rate=sample_rate,
         )
 
         self.deps = deps
-
-        self.output_sample_rate = sample_rate
-        self.input_sample_rate = sample_rate
 
         self.client: AsyncOpenAI
         self.connection: AsyncRealtimeConnection | None = None
