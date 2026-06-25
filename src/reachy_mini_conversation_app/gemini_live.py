@@ -670,6 +670,8 @@ class GeminiLiveHandler(ConversationHandler):
             return
 
         input_sample_rate, audio_frame = frame
+        if audio_frame.size == 0:
+            return
 
         # Reshape if needed
         if audio_frame.ndim == 2:
