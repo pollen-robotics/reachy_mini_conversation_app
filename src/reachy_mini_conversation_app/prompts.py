@@ -28,7 +28,7 @@ def _default_instructions_file() -> Path:
 
 def _expand_prompt_includes(content: str) -> str:
     """Expand supported prompt placeholders."""
-    pattern = re.compile(r"^\[([a-zA-Z0-9/_-]+)\]$")
+    pattern = re.compile(r"^\[([a-zA-Z0-9_-]+)\]$")
 
     lines = content.split("\n")
     expanded_lines = []
@@ -75,7 +75,7 @@ def get_session_instructions(instance_path: str | Path | None = None) -> str:
                 config.PROFILES_DIRECTORY,
             )
         else:
-            logger.info(f"Loading prompt from profile '{profile}'")
+            logger.info("Loading prompt from profile '%s'", profile)
         instructions_file = config.resolve_profile_dir(profile) / INSTRUCTIONS_FILENAME
 
     try:

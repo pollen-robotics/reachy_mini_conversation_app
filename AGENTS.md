@@ -102,7 +102,7 @@ src/reachy_mini_conversation_app/
   config.py               # configuration + env loading
   personality.py          # personality/profile loading
   tools/                  # LLM-callable tools (one file per tool)
-  audio/, memory/, prompts/, sounds/, static/
+  audio/, memory/, sounds/, static/
 profiles/                 # bundled personalities (one dir per profile)
 tests/                    # pytest suite, mirrors the src layout
 ```
