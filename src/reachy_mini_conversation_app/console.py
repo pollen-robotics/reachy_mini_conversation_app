@@ -14,7 +14,6 @@ from typing import List, Optional
 from pathlib import Path
 from collections.abc import Callable, AsyncGenerator
 
-from fastrtc import AdditionalOutputs, audio_to_float32
 from scipy.signal import resample
 
 from reachy_mini import ReachyMini
@@ -41,6 +40,7 @@ from reachy_mini_conversation_app.config import (
     refresh_runtime_config_from_env,
     get_available_voices_for_backend,
 )
+from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_float32
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
 from reachy_mini_conversation_app.tools.core_tools import initialize_tools
 from reachy_mini_conversation_app.personality_routes import mount_personality_routes

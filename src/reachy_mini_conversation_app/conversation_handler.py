@@ -7,9 +7,9 @@ from typing import Literal, ClassVar, TypeAlias
 from collections.abc import Callable
 
 import numpy as np
-from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item
 from numpy.typing import NDArray
 
+from reachy_mini_conversation_app.streaming import AdditionalOutputs, AsyncStreamHandler, wait_for_item
 from reachy_mini_conversation_app.idle_policy import start_idle_tool_call
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, get_tool_specs
 from reachy_mini_conversation_app.tools.background_tool_manager import BackgroundToolManager
@@ -90,7 +90,8 @@ class ConversationHandler(AsyncStreamHandler, ABC):
                 logger.warning("Idle tool skipped (connection closed?): %s", e)
                 return None
             self.last_idle_behavior_time = now
-        return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
+        handler_output = await wait_for_item(self.output_queue)
+        return handler_output
 
     async def send_idle_signal(self, idle_duration: float) -> None:
         """Run a locally selected idle tool without sending an idle turn to the model."""

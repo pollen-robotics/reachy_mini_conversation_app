@@ -18,7 +18,6 @@ from typing import Any, Dict, List, Final, Tuple, Literal, Optional
 
 import numpy as np
 from google import genai
-from fastrtc import AdditionalOutputs, audio_to_int16
 from google.genai import types
 from numpy.typing import NDArray
 from scipy.signal import resample
@@ -34,6 +33,7 @@ from reachy_mini_conversation_app.prompts import (
     get_session_instructions,
     get_session_greeting_prompt,
 )
+from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_int16
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolSpec,
     ToolDependencies,
@@ -142,7 +142,7 @@ def _resolve_gemini_startup_voice(voice: str | None) -> str | None:
 
 
 class GeminiLiveHandler(ConversationHandler):
-    """Gemini Live API handler for fastrtc Stream."""
+    """Gemini Live API handler for the local audio stream."""
 
     def __init__(
         self,

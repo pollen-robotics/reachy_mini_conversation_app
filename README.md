@@ -30,7 +30,7 @@ Conversational app for the Reachy Mini robot combining realtime voice backends a
 - [License](#license)
 
 ## Overview
-- Real-time audio conversation loop with `fastrtc` for low-latency streaming. Supported backends:
+- Real-time audio conversation loop for low-latency streaming. Supported backends:
   - **Hugging Face** - default, using the built-in Hugging Face server or your own local endpoint.
   - **OpenAI Realtime** (`gpt-realtime-2`) - requires `OPENAI_API_KEY`.
   - **Gemini Live** (`gemini-3.1-flash-live-preview`) - requires `GEMINI_API_KEY`.

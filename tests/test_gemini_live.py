@@ -9,11 +9,11 @@ from typing import Any, Callable, AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
-from fastrtc import AdditionalOutputs
 
 import reachy_mini_conversation_app.gemini_live as gemini_mod
 import reachy_mini_conversation_app.idle_policy as idle_policy_mod
 import reachy_mini_conversation_app.conversation_handler as conv_mod
+from reachy_mini_conversation_app.streaming import AdditionalOutputs
 from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.tool_constants import ToolState

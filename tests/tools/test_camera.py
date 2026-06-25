@@ -4,9 +4,9 @@ import base64
 from io import BytesIO
 from unittest.mock import MagicMock
 
+import av
 import numpy as np
 import pytest
-from PIL import Image
 
 from reachy_mini_conversation_app.tools.camera import Camera
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
@@ -29,10 +29,9 @@ async def test_camera_tool_preserves_frame_color_for_uploaded_jpeg() -> None:
     assert "b64_im" in result
 
     jpeg_bytes = base64.b64decode(result["b64_im"])
-    decoded = Image.open(BytesIO(jpeg_bytes)).convert("RGB")
-    pixel = decoded.getpixel((0, 0))
-    assert isinstance(pixel, tuple)
-    red, green, blue = pixel
+    with av.open(BytesIO(jpeg_bytes)) as container:
+        decoded = next(container.decode(video=0)).to_ndarray(format="rgb24")
+    red, green, blue = decoded[0, 0]
 
     assert red > 200
     assert green < 40

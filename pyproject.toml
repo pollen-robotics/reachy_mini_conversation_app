@@ -11,9 +11,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     #Media
-    "aiortc>=1.13.0",
     "av",
-    "fastrtc>=0.0.34",
     "huggingface-hub>=1.17.0",
     "httpx>=0.28.1",
 

@@ -20,9 +20,8 @@ from typing import Any, Final
 from dataclasses import dataclass
 from collections.abc import Mapping, Callable, Iterable
 
-from fastrtc import AdditionalOutputs
-
 from reachy_mini_conversation_app.tools import core_tools
+from reachy_mini_conversation_app.streaming import AdditionalOutputs
 from reachy_mini_conversation_app.tools.dance import Dance
 from reachy_mini_conversation_app.tools.move_head import MoveHead
 from reachy_mini_conversation_app.tools.play_emotion import PlayEmotion

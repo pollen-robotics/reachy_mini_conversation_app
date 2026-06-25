@@ -7,7 +7,6 @@ from typing import Any, Callable
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastrtc import AdditionalOutputs
 
 import reachy_mini_conversation_app.idle_policy as idle_policy_mod
 import reachy_mini_conversation_app.base_realtime as base_rt_mod
@@ -16,6 +15,7 @@ import reachy_mini_conversation_app.tools.core_tools as ct_mod
 import reachy_mini_conversation_app.conversation_handler as conv_mod
 import reachy_mini_conversation_app.tools.background_tool_manager as btm_mod
 from reachy_mini_conversation_app.config import OPENAI_BACKEND, config, get_default_voice_for_backend
+from reachy_mini_conversation_app.streaming import AdditionalOutputs
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.tool_constants import ToolState
