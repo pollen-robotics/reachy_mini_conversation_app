@@ -13,26 +13,18 @@ class GoToSleep(Tool):
 
     name = "go_to_sleep"
     description = (
-        "Use only when the user explicitly asks Reachy to go to sleep, stop the current app, shut down this app, "
+        "Use when you are sure the user wants Reachy to go to sleep, stop the current app, shut down this app, "
         "or end the conversation. Do not use for idle turns, sleepy emotions, silence, or ambiguous requests."
     )
     needs_response = False
     parameters_schema = {
         "type": "object",
-        "properties": {
-            "confirmation": {
-                "type": "string",
-                "enum": ["go_to_sleep"],
-                "description": "Required exact confirmation for an explicit user request to stop this app.",
-            },
-        },
-        "required": ["confirmation"],
+        "properties": {},
+        "required": [],
     }
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> dict[str, Any]:
         """Put Reachy to sleep and request app shutdown."""
-        if kwargs.get("confirmation") != "go_to_sleep":
-            return {"error": "go_to_sleep requires explicit confirmation"}
         if deps.go_to_sleep is None:
             return {"error": "go_to_sleep is unavailable in this runtime"}
 

@@ -6,20 +6,13 @@ from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.go_to_sleep import GoToSleep
 
 
-@pytest.mark.asyncio
-async def test_go_to_sleep_requires_confirmation() -> None:
-    """The tool should not run without the explicit confirmation token."""
-    go_to_sleep = MagicMock(return_value={"status": "sleeping"})
-    deps = ToolDependencies(
-        reachy_mini=MagicMock(),
-        movement_manager=MagicMock(),
-        go_to_sleep=go_to_sleep,
-    )
-
-    result = await GoToSleep()(deps)
-
-    assert result == {"error": "go_to_sleep requires explicit confirmation"}
-    go_to_sleep.assert_not_called()
+def test_go_to_sleep_has_no_required_arguments() -> None:
+    """The tool should be callable without a confirmation argument."""
+    assert GoToSleep.parameters_schema == {
+        "type": "object",
+        "properties": {},
+        "required": [],
+    }
 
 
 @pytest.mark.asyncio
@@ -27,7 +20,7 @@ async def test_go_to_sleep_returns_unavailable_without_runtime_callback() -> Non
     """The tool should fail gracefully if the runtime did not inject a sleep callback."""
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
 
-    result = await GoToSleep()(deps, confirmation="go_to_sleep")
+    result = await GoToSleep()(deps)
 
     assert result == {"error": "go_to_sleep is unavailable in this runtime"}
 
@@ -47,7 +40,7 @@ async def test_go_to_sleep_calls_runtime_callback() -> None:
         go_to_sleep=go_to_sleep,
     )
 
-    result = await GoToSleep()(deps, confirmation="go_to_sleep")
+    result = await GoToSleep()(deps)
 
     assert result == expected
     go_to_sleep.assert_called_once_with()
