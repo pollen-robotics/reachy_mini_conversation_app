@@ -5,7 +5,6 @@ served via the Reachy Mini Apps settings server so users can configure it.
 """
 
 import os
-import sys
 import time
 import asyncio
 import logging
@@ -66,10 +65,11 @@ except Exception:  # pragma: no cover - only loaded when settings_app is used
 logger = logging.getLogger(__name__)
 
 _SSE_KEEPALIVE_INTERVAL_SECONDS = 15.0  # below typical 60s proxy idle timeout
+SETTINGS_API_PREFIX = "/api/v1"
 
 
 def _detach_framework_root_routes(app: "FastAPI") -> None:
-    """Strip framework-registered GET / and /static routes so ours aren't silently shadowed."""
+    """Strip framework routes that would shadow the settings UI."""
     routes = getattr(app, "router", None)
     routes = getattr(routes, "routes", None) if routes else getattr(app, "routes", None)
     if routes is None:
@@ -77,7 +77,8 @@ def _detach_framework_root_routes(app: "FastAPI") -> None:
     survivors = []
     for route in routes:
         path = getattr(route, "path", None)
-        if path in ("/", "/static"):
+        is_catch_all = isinstance(path, str) and path.startswith("/{") and path.endswith(":path}")
+        if path in ("/", "/static") or is_catch_all:
             logger.debug("detaching framework-provided route %r (%s)", path, type(route).__name__)
             continue
         survivors.append(route)
@@ -197,12 +198,12 @@ class LocalStream:
         self._instance_path: Optional[str] = instance_path
         self._settings_initialized = False
         self._asyncio_loop = None
-        self._mic_muted = False  # mic starts live; the UI toggles it via /mic
+        self._mic_muted = False  # mic starts live; the UI toggles it via the settings API
         self._active_backend_name = get_backend_choice()
         self._backend_connection_state = "not_started"
         self._backend_error: str | None = None
         self._backend_retry_delay = BACKEND_RETRY_DELAY_SECONDS
-        # One bus for the stream's lifetime: the /conversation_events route
+        # One bus for the stream's lifetime: the conversation events route
         # closes over it, so handler rebuilds must keep publishing into it.
         self._event_bus = ConversationEventBus()
         self._install_handler(handler)
@@ -335,7 +336,7 @@ class LocalStream:
             self._backend_error = None
 
     def _backend_connection_status(self) -> dict[str, object]:
-        """Return the backend connection state exposed in /status."""
+        """Return the backend connection state exposed in the settings API."""
         connected = self._backend_connected()
         state = "connected" if connected else self._backend_connection_state
         return {
@@ -595,17 +596,18 @@ class LocalStream:
             return
         if self._settings_app is None:
             return
+        settings_app = self._settings_app
 
         static_dir = Path(__file__).parent / "static"
         index_file = static_dir / "index.html"
         logger.info("Serving settings UI from %s", static_dir)
 
         # Framework pre-registers GET / and /static; strip them so our routes aren't shadowed.
-        _detach_framework_root_routes(self._settings_app)
+        _detach_framework_root_routes(settings_app)
 
-        if hasattr(self._settings_app, "mount"):
+        if hasattr(settings_app, "mount"):
             try:
-                self._settings_app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+                settings_app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
             except Exception:
                 pass
 
@@ -657,33 +659,22 @@ class LocalStream:
             }
 
         # GET / -> index.html
-        @self._settings_app.get("/")
+        @settings_app.get("/")
         def _root() -> FileResponse:
             return FileResponse(str(index_file))
 
         # GET /favicon.ico -> optional, avoid noisy 404s on some browsers
-        @self._settings_app.get("/favicon.ico")
+        @settings_app.get("/favicon.ico")
         def _favicon() -> Response:
             return Response(status_code=204)
 
-        # GET /status -> whether key is set
-        @self._settings_app.get("/status")
+        @settings_app.get(f"{SETTINGS_API_PREFIX}/status")
         def _status() -> JSONResponse:
             return JSONResponse(_status_payload())
 
-        # GET /ready -> whether backend finished loading tools
-        @self._settings_app.get("/ready")
-        def _ready() -> JSONResponse:
-            try:
-                mod = sys.modules.get("reachy_mini_conversation_app.tools.core_tools")
-                ready = bool(getattr(mod, "_TOOLS_INITIALIZED", False)) if mod else False
-            except Exception:
-                ready = False
-            return JSONResponse({"ready": ready})
-
         event_bus = self._event_bus
 
-        @self._settings_app.get("/conversation_events")
+        @settings_app.get(f"{SETTINGS_API_PREFIX}/conversation_events")
         async def _conversation_events(request: Request) -> StreamingResponse:
             return StreamingResponse(
                 _conversation_events_stream(event_bus, request),
@@ -698,19 +689,17 @@ class LocalStream:
         class MicPayload(BaseModel):
             muted: bool
 
-        # GET /mic -> current mic mute state
-        @self._settings_app.get("/mic")
+        @settings_app.get(f"{SETTINGS_API_PREFIX}/mic")
         def _mic_state() -> JSONResponse:
             return JSONResponse({"muted": self._mic_muted})
 
-        # POST /mic -> mute/unmute the user's microphone (Reachy Mini keeps speaking)
-        @self._settings_app.post("/mic")
+        @settings_app.post(f"{SETTINGS_API_PREFIX}/mic")
         def _set_mic(payload: MicPayload) -> JSONResponse:
             self._mic_muted = bool(payload.muted)
             logger.info("Microphone %s via web UI", "muted" if self._mic_muted else "unmuted")
             return JSONResponse({"muted": self._mic_muted})
 
-        @self._settings_app.post("/backend_config")
+        @settings_app.post(f"{SETTINGS_API_PREFIX}/backend_config")
         def _set_backend(payload: BackendPayload) -> JSONResponse:
             backend = payload.backend.strip().lower()
             if backend not in {OPENAI_BACKEND, GEMINI_BACKEND, HF_BACKEND}:
@@ -775,6 +764,7 @@ class LocalStream:
                 get_available_voices=self.get_available_voices,
                 get_current_voice=self.get_current_voice,
                 change_voice=self.change_voice,
+                api_prefix=SETTINGS_API_PREFIX,
             )
         except Exception:
             logger.exception("Failed to mount personality routes; the personality UI will be unavailable")

@@ -173,6 +173,22 @@ reachy-mini-conversation-app
 
 The app runs in console mode by default. Add `--ui` to also serve a web UI at http://127.0.0.1:7860/ for picking a personality, controlling the mic, and changing settings. All options are described in the CLI table below.
 
+### Mobile/settings API
+
+When `--ui` is enabled, the web UI and settings-only clients use the versioned API under `/api/v1`. This API controls configuration and UI state only; live conversation audio still runs through the robot/Python media pipeline.
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/v1/status` | Current backend, readiness, and connection state. |
+| `POST /api/v1/backend_config` | Save backend selection and credentials/connection target. |
+| `GET /api/v1/personalities` | List available personalities and current/startup selection. |
+| `GET /api/v1/personalities/load?name=...` | Load editable personality text, tools, and voice. |
+| `POST /api/v1/personalities/save` | Save a user personality. |
+| `POST /api/v1/personalities/apply` | Apply a personality, optionally persisting it for startup. |
+| `GET /api/v1/mic`, `POST /api/v1/mic` | Read or set whether the robot microphone is muted. |
+| `GET /api/v1/voices`, `GET /api/v1/voices/current`, `POST /api/v1/voices/apply` | List, read, or change the selected backend voice. |
+| `GET /api/v1/conversation_events` | Server-sent events for conversation activity state. |
+
 ### CLI options
 
 | Option | Default | Description |

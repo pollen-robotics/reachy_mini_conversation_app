@@ -4,14 +4,14 @@
  * Robot stays live, tapping the orb only mutes or unmutes the user's mic.
  */
 
-import { getMicState, listPersonalities, setMicMuted } from "../api.js";
+import { API_PREFIX, getMicState, listPersonalities, setMicMuted } from "../api.js";
 import { BUILT_IN_DEFAULT_OPTION, ORB_STATES } from "../constants.js";
 import { createOrb, mapActivityToState } from "../orb.js";
 import { consumePendingApply } from "../pending-apply.js";
 import { setPersonality } from "../personality-badge.js";
 import { h, prettifyProfileName } from "../ui.js";
 
-const SSE_ENDPOINT = "/conversation_events";
+const SSE_ENDPOINT = `${API_PREFIX}/conversation_events`;
 
 const CAPTION_BY_STATE = Object.freeze({
   [ORB_STATES.MUTED]: "Muted",
