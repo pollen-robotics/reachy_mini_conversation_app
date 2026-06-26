@@ -27,21 +27,22 @@ if TYPE_CHECKING:
     from reachy_mini_conversation_app.console import LocalStream
 
 
-_STOP_CURRENT_APP_URL = "http://127.0.0.1:8000/api/apps/stop-current-app"
+_STOP_CURRENT_APP_PATH = "/api/apps/stop-current-app"
 _STOP_CURRENT_APP_TIMEOUT_S = 2.0
 
 
-def _request_stop_current_app(logger: logging.Logger) -> bool:
+def _request_stop_current_app(robot: ReachyMini, logger: logging.Logger) -> bool:
     """Request the Reachy Mini daemon to stop the current app."""
-    request = urllib.request.Request(_STOP_CURRENT_APP_URL, method="POST")
+    stop_current_app_url = f"http://{robot.client.host}:{robot.client.port}{_STOP_CURRENT_APP_PATH}"
+    request = urllib.request.Request(stop_current_app_url, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=_STOP_CURRENT_APP_TIMEOUT_S) as response:
             response.read()
     except urllib.error.URLError as e:
-        logger.error("Failed to request current app stop via %s: %s", _STOP_CURRENT_APP_URL, e)
+        logger.error("Failed to request current app stop via %s: %s", stop_current_app_url, e)
         return False
 
-    logger.info("Requested current app stop via %s", _STOP_CURRENT_APP_URL)
+    logger.info("Requested current app stop via %s", stop_current_app_url)
     return True
 
 
@@ -299,7 +300,7 @@ def run(
                 sleep_error = f"{type(e).__name__}: {e}"
                 logger.error("Failed to move Reachy Mini to sleep pose: %s", e)
 
-            stop_current_app_requested = _request_stop_current_app(logger)
+            stop_current_app_requested = _request_stop_current_app(robot, logger)
             local_stop_requested = True
             if app_stop_event is not None:
                 app_stop_event.set()

@@ -43,7 +43,7 @@ def test_inactivity_timeout_thread_closes_stream_manager_without_sleep_callback(
 
 
 def test_request_stop_current_app_posts_to_daemon(monkeypatch) -> None:
-    """The app stop request should call the Reachy daemon stop-current-app endpoint."""
+    """The app stop request should call the connected Reachy daemon endpoint."""
 
     class FakeResponse:
         def __enter__(self) -> "FakeResponse":
@@ -56,11 +56,12 @@ def test_request_stop_current_app_posts_to_daemon(monkeypatch) -> None:
             return b"{}"
 
     def fake_urlopen(request, timeout):
-        assert request.full_url == "http://127.0.0.1:8000/api/apps/stop-current-app"
+        assert request.full_url == "http://192.168.1.42:8000/api/apps/stop-current-app"
         assert request.get_method() == "POST"
         assert timeout == 2.0
         return FakeResponse()
 
     monkeypatch.setattr(main_mod.urllib.request, "urlopen", fake_urlopen)
+    robot = SimpleNamespace(client=SimpleNamespace(host="192.168.1.42", port=8000))
 
-    assert main_mod._request_stop_current_app(MagicMock())
+    assert main_mod._request_stop_current_app(robot, MagicMock())
