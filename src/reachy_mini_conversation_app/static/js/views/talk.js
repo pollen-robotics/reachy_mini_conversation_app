@@ -31,16 +31,11 @@ export async function mountTalkView({ outlet, signal }) {
   let activePersonality = null;
 
   const caption = h("p", { class: "talk__caption" }, CAPTION_BY_STATE[ORB_STATES.CONNECTING]);
-  const defaultAction = h(
-    "button",
-    {
-      type: "button",
-      class: "talk__default-action",
-      hidden: "hidden",
-      onClick: onSetDefault,
-    },
-    "Set as default"
-  );
+  const defaultAction = document.querySelector('[data-component="default-personality-action"]');
+  if (defaultAction) {
+    defaultAction.hidden = true;
+    defaultAction.addEventListener("click", onSetDefault);
+  }
   const orb = createOrb({
     initialState: ORB_STATES.CONNECTING,
     onStateChange: (state) => {
@@ -54,8 +49,7 @@ export async function mountTalkView({ outlet, signal }) {
     "section",
     { class: "view view--talk" },
     h("div", { class: "talk__orb-wrap" }, orb.root),
-    caption,
-    defaultAction
+    caption
   );
   outlet.replaceChildren(view);
 
@@ -119,6 +113,10 @@ export async function mountTalkView({ outlet, signal }) {
   signal.addEventListener("abort", () => {
     subscription.close();
     orb.dispose();
+    if (defaultAction) {
+      defaultAction.hidden = true;
+      defaultAction.removeEventListener("click", onSetDefault);
+    }
   });
 
   function restingState() {
@@ -151,12 +149,14 @@ export async function mountTalkView({ outlet, signal }) {
     if (signal.aborted || personalityState == null) return;
     activePersonality = personalityState.current;
     setPersonality(personalityState.badgeName);
-    defaultAction.hidden =
-      personalityState.locked || personalityState.current === personalityState.startup;
+    if (defaultAction) {
+      defaultAction.hidden =
+        personalityState.locked || personalityState.current === personalityState.startup;
+    }
   }
 
   async function onSetDefault() {
-    if (!activePersonality) return;
+    if (!defaultAction || !activePersonality) return;
     defaultAction.disabled = true;
     caption.textContent = `Saving "${displayPersonalityName(activePersonality)}" as default...`;
     try {

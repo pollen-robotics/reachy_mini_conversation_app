@@ -43,22 +43,31 @@
         </svg>
       </button>
     </header>
-    <button
-      type="button"
-      class="app-shell__personality"
-      data-component="personality-badge"
-      data-action="open-personalities"
-      aria-label="Change personality"
-      hidden
-    >
-      <span class="app-shell__personality-avatar" aria-hidden="true">
-        <img src="/static/avatars/default.svg" alt="" draggable="false" />
-      </span>
-      <span class="app-shell__personality-text">
-        <span class="app-shell__personality-label">Personality</span>
-        <span class="app-shell__personality-name" aria-live="polite"></span>
-      </span>
-    </button>
+    <div class="app-shell__personality-row" data-component="personality-row" hidden>
+      <button
+        type="button"
+        class="app-shell__personality"
+        data-component="personality-badge"
+        data-action="open-personalities"
+        aria-label="Change personality"
+      >
+        <span class="app-shell__personality-avatar" aria-hidden="true">
+          <img src="/static/avatars/default.svg" alt="" draggable="false" />
+        </span>
+        <span class="app-shell__personality-text">
+          <span class="app-shell__personality-label">Personality</span>
+          <span class="app-shell__personality-name" aria-live="polite"></span>
+        </span>
+      </button>
+      <button
+        type="button"
+        class="app-shell__default-personality"
+        data-component="default-personality-action"
+        hidden
+      >
+        Set as default
+      </button>
+    </div>
     <main id="view-outlet" class="app-shell__outlet" role="main"></main>
   </body>
 </html>
