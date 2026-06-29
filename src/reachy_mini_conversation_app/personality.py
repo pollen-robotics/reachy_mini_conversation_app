@@ -115,6 +115,24 @@ def available_tools_for(selected: str) -> List[str]:
     return sorted(set(shared + local))
 
 
+def delete_personality(name: str) -> bool:
+    """Delete a user-created personality directory; return whether it existed.
+
+    Refuses anything outside the user personalities root, so built-in profiles
+    can never be removed through the UI.
+    """
+    import shutil
+
+    target = resolve_profile_dir(name).resolve()
+    user_root = config.user_personalities_root().resolve()
+    if user_root not in target.parents:
+        return False
+    if target.is_dir():
+        shutil.rmtree(target)
+        return True
+    return False
+
+
 def _write_profile(
     sanitized_name: str,
     instructions: str,

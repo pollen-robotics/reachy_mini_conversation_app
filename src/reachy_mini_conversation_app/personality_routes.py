@@ -25,6 +25,7 @@ from .personality import (
     _write_profile,
     read_tools_for,
     read_greeting_for,
+    delete_personality,
     list_personalities,
     available_tools_for,
     resolve_profile_dir,
@@ -165,6 +166,12 @@ def mount_personality_routes(
             return {"ok": True, "value": value, "choices": choices}
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
+
+    @app.delete("/personalities")
+    def _delete(name: str) -> dict:  # type: ignore
+        """Delete a user-created personality (name is the full selection string)."""
+        deleted = delete_personality(name)
+        return {"ok": deleted, "choices": [DEFAULT_OPTION, *list_personalities()]}
 
     @app.post("/personalities/apply")
     async def _apply(payload: ApplyPayload) -> dict:  # type: ignore

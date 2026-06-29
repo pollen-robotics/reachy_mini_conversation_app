@@ -72,6 +72,8 @@ export const savePersonality = (payload) =>
   request("POST", "/personalities/save", { body: payload });
 export const applyPersonality = (name, { persist = false } = {}) =>
   request("POST", "/personalities/apply", { body: { name, persist } });
+export const deletePersonality = (name) =>
+  request("DELETE", `/personalities?name=${encodeURIComponent(name)}`);
 
 export const getMicState = () => request("GET", "/mic");
 export const setMicMuted = (muted) => request("POST", "/mic", { body: { muted } });

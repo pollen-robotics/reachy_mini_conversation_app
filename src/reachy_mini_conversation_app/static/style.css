@@ -421,6 +421,16 @@ button {
   color: var(--text);
 }
 
+.btn--danger {
+  background: #e5484d;
+  color: #fff;
+  font-weight: 600;
+}
+
+.btn--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, #e5484d 88%, black);
+}
+
 .route-error {
   margin: 32px;
   padding: 16px;
@@ -450,7 +460,8 @@ button {
   width: 100%;
 }
 
-.personality-card__edit {
+.personality-card__edit,
+.personality-card__delete {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -470,8 +481,15 @@ button {
     color var(--transition-fast);
 }
 
+/* Delete sits just left of the edit button. */
+.personality-card__delete {
+  right: 44px;
+}
+
 .personality-card-slot:hover .personality-card__edit,
-.personality-card__edit:focus-visible {
+.personality-card-slot:hover .personality-card__delete,
+.personality-card__edit:focus-visible,
+.personality-card__delete:focus-visible {
   opacity: 1;
 }
 
@@ -480,7 +498,13 @@ button {
   color: var(--text);
 }
 
-.personality-card__edit svg {
+.personality-card__delete:hover {
+  background: color-mix(in srgb, #e5484d 16%, var(--bg-elev));
+  color: #e5484d;
+}
+
+.personality-card__edit svg,
+.personality-card__delete svg {
   width: 15px;
   height: 15px;
 }
@@ -835,6 +859,11 @@ button {
 @keyframes modal-pop-in {
   from { transform: translateY(8px) scale(0.98); opacity: 0; }
   to   { transform: translateY(0)   scale(1);    opacity: 1; }
+}
+
+/* Confirmation dialog: a compact modal that replaces window.confirm. */
+.modal--confirm {
+  width: min(420px, 100%);
 }
 
 .modal__title {
