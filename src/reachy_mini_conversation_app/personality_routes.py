@@ -62,8 +62,8 @@ def mount_personality_routes(
     """Register personality management endpoints on a FastAPI app."""
     from fastapi.responses import JSONResponse
 
-    def _startup_choice() -> Any:
-        """Return the persisted startup personality or default."""
+    def _configured_startup_choice() -> Any:
+        """Return the startup personality configured when routes mount."""
         try:
             if get_persisted_personality is not None:
                 stored = get_persisted_personality()
@@ -75,6 +75,23 @@ def mount_personality_routes(
         except Exception:
             pass
         return DEFAULT_OPTION
+
+    startup_choice = _configured_startup_choice()
+
+    def _startup_choice() -> Any:
+        """Return the persisted startup personality or default."""
+        try:
+            if get_persisted_personality is not None:
+                stored = get_persisted_personality()
+                if stored:
+                    return stored
+        except Exception:
+            pass
+        return startup_choice
+
+    def _set_startup_choice(selected_name: str) -> None:
+        nonlocal startup_choice
+        startup_choice = DEFAULT_OPTION if selected_name == DEFAULT_OPTION else selected_name
 
     def _current_choice() -> str:
         try:
@@ -182,6 +199,7 @@ def mount_personality_routes(
                 try:
                     voice_override = _voice_override()
                     persist_personality(None if selected_name == DEFAULT_OPTION else selected_name, voice_override)
+                    _set_startup_choice(selected_name)
                     persisted_choice = _startup_choice()
                 except Exception as e:
                     logger.warning("Failed to persist startup personality: %s", e)
@@ -210,6 +228,7 @@ def mount_personality_routes(
             if persist and persist_personality is not None:
                 try:
                     persist_personality(None if selected_name == DEFAULT_OPTION else selected_name, voice_override)
+                    _set_startup_choice(selected_name)
                     persisted_choice = _startup_choice()
                 except Exception as e:
                     logger.warning("Failed to persist startup personality: %s", e)
