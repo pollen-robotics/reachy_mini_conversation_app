@@ -12,6 +12,7 @@ import { setPersonality } from "../personality-badge.js";
 import { h, prettifyProfileName } from "../ui.js";
 
 const SSE_ENDPOINT = "/conversation_events";
+const DEBUG_PREFIX = "[default-personality]";
 
 const CAPTION_BY_STATE = Object.freeze({
   [ORB_STATES.MUTED]: "Muted",
@@ -36,6 +37,7 @@ export async function mountTalkView({ outlet, signal }) {
     defaultAction.hidden = true;
     defaultAction.addEventListener("click", onSetDefault);
   }
+  logDefaultAction("mount", { hasDefaultAction: Boolean(defaultAction) });
   const orb = createOrb({
     initialState: ORB_STATES.CONNECTING,
     onStateChange: (state) => {
@@ -146,31 +148,67 @@ export async function mountTalkView({ outlet, signal }) {
 
   async function refreshPersonalityState() {
     const personalityState = await fetchPersonalityState();
-    if (signal.aborted || personalityState == null) return;
+    if (signal.aborted) {
+      logDefaultAction("refresh skipped", { reason: "signal_aborted" });
+      return;
+    }
+    if (personalityState == null) {
+      logDefaultAction("refresh skipped", { reason: "personality_state_unavailable" });
+      return;
+    }
     activePersonality = personalityState.current;
     setPersonality(personalityState.badgeName);
+    const shouldHide = personalityState.locked || personalityState.current === personalityState.startup;
     if (defaultAction) {
-      defaultAction.hidden =
-        personalityState.locked || personalityState.current === personalityState.startup;
+      defaultAction.hidden = shouldHide;
     }
+    logDefaultAction("refresh", {
+      current: personalityState.current,
+      startup: personalityState.startup,
+      locked: personalityState.locked,
+      shouldHide,
+      shouldShow: !shouldHide,
+    });
   }
 
   async function onSetDefault() {
-    if (!defaultAction || !activePersonality) return;
+    if (!defaultAction || !activePersonality) {
+      logDefaultAction("set default skipped", {
+        hasDefaultAction: Boolean(defaultAction),
+        activePersonality,
+      });
+      return;
+    }
     defaultAction.disabled = true;
+    logDefaultAction("set default requested", { activePersonality });
     caption.textContent = `Saving "${displayPersonalityName(activePersonality)}" as default...`;
     try {
       await applyPersonality(activePersonality, { persist: true });
       if (signal.aborted) return;
       defaultAction.hidden = true;
       caption.textContent = `"${displayPersonalityName(activePersonality)}" will be used at startup.`;
+      logDefaultAction("set default saved", { activePersonality });
     } catch (error) {
       if (!signal.aborted) {
         caption.textContent = `Failed to save default: ${error?.message || error}`;
       }
+      logDefaultAction("set default failed", { error: error?.message || String(error) });
     } finally {
       defaultAction.disabled = false;
     }
+  }
+
+  function logDefaultAction(event, details = {}) {
+    const row = defaultAction?.closest('[data-component="personality-row"]');
+    console.info(DEBUG_PREFIX, event, JSON.stringify({
+      route: window.location.hash || "#/",
+      hasDefaultAction: Boolean(defaultAction),
+      defaultActionHidden: defaultAction?.hidden,
+      defaultActionDisabled: defaultAction?.disabled,
+      hasPersonalityRow: Boolean(row),
+      personalityRowHidden: row?.hidden,
+      ...details,
+    }));
   }
 
   function syncMicAria() {
@@ -194,7 +232,8 @@ async function fetchPersonalityState() {
       locked: Boolean(data?.locked),
       badgeName: current === BUILT_IN_DEFAULT_OPTION ? "default" : current,
     };
-  } catch {
+  } catch (error) {
+    console.info(DEBUG_PREFIX, "list personalities failed", JSON.stringify({ error: error?.message || String(error) }));
     return null;
   }
 }
