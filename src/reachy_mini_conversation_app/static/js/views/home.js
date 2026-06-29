@@ -58,7 +58,6 @@ export async function mountHomeView({ outlet, signal, navigate }) {
   const choices = (personalities?.choices || []).filter((name) => name !== BUILT_IN_DEFAULT_OPTION);
   const current = personalities?.current;
   const lockedTo = personalities?.locked ? personalities.locked_to : null;
-  let startupChoice = personalities?.startup || BUILT_IN_DEFAULT_OPTION;
 
   renderGrid();
   if (lockedTo) {
@@ -77,10 +76,8 @@ export async function mountHomeView({ outlet, signal, navigate }) {
           name,
           isActive,
           disabled,
-          showDefaultAction: isActive && !disabled && name !== startupChoice,
           onSelect: () => handleSelection(name),
           onEdit: editable ? () => handleEditClick(name) : null,
-          onSetDefault: () => handleSetDefault(name),
         })
       );
     }
@@ -101,22 +98,6 @@ export async function mountHomeView({ outlet, signal, navigate }) {
     // the orb in CONNECTING immediately instead of waiting on home.
     setPendingApply({ name, promise: applyPersonality(name, { persist: false }) });
     navigate(ROUTES.TALK);
-  }
-
-  async function handleSetDefault(name) {
-    status.classList.remove("is-warning", "is-error");
-    status.textContent = `Saving "${prettifyProfileName(name)}" as default…`;
-    try {
-      const result = await applyPersonality(name, { persist: true });
-      if (signal.aborted) return;
-      startupChoice = result?.startup || name;
-      renderGrid();
-      status.textContent = `"${prettifyProfileName(name)}" will be used at startup.`;
-    } catch (error) {
-      if (signal.aborted) return;
-      status.textContent = `Failed to save default: ${describeError(error)}`;
-      status.classList.add("is-error");
-    }
   }
 
   async function handleCustomClick() {
@@ -218,7 +199,7 @@ export async function mountHomeView({ outlet, signal, navigate }) {
   }
 }
 
-function buildPersonalityCard({ name, isActive, disabled, showDefaultAction, onSelect, onEdit, onSetDefault }) {
+function buildPersonalityCard({ name, isActive, disabled, onSelect, onEdit }) {
   const hasAvatar = Object.prototype.hasOwnProperty.call(AVATAR_BY_PROFILE, stripUserPrefix(name));
   const card = h(
     "button",
@@ -248,10 +229,9 @@ function buildPersonalityCard({ name, isActive, disabled, showDefaultAction, onS
   // Wrap so the edit button is a sibling, not a nested <button> inside the card button.
   return h(
     "div",
-    { class: ["personality-card-slot", showDefaultAction && "has-default-action"], role: "listitem" },
+    { class: "personality-card-slot", role: "listitem" },
     card,
-    onEdit ? buildEditButton({ name, onEdit }) : null,
-    showDefaultAction ? buildSetDefaultButton({ name, onSetDefault }) : null
+    onEdit ? buildEditButton({ name, onEdit }) : null
   );
 }
 
@@ -268,19 +248,6 @@ function buildEditButton({ name, onEdit }) {
         <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
       </svg>`,
   });
-}
-
-function buildSetDefaultButton({ name, onSetDefault }) {
-  return h(
-    "button",
-    {
-      type: "button",
-      class: "personality-card__default",
-      "aria-label": `Use ${prettifyProfileName(name)} at startup`,
-      onClick: onSetDefault,
-    },
-    "Set as default"
-  );
 }
 
 function checkBadge() {
