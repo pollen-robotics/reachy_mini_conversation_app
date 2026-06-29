@@ -450,6 +450,10 @@ button {
   width: 100%;
 }
 
+.personality-card-slot.has-default-action .personality-card {
+  padding-bottom: 62px;
+}
+
 .personality-card__edit {
   position: absolute;
   top: 8px;
@@ -483,6 +487,36 @@ button {
 .personality-card__edit svg {
   width: 15px;
   height: 15px;
+}
+
+.personality-card__default {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  left: 14px;
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-elev));
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.2;
+  transition: background var(--transition-fast), border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.personality-card__default:hover {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #17130c;
+}
+
+.personality-card__default:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .personality-card {

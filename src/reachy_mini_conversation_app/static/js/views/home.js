@@ -58,26 +58,33 @@ export async function mountHomeView({ outlet, signal, navigate }) {
   const choices = (personalities?.choices || []).filter((name) => name !== BUILT_IN_DEFAULT_OPTION);
   const current = personalities?.current;
   const lockedTo = personalities?.locked ? personalities.locked_to : null;
+  let startupChoice = personalities?.startup || BUILT_IN_DEFAULT_OPTION;
 
-  grid.replaceChildren();
-  for (const name of choices) {
-    const disabled = Boolean(lockedTo) && name !== lockedTo;
-    const editable = name.startsWith("user_personalities/") && !disabled;
-    grid.appendChild(
-      buildPersonalityCard({
-        name,
-        isActive: name === current,
-        disabled,
-        onSelect: () => handleSelection(name),
-        onEdit: editable ? () => handleEditClick(name) : null,
-      })
-    );
-  }
-  grid.appendChild(buildCustomCard({ onClick: handleCustomClick }));
-
+  renderGrid();
   if (lockedTo) {
     status.textContent = `Profile locked to "${lockedTo}" by REACHY_MINI_LOCKED_PROFILE; switching is disabled.`;
     status.classList.add("is-warning");
+  }
+
+  function renderGrid() {
+    grid.replaceChildren();
+    for (const name of choices) {
+      const disabled = Boolean(lockedTo) && name !== lockedTo;
+      const isActive = name === current;
+      const editable = name.startsWith("user_personalities/") && !disabled;
+      grid.appendChild(
+        buildPersonalityCard({
+          name,
+          isActive,
+          disabled,
+          showDefaultAction: isActive && !disabled && name !== startupChoice,
+          onSelect: () => handleSelection(name),
+          onEdit: editable ? () => handleEditClick(name) : null,
+          onSetDefault: () => handleSetDefault(name),
+        })
+      );
+    }
+    grid.appendChild(buildCustomCard({ onClick: handleCustomClick }));
   }
 
   function handleSelection(name) {
@@ -94,6 +101,22 @@ export async function mountHomeView({ outlet, signal, navigate }) {
     // the orb in CONNECTING immediately instead of waiting on home.
     setPendingApply({ name, promise: applyPersonality(name, { persist: false }) });
     navigate(ROUTES.TALK);
+  }
+
+  async function handleSetDefault(name) {
+    status.classList.remove("is-warning", "is-error");
+    status.textContent = `Saving "${prettifyProfileName(name)}" as default…`;
+    try {
+      const result = await applyPersonality(name, { persist: true });
+      if (signal.aborted) return;
+      startupChoice = result?.startup || name;
+      renderGrid();
+      status.textContent = `"${prettifyProfileName(name)}" will be used at startup.`;
+    } catch (error) {
+      if (signal.aborted) return;
+      status.textContent = `Failed to save default: ${describeError(error)}`;
+      status.classList.add("is-error");
+    }
   }
 
   async function handleCustomClick() {
@@ -195,7 +218,7 @@ export async function mountHomeView({ outlet, signal, navigate }) {
   }
 }
 
-function buildPersonalityCard({ name, isActive, disabled, onSelect, onEdit }) {
+function buildPersonalityCard({ name, isActive, disabled, showDefaultAction, onSelect, onEdit, onSetDefault }) {
   const hasAvatar = Object.prototype.hasOwnProperty.call(AVATAR_BY_PROFILE, stripUserPrefix(name));
   const card = h(
     "button",
@@ -225,9 +248,10 @@ function buildPersonalityCard({ name, isActive, disabled, onSelect, onEdit }) {
   // Wrap so the edit button is a sibling, not a nested <button> inside the card button.
   return h(
     "div",
-    { class: "personality-card-slot", role: "listitem" },
+    { class: ["personality-card-slot", showDefaultAction && "has-default-action"], role: "listitem" },
     card,
-    onEdit ? buildEditButton({ name, onEdit }) : null
+    onEdit ? buildEditButton({ name, onEdit }) : null,
+    showDefaultAction ? buildSetDefaultButton({ name, onSetDefault }) : null
   );
 }
 
@@ -244,6 +268,19 @@ function buildEditButton({ name, onEdit }) {
         <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
       </svg>`,
   });
+}
+
+function buildSetDefaultButton({ name, onSetDefault }) {
+  return h(
+    "button",
+    {
+      type: "button",
+      class: "personality-card__default",
+      "aria-label": `Use ${prettifyProfileName(name)} at startup`,
+      onClick: onSetDefault,
+    },
+    "Set as default"
+  );
 }
 
 function checkBadge() {
