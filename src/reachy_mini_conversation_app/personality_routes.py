@@ -25,6 +25,7 @@ from .personality import (
     _write_profile,
     read_tools_for,
     read_greeting_for,
+    delete_personality,
     list_personalities,
     available_tools_for,
     resolve_profile_dir,
@@ -37,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 class ApplyPayload(BaseModel):
-    """Body of POST /personalities/apply.
+    """Body of the apply-personality endpoint.
 
     Module-level: under postponed annotations, FastAPI can't resolve a
     function-local model and silently treats it as a query param.
@@ -58,9 +59,12 @@ def mount_personality_routes(
     get_available_voices: Callable[[], Awaitable[list[str]]] | None = None,
     get_current_voice: Callable[[], str] | None = None,
     change_voice: Callable[[str], Awaitable[str]] | None = None,
+    api_prefix: str | None = None,
 ) -> None:
     """Register personality management endpoints on a FastAPI app."""
     from fastapi.responses import JSONResponse
+
+    api_prefix = (api_prefix or "").rstrip("/")
 
     def _configured_startup_choice() -> Any:
         """Return the startup personality configured when routes mount."""
@@ -72,8 +76,8 @@ def mount_personality_routes(
             env_val = getattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
             if env_val:
                 return env_val
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to read configured startup personality: %s", e)
         return DEFAULT_OPTION
 
     startup_choice = _configured_startup_choice()
@@ -85,8 +89,8 @@ def mount_personality_routes(
                 stored = get_persisted_personality()
                 if stored:
                     return stored
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to read persisted startup personality: %s", e)
         return startup_choice
 
     def _set_startup_choice(selected_name: str) -> None:
@@ -104,7 +108,7 @@ def mount_personality_routes(
         current_voice_callback = get_current_voice or getattr(handler, "get_current_voice", None)
         return current_voice_callback() if callable(current_voice_callback) else None
 
-    @app.get("/personalities")
+    @app.get(f"{api_prefix}/personalities")
     def _list() -> dict:  # type: ignore
         choices = [DEFAULT_OPTION, *list_personalities()]
         return {
@@ -115,7 +119,7 @@ def mount_personality_routes(
             "locked_to": LOCKED_PROFILE,
         }
 
-    @app.get("/personalities/load")
+    @app.get(f"{api_prefix}/personalities/load")
     def _load(name: str) -> dict:  # type: ignore
         instr = read_instructions_for(name)
         tools_txt = read_tools_for(name)
@@ -141,7 +145,7 @@ def mount_personality_routes(
             "enabled_tools": enabled,
         }
 
-    @app.post("/personalities/save")
+    @app.post(f"{api_prefix}/personalities/save")
     async def _save(request: Request) -> dict:  # type: ignore
         # Accept raw JSON only to avoid validation-related 422s
         try:
@@ -183,7 +187,25 @@ def mount_personality_routes(
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
 
-    @app.post("/personalities/apply")
+    @app.delete(f"{api_prefix}/personalities")
+    def _delete(name: str) -> dict:  # type: ignore
+        """Delete a user-created personality (name is the full selection string)."""
+        if name in (_current_choice(), _startup_choice()):
+            # Deleting the active/startup profile would break get_session_instructions() at next startup.
+            return JSONResponse(
+                {"ok": False, "error": "profile_in_use", "choices": [DEFAULT_OPTION, *list_personalities()]},
+                status_code=409,
+            )  # type: ignore
+        deleted = delete_personality(name)
+        if not deleted:
+            # Built-in profile, outside the user root, or already gone; nothing was removed.
+            return JSONResponse(
+                {"ok": False, "error": "not_deletable", "choices": [DEFAULT_OPTION, *list_personalities()]},
+                status_code=404,
+            )  # type: ignore
+        return {"ok": True, "choices": [DEFAULT_OPTION, *list_personalities()]}
+
+    @app.post(f"{api_prefix}/personalities/apply")
     async def _apply(payload: ApplyPayload) -> dict:  # type: ignore
         if LOCKED_PROFILE is not None:
             return JSONResponse(
@@ -236,7 +258,7 @@ def mount_personality_routes(
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
 
-    @app.get("/voices")
+    @app.get(f"{api_prefix}/voices")
     async def _voices() -> list[str]:
         loop = get_loop()
         if loop is None:
@@ -256,7 +278,7 @@ def mount_personality_routes(
         except Exception:
             return get_available_voices_for_backend()
 
-    @app.get("/voices/current")
+    @app.get(f"{api_prefix}/voices/current")
     def _current_voice() -> dict[str, str]:
         try:
             if get_current_voice is not None:
@@ -265,7 +287,7 @@ def mount_personality_routes(
         except Exception:
             return {"voice": get_default_voice_for_backend()}
 
-    @app.post("/voices/apply")
+    @app.post(f"{api_prefix}/voices/apply")
     async def _apply_voice(request: Request, voice: str | None = Query(None)) -> dict:  # type: ignore
         voice = str(voice or "")
         if not voice:

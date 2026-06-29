@@ -1,6 +1,7 @@
 /** HTTP client for all calls to the settings backend. */
 
 const DEFAULT_TIMEOUT_MS = 8000;
+export const API_PREFIX = "/api/v1";
 
 class HttpError extends Error {
   constructor(status, body, message) {
@@ -60,26 +61,28 @@ export async function untilReady(requestFn, signal, onRetry) {
   }
 }
 
-export const getStatus = () => request("GET", "/status");
+export const getStatus = () => request("GET", `${API_PREFIX}/status`);
 
 export const saveBackendConfig = (payload) =>
-  request("POST", "/backend_config", { body: payload });
+  request("POST", `${API_PREFIX}/backend_config`, { body: payload });
 
-export const listPersonalities = () => request("GET", "/personalities");
+export const listPersonalities = () => request("GET", `${API_PREFIX}/personalities`);
 export const loadPersonality = (name) =>
-  request("GET", `/personalities/load?name=${encodeURIComponent(name)}`);
+  request("GET", `${API_PREFIX}/personalities/load?name=${encodeURIComponent(name)}`);
 export const savePersonality = (payload) =>
-  request("POST", "/personalities/save", { body: payload });
+  request("POST", `${API_PREFIX}/personalities/save`, { body: payload });
 export const applyPersonality = (name, { persist = false } = {}) =>
-  request("POST", "/personalities/apply", { body: { name, persist } });
+  request("POST", `${API_PREFIX}/personalities/apply`, { body: { name, persist } });
+export const deletePersonality = (name) =>
+  request("DELETE", `${API_PREFIX}/personalities?name=${encodeURIComponent(name)}`);
 
-export const getMicState = () => request("GET", "/mic");
-export const setMicMuted = (muted) => request("POST", "/mic", { body: { muted } });
+export const getMicState = () => request("GET", `${API_PREFIX}/mic`);
+export const setMicMuted = (muted) => request("POST", `${API_PREFIX}/mic`, { body: { muted } });
 
-export const listVoices = () => request("GET", "/voices");
-export const getCurrentVoice = () => request("GET", "/voices/current");
+export const listVoices = () => request("GET", `${API_PREFIX}/voices`);
+export const getCurrentVoice = () => request("GET", `${API_PREFIX}/voices/current`);
 export const applyVoice = (voice) =>
-  request("POST", "/voices/apply", { body: { voice } });
+  request("POST", `${API_PREFIX}/voices/apply`, { body: { voice } });
 
 /** Backend error codes that need friendlier copy than the raw code. */
 const ERROR_MESSAGES = Object.freeze({
@@ -93,6 +96,8 @@ const ERROR_MESSAGES = Object.freeze({
   invalid_name: "Enter a valid profile name.",
   missing_voice: "Choose a voice first.",
   profile_locked: "Profile switching is locked by the administrator.",
+  profile_in_use: "This personality is active or set to load at startup. Switch to another one first.",
+  not_deletable: "This personality can't be deleted.",
   loop_unavailable: "Reachy is still starting up. Try again in a moment.",
 });
 

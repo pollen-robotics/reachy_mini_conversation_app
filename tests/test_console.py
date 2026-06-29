@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from reachy_mini_conversation_app.config import GEMINI_AVAILABLE_VOICES, config
@@ -82,23 +82,67 @@ def test_clear_audio_queue_drains_queue_in_place() -> None:
 
 
 def test_mic_endpoints_report_and_toggle_mute_state() -> None:
-    """The mic starts live; /mic exposes and flips the pause state."""
+    """The mic starts live; the settings API exposes and flips the pause state."""
     app = FastAPI()
     robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
     stream = LocalStream(MagicMock(), robot, settings_app=app)
     stream._init_settings_ui_if_needed()
     client = TestClient(app)
 
-    assert client.get("/mic").json() == {"muted": False}
+    assert client.get("/api/v1/mic").json() == {"muted": False}
 
-    assert client.post("/mic", json={"muted": True}).json() == {"muted": True}
+    assert client.post("/api/v1/mic", json={"muted": True}).json() == {"muted": True}
     assert stream._mic_muted is True
 
-    assert client.post("/mic", json={"muted": False}).json() == {"muted": False}
+    assert client.post("/api/v1/mic", json={"muted": False}).json() == {"muted": False}
     assert stream._mic_muted is False
 
     # headless streams keep the mic live
     assert LocalStream(MagicMock(), robot)._mic_muted is False
+
+
+def test_settings_api_uses_versioned_routes_only() -> None:
+    """Settings clients should use the versioned API paths."""
+    app = FastAPI()
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(MagicMock(), robot, settings_app=app)
+    stream._init_settings_ui_if_needed()
+    client = TestClient(app)
+
+    assert client.get("/api/v1/mic").json() == {"muted": False}
+
+    response = client.post("/api/v1/mic", json={"muted": True})
+
+    assert response.status_code == 200
+    assert response.json() == {"muted": True}
+    assert stream._mic_muted is True
+    assert client.get("/api/v1/status").json()["backend_provider"]
+    assert client.get("/api/v1/ready").status_code == 404
+    assert client.get("/status").status_code == 404
+    assert client.get("/ready").status_code == 404
+    assert client.post("/backend_config", json={"backend": "openai"}).status_code == 404
+    assert client.get("/mic").status_code == 404
+    assert client.post("/mic", json={"muted": False}).status_code == 404
+    assert client.get("/conversation_events").status_code == 404
+
+
+def test_settings_ui_detaches_framework_catch_all_before_api_routes() -> None:
+    """Framework fallback routes should not shadow the settings API."""
+    app = FastAPI()
+
+    @app.get("/{path:path}")
+    def _framework_fallback(path: str) -> None:
+        raise HTTPException(status_code=404)
+
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(MagicMock(), robot, settings_app=app)
+    stream._init_settings_ui_if_needed()
+    client = TestClient(app)
+
+    assert client.get("/").status_code == 200
+    assert client.get("/static/js/api.js").status_code == 200
+    assert client.get("/api/v1/mic").status_code == 200
+    assert client.get("/api/v1/personalities").status_code == 200
 
 
 @pytest.mark.asyncio
@@ -146,7 +190,7 @@ def test_backend_config_persists_gemini_selection_and_status(
     client = TestClient(app)
 
     response = client.post(
-        "/backend_config",
+        "/api/v1/backend_config",
         json={"backend": "gemini", "api_key": "gem-test-token"},
     )
 
@@ -162,7 +206,7 @@ def test_backend_config_persists_gemini_selection_and_status(
     assert data["can_proceed_with_gemini"] is True
     assert data["requires_restart"] is True
 
-    status = client.get("/status")
+    status = client.get("/api/v1/status")
     assert status.status_code == 200
     status_data = status.json()
     assert status_data["backend_provider"] == "gemini"
@@ -206,7 +250,7 @@ def test_backend_config_requests_in_process_restart_with_handler_factory(
     stream._init_settings_ui_if_needed()
 
     response = TestClient(app).post(
-        "/backend_config",
+        "/api/v1/backend_config",
         json={"backend": "gemini", "api_key": "gem-test-token"},
     )
 
@@ -243,7 +287,7 @@ def test_backend_config_preserves_explicit_model_override_when_saving_key(
 
     client = TestClient(app)
     response = client.post(
-        "/backend_config",
+        "/api/v1/backend_config",
         json={"backend": "openai", "api_key": "openai-test-key"},
     )
 
@@ -285,7 +329,7 @@ def test_backend_config_persists_local_hf_selection_and_status(
 
     client = TestClient(app)
     response = client.post(
-        "/backend_config",
+        "/api/v1/backend_config",
         json={
             "backend": "huggingface",
             "hf_mode": "local",
@@ -345,7 +389,7 @@ def test_backend_config_persists_deployed_mode_without_clearing_local_hf_ws_url(
 
     client = TestClient(app)
     response = client.post(
-        "/backend_config",
+        "/api/v1/backend_config",
         json={
             "backend": "huggingface",
             "hf_mode": "deployed",
@@ -396,7 +440,7 @@ def test_backend_config_switches_to_saved_local_hf_connection_without_payload_ta
 
     client = TestClient(app)
     response = client.post(
-        "/backend_config",
+        "/api/v1/backend_config",
         json={"backend": "huggingface"},
     )
 
@@ -431,7 +475,7 @@ def test_backend_config_rejects_invalid_hf_port_zero(
 
     client = TestClient(app)
     response = client.post(
-        "/backend_config",
+        "/api/v1/backend_config",
         json={
             "backend": "huggingface",
             "hf_mode": "local",
@@ -460,7 +504,7 @@ def test_status_reports_direct_hf_ws_url_as_ready(
     stream._init_settings_ui_if_needed()
 
     client = TestClient(app)
-    response = client.get("/status")
+    response = client.get("/api/v1/status")
 
     assert response.status_code == 200
     data = response.json()
@@ -491,7 +535,7 @@ def test_status_reports_backend_connection_failure(
     stream._init_settings_ui_if_needed()
 
     client = TestClient(app)
-    response = client.get("/status")
+    response = client.get("/api/v1/status")
 
     assert response.status_code == 200
     data = response.json()
@@ -543,7 +587,7 @@ def test_backend_startup_failure_is_recorded_without_raising(
 
     handler.start_up.assert_awaited_once()
     client = TestClient(app)
-    response = client.get("/status")
+    response = client.get("/api/v1/status")
 
     assert response.status_code == 200
     data = response.json()
@@ -645,6 +689,31 @@ def test_personality_routes_return_gemini_voices_when_backend_selected(
     assert response.json() == GEMINI_AVAILABLE_VOICES
 
 
+def test_personality_routes_mount_versioned_paths() -> None:
+    """Personality and voice endpoints should use the configured API prefix."""
+    app = FastAPI()
+    handler = MagicMock()
+
+    mount_personality_routes(
+        app,
+        handler,
+        lambda: None,
+        api_prefix="/api/v1",
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/v1/voices")
+    delete_response = client.delete("/api/v1/personalities", params={"name": "mad_scientist_assistant"})
+
+    assert response.status_code == 200
+    assert delete_response.status_code == 404
+    assert delete_response.json()["error"] == "not_deletable"
+    assert client.get("/personalities").status_code == 404
+    assert client.get("/voices").status_code == 404
+    assert client.delete("/personalities", params={"name": "mad_scientist_assistant"}).status_code == 404
+    assert client.post("/voices/apply?voice=cedar").status_code == 404
+
+
 def test_personality_routes_load_builtin_default_tools() -> None:
     """Headless personality UI should expose built-in default tools on initial load."""
     app = FastAPI()
@@ -680,10 +749,10 @@ def test_personality_routes_apply_voice_accepts_query_param() -> None:
     started.wait(timeout=1.0)
 
     try:
-        mount_personality_routes(app, handler, lambda: loop)
+        mount_personality_routes(app, handler, lambda: loop, api_prefix="/api/v1")
 
         client = TestClient(app)
-        response = client.post("/voices/apply?voice=cedar")
+        response = client.post("/api/v1/voices/apply?voice=cedar")
 
         assert response.status_code == 200
         assert response.json() == {"ok": True, "status": "Voice changed to cedar."}
