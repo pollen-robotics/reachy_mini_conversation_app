@@ -703,10 +703,14 @@ def test_personality_routes_mount_versioned_paths() -> None:
 
     client = TestClient(app)
     response = client.get("/api/v1/voices")
+    delete_response = client.delete("/api/v1/personalities", params={"name": "mad_scientist_assistant"})
 
     assert response.status_code == 200
+    assert delete_response.status_code == 404
+    assert delete_response.json()["error"] == "not_deletable"
     assert client.get("/personalities").status_code == 404
     assert client.get("/voices").status_code == 404
+    assert client.delete("/personalities", params={"name": "mad_scientist_assistant"}).status_code == 404
     assert client.post("/voices/apply?voice=cedar").status_code == 404
 
 

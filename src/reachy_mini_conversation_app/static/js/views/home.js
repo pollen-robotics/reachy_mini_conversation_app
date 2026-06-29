@@ -2,6 +2,7 @@
 
 import {
   applyPersonality,
+  deletePersonality,
   describeError,
   listPersonalities,
   loadPersonality,
@@ -16,6 +17,7 @@ import {
 } from "../constants.js";
 import { $, h, prettifyProfileName } from "../ui.js";
 import { openProfileModal } from "../components/profile-modal.js";
+import { confirmDialog } from "../components/confirm-dialog.js";
 import { setPendingApply } from "../pending-apply.js";
 import { setPersonality } from "../personality-badge.js";
 
@@ -70,6 +72,9 @@ export async function mountHomeView({ outlet, signal, navigate }) {
         disabled,
         onSelect: () => handleSelection(name),
         onEdit: editable ? () => handleEditClick(name) : null,
+        // No delete affordance for the active personality: it would keep
+        // running with no card to manage it.
+        onDelete: editable && name !== current ? (slot) => handleDeleteClick(name, slot) : null,
       })
     );
   }
@@ -193,9 +198,31 @@ export async function mountHomeView({ outlet, signal, navigate }) {
       status.textContent = `Saved "${prettifyProfileName(name)}". It will apply next time you select it.`;
     }
   }
+
+  async function handleDeleteClick(name, slot) {
+    const ok = await confirmDialog({
+      title: "Delete personality?",
+      message: `"${prettifyProfileName(name)}" will be permanently removed.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok || signal.aborted) return;
+    status.classList.remove("is-warning", "is-error");
+    try {
+      await deletePersonality(name);
+    } catch (error) {
+      if (signal.aborted) return;
+      status.textContent = `Failed to delete: ${describeError(error)}`;
+      status.classList.add("is-error");
+      return;
+    }
+    if (signal.aborted) return;
+    slot.remove();
+    status.textContent = `Deleted "${prettifyProfileName(name)}".`;
+  }
 }
 
-function buildPersonalityCard({ name, isActive, disabled, onSelect, onEdit }) {
+function buildPersonalityCard({ name, isActive, disabled, onSelect, onEdit, onDelete }) {
   const hasAvatar = Object.prototype.hasOwnProperty.call(AVATAR_BY_PROFILE, stripUserPrefix(name));
   const card = h(
     "button",
@@ -222,13 +249,29 @@ function buildPersonalityCard({ name, isActive, disabled, onSelect, onEdit }) {
     h("span", { class: "personality-card__name" }, prettifyProfileName(name)),
     isActive && checkBadge()
   );
-  // Wrap so the edit button is a sibling, not a nested <button> inside the card button.
-  return h(
-    "div",
-    { class: "personality-card-slot", role: "listitem" },
-    card,
-    onEdit ? buildEditButton({ name, onEdit }) : null
-  );
+  // Wrap so the edit/delete buttons are siblings, not nested <button>s inside the card button.
+  const slot = h("div", { class: "personality-card-slot", role: "listitem" }, card);
+  if (onDelete) slot.appendChild(buildDeleteButton({ name, onDelete: () => onDelete(slot) }));
+  if (onEdit) slot.appendChild(buildEditButton({ name, onEdit }));
+  return slot;
+}
+
+/** Small overlay button to delete a user personality, anchored left of the edit button. */
+function buildDeleteButton({ name, onDelete }) {
+  return h("button", {
+    type: "button",
+    class: "personality-card__delete",
+    "aria-label": `Delete personality ${prettifyProfileName(name)}`,
+    onClick: onDelete,
+    html: `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 6h18"/>
+        <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/>
+        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+        <path d="M10 11v6"/>
+        <path d="M14 11v6"/>
+      </svg>`,
+  });
 }
 
 /** Small overlay button to edit a user personality, anchored to the card corner. */

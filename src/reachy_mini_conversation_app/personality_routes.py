@@ -25,6 +25,7 @@ from .personality import (
     _write_profile,
     read_tools_for,
     read_greeting_for,
+    delete_personality,
     list_personalities,
     available_tools_for,
     resolve_profile_dir,
@@ -168,6 +169,24 @@ def mount_personality_routes(
             return {"ok": True, "value": value, "choices": choices}
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
+
+    @app.delete(f"{api_prefix}/personalities")
+    def _delete(name: str) -> dict:  # type: ignore
+        """Delete a user-created personality (name is the full selection string)."""
+        if name in (_current_choice(), _startup_choice()):
+            # Deleting the active/startup profile would break get_session_instructions() at next startup.
+            return JSONResponse(
+                {"ok": False, "error": "profile_in_use", "choices": [DEFAULT_OPTION, *list_personalities()]},
+                status_code=409,
+            )  # type: ignore
+        deleted = delete_personality(name)
+        if not deleted:
+            # Built-in profile, outside the user root, or already gone; nothing was removed.
+            return JSONResponse(
+                {"ok": False, "error": "not_deletable", "choices": [DEFAULT_OPTION, *list_personalities()]},
+                status_code=404,
+            )  # type: ignore
+        return {"ok": True, "choices": [DEFAULT_OPTION, *list_personalities()]}
 
     @app.post(f"{api_prefix}/personalities/apply")
     async def _apply(payload: ApplyPayload) -> dict:  # type: ignore

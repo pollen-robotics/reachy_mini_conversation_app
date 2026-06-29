@@ -73,6 +73,8 @@ export const savePersonality = (payload) =>
   request("POST", `${API_PREFIX}/personalities/save`, { body: payload });
 export const applyPersonality = (name, { persist = false } = {}) =>
   request("POST", `${API_PREFIX}/personalities/apply`, { body: { name, persist } });
+export const deletePersonality = (name) =>
+  request("DELETE", `${API_PREFIX}/personalities?name=${encodeURIComponent(name)}`);
 
 export const getMicState = () => request("GET", `${API_PREFIX}/mic`);
 export const setMicMuted = (muted) => request("POST", `${API_PREFIX}/mic`, { body: { muted } });
@@ -94,6 +96,8 @@ const ERROR_MESSAGES = Object.freeze({
   invalid_name: "Enter a valid profile name.",
   missing_voice: "Choose a voice first.",
   profile_locked: "Profile switching is locked by the administrator.",
+  profile_in_use: "This personality is active or set to load at startup. Switch to another one first.",
+  not_deletable: "This personality can't be deleted.",
   loop_unavailable: "Reachy is still starting up. Try again in a moment.",
 });
 

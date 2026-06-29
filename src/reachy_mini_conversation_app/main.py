@@ -7,7 +7,9 @@ import asyncio
 import logging
 import argparse
 import threading
-from typing import TYPE_CHECKING, Optional
+import urllib.error
+import urllib.request
+from typing import TYPE_CHECKING, Any, Optional
 from pathlib import Path
 from collections.abc import Callable, Awaitable
 
@@ -25,13 +27,33 @@ if TYPE_CHECKING:
     from reachy_mini_conversation_app.console import LocalStream
 
 
+_STOP_CURRENT_APP_PATH = "/api/apps/stop-current-app"
+_STOP_CURRENT_APP_TIMEOUT_S = 2.0
+
+
+def _request_stop_current_app(robot: ReachyMini, logger: logging.Logger) -> bool:
+    """Request the Reachy Mini daemon to stop the current app."""
+    stop_current_app_url = f"http://{robot.client.host}:{robot.client.port}{_STOP_CURRENT_APP_PATH}"
+    request = urllib.request.Request(stop_current_app_url, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=_STOP_CURRENT_APP_TIMEOUT_S) as response:
+            response.read()
+    except urllib.error.URLError as e:
+        logger.error("Failed to request current app stop via %s: %s", stop_current_app_url, e)
+        return False
+
+    logger.info("Requested current app stop via %s", stop_current_app_url)
+    return True
+
+
 def _start_inactivity_timeout_thread(
     timeout_minutes: float,
     stream_manager: LocalStream,
     logger: logging.Logger,
     app_stop_event: threading.Event | None,
+    go_to_sleep: Callable[[], dict[str, Any]] | None = None,
 ) -> threading.Thread:
-    """Start a daemon that closes the app after `timeout_minutes` without activity."""
+    """Start a daemon that puts the app to sleep after inactivity."""
     timeout_seconds = timeout_minutes * 60.0
 
     def poll_inactivity_timeout() -> None:
@@ -39,11 +61,18 @@ def _start_inactivity_timeout_thread(
         while app_stop_event is None or not app_stop_event.is_set():
             elapsed = stream_manager.seconds_since_activity()
             if elapsed >= timeout_seconds:
-                logger.info("No activity for %.1f minutes; closing conversation app.", elapsed / 60.0)
+                logger.info("No activity for %.1f minutes; going to sleep.", elapsed / 60.0)
                 try:
-                    stream_manager.close()
+                    if go_to_sleep is not None:
+                        go_to_sleep()
+                    else:
+                        stream_manager.close()
                 except Exception as e:
-                    logger.error("Error while closing stream manager after inactivity timeout: %s", e)
+                    logger.error("Error while going to sleep after inactivity timeout: %s", e)
+                    try:
+                        stream_manager.close()
+                    except Exception as close_error:
+                        logger.error("Error while closing stream manager after inactivity timeout: %s", close_error)
                 return
             time.sleep(1.0)
 
@@ -242,6 +271,59 @@ def run(
     if effective_settings_app is not None:
         stream_manager._init_settings_ui_if_needed()
 
+    go_to_sleep_lock = threading.Lock()
+    go_to_sleep_requested = threading.Event()
+
+    def go_to_sleep_and_stop_app() -> dict[str, Any]:
+        """Put Reachy to sleep, then stop the current app."""
+        if not go_to_sleep_lock.acquire(blocking=False):
+            return {"status": "already_requested"}
+
+        try:
+            if go_to_sleep_requested.is_set():
+                return {"status": "already_requested"}
+            go_to_sleep_requested.set()
+
+            logger.info("Going to sleep before stopping conversation app.")
+            sleep_error: str | None = None
+
+            try:
+                robot.disable_wobbling()
+            except Exception as e:
+                logger.debug("Error disabling wobbling before sleep: %s", e)
+
+            movement_manager.stop(reset_to_neutral=False)
+
+            try:
+                robot.goto_sleep()
+            except Exception as e:
+                sleep_error = f"{type(e).__name__}: {e}"
+                logger.error("Failed to move Reachy Mini to sleep pose: %s", e)
+
+            stop_current_app_requested = _request_stop_current_app(robot, logger)
+            local_stop_requested = True
+            if app_stop_event is not None:
+                app_stop_event.set()
+            else:
+                try:
+                    stream_manager.close()
+                except Exception as e:
+                    local_stop_requested = False
+                    logger.error("Error while closing stream manager after go_to_sleep: %s", e)
+
+            result: dict[str, Any] = {
+                "status": "sleeping" if sleep_error is None else "stop_requested",
+                "stop_current_app_requested": stop_current_app_requested,
+                "local_stop_requested": local_stop_requested,
+            }
+            if sleep_error is not None:
+                result["error"] = f"go_to_sleep movement failed: {sleep_error}"
+            return result
+        finally:
+            go_to_sleep_lock.release()
+
+    deps.go_to_sleep = go_to_sleep_and_stop_app
+
     if args.ui and settings_app is None and effective_settings_app is not None:
         import uvicorn
 
@@ -266,7 +348,9 @@ def run(
 
     timeout_minutes = resolve_app_timeout_minutes()
     if timeout_minutes is not None:
-        _start_inactivity_timeout_thread(timeout_minutes, stream_manager, logger, app_stop_event)
+        _start_inactivity_timeout_thread(
+            timeout_minutes, stream_manager, logger, app_stop_event, go_to_sleep_and_stop_app
+        )
 
     def poll_stop_event() -> None:
         """Poll the stop event to allow graceful shutdown."""

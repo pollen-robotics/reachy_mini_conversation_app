@@ -572,16 +572,19 @@ class MovementManager:
         self._thread.start()
         logger.debug("Move worker started")
 
-    def stop(self) -> None:
+    def stop(self, reset_to_neutral: bool = True) -> None:
         """Request the worker thread to stop and wait for it to exit.
 
-        Before stopping, resets the robot to a neutral position.
+        Optionally resets the robot to a neutral position after stopping.
         """
         if self._thread is None or not self._thread.is_alive():
             logger.debug("Move worker not running; stop() ignored")
             return
 
-        logger.info("Stopping movement manager and resetting to neutral position...")
+        if reset_to_neutral:
+            logger.info("Stopping movement manager and resetting to neutral position...")
+        else:
+            logger.info("Stopping movement manager...")
 
         # Clear any queued moves and stop current move
         self.clear_move_queue()
@@ -592,6 +595,9 @@ class MovementManager:
             self._thread.join()
             self._thread = None
         logger.debug("Move worker stopped")
+
+        if not reset_to_neutral:
+            return
 
         # Reset to neutral position using goto_target (same approach as wake_up)
         try:
