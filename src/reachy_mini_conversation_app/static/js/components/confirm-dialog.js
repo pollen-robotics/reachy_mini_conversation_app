@@ -35,8 +35,9 @@ export function confirmDialog({
       resolve(value);
     }
     function onKeydown(event) {
+      // Only handle Escape globally; let the focused button handle Enter/click
+      // natively, so pressing Enter on Cancel cancels rather than confirms.
       if (event.key === "Escape") close(false);
-      else if (event.key === "Enter") close(true);
     }
     overlay.addEventListener("click", (event) => {
       if (event.target === overlay) close(false);

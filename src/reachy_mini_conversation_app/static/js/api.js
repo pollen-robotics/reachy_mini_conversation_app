@@ -95,6 +95,8 @@ const ERROR_MESSAGES = Object.freeze({
   invalid_name: "Enter a valid profile name.",
   missing_voice: "Choose a voice first.",
   profile_locked: "Profile switching is locked by the administrator.",
+  profile_in_use: "This personality is active or set to load at startup. Switch to another one first.",
+  not_deletable: "This personality can't be deleted.",
   loop_unavailable: "Reachy is still starting up. Try again in a moment.",
 });
 

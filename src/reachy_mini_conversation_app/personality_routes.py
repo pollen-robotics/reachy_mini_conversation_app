@@ -170,8 +170,20 @@ def mount_personality_routes(
     @app.delete("/personalities")
     def _delete(name: str) -> dict:  # type: ignore
         """Delete a user-created personality (name is the full selection string)."""
+        if name in (_current_choice(), _startup_choice()):
+            # Deleting the active/startup profile would break get_session_instructions() at next startup.
+            return JSONResponse(
+                {"ok": False, "error": "profile_in_use", "choices": [DEFAULT_OPTION, *list_personalities()]},
+                status_code=409,
+            )  # type: ignore
         deleted = delete_personality(name)
-        return {"ok": deleted, "choices": [DEFAULT_OPTION, *list_personalities()]}
+        if not deleted:
+            # Built-in profile, outside the user root, or already gone — nothing was removed.
+            return JSONResponse(
+                {"ok": False, "error": "not_deletable", "choices": [DEFAULT_OPTION, *list_personalities()]},
+                status_code=404,
+            )  # type: ignore
+        return {"ok": True, "choices": [DEFAULT_OPTION, *list_personalities()]}
 
     @app.post("/personalities/apply")
     async def _apply(payload: ApplyPayload) -> dict:  # type: ignore
