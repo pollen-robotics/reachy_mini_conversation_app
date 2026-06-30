@@ -12,6 +12,7 @@ class StopEmotion(Tool):
 
     name = "stop_emotion"
     description = "Stop the current emotion"
+    needs_response = False
     parameters_schema = {
         "type": "object",
         "properties": {

@@ -16,6 +16,7 @@ class MoveHead(Tool):
 
     name = "move_head"
     description = "Move your head in a given direction: left, right, up, down or front."
+    needs_response = False
     parameters_schema = {
         "type": "object",
         "properties": {

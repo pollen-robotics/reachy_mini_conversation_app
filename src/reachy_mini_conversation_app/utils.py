@@ -1,44 +1,20 @@
 from __future__ import annotations
-import sys
 import logging
 import argparse
 import warnings
-import subprocess
-from typing import TYPE_CHECKING, Optional
-
-from reachy_mini import ReachyMini
-from reachy_mini_conversation_app.camera_worker import CameraWorker
-from reachy_mini_conversation_app.vision.head_tracking import HeadTracker
-
-
-if TYPE_CHECKING:
-    from reachy_mini_conversation_app.vision.local_vision import VisionProcessor
-
-
-class CameraVisionInitializationError(Exception):
-    """Raised when camera or vision setup fails in an expected way."""
+from typing import Optional
 
 
 def parse_args() -> tuple[argparse.Namespace, list]:  # type: ignore
     """Parse command line arguments."""
     parser = argparse.ArgumentParser("Reachy Mini Conversation App")
-    parser.add_argument(
-        "--head-tracker",
-        choices=["yolo", "mediapipe"],
-        default=None,
-        help=(
-            "Optional head-tracking backend: yolo uses a local face detector in a subprocess, "
-            "mediapipe uses reachy_mini in process. Disabled by default."
-        ),
-    )
     parser.add_argument("--no-camera", default=False, action="store_true", help="Disable camera usage")
     parser.add_argument(
-        "--local-vision",
+        "--ui",
         default=False,
         action="store_true",
-        help="Use local vision model instead of the selected realtime backend vision",
+        help="Serve the web UI at http://127.0.0.1:7860/, in addition to console mode",
     )
-    parser.add_argument("--gradio", default=False, action="store_true", help="Open gradio interface")
     parser.add_argument("--debug", default=False, action="store_true", help="Enable debug logging")
     parser.add_argument(
         "--robot-name",
@@ -46,73 +22,31 @@ def parse_args() -> tuple[argparse.Namespace, list]:  # type: ignore
         default=None,
         help="[Optional] Robot name to target. Must match the daemon's --robot-name when connecting to a specific robot, mainly useful for development with multiple robots.",
     )
+    subparsers = parser.add_subparsers(dest="command")
+    tool_spaces_parser = subparsers.add_parser("tool-spaces", help="Manage installed Hugging Face Space tool sources")
+    tool_spaces_subparsers = tool_spaces_parser.add_subparsers(dest="tool_spaces_command", required=True)
+
+    add_parser = tool_spaces_subparsers.add_parser("add", help="Install one public Space tool source by slug")
+    add_parser.add_argument("space_slug", help="Public Hugging Face Space slug in the form owner/space-name")
+    add_parser.add_argument(
+        "--install-only",
+        action="store_true",
+        default=False,
+        help="Install the Space without enabling its tools in any profile.",
+    )
+    add_parser.add_argument(
+        "--profile",
+        dest="profile",
+        default=None,
+        metavar="PROFILE",
+        help="Enable tools in this profile instead of the active profile.",
+    )
+
+    remove_parser = tool_spaces_subparsers.add_parser("remove", help="Remove one installed Space tool source")
+    remove_parser.add_argument("space_slug", help="Installed Hugging Face Space slug in the form owner/space-name")
+
+    tool_spaces_subparsers.add_parser("list", help="List installed Space tool sources")
     return parser.parse_known_args()
-
-
-def initialize_camera_and_vision(
-    args: argparse.Namespace,
-    current_robot: ReachyMini,
-) -> tuple[CameraWorker | None, VisionProcessor | None]:
-    """Initialize camera capture, optional head tracking, and optional local vision."""
-    camera_worker: Optional[CameraWorker] = None
-    head_tracker: HeadTracker | None = None
-    vision_processor: Optional[VisionProcessor] = None
-
-    if not args.no_camera:
-        if args.head_tracker is not None:
-            try:
-                if args.head_tracker == "yolo":
-                    from reachy_mini_conversation_app.vision.head_tracking.yolo_process import (
-                        YoloHeadTrackerProcess,
-                    )
-
-                    head_tracker = YoloHeadTrackerProcess()
-                    logging.getLogger(__name__).info("Using yolo head tracker subprocess")
-                else:
-                    from reachy_mini_conversation_app.vision.head_tracking.mediapipe import (
-                        MediapipeHeadTracker,
-                    )
-
-                    head_tracker = MediapipeHeadTracker()
-                    logging.getLogger(__name__).info("Using mediapipe head tracker in process")
-            except Exception as e:
-                raise CameraVisionInitializationError(
-                    f"Failed to initialize {args.head_tracker} head tracker: {e}",
-                ) from e
-
-        camera_worker = CameraWorker(current_robot, head_tracker)
-
-        if args.local_vision:
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-c",
-                    "from reachy_mini_conversation_app.vision.local_vision import VisionProcessor",
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if result.returncode < 0:
-                raise CameraVisionInitializationError(
-                    "Local vision import crashed on this machine. "
-                    "Run without --local-vision or install compatible dependencies.",
-                )
-            try:
-                from reachy_mini_conversation_app.vision.local_vision import initialize_vision_processor
-
-            except ImportError as e:
-                raise CameraVisionInitializationError(
-                    "To use --local-vision, please install the extra dependencies: pip install '.[local_vision]'",
-                ) from e
-
-            vision_processor = initialize_vision_processor()
-        else:
-            logging.getLogger(__name__).info(
-                "Using the selected realtime backend for vision (default). Use --local-vision for local processing.",
-            )
-
-    return camera_worker, vision_processor
 
 
 def setup_logger(debug: bool) -> logging.Logger:
@@ -132,13 +66,11 @@ def setup_logger(debug: bool) -> logging.Logger:
     # Tame third-party noise (looser in DEBUG)
     if log_level == "DEBUG":
         logging.getLogger("aiortc").setLevel(logging.INFO)
-        logging.getLogger("fastrtc").setLevel(logging.INFO)
         logging.getLogger("aioice").setLevel(logging.INFO)
         logging.getLogger("openai").setLevel(logging.INFO)
         logging.getLogger("websockets").setLevel(logging.INFO)
     else:
         logging.getLogger("aiortc").setLevel(logging.ERROR)
-        logging.getLogger("fastrtc").setLevel(logging.ERROR)
         logging.getLogger("aioice").setLevel(logging.WARNING)
     return logger
 

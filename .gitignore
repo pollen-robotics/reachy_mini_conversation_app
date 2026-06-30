@@ -38,6 +38,9 @@ coverage.xml
 *.swp
 *.swo
 
+# AI tooling
+.claude/
+
 # Security
 *.key
 *.pem
@@ -60,3 +63,8 @@ cache/
 
 # User-created personalities (managed by UI)
 src/reachy_mini_conversation_app/profiles/user_personalities/
+
+# Terminal-mode runtime content
+external_content/installed_tool_spaces.json
+external_content/external_profiles/*
+external_content/external_tools/*

@@ -1,5 +1,4 @@
 import logging
-from typing import Any
 
 import httpx
 from openai import AsyncOpenAI
@@ -27,7 +26,7 @@ from reachy_mini_conversation_app.base_realtime import (
     InputTranscriptChunksByItem,
     to_realtime_tools_config,
 )
-from reachy_mini_conversation_app.tools.core_tools import get_active_tool_specs
+from reachy_mini_conversation_app.tools.core_tools import ToolSpec
 
 
 logger = logging.getLogger(__name__)
@@ -73,17 +72,13 @@ class HuggingFaceRealtimeHandler(BaseRealtimeHandler):
 
     def _get_session_instructions(self) -> str:
         """Return Hugging Face session instructions."""
-        return get_session_instructions()
+        return get_session_instructions(self.instance_path)
 
     def _get_session_voice(self, default: str | None = None) -> str:
         """Return the configured Hugging Face session voice."""
         return get_session_voice(default)
 
-    def _get_active_tool_specs(self) -> list[dict[str, Any]]:
-        """Return active tool specs for the current session dependencies."""
-        return get_active_tool_specs(self.deps)
-
-    def _get_session_config(self, tool_specs: list[dict[str, Any]]) -> RealtimeSessionCreateRequestParam:
+    def _get_session_config(self, tool_specs: list[ToolSpec]) -> RealtimeSessionCreateRequestParam:
         """Return the Hugging Face OpenAI-compatible session config."""
         return RealtimeSessionCreateRequestParam(
             type="realtime",
@@ -93,7 +88,10 @@ class HuggingFaceRealtimeHandler(BaseRealtimeHandler):
                     # The OpenAI SDK type only includes 24 kHz PCM, but the HF
                     # compatible server uses rate=None for native 16 kHz mode.
                     format=_native_rate_audio_pcm(),  # type: ignore[typeddict-item]
-                    transcription=AudioTranscriptionParam(model="gpt-4o-transcribe", language="en"),
+                    transcription=AudioTranscriptionParam(
+                        model="gpt-4o-transcribe",
+                        language=config.REALTIME_TRANSCRIPTION_LANGUAGE,
+                    ),
                     turn_detection=ServerVad(type="server_vad", interrupt_response=True),
                 ),
                 output=RealtimeAudioConfigOutputParam(

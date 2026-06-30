@@ -1,10 +1,11 @@
-import asyncio
+import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 import reachy_mini_conversation_app.base_realtime as base_rt_mod
+import reachy_mini_conversation_app.conversation_handler as conv_mod
 import reachy_mini_conversation_app.huggingface_realtime as hf_mod
 from reachy_mini_conversation_app.config import HF_BACKEND, config, get_default_voice_for_backend
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
@@ -46,9 +47,9 @@ def _make_usage(
 @pytest.mark.asyncio
 async def test_partial_transcription_uses_latest_snapshot(monkeypatch: Any) -> None:
     """Partial transcription snapshots should replace older snapshots for the same item."""
-    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda: "test")
+    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "Aiden")
-    monkeypatch.setattr(hf_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
 
     class FakeEvent:
         def __init__(self, etype: str, **kwargs: Any) -> None:
@@ -139,118 +140,18 @@ async def test_partial_transcription_uses_latest_snapshot(monkeypatch: Any) -> N
 
 
 @pytest.mark.asyncio
-async def test_output_audio_delta_passes_output_sample_rate_to_head_wobbler(monkeypatch: Any) -> None:
-    """Assistant audio deltas should propagate the realtime output sample rate to the head wobbler."""
-    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda: "test")
-    monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "Aiden")
-    monkeypatch.setattr(hf_mod, "get_active_tool_specs", lambda _: [])
-    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
-
-    audio_delta = "AAABAAIAAwA="
-
-    class FakeEvent:
-        def __init__(self, etype: str, **kwargs: Any) -> None:
-            self.type = etype
-            for key, value in kwargs.items():
-                setattr(self, key, value)
-
-    class FakeSession:
-        async def update(self, **_kw: Any) -> None:
-            pass
-
-    class FakeInputAudioBuffer:
-        async def append(self, **_kw: Any) -> None:
-            pass
-
-    class FakeItem:
-        async def create(self, **_kw: Any) -> None:
-            pass
-
-    class FakeConversation:
-        item = FakeItem()
-
-    class FakeResponse:
-        async def create(self, **_kw: Any) -> None:
-            pass
-
-        async def cancel(self, **_kw: Any) -> None:
-            pass
-
-    class FakeConn:
-        session = FakeSession()
-        input_audio_buffer = FakeInputAudioBuffer()
-        conversation = FakeConversation()
-        response = FakeResponse()
-
-        def __init__(self) -> None:
-            self._events = iter(
-                [
-                    FakeEvent("response.created"),
-                    FakeEvent("response.output_audio.delta", delta=audio_delta),
-                    FakeEvent("response.output_audio.done"),
-                ]
-            )
-
-        async def __aenter__(self) -> "FakeConn":
-            return self
-
-        async def __aexit__(self, *_args: Any) -> bool:
-            return False
-
-        async def close(self) -> None:
-            pass
-
-        def __aiter__(self) -> "FakeConn":
-            return self
-
-        async def __anext__(self) -> FakeEvent:
-            try:
-                return next(self._events)
-            except StopIteration:
-                raise StopAsyncIteration
-
-    class FakeRealtime:
-        def connect(self, **_kw: Any) -> FakeConn:
-            return FakeConn()
-
-    class FakeClient:
-        def __init__(self) -> None:
-            self.realtime = FakeRealtime()
-
-    head_wobbler = MagicMock()
-    deps = ToolDependencies(
-        reachy_mini=MagicMock(),
-        movement_manager=MagicMock(),
-        head_wobbler=head_wobbler,
-    )
-    handler = HuggingFaceRealtimeHandler(deps, gradio_mode=True)
-    handler.client = FakeClient()
-
-    start_up = MagicMock()
-    shutdown = AsyncMock()
-    monkeypatch.setattr(type(handler.tool_manager), "start_up", start_up)
-    monkeypatch.setattr(type(handler.tool_manager), "shutdown", shutdown)
-
-    await handler._run_realtime_session()
-
-    head_wobbler.feed_pcm.assert_called_once()
-    assert head_wobbler.feed_pcm.call_args.args[1] == handler.output_sample_rate
-    head_wobbler.request_reset_after_current_audio.assert_called_once()
-
-
-@pytest.mark.asyncio
 async def test_emit_skips_idle_signal_while_response_active(monkeypatch: Any) -> None:
     """Idle tools should not trigger while a response is still active."""
     movement_manager = MagicMock()
     movement_manager.is_idle.return_value = True
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement_manager)
     handler = HuggingFaceRealtimeHandler(deps)
-    handler.last_activity_time = asyncio.get_running_loop().time() - 60.0
+    handler.last_activity_time = time.monotonic() - (handler.IDLE_BEHAVIOR_THRESHOLD_S + 10.0)
     handler._response_done_event.clear()
 
     send_idle_signal = AsyncMock()
     monkeypatch.setattr(handler, "send_idle_signal", send_idle_signal)
-    monkeypatch.setattr(base_rt_mod, "wait_for_item", AsyncMock(return_value=None))
+    monkeypatch.setattr(conv_mod, "wait_for_item", AsyncMock(return_value=None))
 
     result = await handler.emit()
 
@@ -293,35 +194,11 @@ def test_handler_normalizes_hf_voice_case(monkeypatch: Any) -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_up_hf_gradio_does_not_wait_for_api_key(monkeypatch: Any) -> None:
-    """Hugging Face backend should not wait for gradio key input."""
-    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
-    monkeypatch.setattr(config, "OPENAI_API_KEY", "sk-openai-secret")
-
-    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
-    handler = hf_mod.HuggingFaceRealtimeHandler(deps, gradio_mode=True)
-
-    build_client = AsyncMock(return_value=MagicMock())
-    run_realtime_session = AsyncMock(return_value=None)
-    wait_for_args = AsyncMock(side_effect=AssertionError("wait_for_args should not be called"))
-
-    monkeypatch.setattr(handler, "_build_realtime_client", build_client)
-    monkeypatch.setattr(handler, "_run_realtime_session", run_realtime_session)
-    monkeypatch.setattr(handler, "wait_for_args", wait_for_args)
-
-    await handler.start_up()
-
-    wait_for_args.assert_not_awaited()
-    build_client.assert_awaited_once_with()
-    run_realtime_session.assert_awaited_once()
-
-
-@pytest.mark.asyncio
 async def test_run_realtime_session_uses_default_voice_for_lb_allocated_sessions(monkeypatch: Any) -> None:
     """Use the backend default speaker when no profile voice is selected for the hf LB."""
-    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda: "test")
+    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: default)
-    monkeypatch.setattr(hf_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
     monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", "https://lb.example.test/session")
 
@@ -389,16 +266,27 @@ async def test_run_realtime_session_uses_default_voice_for_lb_allocated_sessions
     # HF at 16 kHz passes None so the backend uses its optimal default (16 kHz).
     assert session["audio"]["input"]["format"]["rate"] is None
     assert session["audio"]["output"]["format"]["rate"] is None
+    assert session["audio"]["input"]["transcription"]["language"] == "en"
     output = session["audio"]["output"]
     assert output["voice"] == HF_DEFAULT_VOICE
+
+
+def test_huggingface_session_uses_configured_transcription_language(monkeypatch: Any) -> None:
+    """Hugging Face realtime sessions should forward the configured transcription language."""
+    monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", "zh")
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+
+    session = handler._get_session_config([])
+
+    assert session["audio"]["input"]["transcription"]["language"] == "zh"
 
 
 @pytest.mark.asyncio
 async def test_run_realtime_session_passes_allocated_session_query(monkeypatch: Any) -> None:
     """Hugging Face sessions must forward the allocated session token to the websocket connect call."""
-    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda: "test")
+    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: default)
-    monkeypatch.setattr(hf_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
 
     captured_connect: dict[str, Any] = {}
 
@@ -616,7 +504,7 @@ async def test_build_realtime_client_does_not_send_openai_key_to_hf_allocator(mo
 @pytest.mark.asyncio
 async def test_apply_personality_uses_selected_voice_for_lb_allocated_sessions(monkeypatch: Any) -> None:
     """Live personality updates should honor the selected Qwen CustomVoice speaker."""
-    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda: "new instructions")
+    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "new instructions")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "Serena")
     monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", "https://lb.example.test/session")
@@ -634,11 +522,39 @@ async def test_apply_personality_uses_selected_voice_for_lb_allocated_sessions(m
     handler.connection = FakeConnection()
     monkeypatch.setattr(handler, "_restart_session", AsyncMock(return_value=None))
 
-    result = await handler.apply_personality("example")
+    result = await handler.apply_personality("mars_rover")
 
     assert "restarted realtime session" in result.lower()
     session = captured_update["session"]
     assert session["instructions"] == "new instructions"
+    assert session["audio"]["output"]["voice"] == "Serena"
+
+
+@pytest.mark.asyncio
+async def test_change_voice_updates_live_hf_session_without_restart(monkeypatch: Any) -> None:
+    """Changing Hugging Face voice should update the active session in place."""
+    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
+
+    captured_update: dict[str, Any] = {}
+
+    class FakeSession:
+        async def update(self, **kwargs: Any) -> None:
+            captured_update.update(kwargs)
+
+    class FakeConnection:
+        session = FakeSession()
+
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.connection = FakeConnection()
+    restart = AsyncMock(return_value=None)
+    monkeypatch.setattr(handler, "_restart_session", restart)
+
+    result = await handler.change_voice("Serena")
+
+    assert result == "Voice changed to Serena."
+    assert handler.get_current_voice() == "Serena"
+    restart.assert_not_awaited()
+    session = captured_update["session"]
     assert session["audio"]["output"]["voice"] == "Serena"
 
 

@@ -39,6 +39,7 @@ class Dance(Tool):
 
     name = "dance"
     description = "Play a named or random dance move once (or repeat). Non-blocking."
+    needs_response = False
     parameters_schema = {
         "type": "object",
         "properties": {

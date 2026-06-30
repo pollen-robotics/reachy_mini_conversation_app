@@ -4,5 +4,7 @@ play_emotion
 stop_emotion
 camera
 idle_do_nothing
-head_tracking
 move_head
+go_to_sleep
+remember
+forget

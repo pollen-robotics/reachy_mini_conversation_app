@@ -1,69 +1,51 @@
-import re
-import sys
 import logging
 from pathlib import Path
 
 from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY, config, get_default_voice_for_backend
+from reachy_mini_conversation_app.memory import format_memory_for_prompt
 
 
 logger = logging.getLogger(__name__)
 
 
-PROMPTS_LIBRARY_DIRECTORY = Path(__file__).parent / "prompts"
 INSTRUCTIONS_FILENAME = "instructions.txt"
 VOICE_FILENAME = "voice.txt"
+GREETING_FILENAME = "greeting.txt"
+DEFAULT_PROFILE_NAME = "default"
+
+DEFAULT_GREETING_PROMPT = (
+    "Start the conversation now with a brief, spontaneous greeting in character. "
+    "Keep it to one sentence, invite the user in naturally, and vary the wording each time."
+)
 
 
-def _expand_prompt_includes(content: str) -> str:
-    """Expand [<name>] placeholders with content from prompts library files.
-
-    Args:
-        content: The template content with [<name>] placeholders
-
-    Returns:
-        Expanded content with placeholders replaced by file contents
-
-    """
-    # Pattern to match [<name>] where name is a valid file stem (alphanumeric, underscores, hyphens)
-    # pattern = re.compile(r'^\[([a-zA-Z0-9_-]+)\]$')
-    # Allow slashes for subdirectories
-    pattern = re.compile(r"^\[([a-zA-Z0-9/_-]+)\]$")
-
-    lines = content.split("\n")
-    expanded_lines = []
-
-    for line in lines:
-        stripped = line.strip()
-        match = pattern.match(stripped)
-
-        if match:
-            # Extract the name from [<name>]
-            template_name = match.group(1)
-            template_file = PROMPTS_LIBRARY_DIRECTORY / f"{template_name}.txt"
-
-            try:
-                if template_file.exists():
-                    template_content = template_file.read_text(encoding="utf-8").rstrip()
-                    expanded_lines.append(template_content)
-                    logger.debug("Expanded template: [%s]", template_name)
-                else:
-                    logger.warning("Template file not found: %s, keeping placeholder", template_file)
-                    expanded_lines.append(line)
-            except Exception as e:
-                logger.warning("Failed to read template '%s': %s, keeping placeholder", template_name, e)
-                expanded_lines.append(line)
-        else:
-            expanded_lines.append(line)
-
-    return "\n".join(expanded_lines)
+def _default_instructions_file() -> Path:
+    return DEFAULT_PROFILES_DIRECTORY / DEFAULT_PROFILE_NAME / INSTRUCTIONS_FILENAME
 
 
-def get_session_instructions() -> str:
+def _read_instructions_file(instructions_file: Path, profile_name: str) -> str | None:
+    try:
+        if not instructions_file.exists():
+            logger.warning("Profile '%s' has no %s", profile_name, INSTRUCTIONS_FILENAME)
+            return None
+        instructions = instructions_file.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError) as e:
+        logger.warning("Failed to load instructions from profile '%s': %s", profile_name, e)
+        return None
+
+    if not instructions:
+        logger.warning("Profile '%s' has empty %s", profile_name, INSTRUCTIONS_FILENAME)
+        return None
+    return instructions
+
+
+def get_session_instructions(instance_path: str | Path | None = None) -> str:
     """Get session instructions, loading from REACHY_MINI_CUSTOM_PROFILE if set."""
     profile = config.REACHY_MINI_CUSTOM_PROFILE
+    profile_name = profile or DEFAULT_PROFILE_NAME
     if not profile:
-        logger.info(f"Loading default prompt from {PROMPTS_LIBRARY_DIRECTORY / 'default_prompt.txt'}")
-        instructions_file = PROMPTS_LIBRARY_DIRECTORY / "default_prompt.txt"
+        instructions_file = _default_instructions_file()
+        logger.info("Loading default prompt from %s", instructions_file)
     else:
         if config.PROFILES_DIRECTORY != DEFAULT_PROFILES_DIRECTORY:
             logger.info(
@@ -72,23 +54,26 @@ def get_session_instructions() -> str:
                 config.PROFILES_DIRECTORY,
             )
         else:
-            logger.info(f"Loading prompt from profile '{profile}'")
-        instructions_file = config.PROFILES_DIRECTORY / profile / INSTRUCTIONS_FILENAME
+            logger.info("Loading prompt from profile '%s'", profile)
+        instructions_file = config.resolve_profile_dir(profile) / INSTRUCTIONS_FILENAME
 
-    try:
-        if instructions_file.exists():
-            instructions = instructions_file.read_text(encoding="utf-8").strip()
-            if instructions:
-                # Expand [<name>] placeholders with content from prompts library
-                expanded_instructions = _expand_prompt_includes(instructions)
-                return expanded_instructions
-            logger.error(f"Profile '{profile}' has empty {INSTRUCTIONS_FILENAME}")
-            sys.exit(1)
-        logger.error(f"Profile {profile} has no {INSTRUCTIONS_FILENAME}")
-        sys.exit(1)
-    except Exception as e:
-        logger.error(f"Failed to load instructions from profile '{profile}': {e}")
-        sys.exit(1)
+    instructions = _read_instructions_file(instructions_file, profile_name)
+    if instructions is None and profile and profile != DEFAULT_PROFILE_NAME:
+        default_instructions_file = _default_instructions_file()
+        logger.warning(
+            "Using default profile instructions from %s because profile '%s' is incomplete",
+            default_instructions_file,
+            profile,
+        )
+        instructions = _read_instructions_file(default_instructions_file, DEFAULT_PROFILE_NAME)
+
+    if instructions is None:
+        raise RuntimeError(f"Default profile has no usable {INSTRUCTIONS_FILENAME}")
+
+    memory_prompt = format_memory_for_prompt(instance_path)
+    if memory_prompt:
+        return f"{memory_prompt}\n\n{instructions}"
+    return instructions
 
 
 def get_session_voice(default: str | None = None) -> str:
@@ -103,10 +88,27 @@ def get_session_voice(default: str | None = None) -> str:
     if not profile:
         return fallback
     try:
-        voice_file = config.PROFILES_DIRECTORY / profile / VOICE_FILENAME
+        voice_file = config.resolve_profile_dir(profile) / VOICE_FILENAME
         if voice_file.exists():
             voice = voice_file.read_text(encoding="utf-8").strip()
             return voice or fallback
     except Exception:
         pass
     return fallback
+
+
+def get_session_greeting_prompt() -> str:
+    """Resolve the startup greeting prompt for the selected profile."""
+    profile = config.REACHY_MINI_CUSTOM_PROFILE
+    if not profile:
+        return DEFAULT_GREETING_PROMPT
+
+    try:
+        greeting_file = config.resolve_profile_dir(profile) / GREETING_FILENAME
+        if greeting_file.exists():
+            greeting = greeting_file.read_text(encoding="utf-8").strip()
+            if greeting:
+                return greeting
+    except Exception as e:
+        logger.warning("Failed to load greeting prompt from profile %r: %s", profile, e)
+    return DEFAULT_GREETING_PROMPT

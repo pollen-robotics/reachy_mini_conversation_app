@@ -43,6 +43,9 @@ def _resolve_default_profiles_directory() -> Path:
 
 DEFAULT_PROFILES_DIRECTORY = _resolve_default_profiles_directory()
 
+# UI-created profiles live under a writable instance dir
+USER_PERSONALITIES_DIRNAME = "user_personalities"
+
 # Full list of voices supported by the OpenAI Realtime / TTS API.
 # Source: https://developers.openai.com/api/docs/guides/text-to-speech/#voice-options
 # "marin" and "cedar" are recommended for gpt-realtime-2.
@@ -91,6 +94,7 @@ HF_BACKEND = "huggingface"
 DEFAULT_BACKEND_PROVIDER = HF_BACKEND
 HF_REALTIME_CONNECTION_MODE_ENV = "HF_REALTIME_CONNECTION_MODE"
 HF_REALTIME_WS_URL_ENV = "HF_REALTIME_WS_URL"
+REALTIME_TRANSCRIPTION_LANGUAGE_ENV = "REALTIME_TRANSCRIPTION_LANGUAGE"
 HF_LOCAL_CONNECTION_MODE = "local"
 HF_DEPLOYED_CONNECTION_MODE = "deployed"
 HF_REALTIME_SESSION_PROXY_URL = "https://pollen-robotics-reachy-mini-realtime-url.hf.space/session"
@@ -195,6 +199,23 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return default
 
 
+APP_TIMEOUT_MINUTES_ENV = "REACHY_MINI_APP_TIMEOUT_MINUTES"
+DEFAULT_APP_TIMEOUT_MINUTES = 1440.0
+
+
+def resolve_app_timeout_minutes() -> float | None:
+    """Read the app inactivity timeout (minutes) from the environment; None means disabled."""
+    raw_value = os.getenv(APP_TIMEOUT_MINUTES_ENV, "").strip()
+    if not raw_value:
+        return DEFAULT_APP_TIMEOUT_MINUTES
+    try:
+        timeout_minutes = float(raw_value)
+    except ValueError:
+        logger.warning("Ignoring invalid %s=%r; using default.", APP_TIMEOUT_MINUTES_ENV, raw_value)
+        return DEFAULT_APP_TIMEOUT_MINUTES
+    return timeout_minutes if timeout_minutes > 0 else None
+
+
 def _normalize_hf_connection_mode(value: str | None) -> str | None:
     """Normalize the Hugging Face connection mode, if explicitly configured."""
     candidate = (value or "").strip().lower()
@@ -209,6 +230,12 @@ def _normalize_hf_connection_mode(value: str | None) -> str | None:
         )
         return None
     return candidate
+
+
+def _normalize_transcription_language(value: str | None) -> str:
+    """Return the configured realtime transcription language."""
+    candidate = (value or "").strip()
+    return candidate or "en"
 
 
 @dataclass(frozen=True)
@@ -363,24 +390,22 @@ class Config:
     # Deliberately ignore HF_REALTIME_SESSION_URL from the environment; the app-managed proxy is HF_DEFAULTS.session_url.
     HF_REALTIME_SESSION_URL = HF_DEFAULTS.session_url
     HF_REALTIME_WS_URL = os.getenv(HF_REALTIME_WS_URL_ENV)
-    HF_HOME = os.getenv("HF_HOME", "./cache")
-    LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "HuggingFaceTB/SmolVLM2-2.2B-Instruct")
+    REALTIME_TRANSCRIPTION_LANGUAGE = _normalize_transcription_language(os.getenv(REALTIME_TRANSCRIPTION_LANGUAGE_ENV))
     HF_TOKEN = os.getenv("HF_TOKEN")  # Optional, falls back to hf auth login if not set
 
     logger.debug(
-        "Backend provider: %s, Model: %s, HF mode: %s, HF session URL set: %s, HF direct URL set: %s, HF_HOME: %s, Vision Model: %s",
+        "Backend provider: %s, Model: %s, HF mode: %s, HF session URL set: %s, HF direct URL set: %s",
         BACKEND_PROVIDER,
         MODEL_NAME,
         HF_REALTIME_CONNECTION_MODE,
         bool(HF_REALTIME_SESSION_URL and HF_REALTIME_SESSION_URL.strip()),
         bool(HF_REALTIME_WS_URL and HF_REALTIME_WS_URL.strip()),
-        HF_HOME,
-        LOCAL_VISION_MODEL,
     )
 
     # Filesystem root containing profile directories, not a Python import path.
     _profiles_directory_env = os.getenv("REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY")
     PROFILES_DIRECTORY = Path(_profiles_directory_env) if _profiles_directory_env else DEFAULT_PROFILES_DIRECTORY
+    INSTANCE_PATH: Path | None = None  # set at startup; writable home for UI-created profiles
     _tools_directory_env = os.getenv("REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY")
     TOOLS_DIRECTORY = Path(_tools_directory_env) if _tools_directory_env else None
     AUTOLOAD_EXTERNAL_TOOLS = _env_flag("AUTOLOAD_EXTERNAL_TOOLS", default=False)
@@ -447,6 +472,18 @@ class Config:
         else:
             logger.info("'REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY' is not set. Using built-in shared tools only.")
 
+    def user_personalities_root(self) -> Path:
+        """Writable root for UI-created profiles."""
+        base = self.INSTANCE_PATH if self.INSTANCE_PATH is not None else DEFAULT_PROFILES_DIRECTORY
+        return Path(base) / USER_PERSONALITIES_DIRNAME
+
+    def resolve_profile_dir(self, profile: str) -> Path:
+        """On-disk directory for a profile selection."""
+        head, _, tail = profile.partition("/")
+        if head == USER_PERSONALITIES_DIRNAME and tail:
+            return self.user_personalities_root() / tail
+        return self.PROFILES_DIRECTORY / profile
+
 
 config = Config()
 
@@ -466,8 +503,9 @@ def refresh_runtime_config_from_env() -> None:
     # Deliberately ignore HF_REALTIME_SESSION_URL from the environment; the app-managed proxy is HF_DEFAULTS.session_url.
     config.HF_REALTIME_SESSION_URL = HF_DEFAULTS.session_url
     config.HF_REALTIME_WS_URL = os.getenv(HF_REALTIME_WS_URL_ENV)
-    config.HF_HOME = os.getenv("HF_HOME", "./cache")
-    config.LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "HuggingFaceTB/SmolVLM2-2.2B-Instruct")
+    config.REALTIME_TRANSCRIPTION_LANGUAGE = _normalize_transcription_language(
+        os.getenv(REALTIME_TRANSCRIPTION_LANGUAGE_ENV)
+    )
     config.HF_TOKEN = os.getenv("HF_TOKEN")
     config.REACHY_MINI_CUSTOM_PROFILE = LOCKED_PROFILE or os.getenv("REACHY_MINI_CUSTOM_PROFILE")
 
@@ -544,6 +582,11 @@ def has_hf_realtime_target() -> bool:
 def is_gemini_model() -> bool:
     """Return True if the configured MODEL_NAME is a Gemini Live model."""
     return get_backend_choice() == GEMINI_BACKEND
+
+
+def set_instance_path(instance_path: str | Path | None) -> None:
+    """Record the app instance dir so UI-created profiles persist outside package data."""
+    config.INSTANCE_PATH = Path(instance_path) if instance_path else None
 
 
 def set_custom_profile(profile: str | None) -> None:

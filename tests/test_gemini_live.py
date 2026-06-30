@@ -1,17 +1,19 @@
 """Behavior tests for the Gemini Live handler."""
 
+import time
 import base64
 import asyncio
+import logging
 from types import SimpleNamespace
 from typing import Any, Callable, AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, call
 
-import numpy as np
 import pytest
-from fastrtc import AdditionalOutputs
 
 import reachy_mini_conversation_app.gemini_live as gemini_mod
-import reachy_mini_conversation_app.tools.core_tools as ct_mod
+import reachy_mini_conversation_app.idle_policy as idle_policy_mod
+import reachy_mini_conversation_app.conversation_handler as conv_mod
+from reachy_mini_conversation_app.streaming import AdditionalOutputs
 from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.tool_constants import ToolState
@@ -54,6 +56,7 @@ class _FakeSession:
         self._stop_event = stop_event
         self.realtime_inputs: list[dict[str, Any]] = []
         self.tool_responses: list[dict[str, Any]] = []
+        self.client_contents: list[dict[str, Any]] = []
 
     async def close(self) -> None:
         self._stop_event.set()
@@ -64,6 +67,10 @@ class _FakeSession:
 
     async def send_tool_response(self, **kwargs: Any) -> None:
         self.tool_responses.append(kwargs)
+        return None
+
+    async def send_client_content(self, **kwargs: Any) -> None:
+        self.client_contents.append(kwargs)
         return None
 
     async def receive(self) -> AsyncIterator[SimpleNamespace]:
@@ -98,20 +105,19 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Gemini turns should emit one transcript per role and let the wobbler reset after speech."""
-    monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda: "test")
+    monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
-    monkeypatch.setattr(gemini_mod, "get_active_tool_specs", lambda _: [])
+    monkeypatch.setattr(gemini_mod, "get_tool_specs", lambda: [])
 
     movement_manager = MagicMock()
     movement_manager.is_idle.return_value = False
-    head_wobbler = MagicMock()
     robot = SimpleNamespace(media=SimpleNamespace(audio=None))
     deps = ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
-        head_wobbler=head_wobbler,
     )
     handler = GeminiLiveHandler(deps)
+    handler.last_activity_time = 1.0
     monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
     monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
 
@@ -153,9 +159,7 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
     handler.client = _FakeLiveClient(session)
 
     task = asyncio.create_task(handler._run_live_session())
-    await _wait_for(
-        lambda: head_wobbler.request_reset_after_current_audio.called and handler.output_queue.qsize() >= 3
-    )
+    await _wait_for(lambda: handler.output_queue.qsize() >= 3)
 
     handler._stop_event.set()
     await asyncio.wait_for(task, timeout=1.0)
@@ -176,23 +180,67 @@ async def test_gemini_turn_buffers_transcripts_and_schedules_motion_reset(
         {"role": "user", "content": "How's it going, Reachy?"},
         {"role": "assistant", "content": "Doing great."},
     ]
+    assert handler.last_activity_time > 1.0
     assert any(isinstance(output, tuple) for output in outputs), "audio output was not emitted"
     movement_manager.set_listening.assert_has_calls([call(True), call(False)])
     assert movement_manager.set_listening.call_args_list[-1] == call(False)
-    head_wobbler.feed.assert_not_called()
-    head_wobbler.request_reset_after_current_audio.assert_called_once()
-    head_wobbler.reset.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_gemini_live_session_queues_startup_greeting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Gemini sessions should send the profile greeting as the first text turn."""
+    monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
+    monkeypatch.setattr(gemini_mod, "get_tool_specs", lambda: [])
+    monkeypatch.setattr(gemini_mod, "get_session_greeting_prompt", lambda: "Greet me like a tiny stage host.")
+
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = GeminiLiveHandler(deps)
+    monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
+    monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
+    session = _FakeSession([], handler._stop_event)
+    handler.client = _FakeLiveClient(session)
+
+    task = asyncio.create_task(handler._run_live_session())
+    await _wait_for(lambda: len(session.client_contents) == 1)
+
+    handler._stop_event.set()
+    await asyncio.wait_for(task, timeout=1.0)
+
+    sent = session.client_contents[0]
+    assert sent["turn_complete"] is True
+    assert sent["turns"].role == "user"
+    assert sent["turns"].parts[0].text == "Greet me like a tiny stage host."
+    assert handler._startup_greeting_sent is True
+
+
+@pytest.mark.asyncio
+async def test_gemini_startup_greeting_missing_client_content_warns_once(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: Any,
+) -> None:
+    """Gemini sessions without text-turn support should not warn on every retry."""
+    monkeypatch.setattr(gemini_mod, "get_session_greeting_prompt", lambda: "Greet the user.")
+
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = GeminiLiveHandler(deps)
+    handler.session = SimpleNamespace()
+
+    with caplog.at_level(logging.WARNING):
+        await handler._send_startup_greeting_prompt()
+        await handler._send_startup_greeting_prompt()
+
+    assert handler._startup_greeting_sent is True
+    assert caplog.text.count("Gemini session does not support send_client_content") == 1
 
 
 @pytest.mark.asyncio
 async def test_gemini_camera_tool_sends_snapshot_and_returns_json_result() -> None:
     """Camera tool should push the snapshot via realtime video input and return a JSON-safe tool result."""
-    camera_worker = MagicMock()
-    camera_worker.get_latest_frame.return_value = np.zeros((8, 8, 3), dtype=np.uint8)
     deps = ToolDependencies(
         reachy_mini=MagicMock(),
         movement_manager=MagicMock(),
-        camera_worker=camera_worker,
+        camera_enabled=True,
     )
     handler = GeminiLiveHandler(deps)
     session = _FakeSession([], handler._stop_event)
@@ -236,15 +284,127 @@ async def test_gemini_camera_tool_sends_snapshot_and_returns_json_result() -> No
         {
             "role": "assistant",
             "content": '{"status": "image_captured"}',
-            "metadata": {"title": "🛠️ Used tool camera", "status": "done"},
         }
     ]
 
 
 @pytest.mark.asyncio
+async def test_emit_triggers_idle_through_shared_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Gemini drives idle behavior through the shared base emit and threshold, not the old 15s cadence."""
+    movement_manager = MagicMock()
+    movement_manager.is_idle.return_value = True
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement_manager)
+    handler = GeminiLiveHandler(deps)
+
+    send_idle_signal = AsyncMock()
+    monkeypatch.setattr(handler, "send_idle_signal", send_idle_signal)
+    monkeypatch.setattr(conv_mod, "wait_for_item", AsyncMock(return_value=None))
+
+    # Idle well past the old Gemini-only 15s cadence but under the shared threshold: must not fire.
+    handler.last_activity_time = time.monotonic() - (handler.IDLE_BEHAVIOR_THRESHOLD_S - 30.0)
+    handler.last_idle_behavior_time = time.monotonic() - (handler.IDLE_BEHAVIOR_THRESHOLD_S + 10.0)
+    await handler.emit()
+    send_idle_signal.assert_not_awaited()
+
+    # Past the shared threshold: fires once.
+    handler.last_activity_time = time.monotonic() - (handler.IDLE_BEHAVIOR_THRESHOLD_S + 10.0)
+    await handler.emit()
+    send_idle_signal.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_gemini_idle_signal_starts_local_tool_without_model_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Gemini idle behavior should not send an idle text turn to the model."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = GeminiLiveHandler(deps)
+    session = _FakeSession([], handler._stop_event)
+    handler.session = session
+    monkeypatch.setattr(
+        idle_policy_mod, "choose_idle_tool_call", lambda _available: ("idle_do_nothing", {"reason": "test"})
+    )
+    start_tool = AsyncMock(return_value=SimpleNamespace(tool_id="idle_do_nothing-idle-1"))
+    monkeypatch.setattr(type(handler.tool_manager), "start_tool", start_tool)
+
+    await handler.send_idle_signal(16.0)
+
+    assert session.realtime_inputs == []
+    assert session.tool_responses == []
+    start_tool.assert_awaited_once()
+    start_kwargs = start_tool.await_args.kwargs
+    assert start_kwargs["is_idle_tool_call"] is True
+    assert start_kwargs["tool_call_routine"].tool_name == "idle_do_nothing"
+    assert start_kwargs["tool_call_routine"].args_json_str == '{"reason": "test"}'
+    outputs = []
+    while not handler.output_queue.empty():
+        outputs.append(handler.output_queue.get_nowait())
+    tool_messages = [
+        message
+        for output in outputs
+        if isinstance(output, AdditionalOutputs)
+        for message in output.args
+        if isinstance(message.get("content"), str)
+    ]
+    assert tool_messages == [
+        {
+            "role": "assistant",
+            "content": (
+                '🛠️ Idle tool idle_do_nothing with args {"reason": "test"}. '
+                "The tool is now running. Tool ID: idle_do_nothing-idle-1"
+            ),
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_gemini_idle_emit_updates_idle_clock_without_refreshing_activity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gemini idle behavior should not postpone app inactivity timeout."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    deps.movement_manager.is_idle.return_value = True
+    handler = GeminiLiveHandler(deps)
+    now = time.monotonic()
+    previous_activity_time = now - (handler.IDLE_BEHAVIOR_THRESHOLD_S + 1.0)
+    previous_idle_behavior_time = now - (handler.IDLE_BEHAVIOR_THRESHOLD_S + 1.0)
+    handler.last_activity_time = previous_activity_time
+    handler.last_idle_behavior_time = previous_idle_behavior_time
+    send_idle_signal = AsyncMock()
+    monkeypatch.setattr(handler, "send_idle_signal", send_idle_signal)
+    monkeypatch.setattr(conv_mod, "wait_for_item", AsyncMock(return_value=None))
+
+    await handler.emit()
+
+    send_idle_signal.assert_awaited_once()
+    assert handler.last_activity_time == previous_activity_time
+    assert handler.last_idle_behavior_time > previous_idle_behavior_time
+
+
+@pytest.mark.asyncio
+async def test_gemini_idle_tool_result_is_not_sent_to_model() -> None:
+    """Locally selected Gemini idle tool completions should not send function responses."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+    handler = GeminiLiveHandler(deps)
+    session = _FakeSession([], handler._stop_event)
+    handler.session = session
+
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="idle-call",
+            tool_name="idle_do_nothing",
+            is_idle_tool_call=True,
+            status=ToolState.COMPLETED,
+            result={"status": "idle"},
+        )
+    )
+
+    assert session.realtime_inputs == []
+    assert session.tool_responses == []
+
+
+@pytest.mark.asyncio
 async def test_apply_personality_preserves_manual_voice_override(monkeypatch) -> None:
     """Applying a profile should keep a manually selected Gemini voice active."""
-    monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda: "test")
+    monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
     monkeypatch.setattr("reachy_mini_conversation_app.config.set_custom_profile", lambda _profile: None)
 
@@ -254,11 +414,29 @@ async def test_apply_personality_preserves_manual_voice_override(monkeypatch) ->
     restart = AsyncMock()
     monkeypatch.setattr(handler, "_restart_session", restart)
 
-    status = await handler.apply_personality("example")
+    status = await handler.apply_personality("mars_rover")
 
     assert status == "Applied personality and restarted Gemini session."
     assert handler.get_current_voice() == "Orus"
     restart.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_apply_personality_forces_tool_registry_reload(monkeypatch) -> None:
+    """Applying a profile must rebuild the tool roster even when the profile name is unchanged."""
+    monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
+    monkeypatch.setattr("reachy_mini_conversation_app.config.set_custom_profile", lambda _profile: None)
+    reload = MagicMock()
+    monkeypatch.setattr(gemini_mod, "initialize_tools", reload)
+
+    handler = GeminiLiveHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.session = object()
+    monkeypatch.setattr(handler, "_restart_session", AsyncMock())
+
+    await handler.apply_personality("example")
+
+    reload.assert_called_once_with(force=True)
 
 
 def test_handler_uses_startup_voice_at_startup() -> None:
@@ -282,37 +460,3 @@ def test_copy_preserves_current_voice_override() -> None:
     copied_handler = handler.copy()
 
     assert copied_handler.get_current_voice() == "Zephyr"
-
-
-def test_gemini_excludes_head_tracking_when_no_head_tracker(monkeypatch) -> None:
-    """head_tracking tool must not appear in Gemini session config when head_tracker is not active."""
-    monkeypatch.setattr(gemini_mod, "get_session_instructions", lambda: "test")
-    monkeypatch.setattr(gemini_mod, "get_session_voice", lambda: "Kore")
-
-    # mock ALL_TOOL_SPECS to include at least head_tracking and one other tool, to verify that only head_tracking is excluded, not all tools
-    monkeypatch.setattr(
-        ct_mod,
-        "ALL_TOOL_SPECS",
-        [
-            {"type": "function", "name": "head_tracking", "description": "head_tracking", "parameters": {}},
-            {"type": "function", "name": "fake_tool", "description": "fake_tool", "parameters": {}},
-        ],
-    )
-
-    # case 1: no camera at all, --no-camera flag passed
-    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock(), camera_worker=None)
-    handler = GeminiLiveHandler(deps)
-    live_config = handler._build_live_config()
-    tool_names = [fd.name for fd in live_config.tools[0].function_declarations] if live_config.tools else []
-    assert "head_tracking" not in tool_names, "case 1 failed: camera_worker=None"
-    assert "fake_tool" in tool_names, "case 1 failed: a non-head-tracking tool was unexpectedly excluded"
-
-    # case 2: camera is running but --head-tracker flag was not passed
-    camera_worker = MagicMock()
-    camera_worker.head_tracker = None
-    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock(), camera_worker=camera_worker)
-    handler = GeminiLiveHandler(deps)
-    live_config = handler._build_live_config()
-    tool_names = [fd.name for fd in live_config.tools[0].function_declarations] if live_config.tools else []
-    assert "head_tracking" not in tool_names, "case 2 failed: camera_worker.head_tracker=None"
-    assert "fake_tool" in tool_names, "case 2 failed: a non-head-tracking tool was unexpectedly excluded"

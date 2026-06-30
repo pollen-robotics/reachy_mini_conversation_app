@@ -1,0 +1,155 @@
+"""Personality (profile) data layer.
+
+Provides functions to list, read, and write personality profiles stored
+on disk. No HTTP or framework dependencies — importable anywhere.
+"""
+
+from __future__ import annotations
+from typing import List
+from pathlib import Path
+
+from .config import DEFAULT_PROFILES_DIRECTORY, USER_PERSONALITIES_DIRNAME, config, get_default_voice_for_backend
+from .tools.tool_constants import SystemTool
+
+
+DEFAULT_OPTION = "(built-in default)"
+
+# Dev-only profiles, hidden from the UI, but still loadable via REACHY_MINI_CUSTOM_PROFILE
+UNLISTED_PROFILES = {"tedai"}
+
+
+def _tools_dir() -> Path:
+    return Path(__file__).parent / "tools"
+
+
+def _sanitize_name(name: str) -> str:
+    import re
+
+    s = name.strip()
+    s = re.sub(r"\s+", "_", s)
+    s = re.sub(r"[^a-zA-Z0-9_-]", "", s)
+    return s
+
+
+def list_personalities() -> List[str]:
+    """List available personality profile names."""
+    names: List[str] = []
+    try:
+        builtin_root = config.PROFILES_DIRECTORY
+        if builtin_root.exists():
+            for p in sorted(builtin_root.iterdir()):
+                if p.name == USER_PERSONALITIES_DIRNAME or p.name in UNLISTED_PROFILES:
+                    continue
+                if p.is_dir() and (p / "instructions.txt").exists():
+                    names.append(p.name)
+        udir = config.user_personalities_root()
+        if udir.exists():
+            for p in sorted(udir.iterdir()):
+                if p.is_dir() and (p / "instructions.txt").exists():
+                    names.append(f"{USER_PERSONALITIES_DIRNAME}/{p.name}")
+    except Exception:
+        pass
+    return names
+
+
+def resolve_profile_dir(selection: str) -> Path:
+    """Resolve the directory path for the given profile selection."""
+    return config.resolve_profile_dir(selection)
+
+
+def read_instructions_for(name: str) -> str:
+    """Read the instructions.txt content for the given profile name."""
+    try:
+        if name == DEFAULT_OPTION:
+            target = DEFAULT_PROFILES_DIRECTORY / "default" / "instructions.txt"
+            return target.read_text(encoding="utf-8").strip() if target.exists() else ""
+        target = resolve_profile_dir(name) / "instructions.txt"
+        return target.read_text(encoding="utf-8").strip() if target.exists() else ""
+    except Exception as e:
+        return f"Could not load instructions: {e}"
+
+
+def read_tools_for(name: str) -> str:
+    """Read the tools.txt content for the given profile name."""
+    try:
+        profile_name = "default" if name == DEFAULT_OPTION else name
+        target = resolve_profile_dir(profile_name) / "tools.txt"
+        return target.read_text(encoding="utf-8") if target.exists() else ""
+    except Exception:
+        return ""
+
+
+def read_greeting_for(name: str) -> str:
+    """Read the greeting.txt content for the given profile name."""
+    try:
+        profile_name = "default" if name == DEFAULT_OPTION else name
+        target = resolve_profile_dir(profile_name) / "greeting.txt"
+        if target.exists():
+            greeting = target.read_text(encoding="utf-8").strip()
+            if greeting:
+                return greeting
+        return ""
+    except Exception:
+        return ""
+
+
+def available_tools_for(selected: str) -> List[str]:
+    """List available tool modules for the given profile selection."""
+    shared: List[str] = []
+    try:
+        for py in _tools_dir().glob("*.py"):
+            if py.stem in {"__init__", "core_tools", "background_tool_manager", "tool_constants"} or py.stem in {
+                t.value for t in SystemTool
+            }:
+                continue
+            shared.append(py.stem)
+    except Exception:
+        pass
+    local: List[str] = []
+    try:
+        if selected != DEFAULT_OPTION:
+            for py in resolve_profile_dir(selected).glob("*.py"):
+                local.append(py.stem)
+    except Exception:
+        pass
+    return sorted(set(shared + local))
+
+
+def delete_personality(name: str) -> bool:
+    """Delete a user-created personality directory; return whether it existed.
+
+    Refuses anything outside the user personalities root, so built-in profiles
+    can never be removed through the UI.
+    """
+    import shutil
+
+    target = resolve_profile_dir(name).resolve()
+    user_root = config.user_personalities_root().resolve()
+    if user_root not in target.parents:
+        return False
+    if target.is_dir():
+        shutil.rmtree(target)
+        return True
+    return False
+
+
+def _write_profile(
+    sanitized_name: str,
+    instructions: str,
+    tools_text: str,
+    voice: str | None = None,
+    greeting: str | None = None,
+) -> None:
+    default_voice = get_default_voice_for_backend()
+    target_dir = config.user_personalities_root() / sanitized_name
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "instructions.txt").write_text(instructions.strip() + "\n", encoding="utf-8")
+    (target_dir / "tools.txt").write_text((tools_text or "").strip() + "\n", encoding="utf-8")
+    (target_dir / "voice.txt").write_text((voice or default_voice).strip() + "\n", encoding="utf-8")
+    if greeting is not None:
+        greeting_file = target_dir / "greeting.txt"
+        greeting_text = greeting.strip()
+        if greeting_text:
+            greeting_file.write_text(greeting_text + "\n", encoding="utf-8")
+        elif greeting_file.exists():
+            greeting_file.unlink()

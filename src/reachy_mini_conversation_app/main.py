@@ -1,38 +1,98 @@
 """Entrypoint for the Reachy Mini conversation app."""
 
-import os
+from __future__ import annotations
 import sys
 import time
 import asyncio
+import logging
 import argparse
 import threading
-from typing import Any, Dict, List, Optional
+import urllib.error
+import urllib.request
+from typing import TYPE_CHECKING, Any, Optional
 from pathlib import Path
+from collections.abc import Callable, Awaitable
 
-import gradio as gr
-from fastapi import FastAPI
-from fastrtc import Stream
-from gradio.utils import get_space
+from fastapi import FastAPI, Request, Response
 
 from reachy_mini import ReachyMini, ReachyMiniApp
 from reachy_mini_conversation_app.utils import (
-    CameraVisionInitializationError,
     parse_args,
     setup_logger,
-    initialize_camera_and_vision,
     log_connection_troubleshooting,
 )
 
 
-def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Update the chatbot with AdditionalOutputs."""
-    chatbot.append(response)
-    return chatbot
+if TYPE_CHECKING:
+    from reachy_mini_conversation_app.console import LocalStream
+
+
+_STOP_CURRENT_APP_PATH = "/api/apps/stop-current-app"
+_STOP_CURRENT_APP_TIMEOUT_S = 2.0
+
+
+def _request_stop_current_app(robot: ReachyMini, logger: logging.Logger) -> bool:
+    """Request the Reachy Mini daemon to stop the current app."""
+    stop_current_app_url = f"http://{robot.client.host}:{robot.client.port}{_STOP_CURRENT_APP_PATH}"
+    request = urllib.request.Request(stop_current_app_url, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=_STOP_CURRENT_APP_TIMEOUT_S) as response:
+            response.read()
+    except urllib.error.URLError as e:
+        logger.error("Failed to request current app stop via %s: %s", stop_current_app_url, e)
+        return False
+
+    logger.info("Requested current app stop via %s", stop_current_app_url)
+    return True
+
+
+def _start_inactivity_timeout_thread(
+    timeout_minutes: float,
+    stream_manager: LocalStream,
+    logger: logging.Logger,
+    app_stop_event: threading.Event | None,
+    go_to_sleep: Callable[[], dict[str, Any]] | None = None,
+) -> threading.Thread:
+    """Start a daemon that puts the app to sleep after inactivity."""
+    timeout_seconds = timeout_minutes * 60.0
+
+    def poll_inactivity_timeout() -> None:
+        logger.info("App inactivity timeout enabled: %.1f minutes.", timeout_minutes)
+        while app_stop_event is None or not app_stop_event.is_set():
+            elapsed = stream_manager.seconds_since_activity()
+            if elapsed >= timeout_seconds:
+                logger.info("No activity for %.1f minutes; going to sleep.", elapsed / 60.0)
+                try:
+                    if go_to_sleep is not None:
+                        go_to_sleep()
+                    else:
+                        stream_manager.close()
+                except Exception as e:
+                    logger.error("Error while going to sleep after inactivity timeout: %s", e)
+                    try:
+                        stream_manager.close()
+                    except Exception as close_error:
+                        logger.error("Error while closing stream manager after inactivity timeout: %s", close_error)
+                return
+            time.sleep(1.0)
+
+    thread = threading.Thread(target=poll_inactivity_timeout, daemon=True)
+    thread.start()
+    return thread
 
 
 def main() -> None:
     """Entrypoint for the Reachy Mini conversation app."""
     args, _ = parse_args()
+    if args.command == "tool-spaces":
+        from reachy_mini_conversation_app.tool_spaces import handle_tool_spaces_command
+
+        logger = setup_logger(args.debug)
+        try:
+            raise SystemExit(handle_tool_spaces_command(args))
+        except Exception as exc:
+            logger.error("tool-spaces command failed: %s", exc)
+            raise SystemExit(1) from exc
     run(args)
 
 
@@ -48,13 +108,13 @@ def run(
     from reachy_mini_conversation_app.moves import MovementManager
     from reachy_mini_conversation_app.config import (
         HF_BACKEND,
-        GEMINI_BACKEND,
-        OPENAI_BACKEND,
         HF_LOCAL_CONNECTION_MODE,
         config,
         is_gemini_model,
         get_backend_label,
+        set_instance_path,
         get_hf_connection_selection,
+        resolve_app_timeout_minutes,
         refresh_runtime_config_from_env,
     )
     from reachy_mini_conversation_app.startup_settings import (
@@ -64,6 +124,7 @@ def run(
 
     logger = setup_logger(args.debug)
     logger.info("Starting Reachy Mini Conversation App")
+    set_instance_path(instance_path)
     startup_settings = StartupSettings()
 
     if instance_path is not None:
@@ -99,11 +160,8 @@ def run(
         )
 
     from reachy_mini_conversation_app.console import LocalStream
-    from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
-    from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
-
-    if args.no_camera and args.head_tracker is not None:
-        logger.warning("Head tracking disabled: --no-camera flag is set. Remove --no-camera to enable head tracking.")
+    from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, initialize_tools
+    from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 
     if robot is None:
         try:
@@ -129,152 +187,170 @@ def run(
             logger.error("Please check your configuration and try again.")
             sys.exit(1)
 
-    # Auto-enable Gradio in simulation mode (both MuJoCo for daemon and mockup-sim for desktop app)
-    status = robot.client.get_status()
-    if isinstance(status, dict):
-        simulation_enabled = status.get("simulation_enabled", False)
-        mockup_sim_enabled = status.get("mockup_sim_enabled", False)
-    else:
-        simulation_enabled = getattr(status, "simulation_enabled", False)
-        mockup_sim_enabled = getattr(status, "mockup_sim_enabled", False)
-
-    is_simulation = simulation_enabled or mockup_sim_enabled
-
-    if is_simulation and not args.gradio:
-        logger.info("Simulation mode detected. Automatically enabling gradio flag.")
-        args.gradio = True
-
-    try:
-        camera_worker, vision_processor = initialize_camera_and_vision(args, robot)
-    except CameraVisionInitializationError as e:
-        logger.error("Failed to initialize camera/vision: %s", e)
-        sys.exit(1)
-
-    movement_manager = MovementManager(
-        current_robot=robot,
-        camera_worker=camera_worker,
-    )
-
-    head_wobbler = HeadWobbler(set_speech_offsets=movement_manager.set_speech_offsets)
+    movement_manager = MovementManager(current_robot=robot)
 
     deps = ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
-        camera_worker=camera_worker,
-        vision_processor=vision_processor,
-        head_wobbler=head_wobbler,
+        instance_path=instance_path,
+        camera_enabled=not args.no_camera,
     )
-    current_file_path = os.path.dirname(os.path.abspath(__file__))
-    logger.debug(f"Current file absolute path: {current_file_path}")
-    chatbot = gr.Chatbot(
-        type="messages",
-        resizable=True,
-        avatar_images=(
-            os.path.join(current_file_path, "images", "user_avatar.png"),
-            os.path.join(current_file_path, "images", "reachymini_avatar.png"),
-        ),
-    )
-    logger.debug(f"Chatbot avatar images: {chatbot.avatar_images}")
 
-    if is_gemini_model():
-        from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
+    def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
+        """Build a realtime handler for the current runtime backend config."""
+        if is_gemini_model():
+            from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
 
-        logger.info(
-            "Using %s via GeminiLiveHandler",
-            get_backend_label(config.BACKEND_PROVIDER),
-        )
-        handler = GeminiLiveHandler(
-            deps,
-            gradio_mode=args.gradio,
-            instance_path=instance_path,
-            startup_voice=startup_settings.voice,
-        )
-    elif config.BACKEND_PROVIDER == HF_BACKEND:
-        from reachy_mini_conversation_app.huggingface_realtime import HuggingFaceRealtimeHandler
+            logger.info(
+                "Using %s via GeminiLiveHandler",
+                get_backend_label(config.BACKEND_PROVIDER),
+            )
+            return GeminiLiveHandler(
+                deps,
+                instance_path=instance_path,
+                startup_voice=startup_voice,
+            )
+        if config.BACKEND_PROVIDER == HF_BACKEND:
+            from reachy_mini_conversation_app.huggingface_realtime import HuggingFaceRealtimeHandler
 
-        hf_connection_selection = get_hf_connection_selection()
-        transport_label = (
-            "Hugging Face direct websocket"
-            if hf_connection_selection.mode == HF_LOCAL_CONNECTION_MODE and hf_connection_selection.has_target
-            else "Hugging Face session proxy"
-        )
-        logger.info(
-            "Using %s via Hugging Face realtime handler (%s)",
-            get_backend_label(config.BACKEND_PROVIDER),
-            transport_label,
-        )
-        handler = HuggingFaceRealtimeHandler(
-            deps,
-            gradio_mode=args.gradio,
-            instance_path=instance_path,
-            startup_voice=startup_settings.voice,
-        )  # type: ignore[assignment]
-    else:
+            hf_connection_selection = get_hf_connection_selection()
+            transport_label = (
+                "Hugging Face direct websocket"
+                if hf_connection_selection.mode == HF_LOCAL_CONNECTION_MODE and hf_connection_selection.has_target
+                else "Hugging Face session proxy"
+            )
+            logger.info(
+                "Using %s via Hugging Face realtime handler (%s)",
+                get_backend_label(config.BACKEND_PROVIDER),
+                transport_label,
+            )
+            return HuggingFaceRealtimeHandler(
+                deps,
+                instance_path=instance_path,
+                startup_voice=startup_voice,
+            )
+
         from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 
         logger.info(
             "Using %s via OpenAI realtime handler (OpenAI Realtime API)",
             get_backend_label(config.BACKEND_PROVIDER),
         )
-        handler = OpenaiRealtimeHandler(
+        return OpenaiRealtimeHandler(
             deps,
-            gradio_mode=args.gradio,
             instance_path=instance_path,
-            startup_voice=startup_settings.voice,
-        )  # type: ignore[assignment]
-
-    stream_manager: gr.Blocks | LocalStream | None = None
-
-    if args.gradio:
-        from reachy_mini_conversation_app.gradio_personality import PersonalityUI
-
-        personality_ui = PersonalityUI()
-        personality_ui.create_components()
-        additional_inputs: list[Any] = [chatbot, *personality_ui.additional_inputs_ordered()]
-
-        if config.BACKEND_PROVIDER in {OPENAI_BACKEND, GEMINI_BACKEND}:
-            uses_gemini_backend = is_gemini_model()
-            api_key_textbox = gr.Textbox(
-                label="GEMINI_API_KEY" if uses_gemini_backend else "OPENAI API Key",
-                type="password",
-                value=(os.getenv("GEMINI_API_KEY") if uses_gemini_backend else os.getenv("OPENAI_API_KEY"))
-                if not get_space()
-                else "",
-            )
-            additional_inputs.insert(1, api_key_textbox)
-
-        stream = Stream(
-            handler=handler,
-            mode="send-receive",
-            modality="audio",
-            additional_inputs=additional_inputs,
-            additional_outputs=[chatbot],
-            additional_outputs_handler=update_chatbot,
-            ui_args={"title": "Talk with Reachy Mini"},
+            startup_voice=startup_voice,
         )
-        stream_manager = stream.ui
-        if not settings_app:
-            app = FastAPI()
-        else:
-            app = settings_app
 
-        personality_ui.wire_events(handler, stream_manager)
+    handler = build_handler(startup_settings.voice)
 
-        app = gr.mount_gradio_app(app, stream.ui, path="/")
-    else:
-        # In headless mode, wire settings_app + instance_path to console LocalStream
-        stream_manager = LocalStream(
-            handler,
-            robot,
-            settings_app=settings_app,
-            instance_path=instance_path,
+    stream_manager: LocalStream | None = None
+    own_ui_server = None
+
+    effective_settings_app = settings_app
+    if args.ui and settings_app is None:
+        effective_settings_app = FastAPI()
+
+        @effective_settings_app.middleware("http")
+        async def _no_cache(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+            """Serve everything no-store so browsers don't keep stale UI modules."""
+            response = await call_next(request)
+            response.headers["Cache-Control"] = "no-store"
+            return response
+
+    stream_manager = LocalStream(
+        handler,
+        robot,
+        settings_app=effective_settings_app,
+        instance_path=instance_path,
+        handler_factory=build_handler,
+        startup_voice=startup_settings.voice,
+    )
+
+    # The page is served immediately, so the API must be live before the slow startup work below.
+    if effective_settings_app is not None:
+        stream_manager._init_settings_ui_if_needed()
+
+    go_to_sleep_lock = threading.Lock()
+    go_to_sleep_requested = threading.Event()
+
+    def go_to_sleep_and_stop_app() -> dict[str, Any]:
+        """Put Reachy to sleep, then stop the current app."""
+        if not go_to_sleep_lock.acquire(blocking=False):
+            return {"status": "already_requested"}
+
+        try:
+            if go_to_sleep_requested.is_set():
+                return {"status": "already_requested"}
+            go_to_sleep_requested.set()
+
+            logger.info("Going to sleep before stopping conversation app.")
+            sleep_error: str | None = None
+
+            try:
+                robot.disable_wobbling()
+            except Exception as e:
+                logger.debug("Error disabling wobbling before sleep: %s", e)
+
+            movement_manager.stop(reset_to_neutral=False)
+
+            try:
+                robot.goto_sleep()
+            except Exception as e:
+                sleep_error = f"{type(e).__name__}: {e}"
+                logger.error("Failed to move Reachy Mini to sleep pose: %s", e)
+
+            stop_current_app_requested = _request_stop_current_app(robot, logger)
+            local_stop_requested = True
+            if app_stop_event is not None:
+                app_stop_event.set()
+            else:
+                try:
+                    stream_manager.close()
+                except Exception as e:
+                    local_stop_requested = False
+                    logger.error("Error while closing stream manager after go_to_sleep: %s", e)
+
+            result: dict[str, Any] = {
+                "status": "sleeping" if sleep_error is None else "stop_requested",
+                "stop_current_app_requested": stop_current_app_requested,
+                "local_stop_requested": local_stop_requested,
+            }
+            if sleep_error is not None:
+                result["error"] = f"go_to_sleep movement failed: {sleep_error}"
+            return result
+        finally:
+            go_to_sleep_lock.release()
+
+    deps.go_to_sleep = go_to_sleep_and_stop_app
+
+    if args.ui and settings_app is None and effective_settings_app is not None:
+        import uvicorn
+
+        own_ui_server = uvicorn.Server(
+            uvicorn.Config(effective_settings_app, host="0.0.0.0", port=7860, log_level="warning")
         )
+        threading.Thread(target=own_ui_server.run, daemon=True, name="ui-server").start()
+        logger.info("Web UI available at http://localhost:7860")
+
+    try:
+        initialize_tools(instance_path=instance_path)
+    except Exception as e:
+        logger.error("Failed to initialize tools: %s", e)
+        sys.exit(1)
 
     # Each async service → its own thread/loop
     movement_manager.start()
-    head_wobbler.start()
-    if camera_worker:
-        camera_worker.start()
+    # Audio-reactive head motion is driven by the daemon's wobbler, which
+    # taps the media pipeline at push_audio_sample. The console stream pushes
+    # assistant audio through that pipeline directly.
+    robot.enable_wobbling()
+
+    timeout_minutes = resolve_app_timeout_minutes()
+    if timeout_minutes is not None:
+        _start_inactivity_timeout_thread(
+            timeout_minutes, stream_manager, logger, app_stop_event, go_to_sleep_and_stop_app
+        )
 
     def poll_stop_event() -> None:
         """Poll the stop event to allow graceful shutdown."""
@@ -295,10 +371,14 @@ def run(
     except KeyboardInterrupt:
         logger.info("Keyboard interruption in main thread... closing server.")
     finally:
+        if own_ui_server is not None:
+            own_ui_server.should_exit = True
+
         movement_manager.stop()
-        head_wobbler.stop()
-        if camera_worker:
-            camera_worker.stop()
+        try:
+            robot.disable_wobbling()
+        except Exception as e:
+            logger.debug(f"Error disabling wobbling during shutdown: {e}")
 
         # Ensure media is explicitly closed before disconnecting
         try:
