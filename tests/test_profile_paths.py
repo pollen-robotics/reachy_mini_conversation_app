@@ -114,6 +114,22 @@ def test_bracketed_prompt_line_stays_plain_text(
     assert prompts_mod.get_session_instructions(instance_path=tmp_path) == "[custom_prompt]\n\nStay extra brief."
 
 
+def test_session_instructions_fall_back_to_default_for_incomplete_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Incomplete selected profiles should not stop session startup."""
+    profile_dir = tmp_path / "incomplete_prompt"
+    profile_dir.mkdir()
+
+    monkeypatch.setattr(config, "PROFILES_DIRECTORY", tmp_path)
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "incomplete_prompt")
+
+    expected = (DEFAULT_PROFILES_DIRECTORY / "default" / "instructions.txt").read_text(encoding="utf-8").strip()
+
+    assert prompts_mod.get_session_instructions(instance_path=tmp_path) == expected
+
+
 def test_builtin_default_profile_tools_load_for_ui() -> None:
     """The UI should read built-in default tools from the packaged default profile."""
     expected = (DEFAULT_PROFILES_DIRECTORY / "default" / "tools.txt").read_text(encoding="utf-8")
