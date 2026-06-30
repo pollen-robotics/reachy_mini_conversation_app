@@ -369,8 +369,8 @@ def _read_profile_tool_names() -> list[str]:
 
 
 def _resolve_remote_tools(tool_names: list[str], instance_path: str | Path | None) -> list[RemoteMcpTool]:
-    """Resolve installed public Space tools enabled by the active profile."""
-    from reachy_mini_conversation_app.tool_spaces import read_installed_tool_spaces, resolve_public_tool_space_sync
+    """Resolve installed Space tools enabled by the active profile."""
+    from reachy_mini_conversation_app.tool_spaces import resolve_tool_space_sync, read_installed_tool_spaces
 
     remote_tools: list[RemoteMcpTool] = []
     for installed_space in read_installed_tool_spaces(instance_path).spaces:
@@ -383,7 +383,7 @@ def _resolve_remote_tools(tool_names: list[str], instance_path: str | Path | Non
             continue
 
         try:
-            resolved_space = resolve_public_tool_space_sync(installed_space.slug)
+            resolved_space = resolve_tool_space_sync(installed_space.slug)
         except Exception as exc:
             logger.warning(
                 "Space '%s' is unavailable, skipping its tools (%s): %s",

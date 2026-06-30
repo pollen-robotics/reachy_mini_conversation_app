@@ -87,7 +87,7 @@ async def test_initialize_tools_loads_enabled_installed_remote_tools_and_dispatc
         "text": "hello",
     }
     resolver = MagicMock(side_effect=lambda _slug: _resolved_remote_space(client))
-    monkeypatch.setattr(tool_spaces_mod, "resolve_public_tool_space_sync", resolver)
+    monkeypatch.setattr(tool_spaces_mod, "resolve_tool_space_sync", resolver)
 
     write_installed_tool_spaces(
         None,
@@ -139,7 +139,7 @@ def test_initialize_tools_warns_when_enabled_remote_tool_is_unavailable(
     monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
     monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
     monkeypatch.setattr(
-        tool_spaces_mod, "resolve_public_tool_space_sync", lambda slug: (_ for _ in ()).throw(RuntimeError("boom"))
+        tool_spaces_mod, "resolve_tool_space_sync", lambda slug: (_ for _ in ()).throw(RuntimeError("boom"))
     )
 
     write_installed_tool_spaces(

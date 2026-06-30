@@ -246,7 +246,7 @@ play_emotion
 sweep_look
 ```
 Tools are resolved first from Python files in the profile folder (custom tools), then from the core library `src/reachy_mini_conversation_app/tools/` (like `dance`, `camera`).
-Installed public Hugging Face Space tools can also be enabled here after you add them with `tool-spaces`.
+Installed Hugging Face Space tools can also be enabled here after you add them with `tool-spaces`.
 
 **Custom tools:**
 
@@ -325,9 +325,9 @@ This supports both:
 </details>
 
 <details>
-<summary><b>Public Hugging Face Space tools</b></summary>
+<summary><b>Hugging Face Space tools</b></summary>
 
-You can install public MCP-compatible Hugging Face Spaces as remote tool sources for this app.
+You can install MCP-compatible Hugging Face Spaces as remote tool sources for this app. Private Spaces work too, as long as `HF_TOKEN` is set (or you have run `hf auth login`) for an account that can access them.
 
 ```bash
 # install + enable in active profile
@@ -346,7 +346,7 @@ reachy-mini-conversation-app tool-spaces list
 reachy-mini-conversation-app tool-spaces remove owner/space-name
 ```
 
-The app validates the public Space slug through the Hugging Face Hub, probes the standard public MCP endpoint, discovers tools, enables them in the active profile's `tools.txt`, and writes the installed Space to:
+The app validates the Space slug through the Hugging Face Hub, probes the standard MCP endpoint (sending the HF token only to private Spaces), discovers tools, enables them in the active profile's `tools.txt`, and writes the installed Space to:
 
 - `installed_tool_spaces.json` in the managed app instance directory
 - `external_content/installed_tool_spaces.json` in terminal mode
