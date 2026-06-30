@@ -1,4 +1,5 @@
 import shutil
+import logging
 import zipfile
 import subprocess
 from pathlib import Path, PurePosixPath
@@ -128,6 +129,26 @@ def test_session_instructions_fall_back_to_default_for_incomplete_profile(
     expected = (DEFAULT_PROFILES_DIRECTORY / "default" / "instructions.txt").read_text(encoding="utf-8").strip()
 
     assert prompts_mod.get_session_instructions(instance_path=tmp_path) == expected
+
+
+def test_explicit_default_profile_does_not_fall_back_to_itself(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A broken explicit default profile should fail without a self-fallback log."""
+    default_dir = tmp_path / "default"
+    default_dir.mkdir()
+
+    monkeypatch.setattr(config, "PROFILES_DIRECTORY", tmp_path)
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "default")
+    monkeypatch.setattr(prompts_mod, "DEFAULT_PROFILES_DIRECTORY", tmp_path)
+
+    with caplog.at_level(logging.WARNING, logger="reachy_mini_conversation_app.prompts"):
+        with pytest.raises(RuntimeError, match="Default profile has no usable instructions.txt"):
+            prompts_mod.get_session_instructions(instance_path=tmp_path)
+
+    assert "Using default profile instructions" not in caplog.text
 
 
 def test_builtin_default_profile_tools_load_for_ui() -> None:

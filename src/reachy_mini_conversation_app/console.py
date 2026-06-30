@@ -526,14 +526,11 @@ class LocalStream:
             try:
                 get_session_instructions()
                 get_session_voice(default=get_default_voice_for_backend(get_backend_choice()))
-            except BaseException:
+            except Exception:
                 set_custom_profile(previous_profile)
                 raise
         except Exception as e:
             logger.error("Error applying personality '%s': %s", profile, e)
-            return f"Failed to apply personality: {e}"
-        except BaseException as e:
-            logger.error("Failed to resolve personality content: %s", e)
             return f"Failed to apply personality: {e}"
 
         # Rebuild the tool registry

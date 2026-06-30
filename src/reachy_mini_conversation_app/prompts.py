@@ -58,7 +58,7 @@ def get_session_instructions(instance_path: str | Path | None = None) -> str:
         instructions_file = config.resolve_profile_dir(profile) / INSTRUCTIONS_FILENAME
 
     instructions = _read_instructions_file(instructions_file, profile_name)
-    if instructions is None and profile:
+    if instructions is None and profile and profile != DEFAULT_PROFILE_NAME:
         default_instructions_file = _default_instructions_file()
         logger.warning(
             "Using default profile instructions from %s because profile '%s' is incomplete",
