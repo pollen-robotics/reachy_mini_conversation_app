@@ -2442,8 +2442,8 @@ wheels = [
 
 [[package]]
 name = "reachy-mini"
-version = "1.8.3"
-source = { registry = "https://pypi.org/simple" }
+version = "1.8.4"
+source = { git = "https://github.com/pollen-robotics/reachy_mini.git?rev=c3063c2be7cd35aee809f086769e8d65392df743#c3063c2be7cd35aee809f086769e8d65392df743" }
 dependencies = [
     { name = "aiohttp" },
     { name = "asgiref" },
@@ -2477,10 +2477,6 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
     { name = "websockets" },
     { name = "zeroconf" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/8e/e9/4eefe938e794b360b37a4f100015763566576fd34d58bec7a17179f13ab4/reachy_mini-1.8.3.tar.gz", hash = "sha256:09d9372b4c47eb8291a74f29b91605c87a494e4f707d9993754065bf27a7c058", size = 24792246, upload-time = "2026-06-16T16:18:01.516Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8a/20/f9476d69b5cac93eb4ec6683a2b64ee7c98cd359de51fe47c59f23104b52/reachy_mini-1.8.3-py3-none-any.whl", hash = "sha256:6bdc4227f4b811f5fdf0106e64bcbdb3f10a10b9dfa4a5704e52829f4d6383dd", size = 24890119, upload-time = "2026-06-16T16:17:58.769Z" },
 ]
 
 [[package]]
@@ -2518,7 +2514,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.27.1" },
     { name = "openai", specifier = ">=2.30.0" },
     { name = "python-dotenv" },
-    { name = "reachy-mini", specifier = ">=1.8.3" },
+    { name = "reachy-mini", git = "https://github.com/pollen-robotics/reachy_mini.git?rev=c3063c2be7cd35aee809f086769e8d65392df743" },
     { name = "reachy-mini-dances-library" },
     { name = "reachy-mini-toolbox" },
 ]
