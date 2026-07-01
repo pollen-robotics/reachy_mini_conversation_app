@@ -312,6 +312,24 @@ def test_tool_spaces_add_enables_in_active_profile_by_default(
     assert SEARCH_TOOL_ID in tools_txt.read_text(encoding="utf-8")
 
 
+def test_tool_spaces_remove_disables_tools_in_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Removing a Space strips its tool IDs from the profile they were enabled in."""
+    _mock_add(monkeypatch, tmp_path)
+    tools_txt = _setup_profile(tmp_path, "default")
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", tmp_path)
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", None)
+
+    assert _run_cli(monkeypatch, ["app", "tool-spaces", "add", SEARCH_SPACE_SLUG]) == 0
+    assert SEARCH_TOOL_ID in tools_txt.read_text(encoding="utf-8")
+
+    assert _run_cli(monkeypatch, ["app", "tool-spaces", "remove", SEARCH_SPACE_SLUG]) == 0
+    assert SEARCH_TOOL_ID not in tools_txt.read_text(encoding="utf-8")
+    assert read_installed_tool_spaces(None).spaces == []
+
+
 def test_tool_spaces_add_install_only_skips_tools_txt(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -162,6 +162,27 @@ def _append_tools_to_profile(profile: str, tool_ids: list[str]) -> list[str]:
     return to_add
 
 
+def _disable_space_tools_in_profiles(alias: str) -> list[tuple[str, list[str]]]:
+    """Strip a Space's tool IDs from every profile's tools.txt. Returns (profile, removed IDs) per profile touched."""
+    prefix = f"{alias}__"
+    removed_by_profile: list[tuple[str, list[str]]] = []
+    seen: set[Path] = set()
+    for root in (config.PROFILES_DIRECTORY, config.user_personalities_root()):
+        for tools_txt in sorted(root.glob("*/tools.txt")):
+            resolved = tools_txt.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            lines = tools_txt.read_text(encoding="utf-8").splitlines()
+            removed = [line.strip() for line in lines if line.strip().startswith(prefix)]
+            if not removed:
+                continue
+            kept = [line for line in lines if not line.strip().startswith(prefix)]
+            tools_txt.write_text("".join(f"{line}\n" for line in kept), encoding="utf-8")
+            removed_by_profile.append((tools_txt.parent.name, removed))
+    return removed_by_profile
+
+
 def validate_space_slug(slug: str) -> str:
     """Validate a public HF Space slug."""
     candidate = slug.strip()
@@ -380,19 +401,13 @@ def handle_tool_spaces_command(args: argparse.Namespace, *, instance_path: str |
             logger.warning("Space not installed: %s", validated_slug)
             return 1
 
-        try:
-            removed_space: ResolvedInstalledToolSpace | None = resolve_tool_space_sync(validated_slug)
-        except Exception as exc:
-            removed_space = None
-            logger.warning("Could not refresh tools for '%s' before removal: %s", validated_slug, exc)
-
         write_installed_tool_spaces(
             instance_path,
             InstalledToolSpacesManifest(version=manifest.version, spaces=remaining_spaces),
         )
         logger.info("Removed Space tool source: %s", validated_slug)
-        if removed_space is not None:
-            logger.info("%s", format_space_tool_listing(removed_space))
+        for profile_name, disabled_tool_ids in _disable_space_tools_in_profiles(normalize_space_alias(validated_slug)):
+            logger.info("Disabled in profile '%s': %s", profile_name, disabled_tool_ids)
         return 0
 
     if command == "list":
