@@ -5,12 +5,15 @@ from types import SimpleNamespace
 from pathlib import Path
 from argparse import Namespace
 
+import httpx
 import pytest
+from huggingface_hub.errors import RepositoryNotFoundError
 
 import reachy_mini_conversation_app.config as config_mod
 from reachy_mini_conversation_app.main import main
 from reachy_mini_conversation_app.mcp_client import RemoteToolSpec
 from reachy_mini_conversation_app.tool_spaces import (
+    resolve_tool_space_sync,
     handle_tool_spaces_command,
     read_installed_tool_spaces,
 )
@@ -34,6 +37,12 @@ def _mock_public_space_info(slug: str) -> SimpleNamespace:
         subdomain=slug.replace("/", "-"),
         tags=["reachy-mini-tool", "mcp"],
     )
+
+
+def _mock_private_space_info(slug: str) -> SimpleNamespace:
+    info = _mock_public_space_info(slug)
+    info.private = True
+    return info
 
 
 async def _mock_list_tool_specs(self: object) -> list[RemoteToolSpec]:
@@ -101,26 +110,96 @@ def test_tool_spaces_add_list_remove_round_trip(
     assert read_installed_tool_spaces(None).spaces == []
 
 
-def test_tool_spaces_add_rejects_non_public_space(
+def test_tool_spaces_add_installs_private_space_with_token(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The CLI should reject non-public Spaces before writing the manifest."""
+    """A private Space resolves and installs when an HF token is available."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
-        lambda self, slug, **kwargs: SimpleNamespace(
-            id=slug,
-            private=True,
-            disabled=False,
-            sdk="gradio",
-            host=None,
-            subdomain=slug.replace("/", "-"),
-            tags=[],
-        ),
+        lambda self, slug, **kwargs: _mock_private_space_info(slug),
+    )
+    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.get_token", lambda: "hf_test_token")
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
+        _mock_list_tool_specs,
     )
 
-    assert _run_cli(monkeypatch, ["reachy-mini-conversation-app", "tool-spaces", "add", PRIVATE_SPACE_SLUG]) == 1
+    assert _run_cli(monkeypatch, ["app", "tool-spaces", "add", PRIVATE_SPACE_SLUG, "--install-only"]) == 0
+    assert [space.slug for space in read_installed_tool_spaces(None).spaces] == [PRIVATE_SPACE_SLUG]
+
+
+def test_resolve_tool_space_attaches_auth_header_for_private_space(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A private Space's MCP client must carry the HF bearer token from the hf-login fallback."""
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        lambda self, slug, **kwargs: _mock_private_space_info(slug),
+    )
+    monkeypatch.setattr(config_mod.config, "HF_TOKEN", None)
+    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.get_token", lambda: "hf_test_token")
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
+        _mock_list_tool_specs,
+    )
+
+    resolved = resolve_tool_space_sync(PRIVATE_SPACE_SLUG)
+    assert resolved.client.server.headers["Authorization"] == "Bearer hf_test_token"
+
+
+def test_resolve_tool_space_prefers_app_config_hf_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The token must come from the app config (loaded from .env), not only from get_token()."""
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        lambda self, slug, **kwargs: _mock_private_space_info(slug),
+    )
+    monkeypatch.setattr(config_mod.config, "HF_TOKEN", "hf_env_token")
+    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.get_token", lambda: None)
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
+        _mock_list_tool_specs,
+    )
+
+    resolved = resolve_tool_space_sync(PRIVATE_SPACE_SLUG)
+    assert resolved.client.server.headers["Authorization"] == "Bearer hf_env_token"
+
+
+def test_resolve_tool_space_omits_auth_header_for_public_space(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A public Space must never receive the HF token, even when one is set."""
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        lambda self, slug, **kwargs: _mock_public_space_info(slug),
+    )
+    monkeypatch.setattr(config_mod.config, "HF_TOKEN", None)
+    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.get_token", lambda: "hf_test_token")
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
+        _mock_list_tool_specs,
+    )
+
+    resolved = resolve_tool_space_sync(SEARCH_SPACE_SLUG)
+    assert "Authorization" not in resolved.client.server.headers
+
+
+def test_tool_spaces_add_private_space_without_token_hints_at_auth(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Without a token, adding a private Space fails cleanly and points at HF auth."""
+    monkeypatch.chdir(tmp_path)
+
+    def _raise_not_found(self: object, slug: str, **kwargs: object) -> SimpleNamespace:
+        raise RepositoryNotFoundError(
+            "404 Client Error", response=httpx.Response(404, request=httpx.Request("GET", "https://hf.co"))
+        )
+
+    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.HfApi.space_info", _raise_not_found)
+    monkeypatch.setattr(config_mod.config, "HF_TOKEN", None)
+    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.get_token", lambda: None)
+
+    assert _run_cli(monkeypatch, ["app", "tool-spaces", "add", PRIVATE_SPACE_SLUG]) == 1
+    assert "hf auth login" in capsys.readouterr().err
     assert not (tmp_path / "external_content" / "installed_tool_spaces.json").exists()
 
 
@@ -231,6 +310,24 @@ def test_tool_spaces_add_enables_in_active_profile_by_default(
     assert _run_cli(monkeypatch, ["app", "tool-spaces", "add", SEARCH_SPACE_SLUG]) == 0
 
     assert SEARCH_TOOL_ID in tools_txt.read_text(encoding="utf-8")
+
+
+def test_tool_spaces_remove_disables_tools_in_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Removing a Space strips its tool IDs from the profile they were enabled in."""
+    _mock_add(monkeypatch, tmp_path)
+    tools_txt = _setup_profile(tmp_path, "default")
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", tmp_path)
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", None)
+
+    assert _run_cli(monkeypatch, ["app", "tool-spaces", "add", SEARCH_SPACE_SLUG]) == 0
+    assert SEARCH_TOOL_ID in tools_txt.read_text(encoding="utf-8")
+
+    assert _run_cli(monkeypatch, ["app", "tool-spaces", "remove", SEARCH_SPACE_SLUG]) == 0
+    assert SEARCH_TOOL_ID not in tools_txt.read_text(encoding="utf-8")
+    assert read_installed_tool_spaces(None).spaces == []
 
 
 def test_tool_spaces_add_install_only_skips_tools_txt(

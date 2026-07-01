@@ -26,8 +26,8 @@ def parse_args() -> tuple[argparse.Namespace, list]:  # type: ignore
     tool_spaces_parser = subparsers.add_parser("tool-spaces", help="Manage installed Hugging Face Space tool sources")
     tool_spaces_subparsers = tool_spaces_parser.add_subparsers(dest="tool_spaces_command", required=True)
 
-    add_parser = tool_spaces_subparsers.add_parser("add", help="Install one public Space tool source by slug")
-    add_parser.add_argument("space_slug", help="Public Hugging Face Space slug in the form owner/space-name")
+    add_parser = tool_spaces_subparsers.add_parser("add", help="Install one Space tool source by slug")
+    add_parser.add_argument("space_slug", help="Hugging Face Space slug in the form owner/space-name")
     add_parser.add_argument(
         "--install-only",
         action="store_true",

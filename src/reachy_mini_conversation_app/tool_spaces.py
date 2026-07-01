@@ -12,8 +12,10 @@ from collections import Counter
 from dataclasses import field, asdict, dataclass
 from collections.abc import Sequence
 
-from huggingface_hub import HfApi, SpaceInfo
+from huggingface_hub import HfApi, SpaceInfo, get_token
+from huggingface_hub.errors import RepositoryNotFoundError
 
+from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.mcp_client import (
     McpClientError,
     RemoteToolSpec,
@@ -32,7 +34,7 @@ _SLUG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._
 
 @dataclass(frozen=True)
 class InstalledToolSpace:
-    """Persisted record for one installed public Space."""
+    """Persisted record for one installed Space."""
 
     slug: str
     alias: str
@@ -40,7 +42,7 @@ class InstalledToolSpace:
 
 @dataclass(frozen=True)
 class InstalledToolSpacesManifest:
-    """Persisted manifest of installed public Space tool sources."""
+    """Persisted manifest of installed Space tool sources."""
 
     version: int = 1
     spaces: list[InstalledToolSpace] = field(default_factory=list)
@@ -59,7 +61,7 @@ class InstalledToolSpaceTool:
 
 @dataclass(frozen=True)
 class ResolvedInstalledToolSpace:
-    """Runtime description of an installed public Space."""
+    """Runtime description of an installed Space."""
 
     slug: str
     alias: str
@@ -137,8 +139,6 @@ def write_installed_tool_spaces(
 
 def _append_tools_to_profile(profile: str, tool_ids: list[str]) -> list[str]:
     """Append tool IDs to a profile's tools.txt. Returns the IDs that were added."""
-    from reachy_mini_conversation_app.config import config
-
     tools_txt = config.resolve_profile_dir(profile) / "tools.txt"
     if not tools_txt.parent.is_dir():
         raise RuntimeError(
@@ -160,6 +160,27 @@ def _append_tools_to_profile(profile: str, tool_ids: list[str]) -> list[str]:
             for tid in to_add:
                 f.write(f"{tid}\n")
     return to_add
+
+
+def _disable_space_tools_in_profiles(alias: str) -> list[tuple[str, list[str]]]:
+    """Strip a Space's tool IDs from every profile's tools.txt. Returns (profile, removed IDs) per profile touched."""
+    prefix = f"{alias}__"
+    removed_by_profile: list[tuple[str, list[str]]] = []
+    seen: set[Path] = set()
+    for root in (config.PROFILES_DIRECTORY, config.user_personalities_root()):
+        for tools_txt in sorted(root.glob("*/tools.txt")):
+            resolved = tools_txt.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            lines = tools_txt.read_text(encoding="utf-8").splitlines()
+            removed = [line.strip() for line in lines if line.strip().startswith(prefix)]
+            if not removed:
+                continue
+            kept = [line for line in lines if not line.strip().startswith(prefix)]
+            tools_txt.write_text("".join(f"{line}\n" for line in kept), encoding="utf-8")
+            removed_by_profile.append((tools_txt.parent.name, removed))
+    return removed_by_profile
 
 
 def validate_space_slug(slug: str) -> str:
@@ -228,7 +249,7 @@ def _build_installed_tool_space_tools(
     return tools
 
 
-def _build_public_space_mcp_url(space_info: SpaceInfo, slug: str) -> str:
+def _build_space_mcp_url(space_info: SpaceInfo, slug: str) -> str:
     host = (space_info.host or "").strip()
     if host:
         if host.startswith("http://") or host.startswith("https://"):
@@ -243,27 +264,39 @@ def _build_public_space_mcp_url(space_info: SpaceInfo, slug: str) -> str:
     return f"https://{slug_host}.hf.space/gradio_api/mcp/"
 
 
-def _validate_public_space_info(slug: str, space_info: SpaceInfo) -> None:
-    if bool(space_info.private):
-        raise RuntimeError(f"Space '{slug}' is not public and cannot be installed in this v1 flow.")
+def _validate_space_info(slug: str, space_info: SpaceInfo) -> None:
     if bool(space_info.disabled):
         raise RuntimeError(f"Space '{slug}' is disabled and cannot be installed.")
     if (space_info.sdk or "").strip().lower() != "gradio":
         raise RuntimeError(f"Space '{slug}' is not a Gradio Space and cannot expose the standard MCP endpoint.")
 
 
-async def resolve_public_tool_space(slug: str) -> ResolvedInstalledToolSpace:
-    """Validate and discover tools from one public HF Space."""
+async def resolve_tool_space(slug: str) -> ResolvedInstalledToolSpace:
+    """Validate and discover tools from one HF Space, authenticating private Spaces with the HF token."""
     validated_slug = validate_space_slug(slug)
     alias = normalize_space_alias(validated_slug)
-    space_info = HfApi().space_info(validated_slug, timeout=10.0, token=False)
-    _validate_public_space_info(validated_slug, space_info)
+    token = config.HF_TOKEN or get_token()
+    try:
+        space_info = HfApi().space_info(validated_slug, timeout=10.0, token=token or False)
+    except RepositoryNotFoundError as exc:
+        if token is None:
+            raise RuntimeError(
+                f"Space '{validated_slug}' was not found. If it is private, set HF_TOKEN "
+                "or run 'hf auth login' for an account that can access it."
+            ) from exc
+        raise RuntimeError(
+            f"Space '{validated_slug}' was not found, or the current Hugging Face token cannot access it."
+        ) from exc
+    _validate_space_info(validated_slug, space_info)
 
-    mcp_url = _build_public_space_mcp_url(space_info, validated_slug)
+    mcp_url = _build_space_mcp_url(space_info, validated_slug)
+    # Only private Spaces get the HF token, never leak it to a public Space's MCP endpoint.
+    headers = {"Authorization": f"Bearer {token}"} if bool(space_info.private) and token else {}
     client = RemoteMcpToolClient(
         RemoteMcpServerConfig(
             alias=alias,
             url=mcp_url,
+            headers=headers,
             request_timeout_s=10.0,
             tool_timeout_s=30.0,
         )
@@ -283,9 +316,9 @@ async def resolve_public_tool_space(slug: str) -> ResolvedInstalledToolSpace:
     )
 
 
-def resolve_public_tool_space_sync(slug: str) -> ResolvedInstalledToolSpace:
-    """Resolve one public Space synchronously."""
-    return asyncio.run(resolve_public_tool_space(slug))
+def resolve_tool_space_sync(slug: str) -> ResolvedInstalledToolSpace:
+    """Resolve one Space synchronously."""
+    return asyncio.run(resolve_tool_space(slug))
 
 
 def format_space_tool_listing(space: ResolvedInstalledToolSpace) -> str:
@@ -306,7 +339,11 @@ def handle_tool_spaces_command(args: argparse.Namespace, *, instance_path: str |
     """Handle tool-spaces subcommands from the main CLI."""
     command = getattr(args, "tool_spaces_command", None)
     if command == "add":
-        resolved_space = resolve_public_tool_space_sync(args.space_slug)
+        try:
+            resolved_space = resolve_tool_space_sync(args.space_slug)
+        except RuntimeError as exc:
+            logger.error("%s", exc)
+            return 1
         manifest = read_installed_tool_spaces(instance_path)
         already_installed = any(space.slug == resolved_space.slug for space in manifest.spaces)
         if already_installed:
@@ -342,8 +379,6 @@ def handle_tool_spaces_command(args: argparse.Namespace, *, instance_path: str |
 
         target_profile = args.profile
         if target_profile is None:
-            from reachy_mini_conversation_app.config import config
-
             target_profile = config.REACHY_MINI_CUSTOM_PROFILE or "default"
 
         tool_ids = [tool.local_name for tool in resolved_space.tools]
@@ -366,19 +401,13 @@ def handle_tool_spaces_command(args: argparse.Namespace, *, instance_path: str |
             logger.warning("Space not installed: %s", validated_slug)
             return 1
 
-        try:
-            removed_space: ResolvedInstalledToolSpace | None = resolve_public_tool_space_sync(validated_slug)
-        except Exception as exc:
-            removed_space = None
-            logger.warning("Could not refresh tools for '%s' before removal: %s", validated_slug, exc)
-
         write_installed_tool_spaces(
             instance_path,
             InstalledToolSpacesManifest(version=manifest.version, spaces=remaining_spaces),
         )
         logger.info("Removed Space tool source: %s", validated_slug)
-        if removed_space is not None:
-            logger.info("%s", format_space_tool_listing(removed_space))
+        for profile_name, disabled_tool_ids in _disable_space_tools_in_profiles(normalize_space_alias(validated_slug)):
+            logger.info("Disabled in profile '%s': %s", profile_name, disabled_tool_ids)
         return 0
 
     if command == "list":
@@ -391,7 +420,7 @@ def handle_tool_spaces_command(args: argparse.Namespace, *, instance_path: str |
 
         for installed_space in manifest.spaces:
             try:
-                resolved_space = resolve_public_tool_space_sync(installed_space.slug)
+                resolved_space = resolve_tool_space_sync(installed_space.slug)
             except Exception as exc:
                 logger.warning("Space '%s' (%s) is unavailable: %s", installed_space.slug, installed_space.alias, exc)
                 continue
