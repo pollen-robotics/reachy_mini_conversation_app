@@ -131,11 +131,12 @@ def test_tool_spaces_add_installs_private_space_with_token(
 
 
 def test_resolve_tool_space_attaches_auth_header_for_private_space(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A private Space's MCP client must carry the HF bearer token."""
+    """A private Space's MCP client must carry the HF bearer token from the hf-login fallback."""
     monkeypatch.setattr(
         "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
         lambda self, slug, **kwargs: _mock_private_space_info(slug),
     )
+    monkeypatch.setattr(config_mod.config, "HF_TOKEN", None)
     monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.get_token", lambda: "hf_test_token")
     monkeypatch.setattr(
         "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
@@ -146,12 +147,30 @@ def test_resolve_tool_space_attaches_auth_header_for_private_space(monkeypatch: 
     assert resolved.client.server.headers["Authorization"] == "Bearer hf_test_token"
 
 
+def test_resolve_tool_space_prefers_app_config_hf_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The token must come from the app config (loaded from .env), not only from get_token()."""
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        lambda self, slug, **kwargs: _mock_private_space_info(slug),
+    )
+    monkeypatch.setattr(config_mod.config, "HF_TOKEN", "hf_env_token")
+    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.get_token", lambda: None)
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
+        _mock_list_tool_specs,
+    )
+
+    resolved = resolve_tool_space_sync(PRIVATE_SPACE_SLUG)
+    assert resolved.client.server.headers["Authorization"] == "Bearer hf_env_token"
+
+
 def test_resolve_tool_space_omits_auth_header_for_public_space(monkeypatch: pytest.MonkeyPatch) -> None:
     """A public Space must never receive the HF token, even when one is set."""
     monkeypatch.setattr(
         "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
         lambda self, slug, **kwargs: _mock_public_space_info(slug),
     )
+    monkeypatch.setattr(config_mod.config, "HF_TOKEN", None)
     monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.get_token", lambda: "hf_test_token")
     monkeypatch.setattr(
         "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
@@ -176,6 +195,7 @@ def test_tool_spaces_add_private_space_without_token_hints_at_auth(
         )
 
     monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.HfApi.space_info", _raise_not_found)
+    monkeypatch.setattr(config_mod.config, "HF_TOKEN", None)
     monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.get_token", lambda: None)
 
     assert _run_cli(monkeypatch, ["app", "tool-spaces", "add", PRIVATE_SPACE_SLUG]) == 1

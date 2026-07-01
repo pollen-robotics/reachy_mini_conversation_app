@@ -15,6 +15,7 @@ from collections.abc import Sequence
 from huggingface_hub import HfApi, SpaceInfo, get_token
 from huggingface_hub.errors import RepositoryNotFoundError
 
+from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.mcp_client import (
     McpClientError,
     RemoteToolSpec,
@@ -138,8 +139,6 @@ def write_installed_tool_spaces(
 
 def _append_tools_to_profile(profile: str, tool_ids: list[str]) -> list[str]:
     """Append tool IDs to a profile's tools.txt. Returns the IDs that were added."""
-    from reachy_mini_conversation_app.config import config
-
     tools_txt = config.resolve_profile_dir(profile) / "tools.txt"
     if not tools_txt.parent.is_dir():
         raise RuntimeError(
@@ -255,7 +254,7 @@ async def resolve_tool_space(slug: str) -> ResolvedInstalledToolSpace:
     """Validate and discover tools from one HF Space, authenticating private Spaces with the HF token."""
     validated_slug = validate_space_slug(slug)
     alias = normalize_space_alias(validated_slug)
-    token = get_token()
+    token = config.HF_TOKEN or get_token()
     try:
         space_info = HfApi().space_info(validated_slug, timeout=10.0, token=token or False)
     except RepositoryNotFoundError as exc:
@@ -270,7 +269,7 @@ async def resolve_tool_space(slug: str) -> ResolvedInstalledToolSpace:
     _validate_space_info(validated_slug, space_info)
 
     mcp_url = _build_space_mcp_url(space_info, validated_slug)
-    # Only private Spaces get the HF token; never leak it to a public Space's MCP endpoint.
+    # Only private Spaces get the HF token, never leak it to a public Space's MCP endpoint.
     headers = {"Authorization": f"Bearer {token}"} if bool(space_info.private) and token else {}
     client = RemoteMcpToolClient(
         RemoteMcpServerConfig(
@@ -359,8 +358,6 @@ def handle_tool_spaces_command(args: argparse.Namespace, *, instance_path: str |
 
         target_profile = args.profile
         if target_profile is None:
-            from reachy_mini_conversation_app.config import config
-
             target_profile = config.REACHY_MINI_CUSTOM_PROFILE or "default"
 
         tool_ids = [tool.local_name for tool in resolved_space.tools]
