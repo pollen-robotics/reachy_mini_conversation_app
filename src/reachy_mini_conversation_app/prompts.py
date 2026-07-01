@@ -1,4 +1,3 @@
-import sys
 import logging
 from pathlib import Path
 
@@ -24,6 +23,22 @@ def _default_instructions_file() -> Path:
     return DEFAULT_PROFILES_DIRECTORY / DEFAULT_PROFILE_NAME / INSTRUCTIONS_FILENAME
 
 
+def _read_instructions_file(instructions_file: Path, profile_name: str) -> str | None:
+    try:
+        if not instructions_file.exists():
+            logger.warning("Profile '%s' has no %s", profile_name, INSTRUCTIONS_FILENAME)
+            return None
+        instructions = instructions_file.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError) as e:
+        logger.warning("Failed to load instructions from profile '%s': %s", profile_name, e)
+        return None
+
+    if not instructions:
+        logger.warning("Profile '%s' has empty %s", profile_name, INSTRUCTIONS_FILENAME)
+        return None
+    return instructions
+
+
 def get_session_instructions(instance_path: str | Path | None = None) -> str:
     """Get session instructions, loading from REACHY_MINI_CUSTOM_PROFILE if set."""
     profile = config.REACHY_MINI_CUSTOM_PROFILE
@@ -42,21 +57,23 @@ def get_session_instructions(instance_path: str | Path | None = None) -> str:
             logger.info("Loading prompt from profile '%s'", profile)
         instructions_file = config.resolve_profile_dir(profile) / INSTRUCTIONS_FILENAME
 
-    try:
-        if instructions_file.exists():
-            instructions = instructions_file.read_text(encoding="utf-8").strip()
-            if instructions:
-                memory_prompt = format_memory_for_prompt(instance_path)
-                if memory_prompt:
-                    return f"{memory_prompt}\n\n{instructions}"
-                return instructions
-            logger.error("Profile '%s' has empty %s", profile_name, INSTRUCTIONS_FILENAME)
-            sys.exit(1)
-        logger.error("Profile '%s' has no %s", profile_name, INSTRUCTIONS_FILENAME)
-        sys.exit(1)
-    except Exception as e:
-        logger.error("Failed to load instructions from profile '%s': %s", profile_name, e)
-        sys.exit(1)
+    instructions = _read_instructions_file(instructions_file, profile_name)
+    if instructions is None and profile and profile != DEFAULT_PROFILE_NAME:
+        default_instructions_file = _default_instructions_file()
+        logger.warning(
+            "Using default profile instructions from %s because profile '%s' is incomplete",
+            default_instructions_file,
+            profile,
+        )
+        instructions = _read_instructions_file(default_instructions_file, DEFAULT_PROFILE_NAME)
+
+    if instructions is None:
+        raise RuntimeError(f"Default profile has no usable {INSTRUCTIONS_FILENAME}")
+
+    memory_prompt = format_memory_for_prompt(instance_path)
+    if memory_prompt:
+        return f"{memory_prompt}\n\n{instructions}"
+    return instructions
 
 
 def get_session_voice(default: str | None = None) -> str:

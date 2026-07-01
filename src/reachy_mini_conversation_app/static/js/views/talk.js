@@ -4,7 +4,7 @@
  * Robot stays live, tapping the orb only mutes or unmutes the user's mic.
  */
 
-import { API_PREFIX, getMicState, listPersonalities, setMicMuted } from "../api.js";
+import { API_PREFIX, applyPersonality, getMicState, listPersonalities, setMicMuted } from "../api.js";
 import { BUILT_IN_DEFAULT_OPTION, ORB_STATES } from "../constants.js";
 import { createOrb, mapActivityToState } from "../orb.js";
 import { consumePendingApply } from "../pending-apply.js";
@@ -28,8 +28,14 @@ export async function mountTalkView({ outlet, signal }) {
   const micStatePromise = getMicState();
   let muted = true;
   let togglePending = false;
+  let activePersonality = null;
 
   const caption = h("p", { class: "talk__caption" }, CAPTION_BY_STATE[ORB_STATES.CONNECTING]);
+  const defaultAction = document.querySelector('[data-component="default-personality-action"]');
+  if (defaultAction) {
+    defaultAction.hidden = true;
+    defaultAction.addEventListener("click", onSetDefault);
+  }
   const orb = createOrb({
     initialState: ORB_STATES.CONNECTING,
     onStateChange: (state) => {
@@ -60,12 +66,10 @@ export async function mountTalkView({ outlet, signal }) {
     if (signal.aborted) return;
     // SSE "ready" will flip the orb to its resting state next tick.
     caption.textContent = CAPTION_BY_STATE[ORB_STATES.CONNECTING];
+    void refreshPersonalityState();
   } else {
     // Deep link to /talk with no pending apply: refresh the header badge.
-    fetchActivePersonality().then((name) => {
-      if (signal.aborted) return;
-      if (name) setPersonality(name);
-    });
+    void refreshPersonalityState();
   }
 
   try {
@@ -109,6 +113,10 @@ export async function mountTalkView({ outlet, signal }) {
   signal.addEventListener("abort", () => {
     subscription.close();
     orb.dispose();
+    if (defaultAction) {
+      defaultAction.hidden = true;
+      defaultAction.removeEventListener("click", onSetDefault);
+    }
   });
 
   function restingState() {
@@ -136,18 +144,56 @@ export async function mountTalkView({ outlet, signal }) {
     syncMicAria();
   }
 
+  async function refreshPersonalityState() {
+    const personalityState = await fetchPersonalityState();
+    if (signal.aborted || personalityState == null) return;
+    activePersonality = personalityState.current;
+    setPersonality(personalityState.badgeName);
+    const shouldHide = personalityState.locked || personalityState.current === personalityState.startup;
+    if (defaultAction) {
+      defaultAction.hidden = shouldHide;
+    }
+  }
+
+  async function onSetDefault() {
+    if (!defaultAction || !activePersonality) return;
+    defaultAction.disabled = true;
+    caption.textContent = `Saving "${displayPersonalityName(activePersonality)}" as default...`;
+    try {
+      await applyPersonality(activePersonality, { persist: true });
+      if (signal.aborted) return;
+      defaultAction.hidden = true;
+      caption.textContent = `"${displayPersonalityName(activePersonality)}" will be used at startup.`;
+    } catch (error) {
+      if (!signal.aborted) {
+        caption.textContent = `Failed to save default: ${error?.message || error}`;
+      }
+    } finally {
+      defaultAction.disabled = false;
+    }
+  }
+
   function syncMicAria() {
     orb.root.setAttribute("aria-pressed", String(!muted));
     orb.root.setAttribute("aria-label", muted ? "Unmute microphone" : "Mute microphone");
   }
 }
 
-async function fetchActivePersonality() {
+function displayPersonalityName(name) {
+  return name === BUILT_IN_DEFAULT_OPTION ? "Default" : prettifyProfileName(name);
+}
+
+async function fetchPersonalityState() {
   try {
     const data = await listPersonalities();
     const current = data?.current;
-    if (!current || current === BUILT_IN_DEFAULT_OPTION) return "default";
-    return current;
+    if (!current) return null;
+    return {
+      current,
+      startup: data?.startup || BUILT_IN_DEFAULT_OPTION,
+      locked: Boolean(data?.locked),
+      badgeName: current === BUILT_IN_DEFAULT_OPTION ? "default" : current,
+    };
   } catch {
     return null;
   }

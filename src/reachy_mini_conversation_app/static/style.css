@@ -167,12 +167,22 @@ button {
 }
 
 /* Fixed below the topbar, outside the header, so the lead/gear layout
-   stays untouched. Borderless so it reads as a label, not a control. */
-.app-shell__personality {
+   stays untouched. */
+.app-shell__personality-row {
   position: fixed;
   top: 90px;
   left: 32px;
   z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.app-shell__personality-row[hidden] {
+  display: none;
+}
+
+.app-shell__personality {
   display: inline-flex;
   align-items: center;
   gap: 16px;
@@ -197,10 +207,6 @@ button {
 .app-shell__personality:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-}
-
-.app-shell__personality[hidden] {
-  display: none;
 }
 
 .app-shell__personality-text {
@@ -254,6 +260,42 @@ button {
   user-select: none;
   -webkit-user-drag: none;
   display: block;
+}
+
+.app-shell__default-personality {
+  min-height: 36px;
+  padding: 8px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-elev));
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  transition: background var(--transition-fast), border-color var(--transition-fast),
+    color var(--transition-fast), opacity var(--transition-fast);
+}
+
+.app-shell__default-personality[hidden] {
+  display: none;
+}
+
+.app-shell__default-personality:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #17130c;
+}
+
+.app-shell__default-personality:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.app-shell__default-personality:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 /* Shared by the Back and gear buttons so both read as the same control. */
@@ -820,6 +862,23 @@ button {
 }
 
 @media (max-width: 620px) {
+  .app-shell__personality-row {
+    right: 20px;
+    left: 20px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .app-shell__personality-name {
+    max-width: calc(100vw - 140px);
+    font-size: 1.12rem;
+  }
+
+  .app-shell__personality-avatar {
+    width: 52px;
+    height: 52px;
+  }
+
   .settings-field-row,
   .settings-status-row {
     grid-template-columns: 1fr;

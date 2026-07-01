@@ -816,6 +816,29 @@ def test_personality_routes_apply_same_profile_does_not_restart(monkeypatch: pyt
     handler.get_current_voice.assert_not_called()
 
 
+def test_personality_routes_startup_choice_survives_runtime_profile_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runtime profile switching should not redefine the saved startup personality."""
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "captain_circuit")
+    app = FastAPI()
+    handler = MagicMock()
+    mount_personality_routes(app, handler, lambda: None)
+    client = TestClient(app)
+
+    initial_response = client.get("/personalities")
+    assert initial_response.status_code == 200
+    assert initial_response.json()["current"] == "captain_circuit"
+    assert initial_response.json()["startup"] == "captain_circuit"
+
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "chess_coach")
+
+    switched_response = client.get("/personalities")
+    assert switched_response.status_code == 200
+    assert switched_response.json()["current"] == "chess_coach"
+    assert switched_response.json()["startup"] == "captain_circuit"
+
+
 def test_headless_personality_routes_can_use_stream_callbacks() -> None:
     """Headless personality routes can delegate apply/restart ownership to LocalStream."""
     app = FastAPI()
