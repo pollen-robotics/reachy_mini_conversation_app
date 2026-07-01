@@ -187,7 +187,7 @@ def run(
             logger.error("Please check your configuration and try again.")
             sys.exit(1)
 
-    movement_manager = MovementManager(current_robot=robot)
+    movement_manager = MovementManager(current_robot=robot, head_tracking=args.head_tracking)
 
     deps = ToolDependencies(
         reachy_mini=robot,

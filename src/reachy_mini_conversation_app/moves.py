@@ -186,9 +186,11 @@ class MovementManager:
     def __init__(
         self,
         current_robot: ReachyMini,
+        head_tracking: bool = False,
     ):
         """Initialize movement manager."""
         self.current_robot = current_robot
+        self._head_tracking = head_tracking
 
         # Single timing source for durations
         self._now = time.monotonic
@@ -348,6 +350,20 @@ class MovementManager:
             else:
                 # Unfreeze: restart blending from frozen pose
                 self._antenna_unfreeze_blend = 0.0
+            if self._head_tracking:
+                try:
+                    if desired_state:
+                        self.current_robot.start_head_tracking(weight=1.0)
+                    elif self.state.last_primary_pose is not None:
+                        self.current_robot.start_head_tracking(weight=0.0)
+                        # Hold the look-at pose so the head stays on the user while speaking.
+                        self.state.last_primary_pose = (
+                            self.current_robot.get_current_head_pose(),
+                            self.state.last_primary_pose[1],
+                            self.state.last_primary_pose[2],
+                        )
+                except Exception as e:
+                    logger.warning("Head-tracking handoff failed: %s", e)
             self.state.update_activity()
         else:
             logger.warning("Unknown command received by MovementManager: %s", command)
@@ -595,6 +611,12 @@ class MovementManager:
             self._thread.join()
             self._thread = None
         logger.debug("Move worker stopped")
+
+        if self._head_tracking:
+            try:
+                self.current_robot.stop_head_tracking()
+            except Exception as e:
+                logger.warning("Failed to stop head tracking: %s", e)
 
         if not reset_to_neutral:
             return
