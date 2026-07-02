@@ -257,7 +257,7 @@ class LocalStream:
             handler_state = vars(self.handler)
         except TypeError:
             handler_state = {}
-        return any(handler_state.get(attr) is not None for attr in ("connection", "session"))
+        return handler_state.get("connection") is not None
 
     def _can_rebuild_handler(self) -> bool:
         """Return whether LocalStream can construct handlers for backend changes."""
@@ -332,10 +332,6 @@ class LocalStream:
             "backend_connection_state": state,
             "backend_error": None if connected else self._backend_error,
         }
-
-    def _persist_env_value(self, env_name: str, value: str) -> None:
-        """Persist a non-empty environment value in memory and in the instance `.env`."""
-        self._persist_env_values({env_name: value})
 
     def _persist_env_values(self, updates: dict[str, str]) -> None:
         """Persist non-empty environment values in memory and in the instance `.env`."""
@@ -419,7 +415,7 @@ class LocalStream:
 
     def _persist_hf_allocator_connection(self) -> None:
         """Persist the deployed Hugging Face allocator mode."""
-        self._persist_env_value(HF_REALTIME_CONNECTION_MODE_ENV, HF_DEPLOYED_CONNECTION_MODE)
+        self._persist_env_values({HF_REALTIME_CONNECTION_MODE_ENV: HF_DEPLOYED_CONNECTION_MODE})
         self._remove_persisted_env_values(("HF_REALTIME_SESSION_URL",))
 
     def _persist_personality(self, profile: Optional[str], voice_override: Optional[str] = None) -> None:
@@ -558,8 +554,7 @@ class LocalStream:
             has_hf_connection = hf_connection_selection.has_target
             backend_connection = self._backend_connection_status()
             return {
-                "active_backend": HF_BACKEND,
-                "backend_provider": HF_BACKEND,
+                "backend": HF_BACKEND,
                 "has_key": has_hf_connection,
                 "has_hf_session_url": bool(hf_session_url),
                 "has_hf_ws_url": bool(hf_ws_url),

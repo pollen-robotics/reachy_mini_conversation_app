@@ -113,7 +113,6 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
     """Realtime stream handler for the Hugging Face OpenAI-compatible endpoint."""
 
     SAMPLE_RATE = 16000
-    REFRESH_CLIENT_ON_RECONNECT = True
 
     def __init__(
         self,
@@ -122,11 +121,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         startup_voice: Optional[str] = None,
     ):
         """Initialize the handler."""
-        sample_rate = self.SAMPLE_RATE
-        super().__init__(
-            output_sample_rate=sample_rate,
-            input_sample_rate=sample_rate,
-        )
+        super().__init__()
 
         self.deps = deps
 
@@ -173,7 +168,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         return tool_result
 
     def _normalize_startup_voice(self, voice: str | None) -> str | None:
-        """Return a valid persisted startup voice for this backend, or None."""
+        """Return a valid persisted startup voice, or None."""
         return self._resolve_backend_voice(voice, source="persisted startup voice")
 
     async def _wait_for_response_done_before_tool_result(self) -> bool:
@@ -257,14 +252,6 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 await self.partial_transcript_task
             except asyncio.CancelledError:
                 pass
-
-    def copy(self) -> "HuggingFaceRealtimeHandler":
-        """Return a fresh handler of the same type, preserving deps and voice override."""
-        return type(self)(
-            self.deps,
-            self.instance_path,
-            startup_voice=self._voice_override,
-        )
 
     async def change_voice(self, voice: str) -> str:
         """Change only the voice, updating the active session when possible."""
@@ -384,15 +371,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         input_transcript.item_id = item_id
         input_transcript.deltas = [delta]
 
-    async def _prepare_startup_credentials(self) -> None:
-        """Let providers collect any startup credentials they need."""
-
-    def _persist_credentials_if_needed(self) -> None:
-        """Let providers persist credentials after a successful session update."""
-
     async def start_up(self) -> None:
         """Start the handler with minimal retries on unexpected websocket closure."""
-        await self._prepare_startup_credentials()
         self.client = await self._build_realtime_client()
 
         max_attempts = 3
@@ -405,8 +385,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 # Abrupt close (e.g., "no close frame received or sent") → retry
                 logger.warning("Realtime websocket closed unexpectedly (attempt %d/%d): %s", attempt, max_attempts, e)
                 if attempt < max_attempts:
-                    if self.REFRESH_CLIENT_ON_RECONNECT:
-                        self.client = await self._build_realtime_client()
+                    self.client = await self._build_realtime_client()
                     # exponential backoff with jitter
                     base_delay = 2 ** (attempt - 1)  # 1s, 2s, 4s, 8s, etc.
                     jitter = random.uniform(0, 0.5)
@@ -447,8 +426,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 self._connected_event.clear()
             except Exception:
                 pass
-            if self.REFRESH_CLIENT_ON_RECONNECT:
-                self.client = await self._build_realtime_client()
+            self.client = await self._build_realtime_client()
             asyncio.create_task(self._run_realtime_session(), name="realtime-session-restart")
             try:
                 await asyncio.wait_for(self._connected_event.wait(), timeout=5.0)
@@ -720,7 +698,6 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                     getattr(config, "REACHY_MINI_CUSTOM_PROFILE", None),
                     self.get_current_voice(),
                 )
-                self._persist_credentials_if_needed()
             except Exception:
                 logger.exception("Realtime session.update failed; aborting startup")
                 raise
@@ -847,7 +824,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                             logger.info("Turn latency: first audio delta %.0f ms after user transcript", delta_ms)
                         await self.output_queue.put(
                             (
-                                self.output_sample_rate,
+                                self.SAMPLE_RATE,
                                 decoded_pcm,
                             ),
                         )
@@ -1008,7 +985,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 break
 
     async def get_available_voices(self) -> list[str]:
-        """Return available voices for this backend."""
+        """Return the available Hugging Face voices."""
         return get_available_voices()
 
     async def _build_realtime_client(self) -> AsyncOpenAI:

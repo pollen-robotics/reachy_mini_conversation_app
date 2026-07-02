@@ -69,7 +69,7 @@ def test_obsolete_backend_env_is_ignored_with_warning(
     monkeypatch.setenv("MODEL_NAME", "gpt-realtime-2")
 
     with caplog.at_level("WARNING"):
-        config_mod._warn_on_obsolete_backend_env()
+        config_mod.refresh_runtime_config_from_env()
 
     assert "BACKEND_PROVIDER" in caplog.text
     assert "MODEL_NAME" in caplog.text

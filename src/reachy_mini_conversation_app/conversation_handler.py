@@ -35,16 +35,9 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     last_idle_behavior_time: float
     _activity_observer: Callable[[str], None] | None = None
 
-    def __init__(
-        self,
-        output_sample_rate: int = 24000,
-        input_sample_rate: int = 48000,
-    ) -> None:
+    def __init__(self) -> None:
         """Initialize the stream handler and shared idle/activity tracking."""
-        super().__init__(
-            output_sample_rate=output_sample_rate,
-            input_sample_rate=input_sample_rate,
-        )
+        super().__init__()
         self.last_activity_time = time.monotonic()
         self.last_idle_behavior_time = self.last_activity_time
 
@@ -104,11 +97,6 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     @abstractmethod
     def _is_connected(self) -> bool:
         """Return whether the backend session/connection is currently open."""
-        ...
-
-    @abstractmethod
-    def copy(self) -> ConversationHandler:
-        """Create a copy of the handler."""
         ...
 
     @abstractmethod

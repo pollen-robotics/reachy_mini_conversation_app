@@ -116,7 +116,7 @@ def test_settings_api_uses_versioned_routes_only() -> None:
     assert response.status_code == 200
     assert response.json() == {"muted": True}
     assert stream._mic_muted is True
-    assert client.get("/api/v1/status").json()["backend_provider"]
+    assert client.get("/api/v1/status").json()["backend"]
     assert client.get("/api/v1/ready").status_code == 404
     assert client.get("/status").status_code == 404
     assert client.get("/ready").status_code == 404
@@ -200,7 +200,7 @@ def test_backend_config_requests_in_process_restart_with_handler_factory(
     data = response.json()
     assert data["ok"] is True
     assert data["message"] == "Connection saved. Reconnecting backend."
-    assert data["backend_provider"] == "huggingface"
+    assert data["backend"] == "huggingface"
     assert data["requires_restart"] is False
     assert data["can_proceed"] is True
     assert data["backend_connection_state"] == "connecting"
@@ -237,8 +237,7 @@ def test_backend_config_persists_local_hf_selection_and_status(
     assert response.status_code == 200
     data = response.json()
     assert data["ok"] is True
-    assert data["backend_provider"] == "huggingface"
-    assert data["active_backend"] == "huggingface"
+    assert data["backend"] == "huggingface"
     assert data["has_hf_ws_url"] is True
     assert data["has_hf_connection"] is True
     assert data["hf_connection_mode"] == "local"
@@ -326,7 +325,7 @@ def test_backend_config_switches_to_saved_local_hf_connection_without_payload_ta
     assert response.status_code == 200
     data = response.json()
     assert data["ok"] is True
-    assert data["backend_provider"] == "huggingface"
+    assert data["backend"] == "huggingface"
     assert data["hf_connection_mode"] == "local"
     assert data["hf_direct_host"] == "192.168.1.42"
     assert data["hf_direct_port"] == 8766
@@ -384,7 +383,7 @@ def test_status_reports_direct_hf_ws_url_as_ready(
 
     assert response.status_code == 200
     data = response.json()
-    assert data["backend_provider"] == "huggingface"
+    assert data["backend"] == "huggingface"
     assert data["has_hf_session_url"] is False
     assert data["has_hf_ws_url"] is True
     assert data["has_hf_connection"] is True
@@ -414,7 +413,7 @@ def test_status_reports_backend_connection_failure(
 
     assert response.status_code == 200
     data = response.json()
-    assert data["backend_provider"] == "huggingface"
+    assert data["backend"] == "huggingface"
     assert data["backend_connected"] is False
     assert data["backend_connection_state"] == "disconnected"
     assert data["backend_error"] == "RuntimeError: connect failed"
