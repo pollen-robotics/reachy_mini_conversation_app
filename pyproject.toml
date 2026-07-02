@@ -10,8 +10,6 @@ description = ""
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    #Media
-    "av",
     "huggingface-hub>=1.17.0",
     "httpx>=0.28.1",
 
