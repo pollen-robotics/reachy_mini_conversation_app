@@ -22,9 +22,13 @@ dependencies = [
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
-    "reachy-mini>=1.8.3",
+    "reachy-mini",
     "mcp>=1.27.1",
 ]
+
+[tool.uv.sources]
+reachy_mini = { git = "https://github.com/pollen-robotics/reachy_mini.git", rev = "ff8dfe875e11b23bfe0b63dbc805e0901c563d85" }
+
 
 [dependency-groups]
 dev = [
