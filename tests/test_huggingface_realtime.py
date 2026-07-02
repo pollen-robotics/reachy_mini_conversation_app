@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-import reachy_mini_conversation_app.base_realtime as base_rt_mod
 import reachy_mini_conversation_app.conversation_handler as conv_mod
 import reachy_mini_conversation_app.huggingface_realtime as hf_mod
 from reachy_mini_conversation_app.config import config, get_default_voice
@@ -15,41 +14,12 @@ from reachy_mini_conversation_app.huggingface_realtime import HuggingFaceRealtim
 HF_DEFAULT_VOICE = get_default_voice()
 
 
-def _make_usage(
-    audio_in: int | None = 100,
-    text_in: int | None = 200,
-    image_in: int | None = 300,
-    audio_out: int | None = 400,
-    text_out: int | None = 500,
-    has_input: bool = True,
-    has_output: bool = True,
-) -> MagicMock:
-    """Build a fake usage object matching the OpenAI-compatible response.usage shape."""
-    usage = MagicMock()
-    if has_input:
-        inp = MagicMock()
-        inp.audio_tokens = audio_in
-        inp.text_tokens = text_in
-        inp.image_tokens = image_in
-        usage.input_token_details = inp
-    else:
-        usage.input_token_details = None
-    if has_output:
-        out = MagicMock()
-        out.audio_tokens = audio_out
-        out.text_tokens = text_out
-        usage.output_token_details = out
-    else:
-        usage.output_token_details = None
-    return usage
-
-
 @pytest.mark.asyncio
 async def test_partial_transcription_uses_latest_snapshot(monkeypatch: Any) -> None:
     """Partial transcription snapshots should replace older snapshots for the same item."""
     monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "Aiden")
-    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
+    monkeypatch.setattr(hf_mod, "get_tool_specs", lambda: [])
 
     class FakeEvent:
         def __init__(self, etype: str, **kwargs: Any) -> None:
@@ -194,7 +164,7 @@ async def test_run_realtime_session_uses_default_voice_for_lb_allocated_sessions
     """Use the backend default speaker when no profile voice is selected for the hf LB."""
     monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: default)
-    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
+    monkeypatch.setattr(hf_mod, "get_tool_specs", lambda: [])
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", "https://lb.example.test/session")
 
     captured_update: dict[str, Any] = {}
@@ -281,7 +251,7 @@ async def test_run_realtime_session_passes_allocated_session_query(monkeypatch: 
     """Hugging Face sessions must forward the allocated session token to the websocket connect call."""
     monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: default)
-    monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
+    monkeypatch.setattr(hf_mod, "get_tool_specs", lambda: [])
 
     captured_connect: dict[str, Any] = {}
 
@@ -542,11 +512,3 @@ async def test_change_voice_updates_live_hf_session_without_restart(monkeypatch:
     restart.assert_not_awaited()
     session = captured_update["session"]
     assert session["audio"]["output"]["voice"] == "Serena"
-
-
-def test_huggingface_response_cost_defaults_to_zero() -> None:
-    """Hugging Face should not inherit OpenAI pricing from the shared base handler."""
-    usage = _make_usage(audio_in=1000, text_in=2000, image_in=500, audio_out=800, text_out=300)
-    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
-
-    assert handler._compute_response_cost(usage) == 0.0
