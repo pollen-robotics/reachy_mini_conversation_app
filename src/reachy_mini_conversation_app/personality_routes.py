@@ -16,8 +16,8 @@ from pydantic import BaseModel
 from .config import (
     LOCKED_PROFILE,
     config,
-    get_default_voice_for_backend,
-    get_available_voices_for_backend,
+    get_default_voice,
+    get_available_voices,
 )
 from .personality import (
     DEFAULT_OPTION,
@@ -56,7 +56,7 @@ def mount_personality_routes(
     persist_personality: Callable[[Optional[str], Optional[str]], None] | None = None,
     get_persisted_personality: Callable[[], Optional[str]] | None = None,
     apply_personality: Callable[[Optional[str]], Awaitable[str]] | None = None,
-    get_available_voices: Callable[[], Awaitable[list[str]]] | None = None,
+    get_voices: Callable[[], Awaitable[list[str]]] | None = None,
     get_current_voice: Callable[[], str] | None = None,
     change_voice: Callable[[str], Awaitable[str]] | None = None,
     api_prefix: str | None = None,
@@ -124,14 +124,14 @@ def mount_personality_routes(
         instr = read_instructions_for(name)
         tools_txt = read_tools_for(name)
         greeting = read_greeting_for(name)
-        voice = get_default_voice_for_backend()
+        voice = get_default_voice()
         uses_default_voice = True
         if name != DEFAULT_OPTION:
             pdir = resolve_profile_dir(name)
             vf = pdir / "voice.txt"
             if vf.exists():
                 v = vf.read_text(encoding="utf-8").strip()
-                voice = v or get_default_voice_for_backend()
+                voice = v or get_default_voice()
                 uses_default_voice = not bool(v)
         avail = available_tools_for(name)
         enabled = [ln.strip() for ln in tools_txt.splitlines() if ln.strip() and not ln.strip().startswith("#")]
@@ -156,11 +156,7 @@ def mount_personality_routes(
         instructions = str(raw.get("instructions", ""))
         greeting = str(raw["greeting"]) if raw.get("greeting") is not None else None
         tools_text = str(raw.get("tools_text", ""))
-        voice = (
-            str(raw.get("voice", get_default_voice_for_backend()))
-            if raw.get("voice") is not None
-            else get_default_voice_for_backend()
-        )
+        voice = str(raw.get("voice", get_default_voice())) if raw.get("voice") is not None else get_default_voice()
 
         sanitized_name = _sanitize_name(name)
         if not sanitized_name:
@@ -178,7 +174,7 @@ def mount_personality_routes(
                 sanitized_name,
                 instructions,
                 tools_text,
-                voice or get_default_voice_for_backend(),
+                voice or get_default_voice(),
                 greeting,
             )
             value = f"user_personalities/{sanitized_name}"
@@ -262,21 +258,21 @@ def mount_personality_routes(
     async def _voices() -> list[str]:
         loop = get_loop()
         if loop is None:
-            return get_available_voices_for_backend()
+            return get_available_voices()
 
         async def _get_v() -> list[str]:
             try:
-                if get_available_voices is not None:
-                    return await get_available_voices()
+                if get_voices is not None:
+                    return await get_voices()
                 return await handler.get_available_voices()
             except Exception:
-                return get_available_voices_for_backend()
+                return get_available_voices()
 
         try:
             fut = asyncio.run_coroutine_threadsafe(_get_v(), loop)
             return fut.result(timeout=10)
         except Exception:
-            return get_available_voices_for_backend()
+            return get_available_voices()
 
     @app.get(f"{api_prefix}/voices/current")
     def _current_voice() -> dict[str, str]:
@@ -285,7 +281,7 @@ def mount_personality_routes(
                 return {"voice": get_current_voice()}
             return {"voice": handler.get_current_voice()}
         except Exception:
-            return {"voice": get_default_voice_for_backend()}
+            return {"voice": get_default_voice()}
 
     @app.post(f"{api_prefix}/voices/apply")
     async def _apply_voice(request: Request, voice: str | None = Query(None)) -> dict:  # type: ignore

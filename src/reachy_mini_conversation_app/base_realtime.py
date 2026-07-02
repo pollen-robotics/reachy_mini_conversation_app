@@ -26,8 +26,8 @@ from openai.resources.realtime.realtime import AsyncRealtimeConnection
 from reachy_mini_conversation_app.tools import core_tools
 from reachy_mini_conversation_app.config import (
     config,
-    get_default_voice_for_backend,
-    get_available_voices_for_backend,
+    get_default_voice,
+    get_available_voices,
 )
 from reachy_mini_conversation_app.prompts import get_session_greeting_prompt
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_int16
@@ -188,7 +188,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
         fallback: str | None = None,
     ) -> str | None:
         """Return a backend-supported voice, optionally falling back when unsupported."""
-        available_voices = get_available_voices_for_backend(self.BACKEND_PROVIDER)
+        available_voices = get_available_voices()
         voice_value = (voice or "").strip()
         if not voice_value:
             return fallback
@@ -254,7 +254,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
     async def change_voice(self, voice: str) -> str:
         """Change only the voice, updating the active session when possible."""
-        default_voice = get_default_voice_for_backend(self.BACKEND_PROVIDER)
+        default_voice = get_default_voice()
         resolved_voice = (
             self._resolve_backend_voice(voice, source="requested voice", fallback=default_voice) or default_voice
         )
@@ -279,7 +279,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
     def get_current_voice(self) -> str:
         """Return the voice currently selected for this handler."""
-        default_voice = get_default_voice_for_backend(self.BACKEND_PROVIDER)
+        default_voice = get_default_voice()
         voice = self._voice_override or self._get_session_voice(default=default_voice)
         return self._resolve_backend_voice(voice, source="session voice", fallback=default_voice) or default_voice
 
@@ -712,8 +712,6 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
             [tool["name"] for tool in tool_specs],
         )
         connect_kwargs: dict[str, Any] = {}
-        if config.MODEL_NAME:
-            connect_kwargs["model"] = config.MODEL_NAME
         if self._realtime_connect_query:
             connect_kwargs["extra_query"] = self._realtime_connect_query
         async with self.client.realtime.connect(**connect_kwargs) as conn:
@@ -1027,7 +1025,7 @@ class BaseRealtimeHandler(ConversationHandler, ABC):
 
     async def get_available_voices(self) -> list[str]:
         """Return available voices for this backend."""
-        return get_available_voices_for_backend(self.BACKEND_PROVIDER)
+        return get_available_voices()
 
     @abstractmethod
     async def _build_realtime_client(self) -> AsyncOpenAI:

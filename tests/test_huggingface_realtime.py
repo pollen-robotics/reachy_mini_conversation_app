@@ -7,12 +7,12 @@ import pytest
 import reachy_mini_conversation_app.base_realtime as base_rt_mod
 import reachy_mini_conversation_app.conversation_handler as conv_mod
 import reachy_mini_conversation_app.huggingface_realtime as hf_mod
-from reachy_mini_conversation_app.config import HF_BACKEND, config, get_default_voice_for_backend
+from reachy_mini_conversation_app.config import config, get_default_voice
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.huggingface_realtime import HuggingFaceRealtimeHandler
 
 
-HF_DEFAULT_VOICE = get_default_voice_for_backend(HF_BACKEND)
+HF_DEFAULT_VOICE = get_default_voice()
 
 
 def _make_usage(
@@ -161,8 +161,6 @@ async def test_emit_skips_idle_signal_while_response_active(monkeypatch: Any) ->
 
 def test_handler_uses_hf_startup_voice_at_startup(monkeypatch: Any) -> None:
     """Hugging Face startup should restore persisted HF voices."""
-    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
-
     handler = HuggingFaceRealtimeHandler(
         ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()),
         startup_voice="Aiden",
@@ -172,8 +170,7 @@ def test_handler_uses_hf_startup_voice_at_startup(monkeypatch: Any) -> None:
 
 
 def test_handler_ignores_unsupported_hf_profile_voice(monkeypatch: Any) -> None:
-    """OpenAI/Gemini profile voices should not be sent to the Hugging Face backend."""
-    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
+    """Unsupported profile voices should not be sent to the Hugging Face backend."""
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "cedar")
 
     handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
@@ -185,7 +182,6 @@ def test_handler_ignores_unsupported_hf_profile_voice(monkeypatch: Any) -> None:
 
 def test_handler_normalizes_hf_voice_case(monkeypatch: Any) -> None:
     """Lowercase Hugging Face speaker names should resolve to the curated UI value."""
-    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "serena")
 
     handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
@@ -199,7 +195,6 @@ async def test_run_realtime_session_uses_default_voice_for_lb_allocated_sessions
     monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: default)
     monkeypatch.setattr(base_rt_mod, "get_tool_specs", lambda: [])
-    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", "https://lb.example.test/session")
 
     captured_update: dict[str, Any] = {}
@@ -367,10 +362,8 @@ async def test_build_realtime_client_uses_direct_hf_ws_url(monkeypatch: Any) -> 
 
     monkeypatch.setattr(hf_mod, "AsyncOpenAI", FakeClient)
     monkeypatch.setattr(hf_mod.httpx, "AsyncClient", _unexpected_async_client)
-    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
     monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "local")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", "https://lb.example.test/session")
-    monkeypatch.setattr(config, "OPENAI_API_KEY", "sk-openai-secret")
     monkeypatch.setattr(config, "HF_TOKEN", None)
     monkeypatch.setattr(
         config,
@@ -429,11 +422,9 @@ async def test_build_realtime_client_uses_deployed_mode_even_when_direct_hf_ws_u
 
     monkeypatch.setattr(hf_mod, "AsyncOpenAI", FakeClient)
     monkeypatch.setattr(hf_mod.httpx, "AsyncClient", FakeAsyncClient)
-    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
     monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "deployed")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", "https://lb.example.test/session")
     monkeypatch.setattr(config, "HF_REALTIME_WS_URL", "ws://127.0.0.1:8765/v1/realtime")
-    monkeypatch.setattr(config, "OPENAI_API_KEY", "sk-openai-secret")
     monkeypatch.setattr(config, "HF_TOKEN", "hf-secret")
 
     handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
@@ -485,11 +476,9 @@ async def test_build_realtime_client_does_not_send_openai_key_to_hf_allocator(mo
 
     monkeypatch.setattr(hf_mod, "AsyncOpenAI", FakeClient)
     monkeypatch.setattr(hf_mod.httpx, "AsyncClient", FakeAsyncClient)
-    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
     monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "deployed")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", "https://lb.example.test/session")
     monkeypatch.setattr(config, "HF_REALTIME_WS_URL", None)
-    monkeypatch.setattr(config, "OPENAI_API_KEY", "sk-openai-secret")
     monkeypatch.setattr(config, "HF_TOKEN", None)
 
     handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
@@ -506,7 +495,6 @@ async def test_apply_personality_uses_selected_voice_for_lb_allocated_sessions(m
     """Live personality updates should honor the selected Qwen CustomVoice speaker."""
     monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "new instructions")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "Serena")
-    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", "https://lb.example.test/session")
 
     captured_update: dict[str, Any] = {}
@@ -533,8 +521,6 @@ async def test_apply_personality_uses_selected_voice_for_lb_allocated_sessions(m
 @pytest.mark.asyncio
 async def test_change_voice_updates_live_hf_session_without_restart(monkeypatch: Any) -> None:
     """Changing Hugging Face voice should update the active session in place."""
-    monkeypatch.setattr(config, "BACKEND_PROVIDER", "huggingface")
-
     captured_update: dict[str, Any] = {}
 
     class FakeSession:

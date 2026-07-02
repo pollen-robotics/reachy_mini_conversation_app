@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 
-from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY, config, get_default_voice_for_backend
+from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY, config, get_default_voice
 from reachy_mini_conversation_app.memory import format_memory_for_prompt
 
 
@@ -83,7 +83,7 @@ def get_session_voice(default: str | None = None) -> str:
     trimmed content; otherwise return the provided default or the active
     backend default voice.
     """
-    fallback = get_default_voice_for_backend() if default is None else default
+    fallback = get_default_voice() if default is None else default
     profile = config.REACHY_MINI_CUSTOM_PROFILE
     if not profile:
         return fallback

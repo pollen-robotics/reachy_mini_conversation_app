@@ -107,11 +107,7 @@ def run(
     # Putting these dependencies here makes the dashboard faster to load when the conversation app is installed
     from reachy_mini_conversation_app.moves import MovementManager
     from reachy_mini_conversation_app.config import (
-        HF_BACKEND,
         HF_LOCAL_CONNECTION_MODE,
-        config,
-        is_gemini_model,
-        get_backend_label,
         set_instance_path,
         get_hf_connection_selection,
         resolve_app_timeout_minutes,
@@ -144,20 +140,10 @@ def run(
         except Exception as e:
             logger.warning("Failed to load startup settings: %s", e)
 
-    if config.BACKEND_PROVIDER == HF_BACKEND:
-        logger.info(
-            "Configured backend provider: %s (%s), connection mode: %s",
-            config.BACKEND_PROVIDER,
-            get_backend_label(config.BACKEND_PROVIDER),
-            get_hf_connection_selection().mode,
-        )
-    else:
-        logger.info(
-            "Configured backend provider: %s (%s), model: %s",
-            config.BACKEND_PROVIDER,
-            get_backend_label(config.BACKEND_PROVIDER),
-            config.MODEL_NAME,
-        )
+    logger.info(
+        "Configured Hugging Face realtime backend, connection mode: %s",
+        get_hf_connection_selection().mode,
+    )
 
     from reachy_mini_conversation_app.console import LocalStream
     from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, initialize_tools
@@ -197,46 +183,17 @@ def run(
     )
 
     def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
-        """Build a realtime handler for the current runtime backend config."""
-        if is_gemini_model():
-            from reachy_mini_conversation_app.gemini_live import GeminiLiveHandler
+        """Build a Hugging Face realtime handler for the current runtime config."""
+        from reachy_mini_conversation_app.huggingface_realtime import HuggingFaceRealtimeHandler
 
-            logger.info(
-                "Using %s via GeminiLiveHandler",
-                get_backend_label(config.BACKEND_PROVIDER),
-            )
-            return GeminiLiveHandler(
-                deps,
-                instance_path=instance_path,
-                startup_voice=startup_voice,
-            )
-        if config.BACKEND_PROVIDER == HF_BACKEND:
-            from reachy_mini_conversation_app.huggingface_realtime import HuggingFaceRealtimeHandler
-
-            hf_connection_selection = get_hf_connection_selection()
-            transport_label = (
-                "Hugging Face direct websocket"
-                if hf_connection_selection.mode == HF_LOCAL_CONNECTION_MODE and hf_connection_selection.has_target
-                else "Hugging Face session proxy"
-            )
-            logger.info(
-                "Using %s via Hugging Face realtime handler (%s)",
-                get_backend_label(config.BACKEND_PROVIDER),
-                transport_label,
-            )
-            return HuggingFaceRealtimeHandler(
-                deps,
-                instance_path=instance_path,
-                startup_voice=startup_voice,
-            )
-
-        from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
-
-        logger.info(
-            "Using %s via OpenAI realtime handler (OpenAI Realtime API)",
-            get_backend_label(config.BACKEND_PROVIDER),
+        hf_connection_selection = get_hf_connection_selection()
+        transport_label = (
+            "Hugging Face direct websocket"
+            if hf_connection_selection.mode == HF_LOCAL_CONNECTION_MODE and hf_connection_selection.has_target
+            else "Hugging Face session proxy"
         )
-        return OpenaiRealtimeHandler(
+        logger.info("Using Hugging Face realtime handler (%s)", transport_label)
+        return HuggingFaceRealtimeHandler(
             deps,
             instance_path=instance_path,
             startup_voice=startup_voice,
