@@ -923,8 +923,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         """Receive audio frame from the microphone and send it to the realtime server.
 
         Handles both mono and stereo audio formats, converting to the expected
-        mono format for the realtime API. Resamples if the input sample rate differs
-        from the expected rate.
+        mono format for the realtime API.
 
         Args:
             frame: A tuple containing (sample_rate, audio_data).
