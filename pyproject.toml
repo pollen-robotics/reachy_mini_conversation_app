@@ -18,7 +18,7 @@ dependencies = [
     #Environment variables
     "python-dotenv",
 
-    #OpenAI-compatible realtime client (used by the Hugging Face backend)
+    #OpenAI (used by the Hugging Face backend)
     "openai>=2.30.0",
 
     #Reachy mini
