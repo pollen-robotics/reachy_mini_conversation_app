@@ -13,8 +13,6 @@ from typing import List, Optional
 from pathlib import Path
 from collections.abc import Callable, AsyncGenerator
 
-from scipy.signal import resample
-
 from reachy_mini import ReachyMini
 from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.config import (
@@ -894,8 +892,7 @@ class LocalStream:
                         )
 
             elif isinstance(handler_output, tuple):
-                input_sample_rate, audio_data = handler_output
-                output_sample_rate = self._robot.media.get_output_audio_samplerate()
+                _, audio_data = handler_output
 
                 # Skip empty audio frames
                 if audio_data.size == 0:
@@ -903,7 +900,7 @@ class LocalStream:
 
                 # Reshape if needed
                 if audio_data.ndim == 2:
-                    # Scipy channels last convention
+                    # channels-last convention
                     if audio_data.shape[1] > audio_data.shape[0]:
                         audio_data = audio_data.T
                     # Multiple channels -> Mono channel
@@ -912,16 +909,6 @@ class LocalStream:
 
                 # Cast if needed
                 audio_frame = audio_to_float32(audio_data)
-
-                # Resample if needed
-                if input_sample_rate != output_sample_rate:
-                    num_samples = int(len(audio_frame) * output_sample_rate / input_sample_rate)
-                    if num_samples == 0:
-                        continue
-                    audio_frame = resample(
-                        audio_frame,
-                        num_samples,
-                    )
 
                 self._robot.media.push_audio_sample(audio_frame)
 
