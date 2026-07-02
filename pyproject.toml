@@ -18,11 +18,8 @@ dependencies = [
     #Environment variables
     "python-dotenv",
 
-    #OpenAI
+    #OpenAI-compatible realtime client (used by the Hugging Face backend)
     "openai>=2.30.0",
-
-    #Gemini
-    "google-genai>=1.0.0",
 
     #Reachy mini
     "reachy_mini_dances_library",
