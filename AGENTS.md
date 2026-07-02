@@ -95,10 +95,8 @@ These are the cleanups we make in review over and over. Write code that wouldn't
 src/reachy_mini_conversation_app/
   main.py                 # entry point + CLI (reachy-mini-conversation-app)
   base_realtime.py        # abstract realtime backend, shared conversation loop
-  openai_realtime.py      # OpenAI Realtime backend
-  gemini_live.py          # Gemini Live backend
   huggingface_realtime.py # Hugging Face backend
-  conversation_handler.py # wires audio/tools/backends together
+  conversation_handler.py # wires audio/tools/backend together
   config.py               # configuration + env loading
   personality.py          # personality/profile loading
   tools/                  # LLM-callable tools (one file per tool)
