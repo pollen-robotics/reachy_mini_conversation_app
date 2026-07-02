@@ -1,4 +1,4 @@
-/** Settings view: backend selector, Hugging Face connection, voice, and status. */
+/** Settings view: Hugging Face connection, voice, and status. */
 
 import {
   applyVoice,
@@ -9,7 +9,6 @@ import {
   saveBackendConfig,
   untilReady,
 } from "../api.js";
-import { BACKENDS } from "../constants.js";
 import { h } from "../ui.js";
 
 const HF_CONNECTION_MODES = Object.freeze({
@@ -20,29 +19,16 @@ const HF_CONNECTION_MODES = Object.freeze({
 const DEFAULT_HF_HOST = "localhost";
 const DEFAULT_HF_PORT = 8765;
 
-const BACKEND_LABELS = Object.freeze({
-  [BACKENDS.HUGGINGFACE]: "Hugging Face",
-  [BACKENDS.OPENAI]: "OpenAI Realtime",
-  [BACKENDS.GEMINI]: "Gemini Live",
-});
-
-const BACKEND_HINTS = Object.freeze({
-  [BACKENDS.HUGGINGFACE]: "Choose the hosted service or a local realtime backend.",
-  [BACKENDS.OPENAI]: "Bring your own OPENAI_API_KEY.",
-  [BACKENDS.GEMINI]: "Bring your own GEMINI_API_KEY.",
-});
-
 const HF_MODE_HINTS = Object.freeze({
   [HF_CONNECTION_MODES.DEPLOYED]: "Uses the hosted Hugging Face backend. No API key required.",
   [HF_CONNECTION_MODES.LOCAL]: "Connects directly to the host and port below.",
 });
 
 export async function mountSettingsView({ outlet, signal }) {
-  // Backends expose different voice lists, so a save re-syncs voices and status.
-  const backendSection = buildBackendSection({
+  const connectionSection = buildConnectionSection({
     onSaved: () =>
       Promise.all([
-        refreshStatus({ statusSection, backendSection, signal }),
+        refreshStatus({ statusSection, connectionSection, signal }),
         refreshVoices({ voiceSection, signal }),
       ]),
   });
@@ -56,41 +42,21 @@ export async function mountSettingsView({ outlet, signal }) {
       "header",
       { class: "view-header" },
       h("h1", { class: "view-title" }, "Settings"),
-      h("p", { class: "view-subtitle" }, "Backend, credentials and voice for Reachy Mini.")
+      h("p", { class: "view-subtitle" }, "Connection and voice for Reachy Mini.")
     ),
-    backendSection.element,
+    connectionSection.element,
     voiceSection.element,
     statusSection.element
   );
   outlet.replaceChildren(view);
 
   await Promise.all([
-    refreshStatus({ statusSection, backendSection, signal }),
+    refreshStatus({ statusSection, connectionSection, signal }),
     refreshVoices({ voiceSection, signal }),
   ]);
 }
 
-function buildBackendSection({ onSaved } = {}) {
-  const backendSelect = h(
-    "select",
-    { class: "settings-select", name: "backend" },
-    ...Object.entries(BACKEND_LABELS).map(([value, label]) =>
-      h("option", { value }, label)
-    )
-  );
-  const apiKeyInput = h("input", {
-    type: "password",
-    name: "api_key",
-    autocomplete: "off",
-    placeholder: "sk-… or AIza…",
-    class: "settings-input",
-  });
-  const apiKeyField = h(
-    "label",
-    { class: "settings-field", "data-role": "api-key-field" },
-    h("span", { class: "settings-label" }, "API key"),
-    apiKeyInput
-  );
+function buildConnectionSection({ onSaved } = {}) {
   const hfModeSelect = h(
     "select",
     { class: "settings-select", name: "hf_mode" },
@@ -115,12 +81,6 @@ function buildBackendSection({ onSaved } = {}) {
     value: String(DEFAULT_HF_PORT),
     class: "settings-input",
   });
-  const hfModeField = h(
-    "label",
-    { class: "settings-field", "data-role": "hf-mode-field" },
-    h("span", { class: "settings-label" }, "Hugging Face connection"),
-    hfModeSelect
-  );
   const hfLocalFields = h(
     "div",
     { class: "settings-field-row", "data-role": "hf-local-fields" },
@@ -143,15 +103,18 @@ function buildBackendSection({ onSaved } = {}) {
   const form = h(
     "form",
     { class: "settings-form" },
-    h("label", { class: "settings-field" }, h("span", { class: "settings-label" }, "Backend"), backendSelect),
-    apiKeyField,
-    hfModeField,
+    h(
+      "label",
+      { class: "settings-field" },
+      h("span", { class: "settings-label" }, "Hugging Face connection"),
+      hfModeSelect
+    ),
     hfLocalFields,
     hint,
     h(
       "div",
       { class: "settings-actions" },
-      h("button", { type: "submit", class: "btn btn--primary" }, "Save backend")
+      h("button", { type: "submit", class: "btn btn--primary" }, "Save connection")
     ),
     status
   );
@@ -159,54 +122,32 @@ function buildBackendSection({ onSaved } = {}) {
   const element = h(
     "section",
     { class: "settings-section" },
-    h("h2", { class: "settings-section-title" }, "Backend"),
+    h("h2", { class: "settings-section-title" }, "Connection"),
     form
   );
 
-  function syncApiKeyVisibility() {
-    const requiresKey = backendSelect.value !== BACKENDS.HUGGINGFACE;
-    const isHuggingFace = backendSelect.value === BACKENDS.HUGGINGFACE;
-    const isLocalHuggingFace = isHuggingFace && hfModeSelect.value === HF_CONNECTION_MODES.LOCAL;
-
-    apiKeyField.style.display = requiresKey ? "" : "none";
-    if (!requiresKey) apiKeyInput.value = "";
-    apiKeyInput.disabled = !requiresKey;
-
-    hfModeField.style.display = isHuggingFace ? "" : "none";
-    hfLocalFields.style.display = isLocalHuggingFace ? "" : "none";
-    hfModeSelect.disabled = !isHuggingFace;
-    hfHostInput.disabled = !isLocalHuggingFace;
-    hfPortInput.disabled = !isLocalHuggingFace;
-    hfHostInput.required = isLocalHuggingFace;
-    hfPortInput.required = isLocalHuggingFace;
-
-    hint.textContent =
-      (isHuggingFace && HF_MODE_HINTS[hfModeSelect.value]) ||
-      BACKEND_HINTS[backendSelect.value] ||
-      "";
+  function syncLocalFields() {
+    const isLocal = hfModeSelect.value === HF_CONNECTION_MODES.LOCAL;
+    hfLocalFields.style.display = isLocal ? "" : "none";
+    hfHostInput.disabled = !isLocal;
+    hfPortInput.disabled = !isLocal;
+    hfHostInput.required = isLocal;
+    hfPortInput.required = isLocal;
+    hint.textContent = HF_MODE_HINTS[hfModeSelect.value] || "";
   }
 
-  backendSelect.addEventListener("change", syncApiKeyVisibility);
-  hfModeSelect.addEventListener("change", syncApiKeyVisibility);
+  hfModeSelect.addEventListener("change", syncLocalFields);
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     status.classList.remove("is-error");
     status.textContent = "Saving…";
     try {
-      const payload = {
-        backend: backendSelect.value,
-      };
-      if (backendSelect.value !== BACKENDS.HUGGINGFACE && apiKeyInput.value) {
-        payload.api_key = apiKeyInput.value;
-      }
-      if (backendSelect.value === BACKENDS.HUGGINGFACE) {
-        payload.hf_mode = hfModeSelect.value;
-        if (hfModeSelect.value === HF_CONNECTION_MODES.LOCAL) {
-          payload.hf_host = hfHostInput.value.trim();
-          if (hfPortInput.value) {
-            payload.hf_port = Number.parseInt(hfPortInput.value, 10);
-          }
+      const payload = { hf_mode: hfModeSelect.value };
+      if (hfModeSelect.value === HF_CONNECTION_MODES.LOCAL) {
+        payload.hf_host = hfHostInput.value.trim();
+        if (hfPortInput.value) {
+          payload.hf_port = Number.parseInt(hfPortInput.value, 10);
         }
       }
       const result = await saveBackendConfig(payload);
@@ -219,15 +160,11 @@ function buildBackendSection({ onSaved } = {}) {
     }
   });
 
-  syncApiKeyVisibility();
+  syncLocalFields();
 
   return {
     element,
     syncFromStatus(payload) {
-      const backend = payload?.backend_provider;
-      if (backend && BACKEND_LABELS[backend]) {
-        backendSelect.value = backend;
-      }
       if (Object.values(HF_CONNECTION_MODES).includes(payload?.hf_connection_mode)) {
         hfModeSelect.value = payload.hf_connection_mode;
       }
@@ -237,7 +174,7 @@ function buildBackendSection({ onSaved } = {}) {
       if (payload?.hf_direct_port != null) {
         hfPortInput.value = String(payload.hf_direct_port);
       }
-      syncApiKeyVisibility();
+      syncLocalFields();
     },
   };
 }
@@ -304,25 +241,15 @@ function buildStatusSection() {
     element,
     render(payload) {
       list.replaceChildren();
-      list.appendChild(statusRow("Active backend", payload.active_backend || "-"));
-      list.appendChild(statusRow("Selected backend", payload.backend_provider || "-"));
-      if (payload.backend_provider === BACKENDS.HUGGINGFACE || payload.active_backend === BACKENDS.HUGGINGFACE) {
-        list.appendChild(statusRow("HF connection", formatHfMode(payload.hf_connection_mode)));
-        if (payload.hf_connection_mode === HF_CONNECTION_MODES.LOCAL) {
-          list.appendChild(statusRow("HF target", formatHfTarget(payload)));
-        }
+      list.appendChild(statusRow("HF connection", formatHfMode(payload.hf_connection_mode)));
+      if (payload.hf_connection_mode === HF_CONNECTION_MODES.LOCAL) {
+        list.appendChild(statusRow("HF target", formatHfTarget(payload)));
       }
       list.appendChild(
-        statusRow("Credentials", payload.has_key ? "Ready" : "Missing", payload.has_key ? "ok" : "warn")
+        statusRow("Connection", payload.has_key ? "Ready" : "Missing", payload.has_key ? "ok" : "warn")
       );
       if (payload.requires_restart) {
-        list.appendChild(
-          statusRow(
-            "Restart",
-            "Required to apply selected backend",
-            "warn"
-          )
-        );
+        list.appendChild(statusRow("Restart", "Required to apply changes", "warn"));
       }
     },
   };
@@ -350,12 +277,12 @@ function formatHfTarget(payload) {
   return `${host}:${port || DEFAULT_HF_PORT}`;
 }
 
-async function refreshStatus({ statusSection, backendSection, signal }) {
+async function refreshStatus({ statusSection, connectionSection, signal }) {
   try {
     const payload = await untilReady(getStatus, signal);
     if (signal.aborted) return;
     statusSection.render(payload);
-    backendSection.syncFromStatus(payload);
+    connectionSection.syncFromStatus(payload);
   } catch {
     // Status panel just stays empty; not critical for the rest of the UI.
   }
