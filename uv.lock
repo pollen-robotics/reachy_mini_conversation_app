@@ -2326,7 +2326,7 @@ wheels = [
 [[package]]
 name = "reachy-mini"
 version = "1.8.4"
-source = { git = "https://github.com/pollen-robotics/reachy_mini.git?rev=ff8dfe875e11b23bfe0b63dbc805e0901c563d85#ff8dfe875e11b23bfe0b63dbc805e0901c563d85" }
+source = { git = "https://github.com/pollen-robotics/reachy_mini.git?rev=bb120a25f97b144e8ae0f0583c8880a26c93fe16#bb120a25f97b144e8ae0f0583c8880a26c93fe16" }
 dependencies = [
     { name = "aiohttp" },
     { name = "asgiref" },
@@ -2393,7 +2393,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.27.1" },
     { name = "openai", specifier = ">=2.30.0" },
     { name = "python-dotenv" },
-    { name = "reachy-mini", git = "https://github.com/pollen-robotics/reachy_mini.git?rev=ff8dfe875e11b23bfe0b63dbc805e0901c563d85" },
+    { name = "reachy-mini", git = "https://github.com/pollen-robotics/reachy_mini.git?rev=bb120a25f97b144e8ae0f0583c8880a26c93fe16" },
     { name = "reachy-mini-dances-library" },
     { name = "reachy-mini-toolbox" },
 ]
