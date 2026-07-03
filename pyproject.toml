@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reachy_mini_conversation_app"
-version = "0.8.0"
+version = "0.9.0"
 authors = [{ name = "Pollen Robotics", email = "contact@pollen-robotics.com" }]
 description = ""
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     #Media
-    "av",
+    "av>=17",
     "huggingface-hub>=1.17.0",
     "httpx>=0.28.1",
 
@@ -19,12 +19,12 @@ dependencies = [
     "python-dotenv",
 
     #OpenAI (used by the Hugging Face backend)
-    "openai>=2.30.0",
+    "openai>=2.44.0",
 
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
-    "reachy-mini>=1.8.3",
+    "reachy-mini>=1.8.4",
     "mcp>=1.27.1",
 ]
 
