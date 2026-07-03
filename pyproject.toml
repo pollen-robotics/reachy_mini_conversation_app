@@ -19,7 +19,7 @@ dependencies = [
     "python-dotenv",
 
     #OpenAI (used by the Hugging Face backend)
-    "openai>=2.44.0",
+    "openai==2.28.0",
 
     #Reachy mini
     "reachy_mini_dances_library",
