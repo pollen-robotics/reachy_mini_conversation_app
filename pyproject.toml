@@ -29,7 +29,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-reachy_mini = { git = "https://github.com/pollen-robotics/reachy_mini.git", rev = "c3063c2be7cd35aee809f086769e8d65392df743" }
+reachy_mini = { git = "https://github.com/pollen-robotics/reachy_mini.git", rev = "110970214868d11436ab5de28b60e3b1070eece2" }
 
 [dependency-groups]
 dev = [
