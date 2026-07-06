@@ -38,7 +38,8 @@ from numpy.typing import NDArray
 from reachy_mini import ReachyMini
 from reachy_mini.utils import create_head_pose
 from reachy_mini.motion.move import Move
-from reachy_mini.utils.interpolation import linear_pose_interpolation
+from reachy_mini.utils.interpolation import compose_world_offset, linear_pose_interpolation
+from reachy_mini_conversation_app.dance_emotion_moves import EmotionQueueMove
 
 
 logger = logging.getLogger(__name__)
@@ -212,6 +213,9 @@ class MovementManager:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._is_listening = False
+        # Speaking pauses tracking; the captured look-at pose anchors queued moves.
+        self._is_speaking = False
+        self._track_anchor: NDArray[np.float64] | None = None
         self._last_commanded_pose: FullBodyPose = clone_full_body_pose(self.state.last_primary_pose)
         self._listening_antennas: Tuple[float, float] = self._last_commanded_pose[1]
         self._antenna_unfreeze_blend = 1.0
@@ -283,6 +287,15 @@ class MovementManager:
                 return
         self._command_queue.put(("set_listening", listening))
 
+    def set_speaking(self, speaking: bool) -> None:
+        """Pause head tracking while the assistant speaks, resume it afterwards.
+
+        On speaking, the current look-at pose is captured as an anchor so queued
+        moves stay on the user; when speaking stops the head is handed back to
+        daemon tracking. Thread-safe: posted to the worker command queue.
+        """
+        self._command_queue.put(("set_speaking", speaking))
+
     def _poll_signals(self, current_time: float) -> None:
         """Apply queued commands."""
         while True:
@@ -350,21 +363,24 @@ class MovementManager:
             else:
                 # Unfreeze: restart blending from frozen pose
                 self._antenna_unfreeze_blend = 0.0
-            if self._head_tracking:
-                try:
-                    if desired_state:
-                        self.current_robot.start_head_tracking(weight=1.0)
-                    elif self.state.last_primary_pose is not None:
-                        self.current_robot.start_head_tracking(weight=0.0)
-                        # Hold the look-at pose so the head stays on the user while speaking.
-                        self.state.last_primary_pose = (
-                            self.current_robot.get_current_head_pose(),
-                            self.state.last_primary_pose[1],
-                            self.state.last_primary_pose[2],
-                        )
-                except Exception as e:
-                    logger.warning("Head-tracking handoff failed: %s", e)
             self.state.update_activity()
+        elif command == "set_speaking":
+            if not self._head_tracking:
+                return
+            speaking = bool(payload)
+            if self._is_speaking == speaking:
+                return
+            self._is_speaking = speaking
+            try:
+                if speaking:
+                    # Capture the look-at pose, then pause tracking so queued moves own the head.
+                    self._track_anchor = self.current_robot.get_current_head_pose()
+                    self.current_robot.start_head_tracking(weight=0.0)
+                else:
+                    self._track_anchor = None
+                    self.current_robot.start_head_tracking(weight=1.0)
+            except Exception as e:
+                logger.warning("Head-tracking speaking handoff failed: %s", e)
         else:
             logger.warning("Unknown command received by MovementManager: %s", command)
 
@@ -459,6 +475,16 @@ class MovementManager:
             neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
             primary_full_body_pose = (neutral_head_pose, (0.0, 0.0), 0.0)
             self.state.last_primary_pose = clone_full_body_pose(primary_full_body_pose)
+
+        # Speaking pauses tracking: hold the look-at anchor, overlay emotions on it, dance from neutral.
+        if self._track_anchor is not None:
+            head_pose, antennas, body_yaw = primary_full_body_pose
+            move = self.state.current_move
+            if move is None:
+                head_pose = self._track_anchor.copy()
+            elif isinstance(move, EmotionQueueMove):
+                head_pose = compose_world_offset(self._track_anchor, head_pose)
+            primary_full_body_pose = (head_pose, antennas, body_yaw)
 
         return primary_full_body_pose
 
@@ -587,6 +613,11 @@ class MovementManager:
         self._thread = threading.Thread(target=self.working_loop, daemon=True)
         self._thread.start()
         logger.debug("Move worker started")
+        if self._head_tracking:
+            try:
+                self.current_robot.start_head_tracking(weight=1.0)
+            except Exception as e:
+                logger.warning("Failed to start head tracking: %s", e)
 
     def stop(self, reset_to_neutral: bool = True) -> None:
         """Request the worker thread to stop and wait for it to exit.

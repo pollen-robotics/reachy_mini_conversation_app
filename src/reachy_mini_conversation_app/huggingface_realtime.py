@@ -741,6 +741,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         logger.debug("User speech stopped - server will auto-commit with VAD")
 
                     if event.type == "response.output_audio.done":
+                        self.deps.movement_manager.set_speaking(False)
                         logger.debug("response completed")
 
                     if event.type == "response.output_text.delta":
@@ -751,6 +752,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
                     if event.type == "response.created":
                         self._mark_activity("response_created")
+                        self.deps.movement_manager.set_speaking(True)
                         self._response_done_event.clear()
                         self._response_started_or_rejected_event.set()
                         if self._turn_user_done_at is not None and self._turn_response_created_at is None:
@@ -761,6 +763,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
                     if event.type == "response.done":
                         # Doesn't mean the audio is done playing
+                        # Resume tracking for responses that emit no audio (text-only / tool-only).
+                        self.deps.movement_manager.set_speaking(False)
                         self._response_done_event.set()
                         self._response_started_or_rejected_event.set()
                         logger.debug("Response done")
