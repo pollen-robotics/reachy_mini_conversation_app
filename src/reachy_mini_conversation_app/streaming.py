@@ -23,16 +23,8 @@ class AdditionalOutputs:
 class AsyncStreamHandler:
     """Minimal async stream handler state used by the local audio loop."""
 
-    def __init__(
-        self,
-        output_sample_rate: int = 24000,
-        input_sample_rate: int = 48000,
-    ) -> None:
-        """Initialize the audio stream metadata used by conversation handlers."""
-        if output_sample_rate % 50 != 0:
-            raise ValueError(f"output_sample_rate must be a multiple of 50, got {output_sample_rate}")
-        self.output_sample_rate = output_sample_rate
-        self.input_sample_rate = input_sample_rate
+    def __init__(self) -> None:
+        """Initialize shared stream handler state."""
         self._clear_queue: Callable[[], None] | None = None
 
 

@@ -13,31 +13,25 @@ from typing import List, Optional
 from pathlib import Path
 from collections.abc import Callable, AsyncGenerator
 
-from scipy.signal import resample
-
 from reachy_mini import ReachyMini
 from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.config import (
     HF_BACKEND,
-    GEMINI_BACKEND,
     LOCKED_PROFILE,
-    OPENAI_BACKEND,
     HF_REALTIME_WS_URL_ENV,
     HF_LOCAL_CONNECTION_MODE,
     HF_DEPLOYED_CONNECTION_MODE,
     HF_REALTIME_CONNECTION_MODE_ENV,
     config,
-    get_backend_choice,
+    get_default_voice,
     get_hf_session_url,
+    get_available_voices,
     get_hf_direct_ws_url,
     build_hf_direct_ws_url,
     has_hf_realtime_target,
     parse_hf_direct_target,
-    get_model_name_for_backend,
     get_hf_connection_selection,
-    get_default_voice_for_backend,
     refresh_runtime_config_from_env,
-    get_available_voices_for_backend,
 )
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_float32
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
@@ -199,7 +193,6 @@ class LocalStream:
         self._settings_initialized = False
         self._asyncio_loop = None
         self._mic_muted = False  # mic starts live; the UI toggles it via the settings API
-        self._active_backend_name = get_backend_choice()
         self._backend_connection_state = "not_started"
         self._backend_error: str | None = None
         self._backend_retry_delay = BACKEND_RETRY_DELAY_SECONDS
@@ -258,17 +251,13 @@ class LocalStream:
         except Exception:
             return []
 
-    def _active_backend(self) -> str:
-        """Return the backend family of the currently running handler."""
-        return self._active_backend_name
-
     def _backend_connected(self) -> bool:
         """Return whether the active handler currently has a realtime connection."""
         try:
             handler_state = vars(self.handler)
         except TypeError:
             handler_state = {}
-        return any(handler_state.get(attr) is not None for attr in ("connection", "session"))
+        return handler_state.get("connection") is not None
 
     def _can_rebuild_handler(self) -> bool:
         """Return whether LocalStream can construct handlers for backend changes."""
@@ -280,7 +269,6 @@ class LocalStream:
             return self.handler
         handler = self._handler_factory(self._voice_override)
         self._install_handler(handler)
-        self._active_backend_name = get_backend_choice()
         return handler
 
     async def _shutdown_active_handler(self) -> None:
@@ -344,32 +332,6 @@ class LocalStream:
             "backend_connection_state": state,
             "backend_error": None if connected else self._backend_error,
         }
-
-    @staticmethod
-    def _has_key(value: Optional[str]) -> bool:
-        """Return whether a runtime credential value is present."""
-        return bool(value and str(value).strip())
-
-    def _has_required_key(self, backend: str) -> bool:
-        """Return whether the requested backend has its required credential."""
-        if backend == GEMINI_BACKEND:
-            return self._has_key(config.GEMINI_API_KEY)
-        if backend == HF_BACKEND:
-            return has_hf_realtime_target()
-        return self._has_key(config.OPENAI_API_KEY)
-
-    @staticmethod
-    def _requirement_name(backend: str) -> str:
-        """Return the env var users need for a backend, if any."""
-        if backend == GEMINI_BACKEND:
-            return "GEMINI_API_KEY"
-        if backend == HF_BACKEND:
-            return HF_REALTIME_WS_URL_ENV
-        return "OPENAI_API_KEY"
-
-    def _persist_env_value(self, env_name: str, value: str) -> None:
-        """Persist a non-empty environment value in memory and in the instance `.env`."""
-        self._persist_env_values({env_name: value})
 
     def _persist_env_values(self, updates: dict[str, str]) -> None:
         """Persist non-empty environment values in memory and in the instance `.env`."""
@@ -453,37 +415,8 @@ class LocalStream:
 
     def _persist_hf_allocator_connection(self) -> None:
         """Persist the deployed Hugging Face allocator mode."""
-        self._persist_env_value(HF_REALTIME_CONNECTION_MODE_ENV, HF_DEPLOYED_CONNECTION_MODE)
+        self._persist_env_values({HF_REALTIME_CONNECTION_MODE_ENV: HF_DEPLOYED_CONNECTION_MODE})
         self._remove_persisted_env_values(("HF_REALTIME_SESSION_URL",))
-
-    def _persist_api_key(self, key: str) -> None:
-        """Persist OPENAI_API_KEY to environment and instance `.env`."""
-        self._persist_env_value("OPENAI_API_KEY", key)
-
-    def _persist_gemini_api_key(self, key: str) -> None:
-        """Persist GEMINI_API_KEY to environment and instance `.env`."""
-        self._persist_env_value("GEMINI_API_KEY", key)
-
-    def _persist_backend_choice(self, backend: str) -> None:
-        """Persist the selected backend without clobbering explicit model overrides."""
-        current_backend = get_backend_choice()
-        current_model_name = (os.getenv("MODEL_NAME") or "").strip()
-        updates = {"BACKEND_PROVIDER": backend}
-        if backend == HF_BACKEND:
-            self._persist_env_values(updates)
-            try:
-                os.environ.pop("MODEL_NAME", None)
-            except Exception:
-                pass
-            self._remove_persisted_env_values(("MODEL_NAME",))
-            refresh_runtime_config_from_env()
-            return
-
-        if current_model_name and current_model_name != get_model_name_for_backend(current_backend):
-            updates["MODEL_NAME"] = current_model_name
-        else:
-            updates["MODEL_NAME"] = get_model_name_for_backend(backend)
-        self._persist_env_values(updates)
 
     def _persist_personality(self, profile: Optional[str], voice_override: Optional[str] = None) -> None:
         """Persist startup profile and voice in instance-local UI settings."""
@@ -525,7 +458,7 @@ class LocalStream:
             set_custom_profile(profile)
             try:
                 get_session_instructions()
-                get_session_voice(default=get_default_voice_for_backend(get_backend_choice()))
+                get_session_voice(default=get_default_voice())
             except Exception:
                 set_custom_profile(previous_profile)
                 raise
@@ -539,19 +472,19 @@ class LocalStream:
         return "Applied personality and restarting backend."
 
     async def get_available_voices(self) -> list[str]:
-        """Return voices available for the currently selected backend."""
-        return get_available_voices_for_backend(get_backend_choice())
+        """Return the voices available for the Hugging Face backend."""
+        return get_available_voices()
 
     def get_current_voice(self) -> str:
-        """Return the currently selected voice override or backend profile voice."""
+        """Return the currently selected voice override or profile voice."""
         if self._voice_override:
             return self._voice_override
         try:
             from reachy_mini_conversation_app.prompts import get_session_voice
 
-            return get_session_voice(default=get_default_voice_for_backend(get_backend_choice()))
+            return get_session_voice(default=get_default_voice())
         except Exception:
-            return get_default_voice_for_backend(get_backend_choice())
+            return get_default_voice()
 
     async def change_voice(self, voice: str) -> str:
         """Change the voice through the active handler without rebuilding the backend."""
@@ -609,49 +542,29 @@ class LocalStream:
                 pass
 
         class BackendPayload(BaseModel):
-            backend: str
-            api_key: Optional[str] = None
             hf_mode: Optional[str] = None
             hf_host: Optional[str] = None
             hf_port: Optional[int] = None
 
         def _status_payload() -> dict[str, object]:
-            backend_provider = get_backend_choice()
-            active_backend = self._active_backend()
-            has_openai_key = self._has_required_key(OPENAI_BACKEND)
-            has_gemini_key = self._has_required_key(GEMINI_BACKEND)
             hf_session_url = get_hf_session_url()
             hf_ws_url = get_hf_direct_ws_url()
             hf_direct_host, hf_direct_port = parse_hf_direct_target(hf_ws_url)
-            has_hf_session_url = bool(hf_session_url)
-            has_hf_ws_url = bool(hf_ws_url)
             hf_connection_selection = get_hf_connection_selection()
-            hf_connection_mode = hf_connection_selection.mode
             has_hf_connection = hf_connection_selection.has_target
-            can_proceed_with_openai = has_openai_key
-            can_proceed_with_gemini = has_gemini_key
-            can_proceed_with_hf = has_hf_connection
-            readiness_backend = backend_provider if self._can_rebuild_handler() else active_backend
-            can_proceed = self._has_required_key(readiness_backend)
-            requires_restart = backend_provider != active_backend and not self._can_rebuild_handler()
             backend_connection = self._backend_connection_status()
             return {
-                "active_backend": active_backend,
-                "backend_provider": backend_provider,
-                "has_key": can_proceed,
-                "has_openai_key": has_openai_key,
-                "has_gemini_key": has_gemini_key,
-                "has_hf_session_url": has_hf_session_url,
-                "has_hf_ws_url": has_hf_ws_url,
+                "backend": HF_BACKEND,
+                "has_key": has_hf_connection,
+                "has_hf_session_url": bool(hf_session_url),
+                "has_hf_ws_url": bool(hf_ws_url),
                 "has_hf_connection": has_hf_connection,
-                "hf_connection_mode": hf_connection_mode,
+                "hf_connection_mode": hf_connection_selection.mode,
                 "hf_direct_host": hf_direct_host,
                 "hf_direct_port": hf_direct_port,
-                "can_proceed": can_proceed,
-                "can_proceed_with_openai": can_proceed_with_openai,
-                "can_proceed_with_gemini": can_proceed_with_gemini,
-                "can_proceed_with_hf": can_proceed_with_hf,
-                "requires_restart": requires_restart,
+                "can_proceed": has_hf_connection,
+                "can_proceed_with_hf": has_hf_connection,
+                "requires_restart": not self._can_rebuild_handler(),
                 **backend_connection,
             }
 
@@ -698,55 +611,38 @@ class LocalStream:
 
         @settings_app.post(f"{SETTINGS_API_PREFIX}/backend_config")
         def _set_backend(payload: BackendPayload) -> JSONResponse:
-            backend = payload.backend.strip().lower()
-            if backend not in {OPENAI_BACKEND, GEMINI_BACKEND, HF_BACKEND}:
-                return JSONResponse({"ok": False, "error": "invalid_backend"}, status_code=400)
+            hf_selection = get_hf_connection_selection()
+            hf_mode = (payload.hf_mode or hf_selection.mode).strip().lower()
+            if hf_mode == HF_LOCAL_CONNECTION_MODE:
+                existing_host, existing_port = parse_hf_direct_target(hf_selection.direct_ws_url)
+                host = (payload.hf_host or "").strip() or existing_host or ""
+                if not host:
+                    return JSONResponse({"ok": False, "error": "empty_hf_host"}, status_code=400)
+                if "://" in host or "/" in host or "?" in host or "#" in host:
+                    return JSONResponse({"ok": False, "error": "invalid_hf_host"}, status_code=400)
 
-            api_key = (payload.api_key or "").strip()
-            if backend == GEMINI_BACKEND and not api_key and not self._has_required_key(GEMINI_BACKEND):
-                return JSONResponse({"ok": False, "error": "empty_key"}, status_code=400)
+                port = payload.hf_port if payload.hf_port is not None else existing_port or 8765
+                if port < 1 or port > 65535:
+                    return JSONResponse({"ok": False, "error": "invalid_hf_port"}, status_code=400)
 
-            if backend == OPENAI_BACKEND and api_key:
-                self._persist_api_key(api_key)
-            if backend == GEMINI_BACKEND and api_key:
-                self._persist_gemini_api_key(api_key)
-            if backend == HF_BACKEND:
-                hf_selection = get_hf_connection_selection()
-                hf_mode = (payload.hf_mode or hf_selection.mode).strip().lower()
-                if hf_mode == HF_LOCAL_CONNECTION_MODE:
-                    existing_host, existing_port = parse_hf_direct_target(hf_selection.direct_ws_url)
-                    host = (payload.hf_host or "").strip() or existing_host or ""
-                    if not host:
-                        return JSONResponse({"ok": False, "error": "empty_hf_host"}, status_code=400)
-                    if "://" in host or "/" in host or "?" in host or "#" in host:
-                        return JSONResponse({"ok": False, "error": "invalid_hf_host"}, status_code=400)
+                self._persist_hf_direct_connection(host, port)
+            elif hf_mode == HF_DEPLOYED_CONNECTION_MODE:
+                if not bool(get_hf_session_url()):
+                    return JSONResponse({"ok": False, "error": "missing_hf_session_url"}, status_code=400)
+                self._persist_hf_allocator_connection()
+            else:
+                return JSONResponse({"ok": False, "error": "invalid_hf_mode"}, status_code=400)
 
-                    port = payload.hf_port if payload.hf_port is not None else existing_port or 8765
-                    if port < 1 or port > 65535:
-                        return JSONResponse({"ok": False, "error": "invalid_hf_port"}, status_code=400)
-
-                    self._persist_hf_direct_connection(host, port)
-                elif hf_mode == HF_DEPLOYED_CONNECTION_MODE:
-                    if not bool(get_hf_session_url()):
-                        return JSONResponse({"ok": False, "error": "missing_hf_session_url"}, status_code=400)
-                    self._persist_hf_allocator_connection()
-                else:
-                    return JSONResponse({"ok": False, "error": "invalid_hf_mode"}, status_code=400)
-
-            self._persist_backend_choice(backend)
             if self._can_rebuild_handler():
                 self._mark_restart_requested("backend_config_changed")
-            payload_data = _status_payload()
-            message = "Backend saved."
-            if payload_data["requires_restart"]:
-                message = "Backend saved. Restart Reachy Mini Conversation from the desktop app to apply it."
-            elif self._can_rebuild_handler():
-                message = "Backend saved. Reconnecting backend."
+                message = "Connection saved. Reconnecting backend."
+            else:
+                message = "Connection saved. Restart Reachy Mini Conversation from the desktop app to apply it."
             return JSONResponse(
                 {
                     "ok": True,
                     "message": message,
-                    **payload_data,
+                    **_status_payload(),
                 }
             )
 
@@ -758,7 +654,7 @@ class LocalStream:
                 persist_personality=self._persist_personality,
                 get_persisted_personality=self._read_persisted_personality,
                 apply_personality=self.apply_personality,
-                get_available_voices=self.get_available_voices,
+                get_voices=self.get_available_voices,
                 get_current_voice=self.get_current_voice,
                 change_voice=self.change_voice,
                 api_prefix=SETTINGS_API_PREFIX,
@@ -771,8 +667,7 @@ class LocalStream:
     async def _run_handler_startup_loop(self) -> None:
         """Start the realtime handler and keep settings UI alive after backend failures."""
         while not self._stop_event.is_set():
-            selected_backend = get_backend_choice()
-            if selected_backend != self._active_backend() or self._restart_requested.is_set():
+            if self._restart_requested.is_set():
                 await self._shutdown_active_handler()
                 if not self._can_rebuild_handler():
                     self._restart_requested.clear()
@@ -785,8 +680,7 @@ class LocalStream:
                 except Exception as e:
                     self._set_backend_connection_state("disconnected", e)
                     logger.warning(
-                        "%s backend handler failed to initialize: %s. Retrying in %.1f seconds.",
-                        selected_backend,
+                        "Backend handler failed to initialize: %s. Retrying in %.1f seconds.",
                         e,
                         self._backend_retry_delay,
                         exc_info=logger.isEnabledFor(logging.DEBUG),
@@ -794,10 +688,10 @@ class LocalStream:
                     await self._sleep_or_restart_requested(self._backend_retry_delay)
                     continue
 
-            active_backend = self._active_backend()
-            if not self._has_required_key(active_backend):
-                requirement_name = self._requirement_name(active_backend)
-                self._set_backend_connection_state("waiting_for_config", f"{requirement_name} is not configured.")
+            if not has_hf_realtime_target():
+                self._set_backend_connection_state(
+                    "waiting_for_config", f"{HF_REALTIME_WS_URL_ENV} is not configured."
+                )
                 await self._sleep_or_restart_requested(0.5)
                 continue
 
@@ -809,8 +703,7 @@ class LocalStream:
             except Exception as e:
                 self._set_backend_connection_state("disconnected", e)
                 logger.warning(
-                    "%s backend failed to start: %s. Settings UI remains available; retrying in %.1f seconds.",
-                    active_backend,
+                    "Backend failed to start: %s. Settings UI remains available; retrying in %.1f seconds.",
                     e,
                     self._backend_retry_delay,
                     exc_info=logger.isEnabledFor(logging.DEBUG),
@@ -820,11 +713,10 @@ class LocalStream:
                     return
                 self._set_backend_connection_state("disconnected")
                 if self._restart_requested.is_set():
-                    logger.info("%s backend stopped for requested restart.", active_backend)
+                    logger.info("Backend stopped for requested restart.")
                     continue
                 logger.info(
-                    "%s backend session ended. Settings UI remains available; retrying in %.1f seconds.",
-                    active_backend,
+                    "Backend session ended. Settings UI remains available; retrying in %.1f seconds.",
                     self._backend_retry_delay,
                 )
 
@@ -851,37 +743,26 @@ class LocalStream:
             except Exception:
                 pass  # Instance .env loading is optional; continue with defaults
 
-        active_backend = self._active_backend()
-
         # Always expose settings UI if a settings app is available
         # (do this AFTER loading the instance .env so status endpoint sees the right value)
         self._init_settings_ui_if_needed()
 
-        # If key is still missing -> wait until provided via the settings UI
-        if not self._has_required_key(active_backend):
-            requirement_name = self._requirement_name(active_backend)
-            self._set_backend_connection_state("waiting_for_config", f"{requirement_name} is not configured.")
-            if active_backend == HF_BACKEND and self._settings_app is None:
+        # If the Hugging Face target is still missing -> wait until provided via the settings UI
+        if not has_hf_realtime_target():
+            self._set_backend_connection_state("waiting_for_config", f"{HF_REALTIME_WS_URL_ENV} is not configured.")
+            if self._settings_app is None:
                 logger.error(
-                    "%s not found. Set it in the app .env before starting the Hugging Face backend.", requirement_name
+                    "%s not found. Set it in the app .env before starting the Hugging Face backend.",
+                    HF_REALTIME_WS_URL_ENV,
                 )
                 return
-            logger.warning("%s not found. Open the app settings page to configure it.", requirement_name)
-            # Poll until the key becomes available (set via the settings UI)
+            logger.warning("%s not found. Open the app settings page to configure it.", HF_REALTIME_WS_URL_ENV)
+            # Poll until a target becomes available (set via the settings UI)
             try:
-                while not self._stop_event.is_set() and not self._has_required_key(active_backend):
-                    selected_backend = get_backend_choice()
-                    if selected_backend != active_backend:
-                        if self._can_rebuild_handler():
-                            active_backend = selected_backend
-                            self._active_backend_name = selected_backend
-                            self._restart_requested.set()
-                            self._set_backend_connection_state("waiting_for_config")
-                        else:
-                            self._set_backend_connection_state("restart_required")
+                while not self._stop_event.is_set() and not has_hf_realtime_target():
                     time.sleep(0.2)
             except KeyboardInterrupt:
-                logger.info("Interrupted while waiting for API key.")
+                logger.info("Interrupted while waiting for Hugging Face configuration.")
                 return
             if self._stop_event.is_set():
                 return
@@ -1006,8 +887,7 @@ class LocalStream:
                         )
 
             elif isinstance(handler_output, tuple):
-                input_sample_rate, audio_data = handler_output
-                output_sample_rate = self._robot.media.get_output_audio_samplerate()
+                _, audio_data = handler_output
 
                 # Skip empty audio frames
                 if audio_data.size == 0:
@@ -1015,7 +895,7 @@ class LocalStream:
 
                 # Reshape if needed
                 if audio_data.ndim == 2:
-                    # Scipy channels last convention
+                    # channels-last convention
                     if audio_data.shape[1] > audio_data.shape[0]:
                         audio_data = audio_data.T
                     # Multiple channels -> Mono channel
@@ -1024,16 +904,6 @@ class LocalStream:
 
                 # Cast if needed
                 audio_frame = audio_to_float32(audio_data)
-
-                # Resample if needed
-                if input_sample_rate != output_sample_rate:
-                    num_samples = int(len(audio_frame) * output_sample_rate / input_sample_rate)
-                    if num_samples == 0:
-                        continue
-                    audio_frame = resample(
-                        audio_frame,
-                        num_samples,
-                    )
 
                 self._robot.media.push_audio_sample(audio_frame)
 

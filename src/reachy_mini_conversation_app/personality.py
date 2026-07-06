@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import List
 from pathlib import Path
 
-from .config import DEFAULT_PROFILES_DIRECTORY, USER_PERSONALITIES_DIRNAME, config, get_default_voice_for_backend
+from .config import DEFAULT_PROFILES_DIRECTORY, USER_PERSONALITIES_DIRNAME, config, get_default_voice
 from .tools.tool_constants import SystemTool
 
 
@@ -140,7 +140,7 @@ def _write_profile(
     voice: str | None = None,
     greeting: str | None = None,
 ) -> None:
-    default_voice = get_default_voice_for_backend()
+    default_voice = get_default_voice()
     target_dir = config.user_personalities_root() / sanitized_name
     target_dir.mkdir(parents=True, exist_ok=True)
     (target_dir / "instructions.txt").write_text(instructions.strip() + "\n", encoding="utf-8")

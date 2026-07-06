@@ -61,24 +61,19 @@ def test_config_raises_when_selected_external_profile_is_missing(
         config_mod.Config()
 
 
-def test_backend_provider_defaults_to_hf_when_unset() -> None:
-    """Non-Gemini models should default to the Hugging Face backend."""
-    assert config_mod._normalize_backend_provider(None, None) == config_mod.HF_BACKEND
-    assert config_mod._normalize_backend_provider("", None) == config_mod.HF_BACKEND
-    assert config_mod._normalize_backend_provider(None, "gpt-realtime-2") == config_mod.HF_BACKEND
-    assert config_mod._normalize_backend_provider(None, "gemini-3.1-flash-live-preview") == config_mod.GEMINI_BACKEND
+def test_obsolete_backend_env_is_ignored_with_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Stale multi-backend selectors should be ignored with a warning, not change behaviour."""
+    monkeypatch.setenv("BACKEND_PROVIDER", "openai")
+    monkeypatch.setenv("MODEL_NAME", "gpt-realtime-2")
 
+    with caplog.at_level("WARNING"):
+        config_mod.refresh_runtime_config_from_env()
 
-def test_backend_provider_rejects_explicit_unknown_backend() -> None:
-    """An explicit backend typo should fail instead of falling through to the default backend."""
-    with pytest.raises(ValueError, match="Invalid BACKEND_PROVIDER='openia'"):
-        config_mod._normalize_backend_provider("openia", None)
-
-
-def test_huggingface_backend_does_not_resolve_model_name() -> None:
-    """Hugging Face should rely on the server's model selection."""
-    assert config_mod._resolve_model_name(config_mod.HF_BACKEND, None) == ""
-    assert config_mod._resolve_model_name(config_mod.HF_BACKEND, "gpt-realtime-2") == ""
+    assert "BACKEND_PROVIDER" in caplog.text
+    assert "MODEL_NAME" in caplog.text
+    assert "Hugging Face backend only" in caplog.text
 
 
 def test_hf_default_session_url_uses_stable_space_proxy() -> None:

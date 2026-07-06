@@ -30,11 +30,8 @@ Conversational app for the Reachy Mini robot combining realtime voice backends a
 - [License](#license)
 
 ## Overview
-- Real-time audio conversation loop for low-latency streaming. Supported backends:
-  - **Hugging Face** - default, using the built-in Hugging Face server or your own local endpoint.
-  - **OpenAI Realtime** (`gpt-realtime-2`) - requires `OPENAI_API_KEY`.
-  - **Gemini Live** (`gemini-3.1-flash-live-preview`) - requires `GEMINI_API_KEY`.
-- Vision is handled by the selected realtime backend when the `camera` tool is used.
+- Real-time audio conversation loop for low-latency streaming, powered by the **Hugging Face** realtime backend using the built-in Hugging Face server or your own local endpoint.
+- Vision is handled by the realtime backend when the `camera` tool is used.
 - Layered motion system queues primary moves (dances, emotions, goto poses, breathing) while blending speech-reactive wobble.
 - Async tool dispatch integrates robot motion and camera capture. An optional web UI (`--ui`) provides personality selection, mic control, and settings.
 
@@ -103,15 +100,11 @@ pip install -e .[dev]                   # Development tools
 
 The default setup uses the Hugging Face backend and does not require an API key.
 
-Copy `.env.example` to `.env` when you want to switch backends, provide API keys, or point Hugging Face at your own local endpoint.
+Copy `.env.example` to `.env` when you want to point Hugging Face at your own local endpoint.
 
 | Variable | Description |
 |----------|-------------|
-| `OPENAI_API_KEY` | Required for OpenAI Realtime mode. |
-| `GEMINI_API_KEY` | Required for Gemini mode. Also accepts `GOOGLE_API_KEY`. Get one at [aistudio.google.com](https://aistudio.google.com/apikey). |
-| `BACKEND_PROVIDER` | Realtime backend to use: `huggingface` (default), `openai`, or `gemini`. |
-| `MODEL_NAME` | Optional model override for OpenAI Realtime or Gemini Live. Defaults to `gpt-realtime-2` for OpenAI and `gemini-3.1-flash-live-preview` for Gemini. Hugging Face uses the server's model selection. |
-| `REALTIME_TRANSCRIPTION_LANGUAGE` | Optional input transcription language for realtime backends. Defaults to `en`; set to a backend-supported code such as `zh` for Chinese. |
+| `REALTIME_TRANSCRIPTION_LANGUAGE` | Optional input transcription language for the realtime backend. Defaults to `en`; set to a backend-supported code such as `zh` for Chinese. |
 | `HF_REALTIME_CONNECTION_MODE` | Hugging Face connection selector: `deployed` uses the built-in Hugging Face server; `local` uses `HF_REALTIME_WS_URL`. Defaults to `deployed`. |
 | `HF_REALTIME_WS_URL` | Direct websocket endpoint for your own Hugging Face backend. Accepts either a base URL like `ws://127.0.0.1:8765/v1` or the full websocket URL `ws://127.0.0.1:8765/v1/realtime`. Used when `HF_REALTIME_CONNECTION_MODE=local`. |
 | `HF_TOKEN` | Optional token for Hugging Face access (for gated/private assets). |
@@ -122,14 +115,12 @@ Copy `.env.example` to `.env` when you want to switch backends, provide API keys
 Use the built-in Hugging Face server through the app-managed Space proxy. This is the default for a new install; set it explicitly only when you want to switch back from a saved local endpoint:
 
 ```env
-BACKEND_PROVIDER=huggingface
 HF_REALTIME_CONNECTION_MODE=deployed
 ```
 
 Run your own realtime voice backend using [speech-to-speech](https://github.com/huggingface/speech-to-speech) on the same machine as the conversation app:
 
 ```env
-BACKEND_PROVIDER=huggingface
 HF_REALTIME_CONNECTION_MODE=local
 HF_REALTIME_WS_URL=ws://127.0.0.1:8765/v1/realtime
 ```
@@ -137,7 +128,6 @@ HF_REALTIME_WS_URL=ws://127.0.0.1:8765/v1/realtime
 Run your own Hugging Face backend on your laptop and connect to it from Reachy Mini Wireless over the same Wi-Fi network:
 
 ```env
-BACKEND_PROVIDER=huggingface
 HF_REALTIME_CONNECTION_MODE=local
 HF_REALTIME_WS_URL=ws://<your-laptop-lan-ip>:8765/v1/realtime
 ```
@@ -153,12 +143,11 @@ ssh -N -R 8765:127.0.0.1:8765 <robot-user>@<robot-host>
 Then set this on the robot:
 
 ```env
-BACKEND_PROVIDER=huggingface
 HF_REALTIME_CONNECTION_MODE=local
 HF_REALTIME_WS_URL=ws://127.0.0.1:8765/v1/realtime
 ```
 
-When using the web UI's Settings view, selecting `Hugging Face` lets you choose either the built-in server or a local `host:port` target. The UI writes `HF_REALTIME_CONNECTION_MODE` for you, and the local path writes `HF_REALTIME_WS_URL` with a default of `localhost:8765`.
+In the web UI's Settings view, the Connection section lets you choose either the built-in server or a local `host:port` target. The UI writes `HF_REALTIME_CONNECTION_MODE` for you, and the local path writes `HF_REALTIME_WS_URL` with a default of `localhost:8765`.
 
 ## Running the app
 

@@ -27,7 +27,7 @@ Everything below expands these.
 The bar we hold, and the *why* behind the rules:
 
 - **Built on the Reachy Mini SDK.** This app runs on top of [`reachy_mini`](https://github.com/pollen-robotics/reachy_mini) (declared in `pyproject.toml`, locked in `uv.lock`, installed alongside it). Build on the SDK's public API. Don't fork, vendor, or monkey-patch its internals, and keep the app working when the SDK version bumps.
-- **Design before code.** Think non-trivial changes through and state the trade-offs. The realtime backends are deliberately loosely coupled (`base_realtime.py` plus per-provider subclasses). Fix shared behavior in the base, not by forking a provider.
+- **Design before code.** Think non-trivial changes through and state the trade-offs. The realtime conversation loop lives in `huggingface_realtime.py`; keep shared behaviour there.
 - **Graceful degradation.** A tool returns `{"error": ...}` rather than crashing the conversation loop.
 - **Tests cover essential behavior**, not every line.
 - **The CI gate is the floor, not the ceiling.** Never degrade quality to land faster.
@@ -94,11 +94,8 @@ These are the cleanups we make in review over and over. Write code that wouldn't
 ```
 src/reachy_mini_conversation_app/
   main.py                 # entry point + CLI (reachy-mini-conversation-app)
-  base_realtime.py        # abstract realtime backend, shared conversation loop
-  openai_realtime.py      # OpenAI Realtime backend
-  gemini_live.py          # Gemini Live backend
-  huggingface_realtime.py # Hugging Face backend
-  conversation_handler.py # wires audio/tools/backends together
+  huggingface_realtime.py # Hugging Face backend + shared realtime conversation loop
+  conversation_handler.py # wires audio/tools/backend together
   config.py               # configuration + env loading
   personality.py          # personality/profile loading
   tools/                  # LLM-callable tools (one file per tool)

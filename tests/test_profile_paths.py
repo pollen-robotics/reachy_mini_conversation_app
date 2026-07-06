@@ -158,13 +158,11 @@ def test_builtin_default_profile_tools_load_for_ui() -> None:
     assert read_tools_for(DEFAULT_OPTION) == expected
 
 
-def test_session_voice_defaults_follow_selected_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Session voice should fall back to the active backend default."""
-    monkeypatch.setattr(config, "BACKEND_PROVIDER", "gemini")
-    monkeypatch.setattr(config, "MODEL_NAME", "gemini-3.1-flash-live-preview")
+def test_session_voice_defaults_to_hf_voice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Session voice should fall back to the Hugging Face default voice."""
     monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
 
-    assert prompts_mod.get_session_voice() == "Kore"
+    assert prompts_mod.get_session_voice() == "Aiden"
 
 
 def test_session_greeting_prompt_loads_from_selected_profile(
@@ -248,15 +246,13 @@ def test_headless_profile_write_defaults_voice_at_call_time(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """New headless profiles should use the currently selected backend default voice."""
-    monkeypatch.setattr(config, "BACKEND_PROVIDER", "gemini")
-    monkeypatch.setattr(config, "MODEL_NAME", "gemini-3.1-flash-live-preview")
+    """New headless profiles should use the Hugging Face default voice."""
     monkeypatch.setattr(config, "INSTANCE_PATH", tmp_path)
 
     headless_mod._write_profile("runtime_voice_default", "test instructions", "")
 
     voice_file = tmp_path / "user_personalities" / "runtime_voice_default" / "voice.txt"
-    assert voice_file.read_text(encoding="utf-8") == "Kore\n"
+    assert voice_file.read_text(encoding="utf-8") == "Aiden\n"
 
 
 def test_user_profile_round_trips_through_instance_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

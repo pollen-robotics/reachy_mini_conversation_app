@@ -1,10 +1,4 @@
-/** Shared constants for the modern web UI. Keep backend strings in sync with config.py. */
-
-export const BACKENDS = Object.freeze({
-  HUGGINGFACE: "huggingface",
-  OPENAI: "openai",
-  GEMINI: "gemini",
-});
+/** Shared constants for the modern web UI. */
 
 export const BUILT_IN_DEFAULT_OPTION = "(built-in default)";
 
