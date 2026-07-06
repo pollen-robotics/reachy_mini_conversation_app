@@ -65,7 +65,7 @@ def test_head_tracking_follows_speaking() -> None:
         # start() begins tracking with full weight.
         assert _wait_for(lambda: call(weight=1.0) in robot.start_head_tracking.call_args_list)
 
-        # Speaking captures the look-at anchor and releases the head.
+        # Speaking with a locked face captures the anchor and releases the head.
         manager.set_speaking(True)
         assert _wait_for(lambda: call(weight=0.0) in robot.start_head_tracking.call_args_list)
         assert _wait_for(lambda: manager._track_anchor is not None)

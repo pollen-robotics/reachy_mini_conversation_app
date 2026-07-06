@@ -372,11 +372,11 @@ class MovementManager:
                 return
             self._is_speaking = speaking
             try:
-                if speaking:
-                    # Capture the look-at pose, then pause tracking so queued moves own the head.
+                if speaking and self.current_robot.get_tracked_face(wait=False).detected:
+                    # Pause only once a face is locked, else speech blocks acquisition.
                     self._track_anchor = self.current_robot.get_current_head_pose()
                     self.current_robot.start_head_tracking(weight=0.0)
-                else:
+                elif not speaking:
                     self._track_anchor = None
                     self.current_robot.start_head_tracking(weight=1.0)
             except Exception as e:
