@@ -1872,8 +1872,8 @@ name = "pycaw"
 version = "20251023"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "comtypes" },
-    { name = "psutil" },
+    { name = "comtypes", marker = "sys_platform == 'win32'" },
+    { name = "psutil", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d1/81/19181e3118a503f94d8689fbbed60616e85d08cee3a295c11245ae73018f/pycaw-20251023.tar.gz", hash = "sha256:19935b92eb5efc3f3ea5ee8a2d37ca49009e9dc00f83d067b74b9922e84b5b3b", size = 23421, upload-time = "2025-10-23T18:26:45.087Z" }
 wheels = [
@@ -2034,7 +2034,7 @@ name = "pygobject"
 version = "3.46.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pycairo" },
+    { name = "pycairo", marker = "sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ac/4a/f24ddf1d20cc4b56affc7921e29928559a06c922eb60077448392792b914/PyGObject-3.46.0.tar.gz", hash = "sha256:481437b05af0a66b7c366ea052710eb3aacbb979d22d30b797f7ec29347ab1e6", size = 723367, upload-time = "2023-09-10T09:56:26.737Z" }
 
@@ -2222,7 +2222,7 @@ wheels = [
 [[package]]
 name = "reachy-mini"
 version = "1.9.0rc1"
-source = { git = "https://github.com/pollen-robotics/reachy_mini.git?rev=5db721e1aa6284837678ea17f3f7ff0092aff705#5db721e1aa6284837678ea17f3f7ff0092aff705" }
+source = { git = "https://github.com/pollen-robotics/reachy_mini.git?rev=a5018b04b1df818ff30c18ea1b771868ed802ce2#a5018b04b1df818ff30c18ea1b771868ed802ce2" }
 dependencies = [
     { name = "aiohttp" },
     { name = "asgiref" },
@@ -2293,7 +2293,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.27.1" },
     { name = "openai", specifier = "==2.28.0" },
     { name = "python-dotenv" },
-    { name = "reachy-mini", git = "https://github.com/pollen-robotics/reachy_mini.git?rev=5db721e1aa6284837678ea17f3f7ff0092aff705" },
+    { name = "reachy-mini", git = "https://github.com/pollen-robotics/reachy_mini.git?rev=a5018b04b1df818ff30c18ea1b771868ed802ce2" },
     { name = "reachy-mini-dances-library" },
     { name = "reachy-mini-toolbox" },
 ]
