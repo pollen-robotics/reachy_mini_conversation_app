@@ -8,4 +8,3 @@ move_head
 go_to_sleep
 remember
 forget
-head_tracking
