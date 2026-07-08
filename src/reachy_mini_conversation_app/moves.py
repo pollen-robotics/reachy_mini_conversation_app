@@ -187,11 +187,10 @@ class MovementManager:
     def __init__(
         self,
         current_robot: ReachyMini,
-        head_tracking: bool = False,
     ):
         """Initialize movement manager."""
         self.current_robot = current_robot
-        self._head_tracking = head_tracking
+        self._head_tracking = False
 
         # Single timing source for durations
         self._now = time.monotonic
@@ -287,6 +286,10 @@ class MovementManager:
                 return
         self._command_queue.put(("set_listening", listening))
 
+    def set_head_tracking(self, enabled: bool) -> None:
+        """Start or stop following the user's face; thread-safe via the command queue."""
+        self._command_queue.put(("set_head_tracking", enabled))
+
     def set_speaking(self, speaking: bool) -> None:
         """Pause head tracking while the assistant speaks, resume it afterwards.
 
@@ -364,6 +367,21 @@ class MovementManager:
                 # Unfreeze: restart blending from frozen pose
                 self._antenna_unfreeze_blend = 0.0
             self.state.update_activity()
+        elif command == "set_head_tracking":
+            enabled = bool(payload)
+            if self._head_tracking == enabled:
+                return
+            self._head_tracking = enabled
+            self._track_anchor = None
+            # set_speaking is gated off while disabled, so its state would go stale across a toggle.
+            self._is_speaking = False
+            try:
+                if enabled:
+                    self.current_robot.start_head_tracking(weight=1.0)
+                else:
+                    self.current_robot.stop_head_tracking()
+            except Exception as e:
+                logger.warning("Head-tracking toggle failed: %s", e)
         elif command == "set_speaking":
             if not self._head_tracking:
                 return
@@ -613,11 +631,6 @@ class MovementManager:
         self._thread = threading.Thread(target=self.working_loop, daemon=True)
         self._thread.start()
         logger.debug("Move worker started")
-        if self._head_tracking:
-            try:
-                self.current_robot.start_head_tracking(weight=1.0)
-            except Exception as e:
-                logger.warning("Failed to start head tracking: %s", e)
 
     def stop(self, reset_to_neutral: bool = True) -> None:
         """Request the worker thread to stop and wait for it to exit.

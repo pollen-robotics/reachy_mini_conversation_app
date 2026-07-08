@@ -155,7 +155,7 @@ def run(
 
     app_lifecycle.wake_up_if_sleeping(robot, logger)
 
-    movement_manager = MovementManager(current_robot=robot, head_tracking=args.head_tracking)
+    movement_manager = MovementManager(current_robot=robot)
 
     deps = ToolDependencies(
         reachy_mini=robot,

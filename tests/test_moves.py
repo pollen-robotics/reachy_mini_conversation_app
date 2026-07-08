@@ -55,14 +55,15 @@ def test_stop_can_skip_neutral_reset(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_head_tracking_follows_speaking() -> None:
-    """--head-tracking owns the head when idle and releases it while the assistant speaks."""
+    """Once enabled, tracking owns the head when idle and releases it while the assistant speaks."""
     robot = MagicMock()
     robot.get_current_head_pose.return_value = np.eye(4)
     robot.get_current_joint_positions.return_value = ([0.0] * 6, [0.0, 0.0])
-    manager = MovementManager(robot, head_tracking=True)
+    manager = MovementManager(robot)
     manager.start()
     try:
-        # start() begins tracking with full weight.
+        # The head_tracking tool enables tracking with full weight.
+        manager.set_head_tracking(True)
         assert _wait_for(lambda: call(weight=1.0) in robot.start_head_tracking.call_args_list)
 
         # Speaking with a locked face captures the anchor and releases the head.
@@ -84,7 +85,7 @@ def test_head_tracking_follows_speaking() -> None:
 def test_speaking_anchor_composes_emotions_and_holds_dances_from_neutral() -> None:
     """While speaking: hold the anchor, compose emotions onto it, play dances from neutral."""
     robot = MagicMock()
-    manager = MovementManager(robot, head_tracking=True)
+    manager = MovementManager(robot)
     anchor = create_head_pose(0, 0, 0, 0, 0, 20, degrees=True)
     manager._track_anchor = anchor
 
