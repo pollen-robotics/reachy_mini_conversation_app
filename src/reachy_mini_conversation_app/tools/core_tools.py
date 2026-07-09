@@ -18,6 +18,7 @@ from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY as DE
 
 # Import config to ensure .env is loaded before reading REACHY_MINI_CUSTOM_PROFILE
 from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.tool_spaces import build_remote_client, read_installed_tool_spaces
 from reachy_mini_conversation_app.tools.tool_constants import SystemTool
 
 
@@ -370,8 +371,6 @@ def _read_profile_tool_names() -> list[str]:
 
 def _resolve_remote_tools(tool_names: list[str], instance_path: str | Path | None) -> list[RemoteMcpTool]:
     """Build Space tools enabled by the active profile from the cached install manifest, without any network calls."""
-    from reachy_mini_conversation_app.tool_spaces import build_remote_client, read_installed_tool_spaces
-
     remote_tools: list[RemoteMcpTool] = []
     for installed_space in read_installed_tool_spaces(instance_path).spaces:
         enabled_tool_names = {name for name in tool_names if name.startswith(f"{installed_space.alias}__")}
