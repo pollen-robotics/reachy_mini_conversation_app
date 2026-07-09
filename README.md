@@ -198,9 +198,9 @@ The default profile exposes these tools. Custom profiles can enable a different 
 | `sweep_look` | Sweep Reachy's head left, right, and back to center. | Bundled default profile tool. |
 | `remember` | Save one short, stable fact about the user for future sessions. | Core install only. Stored in the app instance data directory. |
 | `forget` | Remove a saved memory fact by matching a short query. | Core install only. |
-| `search_web` | Search the web for current information, today's events, or other explicit web lookups. | Core install only. Uses DuckDuckGo through `ddgs`. |
-| `get_weather` | Report today's weather for a place. | Core install only. Uses Open-Meteo. |
-| `get_time` | Report the current local time, the time in a named place or IANA timezone, or the current difference between two places/timezones. | Core install only. Local timezone uses cached geo-IP detection. Place lookup uses Open-Meteo geocoding. |
+| `pollen_robotics_reachy_mini_search_tool__search_web` | Search the web for current information, today's events, or other explicit web lookups. | Preinstalled MCP Space: `pollen-robotics/reachy-mini-search-tool`. |
+| `pollen_robotics_reachy_mini_weather_tool__get_weather` | Report today's weather for a place. | Preinstalled MCP Space: `pollen-robotics/reachy-mini-weather-tool`. |
+| `pollen_robotics_reachy_mini_time_tool__get_time` | Report the current local time, the time in a named place or IANA timezone, or the current difference between two places/timezones. | Preinstalled MCP Space: `pollen-robotics/reachy-mini-time-tool`. |
 
 > [!NOTE]
 > `remember`/`forget` facts are stored in `memory.v1.json` inside the app's instance data directory (`~/.local/share/reachy_mini_conversation_app/` by default, or the instance path used by the desktop launcher). `forget` only removes facts matched by query. To reset all remembered facts, delete this file.
@@ -341,7 +341,7 @@ reachy-mini-conversation-app tool-spaces list
 reachy-mini-conversation-app tool-spaces remove owner/space-name
 ```
 
-The app validates the Space slug through the Hugging Face Hub, probes the standard MCP endpoint (sending the HF token only to private Spaces), discovers tools, enables them in the active profile's `tools.txt`, and writes the installed Space to:
+The bundled Pollen Space tools are preinstalled from static metadata, so startup does not need Hugging Face discovery. For custom Spaces, the app validates the slug through the Hugging Face Hub, probes the standard MCP endpoint (sending the HF token only to private Spaces), discovers tools, enables them in the active profile's `tools.txt`, and writes the installed Space to:
 
 - `installed_tool_spaces.json` in the managed app instance directory
 - `external_content/installed_tool_spaces.json` in terminal mode
