@@ -283,13 +283,6 @@ def run(
         logger.error("Failed to initialize tools: %s", e)
         sys.exit(1)
 
-    get_time_tool = core_tools.ALL_TOOLS.get("get_time")
-    if get_time_tool is not None:
-        from reachy_mini_conversation_app.tools.get_time import GetTime
-
-        if isinstance(get_time_tool, GetTime):
-            get_time_tool.warm_local_timezone_cache()
-
     # Each async service → its own thread/loop
     movement_manager.start()
     # Audio-reactive head motion is driven by the daemon's wobbler, which

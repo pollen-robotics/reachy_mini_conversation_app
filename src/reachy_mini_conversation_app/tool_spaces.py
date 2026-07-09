@@ -29,6 +29,76 @@ logger = logging.getLogger(__name__)
 
 INSTALLED_TOOL_SPACES_FILENAME = "installed_tool_spaces.json"
 TERMINAL_EXTERNAL_CONTENT_DIRECTORY = Path("external_content")
+PREINSTALLED_TOOL_SPACE_SLUGS = (
+    "pollen-robotics/reachy-mini-search-tool",
+    "pollen-robotics/reachy-mini-time-tool",
+    "pollen-robotics/reachy-mini-weather-tool",
+)
+PREINSTALLED_TOOL_SPACE_SPECS = {
+    "pollen-robotics/reachy-mini-search-tool": (
+        RemoteToolSpec(
+            server_alias="pollen_robotics_reachy_mini_search_tool",
+            remote_name="search_web",
+            namespaced_name="pollen_robotics_reachy_mini_search_tool__search_web",
+            description="Search the web for current information, today's events, or other explicit web lookups.",
+            parameters_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query."},
+                    "max_results": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10,
+                        "default": 5,
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+    ),
+    "pollen-robotics/reachy-mini-time-tool": (
+        RemoteToolSpec(
+            server_alias="pollen_robotics_reachy_mini_time_tool",
+            remote_name="get_time",
+            namespaced_name="pollen_robotics_reachy_mini_time_tool__get_time",
+            description=(
+                "Report the current local time, the time in a named place or IANA timezone, "
+                "or the current difference between two places/timezones."
+            ),
+            parameters_schema={
+                "type": "object",
+                "properties": {
+                    "timezone": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Empty for the user's local time, otherwise a named place or IANA timezone.",
+                    },
+                    "compare_timezone": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Optional named place or IANA timezone to compare against.",
+                    },
+                },
+                "required": [],
+            },
+        ),
+    ),
+    "pollen-robotics/reachy-mini-weather-tool": (
+        RemoteToolSpec(
+            server_alias="pollen_robotics_reachy_mini_weather_tool",
+            remote_name="get_weather",
+            namespaced_name="pollen_robotics_reachy_mini_weather_tool__get_weather",
+            description="Report today's weather for a place.",
+            parameters_schema={
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string", "description": "Place name for the weather lookup."},
+                },
+                "required": ["location"],
+            },
+        ),
+    ),
+}
 _SLUG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
@@ -82,7 +152,12 @@ def read_installed_tool_spaces(instance_path: str | Path | None) -> InstalledToo
     """Read the installed tool-spaces manifest if present."""
     manifest_path = get_installed_tool_spaces_path(instance_path)
     if not manifest_path.exists():
-        return InstalledToolSpacesManifest()
+        return InstalledToolSpacesManifest(
+            spaces=[
+                InstalledToolSpace(slug=slug, alias=normalize_space_alias(slug))
+                for slug in PREINSTALLED_TOOL_SPACE_SLUGS
+            ],
+        )
 
     try:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -271,8 +346,42 @@ def _validate_space_info(slug: str, space_info: SpaceInfo) -> None:
         raise RuntimeError(f"Space '{slug}' is not a Gradio Space and cannot expose the standard MCP endpoint.")
 
 
+def _resolve_preinstalled_tool_space(slug: str) -> ResolvedInstalledToolSpace | None:
+    try:
+        validated_slug = validate_space_slug(slug)
+    except ValueError:
+        return None
+
+    remote_specs = list(PREINSTALLED_TOOL_SPACE_SPECS.get(validated_slug, ()))
+    if not remote_specs:
+        return None
+
+    alias = normalize_space_alias(validated_slug)
+    client = RemoteMcpToolClient(
+        RemoteMcpServerConfig(
+            alias=alias,
+            url=f"https://{validated_slug.replace('/', '-')}.hf.space/gradio_api/mcp/",
+            request_timeout_s=10.0,
+            tool_timeout_s=30.0,
+        ),
+        known_tools=remote_specs,
+    )
+    return ResolvedInstalledToolSpace(
+        slug=validated_slug,
+        alias=alias,
+        mcp_url=client.server.url,
+        tags=["mcp", "reachy-mini-tool"],
+        tools=_build_installed_tool_space_tools(slug=validated_slug, alias=alias, remote_specs=remote_specs),
+        client=client,
+    )
+
+
 async def resolve_tool_space(slug: str) -> ResolvedInstalledToolSpace:
     """Validate and discover tools from one HF Space, authenticating private Spaces with the HF token."""
+    preinstalled_space = _resolve_preinstalled_tool_space(slug)
+    if preinstalled_space is not None:
+        return preinstalled_space
+
     validated_slug = validate_space_slug(slug)
     alias = normalize_space_alias(validated_slug)
     token = config.HF_TOKEN or get_token()
@@ -318,7 +427,15 @@ async def resolve_tool_space(slug: str) -> ResolvedInstalledToolSpace:
 
 def resolve_tool_space_sync(slug: str) -> ResolvedInstalledToolSpace:
     """Resolve one Space synchronously."""
-    return asyncio.run(resolve_tool_space(slug))
+    preinstalled_space = _resolve_preinstalled_tool_space(slug)
+    if preinstalled_space is not None:
+        return preinstalled_space
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(resolve_tool_space(slug))
+    raise RuntimeError("Cannot resolve non-preinstalled Space tools while an event loop is running.")
 
 
 def format_space_tool_listing(space: ResolvedInstalledToolSpace) -> str:

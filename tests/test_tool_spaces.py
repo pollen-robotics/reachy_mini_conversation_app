@@ -20,11 +20,15 @@ from reachy_mini_conversation_app.tool_spaces import (
 
 
 SEARCH_SPACE_SLUG = "pollen-robotics/reachy-mini-search-tool"
+TIME_SPACE_SLUG = "pollen-robotics/reachy-mini-time-tool"
+WEATHER_SPACE_SLUG = "pollen-robotics/reachy-mini-weather-tool"
+EXTRA_SPACE_SLUG = "pollen-robotics/custom-tool-space"
 COLLIDING_SEARCH_SPACE_SLUG = "pollen_robotics/reachy-mini-search-tool"
 PRIVATE_SPACE_SLUG = "pollen-robotics/private-space"
 SEARCH_ALIAS = "pollen_robotics_reachy_mini_search_tool"
+EXTRA_ALIAS = "pollen_robotics_custom_tool_space"
 SEARCH_TOOL_ID = f"{SEARCH_ALIAS}__search_web"
-SEARCH_CLIENT_TOOL_ID = f"{SEARCH_ALIAS}__reachy_mini_search_tool_search_web"
+DEFAULT_SPACE_SLUGS = [SEARCH_SPACE_SLUG, TIME_SPACE_SLUG, WEATHER_SPACE_SLUG]
 
 
 def _mock_public_space_info(slug: str) -> SimpleNamespace:
@@ -46,11 +50,12 @@ def _mock_private_space_info(slug: str) -> SimpleNamespace:
 
 
 async def _mock_list_tool_specs(self: object) -> list[RemoteToolSpec]:
+    server_alias = self.server.alias
     return [
         RemoteToolSpec(
-            server_alias=SEARCH_ALIAS,
-            remote_name="reachy_mini_search_tool_search_web",
-            namespaced_name=SEARCH_CLIENT_TOOL_ID,
+            server_alias=server_alias,
+            remote_name="search_web",
+            namespaced_name=f"{server_alias}__search_web",
             description="Search the web",
             parameters_schema={
                 "type": "object",
@@ -90,7 +95,7 @@ def test_tool_spaces_add_list_remove_round_trip(
                 "reachy-mini-conversation-app",
                 "tool-spaces",
                 "add",
-                SEARCH_SPACE_SLUG,
+                EXTRA_SPACE_SLUG,
                 "--install-only",
             ],
         )
@@ -99,15 +104,24 @@ def test_tool_spaces_add_list_remove_round_trip(
 
     manifest_path = tmp_path / "external_content" / "installed_tool_spaces.json"
     assert manifest_path.is_file()
-    assert json.loads(manifest_path.read_text(encoding="utf-8")) == {
-        "version": 1,
-        "spaces": [{"alias": SEARCH_ALIAS, "slug": SEARCH_SPACE_SLUG}],
-    }
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert payload["version"] == 1
+    assert {"alias": EXTRA_ALIAS, "slug": EXTRA_SPACE_SLUG} in payload["spaces"]
 
     assert _run_cli(monkeypatch, ["reachy-mini-conversation-app", "tool-spaces", "list"]) == 0
 
-    assert _run_cli(monkeypatch, ["reachy-mini-conversation-app", "tool-spaces", "remove", SEARCH_SPACE_SLUG]) == 0
-    assert read_installed_tool_spaces(None).spaces == []
+    assert _run_cli(monkeypatch, ["reachy-mini-conversation-app", "tool-spaces", "remove", EXTRA_SPACE_SLUG]) == 0
+    assert EXTRA_SPACE_SLUG not in [space.slug for space in read_installed_tool_spaces(None).spaces]
+
+
+def test_read_installed_tool_spaces_uses_preinstalled_defaults(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing manifests should still expose the shipped MCP Spaces."""
+    monkeypatch.chdir(tmp_path)
+
+    assert [space.slug for space in read_installed_tool_spaces(None).spaces] == DEFAULT_SPACE_SLUGS
 
 
 def test_tool_spaces_add_installs_private_space_with_token(
@@ -127,7 +141,7 @@ def test_tool_spaces_add_installs_private_space_with_token(
     )
 
     assert _run_cli(monkeypatch, ["app", "tool-spaces", "add", PRIVATE_SPACE_SLUG, "--install-only"]) == 0
-    assert [space.slug for space in read_installed_tool_spaces(None).spaces] == [PRIVATE_SPACE_SLUG]
+    assert PRIVATE_SPACE_SLUG in [space.slug for space in read_installed_tool_spaces(None).spaces]
 
 
 def test_resolve_tool_space_attaches_auth_header_for_private_space(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -177,8 +191,29 @@ def test_resolve_tool_space_omits_auth_header_for_public_space(monkeypatch: pyte
         _mock_list_tool_specs,
     )
 
-    resolved = resolve_tool_space_sync(SEARCH_SPACE_SLUG)
+    resolved = resolve_tool_space_sync(EXTRA_SPACE_SLUG)
     assert "Authorization" not in resolved.client.server.headers
+
+
+def test_resolve_preinstalled_tool_space_uses_static_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Preinstalled Pollen Spaces should not need network discovery at startup."""
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        lambda self, slug, **kwargs: pytest.fail("preinstalled Space should not query HF metadata"),
+    )
+
+    async def _fail_list_tool_specs(self: object) -> list[RemoteToolSpec]:
+        pytest.fail("preinstalled Space should not discover MCP tools")
+
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
+        _fail_list_tool_specs,
+    )
+
+    resolved = resolve_tool_space_sync(SEARCH_SPACE_SLUG)
+
+    assert resolved.mcp_url == "https://pollen-robotics-reachy-mini-search-tool.hf.space/gradio_api/mcp/"
+    assert [tool.local_name for tool in resolved.tools] == [SEARCH_TOOL_ID]
 
 
 def test_tool_spaces_add_private_space_without_token_hints_at_auth(
@@ -219,7 +254,7 @@ def test_tool_spaces_manifest_uses_instance_path_when_provided(
 
     args = Namespace(
         tool_spaces_command="add",
-        space_slug=SEARCH_SPACE_SLUG,
+        space_slug=EXTRA_SPACE_SLUG,
         install_only=True,
         profile=None,
     )
@@ -327,7 +362,7 @@ def test_tool_spaces_remove_disables_tools_in_profile(
 
     assert _run_cli(monkeypatch, ["app", "tool-spaces", "remove", SEARCH_SPACE_SLUG]) == 0
     assert SEARCH_TOOL_ID not in tools_txt.read_text(encoding="utf-8")
-    assert read_installed_tool_spaces(None).spaces == []
+    assert SEARCH_SPACE_SLUG not in [space.slug for space in read_installed_tool_spaces(None).spaces]
 
 
 def test_tool_spaces_add_install_only_skips_tools_txt(

@@ -24,7 +24,7 @@ WEATHER_SPACE_SLUG = "pollen-robotics/reachy-mini-weather-tool"
 SEARCH_ALIAS = "pollen_robotics_reachy_mini_search_tool"
 WEATHER_ALIAS = "pollen_robotics_reachy_mini_weather_tool"
 SEARCH_TOOL_ID = f"{SEARCH_ALIAS}__search_web"
-SEARCH_CLIENT_TOOL_ID = f"{SEARCH_ALIAS}__reachy_mini_search_tool_search_web"
+SEARCH_CLIENT_TOOL_ID = SEARCH_TOOL_ID
 
 
 def _reload_core_tools() -> ModuleType:
@@ -46,7 +46,7 @@ def _resolved_remote_space(client: AsyncMock) -> ResolvedInstalledToolSpace:
             InstalledToolSpaceTool(
                 local_name=SEARCH_TOOL_ID,
                 client_tool_name=SEARCH_CLIENT_TOOL_ID,
-                remote_name="reachy_mini_search_tool_search_web",
+                remote_name="search_web",
                 description="Search the web",
                 parameters_schema={
                     "type": "object",
@@ -81,7 +81,7 @@ async def test_initialize_tools_loads_enabled_installed_remote_tools_and_dispatc
     client.call_tool.return_value = {
         "status": "ok",
         "server_alias": SEARCH_ALIAS,
-        "remote_tool_name": "reachy_mini_search_tool_search_web",
+        "remote_tool_name": "search_web",
         "namespaced_tool_name": SEARCH_CLIENT_TOOL_ID,
         "content_blocks": [],
         "text": "hello",
@@ -173,6 +173,7 @@ def test_initialize_tools_inherits_default_tools_txt_for_profile_without_local_t
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", external_profiles_root)
     monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
     monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
+    monkeypatch.setattr(tool_spaces_mod, "resolve_tool_space_sync", lambda slug: (_ for _ in ()).throw(RuntimeError()))
 
     core_tools_mod = _reload_core_tools()
     core_tools_mod.initialize_tools()
