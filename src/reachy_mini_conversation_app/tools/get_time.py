@@ -13,7 +13,10 @@ from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
 logger = logging.getLogger(__name__)
 
-GEOIP_TIMEZONE_URL = "https://ipapi.co/timezone/"
+GEOIP_TIMEZONE_ENDPOINTS = (
+    ("https://ipapi.co/timezone/", "text"),
+    ("https://worldtimeapi.org/api/ip", "json"),
+)
 GEOIP_TIMEOUT_S = 2.0
 GEOIP_WARMUP_WAIT_S = 0.05
 UTC = ZoneInfo("UTC")
@@ -26,17 +29,18 @@ class GetTime(Tool):
     description = (
         "Get the current local date and time, the time in a specific IANA timezone, "
         "or the current time difference between two timezones."
+        " For local time, use the tool's resolver instead of asking the user for their city."
     )
     parameters_schema = {
         "type": "object",
         "properties": {
             "timezone": {
                 "type": "string",
-                "description": "IANA timezone requested by the user, e.g. 'Europe/Paris'. Use an empty string for the user's local time.",
+                "description": "IANA timezone requested by the user, e.g. 'Europe/Paris'. Use an empty string for the user's local time; do not ask for their city first.",
             },
             "compare_timezone": {
                 "type": "string",
-                "description": "Set for time-difference questions. Use an IANA timezone, e.g. 'Asia/Tokyo', or an empty string for the user's local time.",
+                "description": "Set only for time-difference questions. Use an IANA timezone, e.g. 'Asia/Tokyo'. For differences involving local time, set timezone to an empty string and compare_timezone to the other timezone.",
             },
         },
         "required": ["timezone"],
@@ -57,7 +61,11 @@ class GetTime(Tool):
             self._geoip_lookup_started = True
             self._geoip_lookup_complete.clear()
 
-        threading.Thread(target=self._resolve_geoip_timezone_name, daemon=True, name="get-time-geoip").start()
+        threading.Thread(
+            target=self._resolve_geoip_timezone_name,
+            daemon=True,
+            name="get-time-geoip",
+        ).start()
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> dict[str, Any]:
         """Return the current date and time in the requested timezone, or local time."""
@@ -73,7 +81,7 @@ class GetTime(Tool):
         if compare_arg is None:
             compare_tz_name = None
         elif isinstance(compare_arg, str):
-            compare_tz_name = compare_arg.strip()
+            compare_tz_name = compare_arg.strip() or None
         else:
             return {"error": "compare_timezone must be a string"}
 
@@ -137,26 +145,44 @@ class GetTime(Tool):
 
     def _resolve_geoip_timezone_name(self) -> str | None:
         timezone_name: str | None = None
-        try:
-            response = httpx.get(GEOIP_TIMEZONE_URL, timeout=GEOIP_TIMEOUT_S)
-            response.raise_for_status()
-        except httpx.HTTPError as e:
-            logger.warning("Failed to resolve timezone from geo-IP: %s", e)
-        else:
-            candidate_timezone_name = response.text.strip()
+        failure_reason = "no timezone returned"
+        for url, response_format in GEOIP_TIMEZONE_ENDPOINTS:
+            try:
+                response = httpx.get(url, timeout=GEOIP_TIMEOUT_S)
+                response.raise_for_status()
+            except httpx.HTTPError as e:
+                failure_reason = f"{url}: {e}"
+                continue
+
+            candidate_timezone_name = ""
+            if response_format == "text":
+                candidate_timezone_name = response.text.strip()
+            else:
+                try:
+                    payload = response.json()
+                except ValueError:
+                    payload = None
+                if isinstance(payload, dict):
+                    raw_timezone = payload.get("timezone")
+                    if isinstance(raw_timezone, str):
+                        candidate_timezone_name = raw_timezone.strip()
+
             if candidate_timezone_name and _load_timezone(candidate_timezone_name) is not None:
                 timezone_name = candidate_timezone_name
+                break
             else:
-                logger.warning("Geo-IP timezone lookup returned invalid timezone: %s", candidate_timezone_name)
+                failure_reason = f"{url}: invalid timezone {candidate_timezone_name!r}"
 
         with self._geoip_lock:
             if timezone_name is None:
                 self._geoip_lookup_started = False
             else:
                 self._cached_geoip_timezone_name = timezone_name
-        self._geoip_lookup_complete.set()
         if timezone_name is not None:
             logger.info("Resolved timezone from geo-IP: %s", timezone_name)
+        else:
+            logger.warning("Failed to resolve timezone from geo-IP: %s", failure_reason)
+        self._geoip_lookup_complete.set()
         return timezone_name
 
 

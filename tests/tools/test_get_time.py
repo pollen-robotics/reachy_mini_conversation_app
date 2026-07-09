@@ -12,11 +12,17 @@ from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 
 
 class _FakeResponse:
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str = "", json_payload: dict[str, object] | None = None) -> None:
         self.text = text
+        self._json_payload = json_payload
 
     def raise_for_status(self) -> None:
         return None
+
+    def json(self) -> dict[str, object]:
+        if self._json_payload is None:
+            raise ValueError("no json")
+        return self._json_payload
 
 
 class _FakeGeoIpLookup:
@@ -46,6 +52,7 @@ def test_get_time_schema_requires_timezone_argument() -> None:
 
     assert spec["parameters"]["required"] == ["timezone"]
     assert "empty string" in spec["parameters"]["properties"]["timezone"]["description"]
+    assert "do not ask" in spec["parameters"]["properties"]["timezone"]["description"]
     assert "compare_timezone" in spec["parameters"]["properties"]
 
 
@@ -87,7 +94,34 @@ async def test_get_time_local_uses_geoip_timezone(monkeypatch: pytest.MonkeyPatc
     assert set(result) >= {"iso", "date", "time", "weekday", "timezone", "summary"}
     assert result["timezone"] == "Europe/Paris"
     assert cached_result["timezone"] == "Europe/Paris"
-    assert fake_lookup.urls == [get_time.GEOIP_TIMEZONE_URL]
+    assert fake_lookup.urls == [get_time.GEOIP_TIMEZONE_ENDPOINTS[0][0]]
+
+
+@pytest.mark.asyncio
+async def test_get_time_local_uses_second_geoip_provider_after_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A rate-limited primary geo-IP provider should not break local time."""
+    tool = GetTime()
+    urls: list[str] = []
+
+    class _RateLimitedResponse(_FakeResponse):
+        def raise_for_status(self) -> None:
+            request = get_time.httpx.Request("GET", "https://ipapi.co/timezone/")
+            response = get_time.httpx.Response(429, request=request)
+            raise get_time.httpx.HTTPStatusError("rate limited", request=request, response=response)
+
+    def _lookup(url: str, *, timeout: float) -> _FakeResponse:
+        urls.append(url)
+        if len(urls) == 1:
+            return _RateLimitedResponse()
+        return _FakeResponse(json_payload={"timezone": "Europe/Paris"})
+
+    monkeypatch.setattr(get_time.httpx, "get", _lookup)
+    monkeypatch.setattr(get_time, "GEOIP_WARMUP_WAIT_S", 1.0)
+
+    result = await tool(_deps())
+
+    assert result["timezone"] == "Europe/Paris"
+    assert urls == [endpoint[0] for endpoint in get_time.GEOIP_TIMEZONE_ENDPOINTS]
 
 
 @pytest.mark.asyncio
@@ -149,7 +183,7 @@ async def test_get_time_local_reports_error_when_timezone_cannot_be_resolved(
     result = await tool(_deps())
 
     assert result == {"error": "local timezone unavailable; geo-IP detection failed"}
-    assert "Failed to resolve timezone from geo-IP" in caplog.text
+    assert any("Failed to resolve timezone from geo-IP" in record.getMessage() for record in caplog.records)
 
 
 @pytest.mark.asyncio
@@ -170,9 +204,10 @@ async def test_get_time_with_timezone_does_not_use_geoip(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(get_time.httpx, "get", _unexpected_lookup)
 
-    result = await tool(_deps(), timezone="Asia/Tokyo")
+    result = await tool(_deps(), timezone="Asia/Tokyo", compare_timezone="")
 
     assert result["timezone"] == "Asia/Tokyo"
+    assert "compare" not in result
 
 
 @pytest.mark.asyncio
