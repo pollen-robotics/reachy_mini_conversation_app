@@ -9,3 +9,6 @@ go_to_sleep
 sweep_look
 remember
 forget
+search_web
+get_weather
+get_time

@@ -18,6 +18,9 @@ dependencies = [
     #Environment variables
     "python-dotenv",
 
+    #Web search (search_web tool)
+    "ddgs",
+
     #OpenAI (used by the Hugging Face backend)
     "openai==2.28.0",
 
