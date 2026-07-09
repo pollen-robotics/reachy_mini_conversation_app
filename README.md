@@ -198,9 +198,9 @@ The default profile exposes these tools. Custom profiles can enable a different 
 | `sweep_look` | Sweep Reachy's head left, right, and back to center. | Bundled default profile tool. |
 | `remember` | Save one short, stable fact about the user for future sessions. | Core install only. Stored in the app instance data directory. |
 | `forget` | Remove a saved memory fact by matching a short query. | Core install only. |
-| `search_web` | Search the web for current information and return a short list of results. | Core install only. Uses DuckDuckGo through `ddgs`. |
+| `search_web` | Search the web for current information, today's events, or other explicit web lookups. | Core install only. Uses DuckDuckGo through `ddgs`. |
 | `get_weather` | Report today's weather for a place. | Core install only. Uses Open-Meteo. |
-| `get_time` | Report the current local time, the time in an IANA timezone, or the current difference between two timezones. | Core install only. Local timezone uses cached geo-IP detection. |
+| `get_time` | Report the current local time, the time in a named place or IANA timezone, or the current difference between two places/timezones. | Core install only. Local timezone uses cached geo-IP detection. Place lookup uses Open-Meteo geocoding. |
 
 > [!NOTE]
 > `remember`/`forget` facts are stored in `memory.v1.json` inside the app's instance data directory (`~/.local/share/reachy_mini_conversation_app/` by default, or the instance path used by the desktop launcher). `forget` only removes facts matched by query. To reset all remembered facts, delete this file.
