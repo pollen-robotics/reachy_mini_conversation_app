@@ -21,6 +21,9 @@ dependencies = [
     #Web search (search_web tool)
     "ddgs",
 
+    #IANA timezone database for get_time on Windows (Linux/macOS ship one)
+    "tzdata; sys_platform == 'win32'",
+
     #OpenAI (used by the Hugging Face backend)
     "openai==2.28.0",
 
