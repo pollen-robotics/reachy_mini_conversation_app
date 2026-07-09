@@ -388,7 +388,12 @@ def _resolve_remote_tools(tool_names: list[str], instance_path: str | Path | Non
                 installed_space.slug,
             )
 
-        client = build_remote_client(installed_space.alias, installed_space.mcp_url, private=installed_space.private)
+        client = build_remote_client(
+            installed_space.alias,
+            installed_space.mcp_url,
+            private=installed_space.private,
+            cached_tools=installed_space.tools,
+        )
         for remote_tool in installed_space.tools:
             if remote_tool.local_name not in enabled_tool_names:
                 continue

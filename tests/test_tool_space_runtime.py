@@ -83,7 +83,23 @@ async def test_initialize_tools_loads_enabled_installed_remote_tools_and_dispatc
         "content_blocks": [],
         "text": "hello",
     }
-    monkeypatch.setattr(tool_spaces_mod, "build_remote_client", lambda *args, **kwargs: client)
+    captured_cached_tools: list[InstalledToolSpaceTool] | None = None
+
+    def _build_remote_client(
+        alias: str,
+        mcp_url: str,
+        *,
+        private: bool,
+        cached_tools: list[InstalledToolSpaceTool],
+    ) -> AsyncMock:
+        nonlocal captured_cached_tools
+        assert alias == SEARCH_ALIAS
+        assert mcp_url == SEARCH_MCP_URL
+        assert private is False
+        captured_cached_tools = cached_tools
+        return client
+
+    monkeypatch.setattr(tool_spaces_mod, "build_remote_client", _build_remote_client)
 
     write_installed_tool_spaces(
         None,
@@ -94,6 +110,7 @@ async def test_initialize_tools_loads_enabled_installed_remote_tools_and_dispatc
     core_tools_mod.initialize_tools()
 
     assert SEARCH_TOOL_ID in core_tools_mod.ALL_TOOLS
+    assert captured_cached_tools == _installed_search_space().tools
     tool_specs = core_tools_mod.get_tool_specs()
     assert any(spec["name"] == SEARCH_TOOL_ID for spec in tool_specs)
 
