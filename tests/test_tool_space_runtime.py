@@ -10,6 +10,7 @@ import pytest
 
 import reachy_mini_conversation_app.config as config_mod
 import reachy_mini_conversation_app.tool_spaces as tool_spaces_mod
+from reachy_mini_conversation_app.mcp_client import McpToolTimeoutError, McpToolInvocationError
 from reachy_mini_conversation_app.tool_spaces import (
     InstalledToolSpace,
     InstalledToolSpaceTool,
@@ -118,6 +119,101 @@ async def test_initialize_tools_loads_enabled_installed_remote_tools_and_dispatc
 
     assert result["namespaced_tool_name"] == SEARCH_TOOL_ID
     assert result["tool_space_slug"] == SEARCH_SPACE_SLUG
+    client.call_tool.assert_awaited_once_with(SEARCH_CLIENT_TOOL_ID, {"query": "hello"})
+
+
+@pytest.mark.asyncio
+async def test_remote_tool_retries_once_after_transport_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Transient remote transport failures should get one fast retry."""
+    monkeypatch.chdir(tmp_path)
+    external_profiles_root = tmp_path / "external_profiles"
+    profile_dir = external_profiles_root / "mcp_profile"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "instructions.txt").write_text("hello\n", encoding="utf-8")
+    (profile_dir / "tools.txt").write_text(f"{SEARCH_TOOL_ID}\n", encoding="utf-8")
+
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "mcp_profile")
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", external_profiles_root)
+    monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
+    monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
+
+    client = AsyncMock()
+    client.call_tool.side_effect = [
+        McpToolInvocationError("connection reset"),
+        {
+            "status": "ok",
+            "server_alias": SEARCH_ALIAS,
+            "remote_tool_name": "search_web",
+            "namespaced_tool_name": SEARCH_CLIENT_TOOL_ID,
+            "content_blocks": [],
+            "text": "hello",
+        },
+    ]
+    monkeypatch.setattr(tool_spaces_mod, "resolve_tool_space_sync", lambda _slug: _resolved_remote_space(client))
+    write_installed_tool_spaces(
+        None,
+        InstalledToolSpacesManifest(spaces=[InstalledToolSpace(slug=SEARCH_SPACE_SLUG, alias=SEARCH_ALIAS)]),
+    )
+
+    core_tools_mod = _reload_core_tools()
+    monkeypatch.setattr(core_tools_mod, "_REMOTE_TOOL_RETRY_DELAY_S", 0.0)
+    core_tools_mod.initialize_tools()
+
+    result = await core_tools_mod.dispatch_tool_call(
+        SEARCH_TOOL_ID,
+        json.dumps({"query": "hello"}),
+        core_tools_mod.ToolDependencies(
+            reachy_mini=object(),
+            movement_manager=object(),
+        ),
+    )
+
+    assert result["status"] == "ok"
+    assert client.call_tool.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_remote_tool_does_not_retry_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Remote timeouts should fail once instead of doubling the user wait."""
+    monkeypatch.chdir(tmp_path)
+    external_profiles_root = tmp_path / "external_profiles"
+    profile_dir = external_profiles_root / "mcp_profile"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "instructions.txt").write_text("hello\n", encoding="utf-8")
+    (profile_dir / "tools.txt").write_text(f"{SEARCH_TOOL_ID}\n", encoding="utf-8")
+
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "mcp_profile")
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", external_profiles_root)
+    monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
+    monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
+
+    client = AsyncMock()
+    client.call_tool.side_effect = McpToolTimeoutError("timed out")
+    monkeypatch.setattr(tool_spaces_mod, "resolve_tool_space_sync", lambda _slug: _resolved_remote_space(client))
+    write_installed_tool_spaces(
+        None,
+        InstalledToolSpacesManifest(spaces=[InstalledToolSpace(slug=SEARCH_SPACE_SLUG, alias=SEARCH_ALIAS)]),
+    )
+
+    core_tools_mod = _reload_core_tools()
+    core_tools_mod.initialize_tools()
+
+    result = await core_tools_mod.dispatch_tool_call(
+        SEARCH_TOOL_ID,
+        json.dumps({"query": "hello"}),
+        core_tools_mod.ToolDependencies(
+            reachy_mini=object(),
+            movement_manager=object(),
+        ),
+    )
+
+    assert "timed out" in result["error"]
     client.call_tool.assert_awaited_once_with(SEARCH_CLIENT_TOOL_ID, {"query": "hello"})
 
 

@@ -18,6 +18,7 @@ from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY as DE
 
 # Import config to ensure .env is loaded before reading REACHY_MINI_CUSTOM_PROFILE
 from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.mcp_client import McpToolTimeoutError, McpToolInvocationError
 from reachy_mini_conversation_app.tools.tool_constants import SystemTool
 
 
@@ -95,6 +96,7 @@ _TOOLS_INITIALIZED = False
 _TOOLS_SIGNATURE: tuple[str, str, str | None, bool, str | None] | None = None
 _TOOLS_INSTANCE_PATH: str | Path | None = None
 _LOADED_TOOL_CLASS_CACHE: Dict[tuple[str, str], List[type[Tool]]] = {}
+_REMOTE_TOOL_RETRY_DELAY_S = 0.25
 
 
 class RemoteMcpTool(Tool):
@@ -123,7 +125,14 @@ class RemoteMcpTool(Tool):
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Invoke the underlying remote MCP tool."""
-        result = await self._client.call_tool(self._client_tool_name, kwargs)
+        try:
+            result = await self._client.call_tool(self._client_tool_name, kwargs)
+        except McpToolTimeoutError:
+            raise
+        except McpToolInvocationError as exc:
+            logger.warning("Remote MCP tool failed once; retrying %s from %s: %s", self.name, self._space_slug, exc)
+            await asyncio.sleep(_REMOTE_TOOL_RETRY_DELAY_S)
+            result = await self._client.call_tool(self._client_tool_name, kwargs)
         payload = dict(result)
         if payload.get("namespaced_tool_name") == self._client_tool_name:
             payload["namespaced_tool_name"] = self.name
