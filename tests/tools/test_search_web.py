@@ -24,6 +24,16 @@ def _deps() -> ToolDependencies:
     return ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
 
 
+def test_search_web_spec_requires_tool_call_for_web_lookup() -> None:
+    """The model should call the tool for explicit web lookup requests."""
+    spec = SearchWeb().spec()
+
+    assert "Use this directly" in spec["description"]
+    assert "check the web" in spec["description"]
+    assert "today's events" in spec["description"]
+    assert "Do not just say you'll look it up" in spec["description"]
+
+
 @pytest.mark.asyncio
 async def test_search_web_returns_structured_results(monkeypatch: pytest.MonkeyPatch) -> None:
     """A successful search returns title/snippet/url results."""

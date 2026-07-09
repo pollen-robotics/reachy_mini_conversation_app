@@ -21,7 +21,8 @@ class SearchWeb(Tool):
     name = "search_web"
     description = (
         "Search the web for current information and return a short list of results (title, snippet, url). "
-        "It takes a moment, so briefly tell the user you're looking it up before you call it."
+        "Use this directly when the user asks to search, check the web, look something up, find today's events, "
+        "or learn what is happening now. Do not just say you'll look it up."
     )
     parameters_schema = {
         "type": "object",

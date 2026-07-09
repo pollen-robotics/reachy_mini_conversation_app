@@ -25,6 +25,22 @@ class _FakeResponse:
         return self._json_payload
 
 
+class _FakeAsyncClient:
+    def __init__(self, response: _FakeResponse) -> None:
+        self._response = response
+        self.calls: list[tuple[str, dict[str, object] | None]] = []
+
+    async def __aenter__(self) -> "_FakeAsyncClient":
+        return self
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+    async def get(self, url: str, params: dict[str, object] | None = None) -> _FakeResponse:
+        self.calls.append((url, params))
+        return self._response
+
+
 class _FakeGeoIpLookup:
     def __init__(self, response: _FakeResponse) -> None:
         self._response = response
@@ -53,6 +69,7 @@ def test_get_time_schema_requires_timezone_argument() -> None:
     assert spec["parameters"]["required"] == ["timezone"]
     assert "empty string" in spec["parameters"]["properties"]["timezone"]["description"]
     assert "do not ask" in spec["parameters"]["properties"]["timezone"]["description"]
+    assert "named place" in spec["parameters"]["properties"]["timezone"]["description"]
     assert "compare_timezone" in spec["parameters"]["properties"]
 
 
@@ -202,12 +219,58 @@ async def test_get_time_with_timezone_does_not_use_geoip(monkeypatch: pytest.Mon
     def _unexpected_lookup(url: str, *, timeout: float) -> _FakeResponse:
         raise AssertionError("explicit timezone should not call geo-IP")
 
+    def _unexpected_async_client(**kwargs: object) -> _FakeAsyncClient:
+        raise AssertionError("explicit timezone should not geocode")
+
     monkeypatch.setattr(get_time.httpx, "get", _unexpected_lookup)
+    monkeypatch.setattr(get_time.httpx, "AsyncClient", _unexpected_async_client)
 
     result = await tool(_deps(), timezone="Asia/Tokyo", compare_timezone="")
 
     assert result["timezone"] == "Asia/Tokyo"
     assert "compare" not in result
+
+
+@pytest.mark.asyncio
+async def test_get_time_with_named_place_resolves_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A spoken place can be resolved by the tool instead of the model guessing an IANA timezone."""
+    fake_client = _FakeAsyncClient(
+        _FakeResponse(
+            json_payload={
+                "results": [
+                    {
+                        "name": "Yekaterinburg",
+                        "admin1": "Sverdlovsk Oblast",
+                        "country": "Russia",
+                        "timezone": "Asia/Yekaterinburg",
+                    }
+                ]
+            }
+        )
+    )
+    monkeypatch.setattr(get_time.httpx, "AsyncClient", lambda **kwargs: fake_client)
+
+    result = await GetTime()(_deps(), timezone="Yegerenburg, Russia")
+
+    assert result["timezone"] == "Asia/Yekaterinburg"
+    assert result["location"] == "Yekaterinburg, Sverdlovsk Oblast, Russia"
+    assert fake_client.calls == [
+        (get_time.GEOCODING_URL, {"name": "Yegerenburg, Russia", "count": 3, "language": "en"})
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_time_with_unknown_place_returns_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unresolvable place returns a user-visible error instead of going silent."""
+    monkeypatch.setattr(
+        get_time.httpx,
+        "AsyncClient",
+        lambda **kwargs: _FakeAsyncClient(_FakeResponse(json_payload={"results": []})),
+    )
+
+    result = await GetTime()(_deps(), timezone="Jeterenburg")
+
+    assert result == {"error": "no timezone or place match for 'Jeterenburg'"}
 
 
 @pytest.mark.asyncio
@@ -227,8 +290,14 @@ async def test_get_time_compares_local_time_with_requested_timezone(monkeypatch:
 
 
 @pytest.mark.asyncio
-async def test_get_time_rejects_unknown_timezone() -> None:
-    """An unknown timezone returns an error."""
+async def test_get_time_rejects_unknown_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unknown timezone or place returns an error."""
+    monkeypatch.setattr(
+        get_time.httpx,
+        "AsyncClient",
+        lambda **kwargs: _FakeAsyncClient(_FakeResponse(json_payload={"results": []})),
+    )
+
     result = await GetTime()(_deps(), timezone="Mars/Olympus_Mons")
 
     assert "error" in result
