@@ -125,8 +125,8 @@ def run(
         get_hf_connection_selection().mode,
     )
 
+    from reachy_mini_conversation_app.tools import core_tools
     from reachy_mini_conversation_app.console import LocalStream
-    from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, initialize_tools
     from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 
     if robot is None:
@@ -157,7 +157,7 @@ def run(
 
     movement_manager = MovementManager(current_robot=robot)
 
-    deps = ToolDependencies(
+    deps = core_tools.ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
         instance_path=instance_path,
@@ -278,10 +278,17 @@ def run(
         logger.info("Web UI available at http://localhost:7860")
 
     try:
-        initialize_tools(instance_path=instance_path)
+        core_tools.initialize_tools(instance_path=instance_path)
     except Exception as e:
         logger.error("Failed to initialize tools: %s", e)
         sys.exit(1)
+
+    get_time_tool = core_tools.ALL_TOOLS.get("get_time")
+    if get_time_tool is not None:
+        from reachy_mini_conversation_app.tools.get_time import GetTime
+
+        if isinstance(get_time_tool, GetTime):
+            get_time_tool.warm_local_timezone_cache()
 
     # Each async service → its own thread/loop
     movement_manager.start()

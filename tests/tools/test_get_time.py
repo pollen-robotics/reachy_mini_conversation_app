@@ -1,32 +1,194 @@
 """Tests for the get_time tool."""
 
+import logging
+import threading
 from unittest.mock import MagicMock
 
 import pytest
 
+import reachy_mini_conversation_app.tools.get_time as get_time
 from reachy_mini_conversation_app.tools.get_time import GetTime
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+
+
+class _FakeResponse:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+class _FakeGeoIpLookup:
+    def __init__(self, response: _FakeResponse) -> None:
+        self._response = response
+        self.urls: list[str] = []
+
+    def __call__(self, url: str, *, timeout: float) -> _FakeResponse:
+        self.urls.append(url)
+        return self._response
 
 
 def _deps() -> ToolDependencies:
     return ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
 
 
+async def _warm_tool(monkeypatch: pytest.MonkeyPatch, tool: GetTime, timezone_name: str) -> None:
+    monkeypatch.setattr(get_time.httpx, "get", _FakeGeoIpLookup(_FakeResponse(timezone_name)))
+    monkeypatch.setattr(get_time, "GEOIP_WARMUP_WAIT_S", 1.0)
+    result = await tool(_deps())
+    assert result["timezone"] == timezone_name
+
+
+def test_get_time_schema_requires_timezone_argument() -> None:
+    """The model must explicitly choose local time or a requested timezone."""
+    spec = GetTime().spec()
+
+    assert spec["parameters"]["required"] == ["timezone"]
+    assert "empty string" in spec["parameters"]["properties"]["timezone"]["description"]
+    assert "compare_timezone" in spec["parameters"]["properties"]
+
+
+def test_warm_local_timezone_cache_starts_single_background_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Local timezone warmup should not block startup."""
+    tool = GetTime()
+    threads: list[dict[str, object]] = []
+
+    class _FakeThread:
+        def __init__(self, *, target: object, daemon: bool, name: str) -> None:
+            threads.append({"target": target, "daemon": daemon, "name": name, "started": False})
+
+        def start(self) -> None:
+            threads[-1]["started"] = True
+
+    monkeypatch.setattr(get_time.threading, "Thread", _FakeThread)
+
+    tool.warm_local_timezone_cache()
+    tool.warm_local_timezone_cache()
+
+    assert len(threads) == 1
+    assert threads[0]["daemon"] is True
+    assert threads[0]["name"] == "get-time-geoip"
+    assert threads[0]["started"] is True
+
+
 @pytest.mark.asyncio
-async def test_get_time_local() -> None:
-    """Local time returns the expected fields and no error."""
-    result = await GetTime()(_deps())
+async def test_get_time_local_uses_geoip_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Local time is resolved from the robot's public IP."""
+    tool = GetTime()
+    fake_lookup = _FakeGeoIpLookup(_FakeResponse("Europe/Paris"))
+    monkeypatch.setattr(get_time.httpx, "get", fake_lookup)
+    monkeypatch.setattr(get_time, "GEOIP_WARMUP_WAIT_S", 1.0)
+
+    result = await tool(_deps())
+    cached_result = await tool(_deps())
 
     assert "error" not in result
     assert set(result) >= {"iso", "date", "time", "weekday", "timezone", "summary"}
+    assert result["timezone"] == "Europe/Paris"
+    assert cached_result["timezone"] == "Europe/Paris"
+    assert fake_lookup.urls == [get_time.GEOIP_TIMEZONE_URL]
+
+
+@pytest.mark.asyncio
+async def test_get_time_local_returns_error_while_geoip_lookup_is_pending(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Local time does not block on geo-IP when the cache is not ready."""
+    tool = GetTime()
+    lookup_started = threading.Event()
+    release_lookup = threading.Event()
+    lookup_finished = threading.Event()
+
+    def _slow_lookup(url: str, *, timeout: float) -> _FakeResponse:
+        lookup_started.set()
+        release_lookup.wait(timeout=1.0)
+        lookup_finished.set()
+        return _FakeResponse("Europe/Paris")
+
+    monkeypatch.setattr(get_time.httpx, "get", _slow_lookup)
+    monkeypatch.setattr(get_time, "GEOIP_WARMUP_WAIT_S", 0.001)
+
+    result = await tool(_deps())
+
+    assert result == {"error": "local timezone unavailable; geo-IP detection failed"}
+    assert lookup_started.wait(timeout=1.0)
+    release_lookup.set()
+    assert lookup_finished.wait(timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_get_time_local_uses_cached_timezone_without_geoip(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Warm local timezone cache keeps the foreground tool path instant."""
+    tool = GetTime()
+    await _warm_tool(monkeypatch, tool, "Europe/Paris")
+
+    def _unexpected_lookup(url: str, *, timeout: float) -> _FakeResponse:
+        raise AssertionError("cached local time should not call geo-IP")
+
+    monkeypatch.setattr(get_time.httpx, "get", _unexpected_lookup)
+
+    result = await tool(_deps())
+
+    assert result["timezone"] == "Europe/Paris"
+
+
+@pytest.mark.asyncio
+async def test_get_time_local_reports_error_when_timezone_cannot_be_resolved(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Geo-IP failures fail clearly instead of returning unreliable OS local time."""
+    tool = GetTime()
+
+    def _failing_lookup(url: str, *, timeout: float) -> _FakeResponse:
+        raise get_time.httpx.ConnectError("offline")
+
+    monkeypatch.setattr(get_time.httpx, "get", _failing_lookup)
+    monkeypatch.setattr(get_time, "GEOIP_WARMUP_WAIT_S", 1.0)
+    caplog.set_level(logging.WARNING, logger=get_time.__name__)
+
+    result = await tool(_deps())
+
+    assert result == {"error": "local timezone unavailable; geo-IP detection failed"}
+    assert "Failed to resolve timezone from geo-IP" in caplog.text
 
 
 @pytest.mark.asyncio
 async def test_get_time_with_timezone() -> None:
     """A valid IANA timezone is echoed back in the result."""
-    result = await GetTime()(_deps(), timezone="Europe/Paris")
+    result = await GetTime()(_deps(), timezone="Asia/Tokyo")
+
+    assert result["timezone"] == "Asia/Tokyo"
+
+
+@pytest.mark.asyncio
+async def test_get_time_with_timezone_does_not_use_geoip(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Requested IANA timezone is resolved without local geo-IP."""
+    tool = GetTime()
+
+    def _unexpected_lookup(url: str, *, timeout: float) -> _FakeResponse:
+        raise AssertionError("explicit timezone should not call geo-IP")
+
+    monkeypatch.setattr(get_time.httpx, "get", _unexpected_lookup)
+
+    result = await tool(_deps(), timezone="Asia/Tokyo")
+
+    assert result["timezone"] == "Asia/Tokyo"
+
+
+@pytest.mark.asyncio
+async def test_get_time_compares_local_time_with_requested_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Time differences are returned by the tool instead of left to model arithmetic."""
+    tool = GetTime()
+    await _warm_tool(monkeypatch, tool, "Europe/Paris")
+
+    result = await tool(_deps(), timezone="", compare_timezone="Asia/Tokyo")
 
     assert result["timezone"] == "Europe/Paris"
+    assert result["compare"]["timezone"] == "Asia/Tokyo"
+    assert result["time_difference_minutes"] == (
+        result["compare"]["utc_offset_minutes"] - result["utc_offset_minutes"]
+    )
+    assert "Asia/Tokyo" in result["time_difference_summary"]
 
 
 @pytest.mark.asyncio
