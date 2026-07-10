@@ -28,24 +28,9 @@ from reachy_mini_conversation_app.mcp_client import (
 logger = logging.getLogger(__name__)
 
 INSTALLED_TOOL_SPACES_FILENAME = "installed_tool_spaces.json"
+INSTALLED_TOOL_SPACES_VERSION = 2
 TERMINAL_EXTERNAL_CONTENT_DIRECTORY = Path("external_content")
 _SLUG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
-
-
-@dataclass(frozen=True)
-class InstalledToolSpace:
-    """Persisted record for one installed Space."""
-
-    slug: str
-    alias: str
-
-
-@dataclass(frozen=True)
-class InstalledToolSpacesManifest:
-    """Persisted manifest of installed Space tool sources."""
-
-    version: int = 1
-    spaces: list[InstalledToolSpace] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -60,12 +45,32 @@ class InstalledToolSpaceTool:
 
 
 @dataclass(frozen=True)
+class InstalledToolSpace:
+    """Persisted record for one installed Space and the tools discovered at install time."""
+
+    slug: str
+    alias: str
+    mcp_url: str
+    private: bool
+    tools: list[InstalledToolSpaceTool] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class InstalledToolSpacesManifest:
+    """Persisted manifest of installed Space tool sources."""
+
+    version: int = INSTALLED_TOOL_SPACES_VERSION
+    spaces: list[InstalledToolSpace] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class ResolvedInstalledToolSpace:
     """Runtime description of an installed Space."""
 
     slug: str
     alias: str
     mcp_url: str
+    private: bool
     tags: list[str]
     tools: list[InstalledToolSpaceTool]
     client: RemoteMcpToolClient
@@ -112,9 +117,36 @@ def read_installed_tool_spaces(instance_path: str | Path | None) -> InstalledToo
                 f"Installed tool spaces manifest contains alias collision '{alias}' in {manifest_path}. "
                 "Remove one of the conflicting spaces with 'tool-spaces remove'."
             )
+        mcp_url = str(raw_space.get("mcp_url", "")).strip()
+        if not mcp_url:
+            logger.warning(
+                "Installed Space '%s' predates cached tool metadata and will be skipped. Re-run 'tool-spaces add %s'.",
+                slug,
+                slug,
+            )
+            continue
+        cached_tools = [
+            InstalledToolSpaceTool(
+                local_name=str(tool["local_name"]),
+                client_tool_name=str(tool["client_tool_name"]),
+                remote_name=str(tool.get("remote_name", "")),
+                description=str(tool.get("description", "")),
+                parameters_schema=dict(tool.get("parameters_schema") or {}),
+            )
+            for tool in raw_space.get("tools", [])
+            if isinstance(tool, dict) and tool.get("local_name") and tool.get("client_tool_name")
+        ]
         seen_slugs.add(slug)
         seen_aliases.add(alias)
-        spaces.append(InstalledToolSpace(slug=slug, alias=alias))
+        spaces.append(
+            InstalledToolSpace(
+                slug=slug,
+                alias=alias,
+                mcp_url=mcp_url,
+                private=bool(raw_space.get("private", False)),
+                tools=cached_tools,
+            )
+        )
 
     version = payload.get("version", 1)
     if not isinstance(version, int):
@@ -271,6 +303,38 @@ def _validate_space_info(slug: str, space_info: SpaceInfo) -> None:
         raise RuntimeError(f"Space '{slug}' is not a Gradio Space and cannot expose the standard MCP endpoint.")
 
 
+def build_remote_client(
+    alias: str,
+    mcp_url: str,
+    *,
+    private: bool,
+    cached_tools: Sequence[InstalledToolSpaceTool] = (),
+) -> RemoteMcpToolClient:
+    """Build an MCP client for an installed Space, sending the HF token only to private Spaces."""
+    token = config.HF_TOKEN or get_token()
+    headers = {"Authorization": f"Bearer {token}"} if private and token else {}
+    return RemoteMcpToolClient(
+        RemoteMcpServerConfig(
+            alias=alias,
+            url=mcp_url,
+            headers=headers,
+            request_timeout_s=10.0,
+            tool_timeout_s=30.0,
+        ),
+        known_tools=[
+            RemoteToolSpec(
+                server_alias=alias,
+                remote_name=tool.remote_name,
+                namespaced_name=tool.client_tool_name,
+                description=tool.description,
+                parameters_schema=tool.parameters_schema,
+            )
+            for tool in cached_tools
+            if tool.remote_name
+        ],
+    )
+
+
 async def resolve_tool_space(slug: str) -> ResolvedInstalledToolSpace:
     """Validate and discover tools from one HF Space, authenticating private Spaces with the HF token."""
     validated_slug = validate_space_slug(slug)
@@ -290,17 +354,8 @@ async def resolve_tool_space(slug: str) -> ResolvedInstalledToolSpace:
     _validate_space_info(validated_slug, space_info)
 
     mcp_url = _build_space_mcp_url(space_info, validated_slug)
-    # Only private Spaces get the HF token, never leak it to a public Space's MCP endpoint.
-    headers = {"Authorization": f"Bearer {token}"} if bool(space_info.private) and token else {}
-    client = RemoteMcpToolClient(
-        RemoteMcpServerConfig(
-            alias=alias,
-            url=mcp_url,
-            headers=headers,
-            request_timeout_s=10.0,
-            tool_timeout_s=30.0,
-        )
-    )
+    private = bool(space_info.private)
+    client = build_remote_client(alias, mcp_url, private=private)
     try:
         remote_specs = await client.list_tool_specs()
     except McpClientError as exc:
@@ -310,6 +365,7 @@ async def resolve_tool_space(slug: str) -> ResolvedInstalledToolSpace:
         slug=validated_slug,
         alias=alias,
         mcp_url=mcp_url,
+        private=private,
         tags=sorted(space_info.tags or []),
         tools=_build_installed_tool_space_tools(slug=validated_slug, alias=alias, remote_specs=remote_specs),
         client=client,
@@ -361,13 +417,20 @@ def handle_tool_spaces_command(args: argparse.Namespace, *, instance_path: str |
                 )
                 return 1
 
+            installed = InstalledToolSpace(
+                slug=resolved_space.slug,
+                alias=resolved_space.alias,
+                mcp_url=resolved_space.mcp_url,
+                private=resolved_space.private,
+                tools=resolved_space.tools,
+            )
             updated_spaces = sorted(
-                [*manifest.spaces, InstalledToolSpace(slug=resolved_space.slug, alias=resolved_space.alias)],
+                [*manifest.spaces, installed],
                 key=lambda space: space.slug,
             )
             manifest_path = write_installed_tool_spaces(
                 instance_path,
-                InstalledToolSpacesManifest(version=manifest.version, spaces=updated_spaces),
+                InstalledToolSpacesManifest(version=INSTALLED_TOOL_SPACES_VERSION, spaces=updated_spaces),
             )
             logger.info("Installed Space tool source: %s", resolved_space.slug)
             logger.info("Manifest: %s", manifest_path)
