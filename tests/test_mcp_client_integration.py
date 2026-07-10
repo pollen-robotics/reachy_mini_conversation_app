@@ -16,6 +16,7 @@ pytest.importorskip("mcp.server.fastmcp")
 from mcp.server.fastmcp import FastMCP
 
 from reachy_mini_conversation_app.mcp_client import (
+    RemoteToolSpec,
     McpTransportError,
     McpToolTimeoutError,
     RemoteMcpToolClient,
@@ -104,6 +105,47 @@ async def local_mcp_server(unused_tcp_port: int) -> AsyncIterator[tuple[str, str
     finally:
         server.should_exit = True
         await task
+
+
+@pytest.mark.asyncio
+async def test_remote_mcp_tool_client_calls_known_tool_without_discovery(
+    local_mcp_server: tuple[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cached tool spec should let the first call skip remote discovery."""
+    server_url, token = local_mcp_server
+    client = RemoteMcpToolClient(
+        RemoteMcpServerConfig(
+            alias="gradio_docs",
+            url=server_url,
+            headers={"Authorization": f"Bearer {token}"},
+            request_timeout_s=2.0,
+            tool_timeout_s=1.0,
+        ),
+        known_tools=[
+            RemoteToolSpec(
+                server_alias="gradio_docs",
+                remote_name="echo_text",
+                namespaced_name="gradio_docs__echo_text",
+                description="Echo text",
+                parameters_schema={
+                    "type": "object",
+                    "properties": {"message": {"type": "string"}},
+                    "required": ["message"],
+                },
+            )
+        ],
+    )
+
+    async def _fail_list_tool_specs() -> list[RemoteToolSpec]:
+        raise AssertionError("discovery should not run")
+
+    monkeypatch.setattr(client, "list_tool_specs", _fail_list_tool_specs)
+
+    result = await client.call_tool("gradio_docs__echo_text", {"message": "hello"})
+
+    assert result["status"] == "ok"
+    assert result["structured_content"] == {"echo": "hello"}
 
 
 @pytest.mark.asyncio
