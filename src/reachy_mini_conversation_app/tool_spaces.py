@@ -22,6 +22,7 @@ from reachy_mini_conversation_app.mcp_client import (
     RemoteMcpToolClient,
     RemoteMcpServerConfig,
     apply_name_normalization,
+    build_namespaced_tool_name,
 )
 
 
@@ -39,8 +40,10 @@ PREINSTALLED_TOOL_SPACE_SPECS = {
     "pollen-robotics/reachy-mini-search-tool": (
         RemoteToolSpec(
             server_alias="pollen_robotics_reachy_mini_search_tool",
-            remote_name="search_web",
-            namespaced_name="pollen_robotics_reachy_mini_search_tool__search_web",
+            remote_name="reachy_mini_search_tool_search_web",
+            namespaced_name=build_namespaced_tool_name(
+                "pollen_robotics_reachy_mini_search_tool", "reachy_mini_search_tool_search_web"
+            ),
             description=(
                 "Search the web for current information and return a short list of results (title, snippet, url). "
                 "Call this directly whenever the user asks to search, check the web, look something up, "
@@ -64,8 +67,10 @@ PREINSTALLED_TOOL_SPACE_SPECS = {
     "pollen-robotics/reachy-mini-time-tool": (
         RemoteToolSpec(
             server_alias="pollen_robotics_reachy_mini_time_tool",
-            remote_name="get_time",
-            namespaced_name="pollen_robotics_reachy_mini_time_tool__get_time",
+            remote_name="reachy_mini_time_tool_get_time",
+            namespaced_name=build_namespaced_tool_name(
+                "pollen_robotics_reachy_mini_time_tool", "reachy_mini_time_tool_get_time"
+            ),
             description=(
                 "Get the current date and time for an IANA timezone, and optionally the difference to a second timezone. "
                 "Call this directly whenever the user asks what time it is or the time somewhere. Pass an IANA name like "
@@ -93,8 +98,10 @@ PREINSTALLED_TOOL_SPACE_SPECS = {
     "pollen-robotics/reachy-mini-weather-tool": (
         RemoteToolSpec(
             server_alias="pollen_robotics_reachy_mini_weather_tool",
-            remote_name="get_weather",
-            namespaced_name="pollen_robotics_reachy_mini_weather_tool__get_weather",
+            remote_name="reachy_mini_weather_tool_get_weather",
+            namespaced_name=build_namespaced_tool_name(
+                "pollen_robotics_reachy_mini_weather_tool", "reachy_mini_weather_tool_get_weather"
+            ),
             description=(
                 "Get today's weather for a place: current conditions, high and low temperature, and rain chance. "
                 "Call this directly whenever the user asks about the weather, forecast, or temperature for "
