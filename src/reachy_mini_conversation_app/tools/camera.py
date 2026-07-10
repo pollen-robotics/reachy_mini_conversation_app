@@ -3,7 +3,6 @@ import logging
 from typing import Any, Dict
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
-from reachy_mini_conversation_app.camera_frame_encoding import encode_bgr_frame_as_jpeg
 
 
 logger = logging.getLogger(__name__)
@@ -38,10 +37,9 @@ class Camera(Tool):
             logger.error("Camera is disabled")
             return {"error": "Camera is disabled"}
 
-        frame = deps.reachy_mini.media.get_frame()
-        if frame is None:
+        jpeg_bytes = deps.reachy_mini.media.get_frame_jpeg()
+        if jpeg_bytes is None:
             logger.error("No frame available from camera")
             return {"error": "No frame available"}
 
-        jpeg_bytes = encode_bgr_frame_as_jpeg(frame)
         return {"b64_im": base64.b64encode(jpeg_bytes).decode("utf-8")}
