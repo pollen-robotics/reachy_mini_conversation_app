@@ -771,15 +771,17 @@ class LocalStream:
         # Start media after key is set/available
         self._robot.media.start_recording()
         self._robot.media.start_playing()
-        time.sleep(1)  # give some time to the pipelines to start
-        apply_audio_startup_config(self._robot, logger=logger)
 
         async def runner() -> None:
             # Capture loop for cross-thread personality actions
             loop = asyncio.get_running_loop()
             self._asyncio_loop = loop  # type: ignore[assignment]
-            self._tasks = [
-                asyncio.create_task(self._run_handler_startup_loop(), name="realtime-handler"),
+            # Connect the backend first so it overlaps the warmup and audio config below.
+            handler_task = asyncio.create_task(self._run_handler_startup_loop(), name="realtime-handler")
+            self._tasks = [handler_task]
+            await asyncio.sleep(1)  # give the pipelines time to start
+            await asyncio.to_thread(apply_audio_startup_config, self._robot, logger=logger)
+            self._tasks += [
                 asyncio.create_task(self.record_loop(), name="stream-record-loop"),
                 asyncio.create_task(self.play_loop(), name="stream-play-loop"),
             ]

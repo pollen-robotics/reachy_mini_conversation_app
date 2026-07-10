@@ -19,12 +19,13 @@ from reachy_mini_conversation_app.tool_spaces import (
 )
 
 
-SEARCH_SPACE_SLUG = "pollen-robotics/reachy-mini-search-tool"
-COLLIDING_SEARCH_SPACE_SLUG = "pollen_robotics/reachy-mini-search-tool"
-PRIVATE_SPACE_SLUG = "pollen-robotics/private-space"
-SEARCH_ALIAS = "pollen_robotics_reachy_mini_search_tool"
+SEARCH_SPACE_SLUG = "example/search-tool"
+COLLIDING_SEARCH_SPACE_SLUG = "example/search_tool"
+PRIVATE_SPACE_SLUG = "example/private-space"
+SEARCH_ALIAS = "example_search_tool"
+SEARCH_REMOTE_NAME = "search_tool_search_web"
 SEARCH_TOOL_ID = f"{SEARCH_ALIAS}__search_web"
-SEARCH_CLIENT_TOOL_ID = f"{SEARCH_ALIAS}__reachy_mini_search_tool_search_web"
+SEARCH_CLIENT_TOOL_ID = f"{SEARCH_ALIAS}__{SEARCH_REMOTE_NAME}"
 
 
 def _mock_public_space_info(slug: str) -> SimpleNamespace:
@@ -49,7 +50,7 @@ async def _mock_list_tool_specs(self: object) -> list[RemoteToolSpec]:
     return [
         RemoteToolSpec(
             server_alias=SEARCH_ALIAS,
-            remote_name="reachy_mini_search_tool_search_web",
+            remote_name=SEARCH_REMOTE_NAME,
             namespaced_name=SEARCH_CLIENT_TOOL_ID,
             description="Search the web",
             parameters_schema={
@@ -100,8 +101,28 @@ def test_tool_spaces_add_list_remove_round_trip(
     manifest_path = tmp_path / "external_content" / "installed_tool_spaces.json"
     assert manifest_path.is_file()
     assert json.loads(manifest_path.read_text(encoding="utf-8")) == {
-        "version": 1,
-        "spaces": [{"alias": SEARCH_ALIAS, "slug": SEARCH_SPACE_SLUG}],
+        "version": 2,
+        "spaces": [
+            {
+                "slug": SEARCH_SPACE_SLUG,
+                "alias": SEARCH_ALIAS,
+                "mcp_url": "https://example-search-tool.hf.space/gradio_api/mcp/",
+                "private": False,
+                "tools": [
+                    {
+                        "local_name": SEARCH_TOOL_ID,
+                        "client_tool_name": SEARCH_CLIENT_TOOL_ID,
+                        "remote_name": SEARCH_REMOTE_NAME,
+                        "description": "Search the web",
+                        "parameters_schema": {
+                            "type": "object",
+                            "properties": {"query": {"type": "string"}},
+                            "required": ["query"],
+                        },
+                    }
+                ],
+            }
+        ],
     }
 
     assert _run_cli(monkeypatch, ["reachy-mini-conversation-app", "tool-spaces", "list"]) == 0
@@ -230,11 +251,12 @@ def test_tool_spaces_manifest_uses_instance_path_when_provided(
 
 def test_read_installed_tool_spaces_raises_on_alias_collision_in_manifest(tmp_path: Path) -> None:
     """A manifest with two slugs that normalize to the same alias must be rejected on read."""
+    mcp_url = "https://example.hf.space/gradio_api/mcp/"
     payload = {
-        "version": 1,
+        "version": 2,
         "spaces": [
-            {"slug": "owner/my-tool", "alias": "owner_my_tool"},
-            {"slug": "owner/my_tool", "alias": "owner_my_tool"},
+            {"slug": "owner/my-tool", "alias": "owner_my_tool", "mcp_url": mcp_url, "private": False, "tools": []},
+            {"slug": "owner/my_tool", "alias": "owner_my_tool", "mcp_url": mcp_url, "private": False, "tools": []},
         ],
     }
     (tmp_path / "installed_tool_spaces.json").write_text(json.dumps(payload), encoding="utf-8")

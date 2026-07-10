@@ -18,6 +18,7 @@ from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY as DE
 
 # Import config to ensure .env is loaded before reading REACHY_MINI_CUSTOM_PROFILE
 from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.tool_spaces import build_remote_client, read_installed_tool_spaces
 from reachy_mini_conversation_app.tools.tool_constants import SystemTool
 
 
@@ -369,53 +370,43 @@ def _read_profile_tool_names() -> list[str]:
 
 
 def _resolve_remote_tools(tool_names: list[str], instance_path: str | Path | None) -> list[RemoteMcpTool]:
-    """Resolve installed Space tools enabled by the active profile."""
-    from reachy_mini_conversation_app.tool_spaces import resolve_tool_space_sync, read_installed_tool_spaces
-
+    """Build Space tools enabled by the active profile from the cached install manifest, without any network calls."""
     remote_tools: list[RemoteMcpTool] = []
     for installed_space in read_installed_tool_spaces(instance_path).spaces:
-        enabled_space_tools = sorted(name for name in tool_names if name.startswith(f"{installed_space.alias}__"))
-        if not enabled_space_tools:
-            logger.debug(
-                "Installed Space '%s' has no enabled tools in the active profile; skipping discovery.",
-                installed_space.slug,
-            )
+        enabled_tool_names = {name for name in tool_names if name.startswith(f"{installed_space.alias}__")}
+        if not enabled_tool_names:
             continue
 
-        try:
-            resolved_space = resolve_tool_space_sync(installed_space.slug)
-        except Exception as exc:
-            logger.warning(
-                "Space '%s' is unavailable, skipping its tools (%s): %s",
-                installed_space.slug,
-                ", ".join(enabled_space_tools),
-                exc,
-            )
-            continue
-
-        enabled_tool_names = set(enabled_space_tools)
-        discovered_tool_names = {tool.local_name for tool in resolved_space.tools}
+        discovered_tool_names = {tool.local_name for tool in installed_space.tools}
         missing_tool_names = sorted(enabled_tool_names - discovered_tool_names)
         if missing_tool_names:
             logger.warning(
-                "Enabled tools from '%s' not found in Space and will be skipped: %s",
+                "Tools enabled from '%s' are missing from the install manifest and will be skipped: %s. "
+                "Re-run 'tool-spaces add %s' to refresh.",
                 installed_space.slug,
                 ", ".join(missing_tool_names),
+                installed_space.slug,
             )
 
-        for remote_tool in resolved_space.tools:
+        client = build_remote_client(
+            installed_space.alias,
+            installed_space.mcp_url,
+            private=installed_space.private,
+            cached_tools=installed_space.tools,
+        )
+        for remote_tool in installed_space.tools:
             if remote_tool.local_name not in enabled_tool_names:
                 continue
-            cache_key = ("remote", f"{resolved_space.slug}:{remote_tool.local_name}:{remote_tool.client_tool_name}")
+            cache_key = ("remote", f"{installed_space.slug}:{remote_tool.local_name}:{remote_tool.client_tool_name}")
             cached_tool = _LOADED_REMOTE_TOOL_CACHE.get(cache_key)
             if cached_tool is None:
                 cached_tool = RemoteMcpTool(
-                    slug=resolved_space.slug,
+                    slug=installed_space.slug,
                     name=remote_tool.local_name,
                     description=remote_tool.description,
                     parameters_schema=remote_tool.parameters_schema,
                     client_tool_name=remote_tool.client_tool_name,
-                    client=resolved_space.client,
+                    client=client,
                 )
                 _LOADED_REMOTE_TOOL_CACHE[cache_key] = cached_tool
             remote_tools.append(cached_tool)
