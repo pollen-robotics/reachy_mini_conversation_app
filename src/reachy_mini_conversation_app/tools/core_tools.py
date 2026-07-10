@@ -128,6 +128,7 @@ class RemoteMcpTool(Tool):
         try:
             result = await self._client.call_tool(self._client_tool_name, kwargs)
         except McpToolTimeoutError:
+            # Timeout subclasses the retryable error, but retrying it would just double the wait.
             raise
         except McpToolInvocationError as exc:
             logger.warning("Remote MCP tool failed once; retrying %s from %s: %s", self.name, self._space_slug, exc)

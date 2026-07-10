@@ -34,13 +34,18 @@ PREINSTALLED_TOOL_SPACE_SLUGS = (
     "pollen-robotics/reachy-mini-time-tool",
     "pollen-robotics/reachy-mini-weather-tool",
 )
+# Bundled specs resolved offline so startup skips Hugging Face discovery.
 PREINSTALLED_TOOL_SPACE_SPECS = {
     "pollen-robotics/reachy-mini-search-tool": (
         RemoteToolSpec(
             server_alias="pollen_robotics_reachy_mini_search_tool",
             remote_name="search_web",
             namespaced_name="pollen_robotics_reachy_mini_search_tool__search_web",
-            description="Search the web for current information, today's events, or other explicit web lookups.",
+            description=(
+                "Search the web for current information and return a short list of results (title, snippet, url). "
+                "Call this directly whenever the user asks to search, check the web, look something up, "
+                "find today's events, or learn what is happening now. Do not just say you'll look it up."
+            ),
             parameters_schema={
                 "type": "object",
                 "properties": {
@@ -62,8 +67,10 @@ PREINSTALLED_TOOL_SPACE_SPECS = {
             remote_name="get_time",
             namespaced_name="pollen_robotics_reachy_mini_time_tool__get_time",
             description=(
-                "Report the current local time, the time in a named place or IANA timezone, "
-                "or the current difference between two places/timezones."
+                "Get the current date and time for an IANA timezone, and optionally the difference to a second timezone. "
+                "Call this directly whenever the user asks what time it is or the time somewhere. Pass an IANA name like "
+                "'Europe/Paris' or 'Asia/Tokyo' for a named place (derive it from the place), or leave the timezone empty "
+                "for the user's own local time. Do not ask for their city and do not just say you'll check."
             ),
             parameters_schema={
                 "type": "object",
@@ -71,12 +78,12 @@ PREINSTALLED_TOOL_SPACE_SPECS = {
                     "timezone": {
                         "type": "string",
                         "default": "",
-                        "description": "Empty for the user's local time, otherwise a named place or IANA timezone.",
+                        "description": "IANA timezone like 'Europe/Paris'. Empty resolves the user's local time.",
                     },
                     "compare_timezone": {
                         "type": "string",
                         "default": "",
-                        "description": "Optional named place or IANA timezone to compare against.",
+                        "description": "Optional second IANA timezone to compare against.",
                     },
                 },
                 "required": [],
@@ -88,7 +95,11 @@ PREINSTALLED_TOOL_SPACE_SPECS = {
             server_alias="pollen_robotics_reachy_mini_weather_tool",
             remote_name="get_weather",
             namespaced_name="pollen_robotics_reachy_mini_weather_tool__get_weather",
-            description="Report today's weather for a place.",
+            description=(
+                "Get today's weather for a place: current conditions, high and low temperature, and rain chance. "
+                "Call this directly whenever the user asks about the weather, forecast, or temperature for "
+                "somewhere. Do not just say you'll check."
+            ),
             parameters_schema={
                 "type": "object",
                 "properties": {
@@ -347,6 +358,7 @@ def _validate_space_info(slug: str, space_info: SpaceInfo) -> None:
 
 
 def _resolve_preinstalled_tool_space(slug: str) -> ResolvedInstalledToolSpace | None:
+    """Resolve a bundled Space from static specs, or None when the slug is not preinstalled."""
     try:
         validated_slug = validate_space_slug(slug)
     except ValueError:
@@ -377,7 +389,7 @@ def _resolve_preinstalled_tool_space(slug: str) -> ResolvedInstalledToolSpace | 
 
 
 async def resolve_tool_space(slug: str) -> ResolvedInstalledToolSpace:
-    """Validate and discover tools from one HF Space, authenticating private Spaces with the HF token."""
+    """Resolve one HF Space: bundled specs if preinstalled, else discover its tools (HF token only for private Spaces)."""
     preinstalled_space = _resolve_preinstalled_tool_space(slug)
     if preinstalled_space is not None:
         return preinstalled_space

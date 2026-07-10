@@ -272,7 +272,7 @@ class RemoteMcpToolClient:
     """Minimal async client for allowlisted remote MCP tool servers."""
 
     def __init__(self, server: RemoteMcpServerConfig, known_tools: Sequence[RemoteToolSpec] | None = None) -> None:
-        """Store one allowlisted server configuration and an in-memory tool cache."""
+        """Store one allowlisted server configuration and seed the tool cache with any known specs."""
         self.server = server
         self._tool_index = _index_remote_tools(list(known_tools or []))
 
