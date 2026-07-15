@@ -125,8 +125,8 @@ def run(
         get_hf_connection_selection().mode,
     )
 
-    from reachy_mini_conversation_app.tools import core_tools
     from reachy_mini_conversation_app.console import LocalStream
+    from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, initialize_tools
     from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 
     if robot is None:
@@ -157,7 +157,7 @@ def run(
 
     movement_manager = MovementManager(current_robot=robot)
 
-    deps = core_tools.ToolDependencies(
+    deps = ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
         instance_path=instance_path,
@@ -278,7 +278,7 @@ def run(
         logger.info("Web UI available at http://localhost:7860")
 
     try:
-        core_tools.initialize_tools(instance_path=instance_path)
+        initialize_tools(instance_path=instance_path)
     except Exception as e:
         logger.error("Failed to initialize tools: %s", e)
         sys.exit(1)
