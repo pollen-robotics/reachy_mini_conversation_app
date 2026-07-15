@@ -22,6 +22,7 @@ from reachy_mini_conversation_app.mcp_client import (
     RemoteMcpToolClient,
     RemoteMcpServerConfig,
     apply_name_normalization,
+    build_namespaced_tool_name,
 )
 
 
@@ -30,6 +31,83 @@ logger = logging.getLogger(__name__)
 INSTALLED_TOOL_SPACES_FILENAME = "installed_tool_spaces.json"
 INSTALLED_TOOL_SPACES_VERSION = 2
 TERMINAL_EXTERNAL_CONTENT_DIRECTORY = Path("external_content")
+# Bundled Pollen Spaces seeded when no manifest exists, so startup needs no Hugging Face discovery.
+PREINSTALLED_TOOL_SPACE_SPECS = {
+    "pollen-robotics/reachy-mini-search-tool": (
+        RemoteToolSpec(
+            server_alias="pollen_robotics_reachy_mini_search_tool",
+            remote_name="reachy_mini_search_tool_search_web",
+            namespaced_name=build_namespaced_tool_name(
+                "pollen_robotics_reachy_mini_search_tool", "reachy_mini_search_tool_search_web"
+            ),
+            description=(
+                "Search the web for current information and return a short list of results (title, snippet, url). "
+                "Call this directly whenever the user asks to search, check the web, look something up, "
+                "find today's events, or learn what is happening now. Do not just say you'll look it up."
+            ),
+            parameters_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query."},
+                    "max_results": {"type": "integer", "minimum": 1, "maximum": 10, "default": 5},
+                },
+                "required": ["query"],
+            },
+        ),
+    ),
+    "pollen-robotics/reachy-mini-time-tool": (
+        RemoteToolSpec(
+            server_alias="pollen_robotics_reachy_mini_time_tool",
+            remote_name="reachy_mini_time_tool_get_time",
+            namespaced_name=build_namespaced_tool_name(
+                "pollen_robotics_reachy_mini_time_tool", "reachy_mini_time_tool_get_time"
+            ),
+            description=(
+                "Get the current date and time for an IANA timezone, and optionally the difference to a second timezone. "
+                "Call this directly whenever the user asks what time it is or the time somewhere. Pass an IANA name like "
+                "'Europe/Paris' or 'Asia/Tokyo' for a named place (derive it from the place), or leave the timezone empty "
+                "for the user's own local time. Do not ask for their city and do not just say you'll check."
+            ),
+            parameters_schema={
+                "type": "object",
+                "properties": {
+                    "timezone": {
+                        "type": "string",
+                        "default": "",
+                        "description": "IANA timezone like 'Europe/Paris'. Empty resolves the user's local time.",
+                    },
+                    "compare_timezone": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Optional second IANA timezone to compare against.",
+                    },
+                },
+                "required": [],
+            },
+        ),
+    ),
+    "pollen-robotics/reachy-mini-weather-tool": (
+        RemoteToolSpec(
+            server_alias="pollen_robotics_reachy_mini_weather_tool",
+            remote_name="reachy_mini_weather_tool_get_weather",
+            namespaced_name=build_namespaced_tool_name(
+                "pollen_robotics_reachy_mini_weather_tool", "reachy_mini_weather_tool_get_weather"
+            ),
+            description=(
+                "Get today's weather for a place: current conditions, high and low temperature, and rain chance. "
+                "Call this directly whenever the user asks about the weather, forecast, or temperature for "
+                "somewhere. Do not just say you'll check."
+            ),
+            parameters_schema={
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string", "description": "Place name for the weather lookup."},
+                },
+                "required": ["location"],
+            },
+        ),
+    ),
+}
 _SLUG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
@@ -83,11 +161,28 @@ def get_installed_tool_spaces_path(instance_path: str | Path | None) -> Path:
     return TERMINAL_EXTERNAL_CONTENT_DIRECTORY / INSTALLED_TOOL_SPACES_FILENAME
 
 
+def _preinstalled_installed_spaces() -> list[InstalledToolSpace]:
+    """Build the bundled Pollen Spaces as manifest entries with their tools cached from static specs."""
+    spaces: list[InstalledToolSpace] = []
+    for slug, remote_specs in PREINSTALLED_TOOL_SPACE_SPECS.items():
+        alias = normalize_space_alias(slug)
+        spaces.append(
+            InstalledToolSpace(
+                slug=slug,
+                alias=alias,
+                mcp_url=f"https://{slug.replace('/', '-')}.hf.space/gradio_api/mcp/",
+                private=False,
+                tools=_build_installed_tool_space_tools(slug=slug, alias=alias, remote_specs=list(remote_specs)),
+            )
+        )
+    return spaces
+
+
 def read_installed_tool_spaces(instance_path: str | Path | None) -> InstalledToolSpacesManifest:
-    """Read the installed tool-spaces manifest if present."""
+    """Read the installed tool-spaces manifest, or seed the bundled Pollen Spaces when none exists."""
     manifest_path = get_installed_tool_spaces_path(instance_path)
     if not manifest_path.exists():
-        return InstalledToolSpacesManifest()
+        return InstalledToolSpacesManifest(spaces=_preinstalled_installed_spaces())
 
     try:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))

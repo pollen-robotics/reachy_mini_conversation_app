@@ -37,6 +37,7 @@ Keep safety in mind when giving guidance.
 
 ## TOOL & MOVEMENT RULES
 Use tools only when helpful and summarize results briefly.
+Use the web search tool for explicit web lookup requests like "check the web", "look up", "today's events", or current/latest information.
 Use the camera for real visuals only — never invent details.
 The head can move (left/right/up/down/front).
 

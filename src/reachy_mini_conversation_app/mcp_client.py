@@ -31,7 +31,7 @@ class McpClientError(RuntimeError):
 
 
 class McpDependencyError(McpClientError):
-    """Raised when the optional MCP SDK is not installed."""
+    """Raised when a required MCP client dependency is not installed."""
 
 
 class McpTransportError(McpClientError):
@@ -136,8 +136,7 @@ def _load_mcp_sdk() -> tuple[type["ClientSession"], Any]:
         from mcp.client.streamable_http import streamable_http_client
     except ImportError as exc:
         raise McpDependencyError(
-            "Remote MCP tools require the optional 'remote_tools' dependencies. "
-            "Install the project with the 'remote_tools' extra before using this module."
+            "Remote MCP tools require the app's MCP client dependencies. Reinstall or update the app environment."
         ) from exc
     return ClientSession, streamable_http_client
 
@@ -147,8 +146,7 @@ def _load_httpx() -> Any:
         import httpx
     except ImportError as exc:
         raise McpDependencyError(
-            "Remote MCP tools require the optional 'remote_tools' dependencies. "
-            "Install the project with the 'remote_tools' extra before using this module."
+            "Remote MCP tools require the app's HTTP client dependencies. Reinstall or update the app environment."
         ) from exc
     return httpx
 

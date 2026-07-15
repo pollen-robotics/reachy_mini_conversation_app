@@ -183,19 +183,25 @@ reachy-mini-conversation-app --ui
 
 ## LLM tools exposed to the assistant
 
+The default profile exposes these tools. Custom profiles can enable a different set in their own `tools.txt`.
+
 | Tool | Action | Dependencies |
 |------|--------|--------------|
-| `move_head` | Queue a head pose change (left/right/up/down/front). | Core install only. |
-| `head_tracking` | Follow the user's face with the head, or stop following. | Core install only. Requires a daemon with the `vision` extra and a camera. |
-| `camera` | Capture the latest camera frame and analyze it with the selected realtime backend. | Core install only. Requires the camera (disable with `--no-camera`). |
 | `dance` | Queue a dance from `reachy_mini_dances_library`. | Core install only. |
 | `stop_dance` | Clear queued dances. | Core install only. |
 | `play_emotion` | Play a recorded emotion clip via Hugging Face datasets. | Core install only. Uses the default open emotions dataset: [`pollen-robotics/reachy-mini-emotions-library`](https://huggingface.co/datasets/pollen-robotics/reachy-mini-emotions-library). |
 | `stop_emotion` | Clear queued emotions. | Core install only. |
+| `camera` | Capture the latest camera frame and analyze it with the selected realtime backend. | Core install only. Requires the camera (disable with `--no-camera`). |
+| `idle_do_nothing` | Explicitly remain idle during an idle turn. Not intended for normal conversation turns. | Core install only. |
+| `move_head` | Queue a head pose change (left/right/up/down/front). | Core install only. |
+| `head_tracking` | Follow the user's face with the head, or stop following. | Core install only. Requires a daemon with the `vision` extra and a camera. |
+| `go_to_sleep` | Run Reachy's sleep movement and stop the current app after an explicit user request. | Core install only. |
+| `sweep_look` | Sweep Reachy's head left, right, and back to center. | Bundled default profile tool. |
 | `remember` | Save one short, stable fact about the user for future sessions. | Core install only. Stored in the app instance data directory. |
 | `forget` | Remove a saved memory fact by matching a short query. | Core install only. |
-| `go_to_sleep` | Run Reachy's sleep movement and stop the current app after an explicit user request. | Core install only. |
-| `idle_do_nothing` | Explicitly remain idle during an idle turn. Not intended for normal conversation turns. | Core install only. |
+| `pollen_robotics_reachy_mini_search_tool__search_web` | Search the web and return a short list of results. | Preinstalled MCP Space: `pollen-robotics/reachy-mini-search-tool`. |
+| `pollen_robotics_reachy_mini_weather_tool__get_weather` | Report today's weather for a place: current conditions, high and low temperature, and rain chance. | Preinstalled MCP Space: `pollen-robotics/reachy-mini-weather-tool`. |
+| `pollen_robotics_reachy_mini_time_tool__get_time` | Report the current time for a timezone or the user's local time, or the difference between two timezones. | Preinstalled MCP Space: `pollen-robotics/reachy-mini-time-tool`. |
 
 > [!NOTE]
 > `remember`/`forget` facts are stored in `memory.v1.json` inside the app's instance data directory (`~/.local/share/reachy_mini_conversation_app/` by default, or the instance path used by the desktop launcher). `forget` only removes facts matched by query. To reset all remembered facts, delete this file.
@@ -336,7 +342,7 @@ reachy-mini-conversation-app tool-spaces list
 reachy-mini-conversation-app tool-spaces remove owner/space-name
 ```
 
-The app validates the Space slug through the Hugging Face Hub, probes the standard MCP endpoint (sending the HF token only to private Spaces), discovers tools, enables them in the active profile's `tools.txt`, and writes the installed Space to:
+The bundled Pollen Spaces are enabled by default and resolve from static specs, so startup needs no Hugging Face discovery. For custom Spaces, the app validates the slug through the Hugging Face Hub, probes the standard MCP endpoint (sending the HF token only to private Spaces), discovers tools, enables them in the active profile's `tools.txt`, and writes the installed Space to:
 
 - `installed_tool_spaces.json` in the managed app instance directory
 - `external_content/installed_tool_spaces.json` in terminal mode
@@ -347,6 +353,9 @@ Recommended tags for discoverability on Hugging Face:
 - `mcp`
 
 These tags are advisory only. Installation still relies on successful MCP validation, not on tag presence.
+
+> [!NOTE]
+> Preinstalled Pollen Spaces can be removed like any other (`tool-spaces remove pollen-robotics/reachy-mini-weather-tool`) or delete `installed_tool_spaces.json` to restore all defaults.
 
 </details>
 

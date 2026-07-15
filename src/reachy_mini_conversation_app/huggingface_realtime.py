@@ -156,6 +156,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self._turn_response_created_at: float | None = None
         self._turn_first_audio_at: float | None = None
         self._startup_greeting_sent = False
+        self._in_flight_tool_calls: set[str] = set()
+        self._tool_batch_needs_response = False
 
     @staticmethod
     def _sanitize_tool_result_for_model(tool_name: str, tool_result: dict[str, Any]) -> dict[str, Any]:
@@ -669,9 +671,17 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         jpeg_bytes,
                     )
 
+            if isinstance(completed_tool.id, str):
+                self._in_flight_tool_calls.discard(completed_tool.id)
+
             tool = core_tools.ALL_TOOLS.get(completed_tool.tool_name)
             # Always surface errors, skip the spoken follow-up for tools that opt out.
             if model_result_submitted and (completed_tool.error is not None or tool is None or tool.needs_response):
+                self._tool_batch_needs_response = True
+
+            # Parallel tool calls in one turn: respond once every result is in, not per tool.
+            if self._tool_batch_needs_response and not self._in_flight_tool_calls:
+                self._tool_batch_needs_response = False
                 await self._safe_response_create()
 
         except ConnectionClosedError:
@@ -806,6 +816,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         self._turn_user_done_at = time.perf_counter()
                         self._turn_response_created_at = None
                         self._turn_first_audio_at = None
+                        self._in_flight_tool_calls.clear()
+                        self._tool_batch_needs_response = False
 
                         await self.output_queue.put(AdditionalOutputs({"role": "user", "content": transcript}))
 
@@ -857,6 +869,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                             )
                             continue
 
+                        self._in_flight_tool_calls.add(call_id)
                         background_tool = await self.tool_manager.start_tool(
                             call_id=call_id,
                             tool_call_routine=ToolCallRoutine(
