@@ -129,7 +129,7 @@ If you change dependencies, keep `uv.lock` in sync by running `uv lock` (CI vali
 
 ## Continuous integration
 
-`.github/workflows/` holds seven live, load-bearing workflows. The first four gate every PR. The local gate above mirrors them, so green locally means green CI.
+`.github/workflows/` holds eight live, load-bearing workflows. The first four gate every PR. The local gate above mirrors them, so green locally means green CI.
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
@@ -137,6 +137,7 @@ If you change dependencies, keep `uv.lock` in sync by running `uv lock` (CI vali
 | **Type check** (`typecheck.yml`) | push, PR | `mypy` strict |
 | **Pytest** (`pytest.yml`) | PR, push to `main` | tests on Linux, macOS, Windows |
 | **uv.lock check** (`uv-lock-check.yml`) | PR | `uv.lock` matches `pyproject.toml` |
+| **Allure Report** (`allure.yml`) | push to `main`, manual | publishes test and coverage reports to GitHub Pages |
 | **Release** (`release.yml`) | tag `v*` | publishes the GitHub release |
 | **Sync to HF Space** (`sync-hf-space.yml`) | tag, manual | mirrors releases to the Hugging Face Space |
 | **PR Preview** (`pr-hf-space-preview.yml`) | PR | spins up a private preview Space per PR |
