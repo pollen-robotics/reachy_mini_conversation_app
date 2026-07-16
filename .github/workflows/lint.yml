@@ -33,8 +33,8 @@ jobs:
           python-version: "3.12"
           enable-cache: true
 
-      - name: Install dependencies
-        run: uv sync --frozen --group dev
+      - name: Install development tools
+        run: uv sync --frozen --only-group dev --no-install-project
 
       - name: Ruff check
         run: uv run --no-sync ruff check .
