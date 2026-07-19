@@ -20,6 +20,7 @@ from .config import (
     get_default_voice,
     get_available_voices,
 )
+from .avatars import avatar_id_for, read_avatar_svg
 from .personality import (
     DEFAULT_OPTION,
     _sanitize_name,
@@ -168,6 +169,37 @@ class PersonalityOps:
             "enabled_tools": enabled,
         }
 
+    def get_all(self) -> dict[str, Any]:
+        """Return every personality with its full config in a single call.
+
+        Batches ``get_choices`` + ``load`` for each entry so a remote client
+        (e.g. the phone) can render the whole picker without an N+1 round-trip
+        and without bundling the defaults itself. Avatars are intentionally
+        *not* inlined here - an SVG can be hundreds of KB, which would bloat one
+        message on the data channel - so each entry carries an ``avatar_id``
+        and the SVG is fetched lazily (and cached) via ``personalities.avatar``.
+        """
+        items: list[dict[str, Any]] = []
+        for selection in [DEFAULT_OPTION, *list_personalities()]:
+            entry = self.load(selection)
+            entry["name"] = selection
+            entry["avatar_id"] = avatar_id_for(selection)
+            items.append(entry)
+        return {
+            "personalities": items,
+            "current": self._current_choice(),
+            "startup": self._startup_choice_value(),
+            "locked": LOCKED_PROFILE is not None,
+            "locked_to": LOCKED_PROFILE,
+        }
+
+    def avatar(self, name: str) -> dict[str, Any]:
+        """Return the SVG markup for a personality (falls back to the default)."""
+        svg = read_avatar_svg(name)
+        if svg is None:
+            raise RouteError("avatar_unavailable")
+        return {"name": name, "avatar_id": avatar_id_for(name), "svg": svg}
+
     def save(self, raw: dict[str, Any]) -> dict[str, Any]:
         """Create or update a user personality from a raw payload dict."""
         name = str(raw.get("name", ""))
@@ -305,7 +337,9 @@ def register_personality_methods(rpc: JsonRpcServer, ops: PersonalityOps) -> Non
         return _method
 
     rpc.register("personalities.list", _wrap(lambda p: ops.get_choices()))
+    rpc.register("personalities.all", _wrap(lambda p: ops.get_all()))
     rpc.register("personalities.load", _wrap(lambda p: ops.load(str(p["name"]))))
+    rpc.register("personalities.avatar", _wrap(lambda p: ops.avatar(str(p["name"]))))
     rpc.register("personalities.save", _wrap(lambda p: ops.save(p)))
     rpc.register("personalities.delete", _wrap(lambda p: ops.delete(str(p["name"]))))
     rpc.register(
