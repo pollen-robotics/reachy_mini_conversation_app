@@ -579,11 +579,11 @@ class LocalStream:
         rpc = JsonRpcServer()
 
         # SDK isn't marked py.typed, so mypy sees rpc.method as untyped; safe here.
-        @rpc.method("conversation.status")  # type: ignore[misc]
+        @rpc.method("conversation.status")  # type: ignore[untyped-decorator]
         def _rpc_status(_params: dict[str, object]) -> dict[str, object]:
             return _status_payload()
 
-        @rpc.method("conversation.say")  # type: ignore[misc]
+        @rpc.method("conversation.say")  # type: ignore[untyped-decorator]
         async def _rpc_say(params: dict[str, object]) -> dict[str, object]:
             text = str(params.get("text", "")).strip()
             if not text:
@@ -594,7 +594,7 @@ class LocalStream:
             await self.handler.say(text)
             return {"ok": True}
 
-        @rpc.method("conversation.interrupt")  # type: ignore[misc]
+        @rpc.method("conversation.interrupt")  # type: ignore[untyped-decorator]
         def _rpc_interrupt(_params: dict[str, object]) -> dict[str, object]:
             if not self.handler._is_connected():
                 raise JsonRpcError("no active session", reason="not_running")
@@ -603,14 +603,14 @@ class LocalStream:
             rpc.broadcast_threadsafe("conversation.turn", {"state": "listening", "reason": "interrupted"})
             return {"ok": True}
 
-        @rpc.method("conversation.mic")  # type: ignore[misc]
+        @rpc.method("conversation.mic")  # type: ignore[untyped-decorator]
         def _rpc_mic(params: dict[str, object]) -> dict[str, object]:
             if "muted" in params:
                 self._mic_muted = bool(params["muted"])
                 logger.info("Microphone %s via /rpc", "muted" if self._mic_muted else "unmuted")
             return {"muted": self._mic_muted}
 
-        @rpc.method("backend.config")  # type: ignore[misc]
+        @rpc.method("backend.config")  # type: ignore[untyped-decorator]
         def _rpc_backend_config(params: dict[str, object]) -> dict[str, object]:
             hf_selection = get_hf_connection_selection()
             hf_mode = str(params.get("hf_mode") or hf_selection.mode).strip().lower()
@@ -771,15 +771,17 @@ class LocalStream:
         # Start media after key is set/available
         self._robot.media.start_recording()
         self._robot.media.start_playing()
-        time.sleep(1)  # give some time to the pipelines to start
-        apply_audio_startup_config(self._robot, logger=logger)
 
         async def runner() -> None:
             # Capture loop for cross-thread personality actions
             loop = asyncio.get_running_loop()
             self._asyncio_loop = loop  # type: ignore[assignment]
-            self._tasks = [
-                asyncio.create_task(self._run_handler_startup_loop(), name="realtime-handler"),
+            # Connect the backend first so it overlaps the warmup and audio config below.
+            handler_task = asyncio.create_task(self._run_handler_startup_loop(), name="realtime-handler")
+            self._tasks = [handler_task]
+            await asyncio.sleep(1)  # give the pipelines time to start
+            await asyncio.to_thread(apply_audio_startup_config, self._robot, logger=logger)
+            self._tasks += [
                 asyncio.create_task(self.record_loop(), name="stream-record-loop"),
                 asyncio.create_task(self.play_loop(), name="stream-play-loop"),
             ]

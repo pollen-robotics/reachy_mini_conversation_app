@@ -2,15 +2,28 @@ name: uv.lock check
 
 on:
   pull_request:
-    paths:
-      - "pyproject.toml"
-      - "uv.lock"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   uv-lock-check:
+    name: uv-lock-check
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-      - uses: hbelmiro/uv-lock-check@814bb91b9521353fce69abced9210c8b42467d6d  # v0.2.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
-          command: "uv lock --check"
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          enable-cache: false
+
+      - name: Check uv.lock
+        run: uv lock --check
