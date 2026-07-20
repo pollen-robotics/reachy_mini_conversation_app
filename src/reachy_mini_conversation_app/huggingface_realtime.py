@@ -5,7 +5,7 @@ import base64
 import random
 import asyncio
 import logging
-from typing import Any, Final, Tuple, Optional
+from typing import TYPE_CHECKING, Any, Final, Tuple, Optional
 
 import httpx
 import numpy as np
@@ -23,7 +23,6 @@ from openai.types.realtime import (
     RealtimeSessionCreateRequestParam,
 )
 from websockets.exceptions import ConnectionClosedError
-from openai.resources.realtime.realtime import AsyncRealtimeConnection
 from openai.types.realtime.realtime_audio_input_turn_detection_param import ServerVad
 
 from reachy_mini_conversation_app.tools import core_tools
@@ -53,6 +52,10 @@ from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolNotification,
     BackgroundToolManager,
 )
+
+
+if TYPE_CHECKING:
+    from openai.resources.realtime.realtime import AsyncRealtimeConnection
 
 
 logger = logging.getLogger(__name__)
@@ -126,7 +129,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self.deps = deps
 
         self.client: AsyncOpenAI
-        self.connection: AsyncRealtimeConnection | None = None
+        self.connection: "AsyncRealtimeConnection | None" = None
         self.output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]" = asyncio.Queue()
 
         self.instance_path = instance_path
