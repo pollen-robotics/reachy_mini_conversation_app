@@ -19,7 +19,6 @@ exclude-newer-span = "P7D"
 [options.exclude-newer-package]
 reachy-mini = false
 reachy-mini-dances-library = false
-reachy-mini-toolbox = false
 
 [[package]]
 name = "aiohappyeyeballs"
@@ -2568,7 +2567,6 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "reachy-mini" },
     { name = "reachy-mini-dances-library" },
-    { name = "reachy-mini-toolbox" },
 ]
 
 [package.dev-dependencies]
@@ -2591,7 +2589,6 @@ requires-dist = [
     { name = "python-dotenv" },
     { name = "reachy-mini", specifier = ">=1.9.0" },
     { name = "reachy-mini-dances-library" },
-    { name = "reachy-mini-toolbox" },
 ]
 
 [package.metadata.requires-dev]
@@ -2741,15 +2738,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/09/c1/ad8b896347713d4b1bf0fc3b596a2815b9b13ff3c443e07bd0855edaed60/reachy_mini_rust_kinematics-1.0.3-pp311-pypy311_pp73-musllinux_1_2_armv7l.whl", hash = "sha256:923984775abff5d47326ae745eae566459b2ea2d5d3222e0a6511535e9af29cb", size = 597246, upload-time = "2025-12-04T11:53:13.517Z" },
     { url = "https://files.pythonhosted.org/packages/1d/8c/3c27b7aabccd68d9cf7c3a4f029efb14e4795a12ec0a5da4d69b2ae1f258/reachy_mini_rust_kinematics-1.0.3-pp311-pypy311_pp73-musllinux_1_2_i686.whl", hash = "sha256:b0f48297e8a8ee703837668193937924b9c57a20d6a357b30e6740264571393c", size = 540517, upload-time = "2025-12-04T11:53:29.135Z" },
     { url = "https://files.pythonhosted.org/packages/ee/6a/1619de8f414f2bb5799a3a205d689e7a79a8bedbd2cbd4518d9acbfabb8b/reachy_mini_rust_kinematics-1.0.3-pp311-pypy311_pp73-musllinux_1_2_x86_64.whl", hash = "sha256:d08a9068f7ee8c9e25ba4a77da0717bc81ff036c95b883c4896573ac95a2fe9b", size = 510645, upload-time = "2025-12-04T11:53:43.844Z" },
-]
-
-[[package]]
-name = "reachy-mini-toolbox"
-version = "1.1.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/25/30/b18ab0771b276ab9ba4e0071f5f8f81818b362574644e95bacd9eae2a4c2/reachy_mini_toolbox-1.1.2.tar.gz", hash = "sha256:0f9d7591e40cc9a5a19e01a32301b67a04e7dcc5af49e7b45adb85065ec37e56", size = 9789, upload-time = "2025-12-07T09:34:26.154Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e5/74/3507b27191937b013184e2e4bfc7868c8ab0d91e1578d22a0243b19754bc/reachy_mini_toolbox-1.1.2-py3-none-any.whl", hash = "sha256:ee9c4de4428292e19a90e02cc2d3b6e36c26538ef4dfccbfb7cbbd89a656071b", size = 10601, upload-time = "2025-12-07T09:34:24.824Z" },
 ]
 
 [[package]]

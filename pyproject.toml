@@ -21,7 +21,6 @@ dependencies = [
 
     #Reachy mini
     "reachy_mini_dances_library",
-    "reachy_mini_toolbox",
     "reachy-mini>=1.9.0",
     "mcp>=1.27.1",
 ]
@@ -46,7 +45,6 @@ exclude-newer = "7 days"
 [tool.uv.exclude-newer-package]
 "reachy-mini" = false
 "reachy-mini-dances-library" = false
-"reachy-mini-toolbox" = false
 
 [project.entry-points."reachy_mini_apps"]
 reachy_mini_conversation_app = "reachy_mini_conversation_app.main:ReachyMiniConversationApp"
@@ -93,7 +91,7 @@ length-sort = true
 lines-after-imports = 2
 no-lines-before = ["standard-library", "local-folder"]
 known-local-folder = ["reachy_mini_conversation_app"]
-known-first-party = ["reachy_mini", "reachy_mini_dances_library", "reachy_mini_toolbox"]
+known-first-party = ["reachy_mini", "reachy_mini_dances_library"]
 split-on-trailing-comma = true
 
 [tool.ruff.format]
