@@ -1,18 +1,8 @@
 """Avatar (SVG) resolution for personality profiles.
 
-Built-in personas ship a hand-drawn SVG under ``static/avatars/``. The map
-below mirrors ``AVATAR_BY_PROFILE`` in ``static/js/constants.js`` (the local
-web UI resolves avatars the same way over HTTP); both lists are tiny and are
-kept in sync by hand when a built-in persona is added or renamed.
-
-Resolution order for a selection:
-  1. ``<profile_dir>/avatar.svg`` - lets a (future) user persona carry its own
-     avatar, so an author flow that writes the SVG alongside the profile works
-     without touching this map;
-  2. the built-in ``AVATAR_BY_PROFILE`` mapping;
-  3. the default avatar.
-
-No HTTP or framework dependencies - importable anywhere, like ``personality``.
+Mirrors the front-end ``AVATAR_BY_PROFILE`` map (``static/js/constants.js``);
+kept in sync by hand. Resolution order: a profile-local ``avatar.svg``, then
+the built-in map, then the default.
 """
 
 from __future__ import annotations

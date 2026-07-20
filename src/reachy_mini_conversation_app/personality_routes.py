@@ -170,15 +170,9 @@ class PersonalityOps:
         }
 
     def get_all(self) -> dict[str, Any]:
-        """Return every personality with its full config in a single call.
-
-        Batches ``get_choices`` + ``load`` for each entry so a remote client
-        (e.g. the phone) can render the whole picker without an N+1 round-trip
-        and without bundling the defaults itself. Avatars are intentionally
-        *not* inlined here - an SVG can be hundreds of KB, which would bloat one
-        message on the data channel - so each entry carries an ``avatar_id``
-        and the SVG is fetched lazily (and cached) via ``personalities.avatar``.
-        """
+        """Return every personality with its full config in a single call."""
+        # No inline SVG: an avatar can be 100+ KB; clients fetch them lazily via
+        # personalities.avatar and cache by avatar_id.
         items: list[dict[str, Any]] = []
         for selection in [DEFAULT_OPTION, *list_personalities()]:
             entry = self.load(selection)
