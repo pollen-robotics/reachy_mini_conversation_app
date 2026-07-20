@@ -8,8 +8,13 @@ import pytest
 
 from reachy_mini.utils import create_head_pose
 from reachy_mini.utils.interpolation import compose_world_offset
-from reachy_mini_conversation_app.moves import MovementManager
-from reachy_mini_conversation_app.dance_emotion_moves import EmotionQueueMove
+from reachy_mini_conversation_app.moves import (
+    BreathingMove,
+    MovementManager,
+    LoopFrequencyStats,
+    clone_full_body_pose,
+)
+from reachy_mini_conversation_app.dance_emotion_moves import GotoQueueMove, EmotionQueueMove
 
 
 class _FakeMove:
@@ -109,3 +114,76 @@ def test_speaking_anchor_composes_emotions_and_holds_dances_from_neutral() -> No
     manager.state.move_start_time = manager._now()
     head, _, _ = manager._get_primary_pose(manager._now())
     assert np.allclose(head, dance_head)
+
+
+def test_clone_full_body_pose_is_a_deep_copy() -> None:
+    """Cloning a pose must not alias the head-pose array of the original."""
+    head = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
+    original = (head, (1.0, 2.0), 3.0)
+    clone = clone_full_body_pose(original)
+    head[0, 0] = 999.0
+    assert clone[0][0, 0] != 999.0
+    assert clone[1] == (1.0, 2.0)
+    assert clone[2] == 3.0
+
+
+def test_loop_frequency_stats_reset_keeps_last_potential() -> None:
+    """Reset clears accumulators but preserves last/potential frequency."""
+    stats = LoopFrequencyStats(mean=5.0, m2=2.0, min_freq=1.0, count=10, last_freq=59.0, potential_freq=61.0)
+    stats.reset()
+    assert stats.mean == 0.0
+    assert stats.m2 == 0.0
+    assert stats.count == 0
+    assert stats.min_freq == float("inf")
+    assert stats.last_freq == 59.0
+    assert stats.potential_freq == 61.0
+
+
+def test_breathing_move_interpolates_then_breathes() -> None:
+    """Phase 1 starts at the given antennas; phase 2 keeps body yaw neutral."""
+    move = BreathingMove(
+        interpolation_start_pose=create_head_pose(0, 0, 0, 0, 0, 0, degrees=True),
+        interpolation_start_antennas=(0.3, -0.3),
+        interpolation_duration=1.0,
+    )
+    head_start, antennas_start, body_yaw_start = move.evaluate(0.0)
+    assert head_start is not None
+    np.testing.assert_allclose(antennas_start, [0.3, -0.3])
+    assert body_yaw_start == 0.0
+
+    head_breathe, antennas_breathe, body_yaw_breathe = move.evaluate(5.0)
+    assert head_breathe is not None
+    assert antennas_breathe is not None and antennas_breathe.shape == (2,)
+    assert body_yaw_breathe == 0.0
+
+
+def test_is_idle_reflects_listening_and_activity() -> None:
+    """is_idle is False while listening and True once past the inactivity delay."""
+    manager = MovementManager(MagicMock())
+
+    manager._shared_is_listening = True
+    assert manager.is_idle() is False
+
+    manager._shared_is_listening = False
+    manager._shared_last_activity_time = manager._now()
+    assert manager.is_idle() is False
+
+    manager._shared_last_activity_time = manager._now() - 10.0
+    assert manager.is_idle() is True
+
+
+def test_handle_command_queue_and_clear() -> None:
+    """queue_move appends real moves, ignores bad payloads, and clear empties the queue."""
+    manager = MovementManager(MagicMock())
+    now = manager._now()
+    move = GotoQueueMove(target_head_pose=create_head_pose(0, 0, 0, 0, 0, 0, degrees=True))
+
+    manager._handle_command("queue_move", move, now)
+    assert list(manager.move_queue) == [move]
+
+    manager._handle_command("queue_move", "not-a-move", now)
+    assert list(manager.move_queue) == [move]
+
+    manager._handle_command("clear_queue", None, now)
+    assert len(manager.move_queue) == 0
+    assert manager.state.current_move is None
