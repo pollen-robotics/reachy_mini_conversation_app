@@ -7,12 +7,8 @@ on:
       - "tests/**"
       - ".github/workflows/**"
       - "pyproject.toml"
+      - "uv.lock"
   pull_request:
-    paths:
-      - "src/**"
-      - "tests/**"
-      - ".github/workflows/**"
-      - "pyproject.toml"
 
 permissions:
   contents: read
@@ -23,19 +19,22 @@ concurrency:
 
 jobs:
   mypy:
+    name: mypy
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Install system dependencies
-        uses: awalsh128/cache-apt-pkgs-action@acb598e5ddbc6f68a970c5da0688d2f3a9f04d05 # v1.6.0
+        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
           packages: libcairo2-dev libgirepository1.0-dev
           version: 1.0
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
         with:
           python-version: "3.12"
 

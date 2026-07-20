@@ -1,4 +1,5 @@
 import time
+import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -9,6 +10,7 @@ import reachy_mini_conversation_app.huggingface_realtime as hf_mod
 from reachy_mini_conversation_app.config import config, get_default_voice
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.huggingface_realtime import HuggingFaceRealtimeHandler
+from reachy_mini_conversation_app.tools.background_tool_manager import ToolState, ToolNotification
 
 
 HF_DEFAULT_VOICE = get_default_voice()
@@ -172,6 +174,38 @@ async def test_emit_skips_idle_signal_while_response_active(monkeypatch: Any) ->
 
     assert result is None
     send_idle_signal.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_parallel_tool_calls_trigger_single_response(monkeypatch: Any) -> None:
+    """Parallel tool calls in one turn should yield one response, not one per completed tool."""
+    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "Aiden")
+    monkeypatch.setattr(hf_mod, "get_tool_specs", lambda: [])
+
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.connection = AsyncMock()
+    handler.output_queue = asyncio.Queue()
+    monkeypatch.setattr(handler, "_wait_for_response_done_before_tool_result", AsyncMock(return_value=True))
+    create = AsyncMock()
+    monkeypatch.setattr(handler, "_safe_response_create", create)
+
+    handler._in_flight_tool_calls = {"call_a", "call_b"}
+
+    def _completed(call_id: str) -> ToolNotification:
+        return ToolNotification(
+            id=call_id,
+            tool_name="test__parallel_probe",
+            is_idle_tool_call=False,
+            status=ToolState.COMPLETED,
+            result={"ok": True},
+        )
+
+    await handler._handle_tool_result(_completed("call_a"))
+    assert create.await_count == 0
+
+    await handler._handle_tool_result(_completed("call_b"))
+    assert create.await_count == 1
 
 
 def test_handler_uses_hf_startup_voice_at_startup(monkeypatch: Any) -> None:

@@ -8,10 +8,7 @@ on:
       - synchronize
       - closed
 
-permissions:
-  contents: read
-  issues: write
-  pull-requests: write
+permissions: {}
 
 concurrency:
   group: hf-pr-preview-${{ github.event.pull_request.number }}
@@ -22,31 +19,37 @@ env:
   HF_SPACE_BASE_NAME: reachy_mini_conversation_app
   HF_SPACE_SDK: static
   HF_PREVIEW_COMMENT_MARKER: "<!-- hf-pr-preview-space -->"
+  PR_NUMBER: ${{ github.event.pull_request.number }}
 
 jobs:
   sync-preview:
+    name: Sync preview Space
     if: ${{ github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write # Creates and updates the preview status comment.
 
     steps:
       - name: Compute preview space metadata
         id: preview
         run: |
-          echo "space_id=${HF_SPACE_NAMESPACE}/${HF_SPACE_BASE_NAME}_PR${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
-          echo "space_url=https://huggingface.co/spaces/${HF_SPACE_NAMESPACE}/${HF_SPACE_BASE_NAME}_PR${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          echo "space_id=${HF_SPACE_NAMESPACE}/${HF_SPACE_BASE_NAME}_PR${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "space_url=https://huggingface.co/spaces/${HF_SPACE_NAMESPACE}/${HF_SPACE_BASE_NAME}_PR${PR_NUMBER}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout pull request branch
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
           lfs: true
+          persist-credentials: false
 
       - name: Sync preview space
         id: sync
         continue-on-error: true
-        uses: huggingface/hub-sync@64269e310f79686d68ea78fd189cd1dd7d5ce427  # v0.2.0
+        uses: huggingface/hub-sync@da166beda9a9aff15d1de9a82c6dc86c410ea3ee  # v0.2.1
         with:
           github_repo_id: ${{ github.repository }}
           huggingface_repo_id: ${{ steps.preview.outputs.space_id }}
@@ -160,18 +163,21 @@ jobs:
         run: exit 1
 
   delete-preview:
+    name: Delete preview Space
     if: ${{ github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      pull-requests: write # Updates the preview status after deleting the Space.
 
     steps:
       - name: Compute preview space metadata
         id: preview
         run: |
-          echo "space_id=${HF_SPACE_NAMESPACE}/${HF_SPACE_BASE_NAME}_PR${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          echo "space_id=${HF_SPACE_NAMESPACE}/${HF_SPACE_BASE_NAME}_PR${PR_NUMBER}" >> "$GITHUB_OUTPUT"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
 
       - name: Delete preview space
         env:
