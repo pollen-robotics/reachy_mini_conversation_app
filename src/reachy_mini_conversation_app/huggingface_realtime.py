@@ -12,6 +12,7 @@ import numpy as np
 from openai import AsyncOpenAI
 from pydantic import Field, BaseModel
 from numpy.typing import NDArray
+from huggingface_hub import get_token
 from typing_extensions import Literal, TypedDict
 from openai.types.realtime import (
     AudioTranscriptionParam,
@@ -1030,7 +1031,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
     async def _build_realtime_client(self) -> AsyncOpenAI:
         """Build the Hugging Face OpenAI-compatible realtime client."""
-        bearer_token = (config.HF_TOKEN or "").strip()
+        bearer_token = (config.HF_TOKEN or get_token() or "").strip()
         connection_selection = get_hf_connection_selection()
         direct_realtime_url = get_hf_direct_ws_url()
         if connection_selection.mode == HF_LOCAL_CONNECTION_MODE:

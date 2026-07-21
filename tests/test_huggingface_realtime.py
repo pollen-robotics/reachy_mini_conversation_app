@@ -301,6 +301,7 @@ async def test_build_realtime_client_uses_direct_hf_ws_url(monkeypatch: Any) -> 
     monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "local")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", "https://lb.example.test/session")
     monkeypatch.setattr(config, "HF_TOKEN", None)
+    monkeypatch.setattr(hf_mod, "get_token", lambda: None)
     monkeypatch.setattr(
         config,
         "HF_REALTIME_WS_URL",
@@ -319,20 +320,22 @@ async def test_build_realtime_client_uses_direct_hf_ws_url(monkeypatch: Any) -> 
 
 
 @pytest.mark.parametrize(
-    ("hf_token", "expected_header", "expected_api_key"),
+    ("hf_token", "cached_token", "expected_header", "expected_api_key"),
     [
-        ("hf-secret", {"Authorization": "Bearer hf-secret"}, "hf-secret"),
-        (None, None, "DUMMY"),
+        ("hf-secret", "hf-cached", {"Authorization": "Bearer hf-secret"}, "hf-secret"),
+        (None, "hf-cached", {"Authorization": "Bearer hf-cached"}, "hf-cached"),
+        (None, None, None, "DUMMY"),
     ],
 )
 @pytest.mark.asyncio
-async def test_build_realtime_client_deployed_allocates_with_hf_token_only(
+async def test_build_realtime_client_deployed_resolves_hf_token(
     monkeypatch: Any,
     hf_token: str | None,
+    cached_token: str | None,
     expected_header: dict[str, str] | None,
     expected_api_key: str,
 ) -> None:
-    """Deployed mode allocates via the session URL, authenticating with HF_TOKEN only (never an OpenAI key)."""
+    """Deployed mode prefers HF_TOKEN, then cached Hugging Face credentials."""
     client_kwargs: dict[str, Any] = {}
     posts: list[tuple[str, dict[str, str] | None]] = []
     connect_url = "wss://hf.example.test/v1/realtime?session_token=allocated"
@@ -343,6 +346,7 @@ async def test_build_realtime_client_deployed_allocates_with_hf_token_only(
     # A stale local URL must be ignored in deployed mode.
     monkeypatch.setattr(config, "HF_REALTIME_WS_URL", "ws://127.0.0.1:8765/v1/realtime")
     monkeypatch.setattr(config, "HF_TOKEN", hf_token)
+    monkeypatch.setattr(hf_mod, "get_token", lambda: cached_token)
 
     handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
 
