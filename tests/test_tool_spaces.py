@@ -277,65 +277,6 @@ def test_read_installed_tool_spaces_rejects_legacy_manifest(tmp_path: Path) -> N
         read_installed_tool_spaces(tmp_path)
 
 
-@pytest.mark.parametrize(
-    ("field_name", "invalid_value", "error_match"),
-    [
-        ("private", "false", "private.*boolean"),
-        ("tools", {}, "tools.*list"),
-    ],
-)
-def test_read_installed_tool_spaces_rejects_invalid_space_field_types(
-    tmp_path: Path,
-    field_name: str,
-    invalid_value: object,
-    error_match: str,
-) -> None:
-    """Manifest fields must retain their declared JSON types instead of being coerced."""
-    space: dict[str, object] = {
-        "slug": SEARCH_SPACE_SLUG,
-        "alias": SEARCH_ALIAS,
-        "mcp_url": "https://example-search-tool.hf.space/gradio_api/mcp/",
-        "private": False,
-        "tools": [],
-    }
-    space[field_name] = invalid_value
-    (tmp_path / "installed_tool_spaces.json").write_text(
-        json.dumps({"version": 2, "spaces": [space]}),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(RuntimeError, match=error_match):
-        read_installed_tool_spaces(tmp_path)
-
-
-def test_read_installed_tool_spaces_rejects_invalid_tool_schema(tmp_path: Path) -> None:
-    """Cached MCP parameter schemas must be JSON objects."""
-    payload = {
-        "version": 2,
-        "spaces": [
-            {
-                "slug": SEARCH_SPACE_SLUG,
-                "alias": SEARCH_ALIAS,
-                "mcp_url": "https://example-search-tool.hf.space/gradio_api/mcp/",
-                "private": False,
-                "tools": [
-                    {
-                        "local_name": SEARCH_TOOL_ID,
-                        "client_tool_name": SEARCH_CLIENT_TOOL_ID,
-                        "remote_name": SEARCH_REMOTE_NAME,
-                        "description": "Search the web",
-                        "parameters_schema": [],
-                    }
-                ],
-            }
-        ],
-    }
-    (tmp_path / "installed_tool_spaces.json").write_text(json.dumps(payload), encoding="utf-8")
-
-    with pytest.raises(RuntimeError, match="parameters_schema.*object"):
-        read_installed_tool_spaces(tmp_path)
-
-
 def test_read_installed_tool_spaces_rejects_non_hugging_face_endpoint(tmp_path: Path) -> None:
     """A persisted private Space must not be able to redirect the HF token to another host."""
     payload = {

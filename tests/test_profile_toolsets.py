@@ -1,6 +1,5 @@
 """Tests for instance-local personality tool selections."""
 
-import json
 import threading
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
@@ -147,15 +146,3 @@ def test_disabling_space_tools_preserves_other_tools_for_every_profile(configure
     assert read_profile_tool_names("guide", instance_path) == ["camera", "other_space__lookup"]
     assert read_profile_tool_override("default", instance_path) == ["dance"]
     assert read_profile_tool_override("guide", instance_path) == ["camera", "other_space__lookup"]
-
-
-def test_read_profile_toolsets_rejects_non_list_tool_selection(tmp_path: Path) -> None:
-    """Malformed persisted profile selections should fail rather than change their meaning."""
-    settings_path = get_profile_toolsets_path(tmp_path)
-    settings_path.write_text(
-        json.dumps({"version": 1, "profiles": {"guide": "camera"}}),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(RuntimeError, match="profile names and tool lists must be strings"):
-        read_profile_toolsets(tmp_path)

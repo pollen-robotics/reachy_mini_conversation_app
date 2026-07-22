@@ -138,7 +138,7 @@ class InstalledToolSpaceTool:
 
 @dataclass(frozen=True)
 class InstalledToolSpace:
-    """Persisted record for one installed Space and the tools discovered at install time."""
+    """Metadata for one Space and its discovered tools."""
 
     slug: str
     alias: str
@@ -153,17 +153,6 @@ class InstalledToolSpacesManifest:
 
     version: int = INSTALLED_TOOL_SPACES_VERSION
     spaces: list[InstalledToolSpace] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class ResolvedInstalledToolSpace:
-    """Runtime description of an installed Space."""
-
-    slug: str
-    alias: str
-    mcp_url: str
-    private: bool
-    tools: list[InstalledToolSpaceTool]
 
 
 class ToolSpaceAliasConflictError(RuntimeError):
@@ -182,7 +171,7 @@ class ToolSpaceProfileUpdateError(RuntimeError):
 class ToolSpaceInstallResult:
     """Result of installing or refreshing one Space tool source."""
 
-    resolved_space: ResolvedInstalledToolSpace
+    resolved_space: InstalledToolSpace
     manifest: InstalledToolSpacesManifest
     manifest_path: Path
     refreshed: bool
@@ -547,7 +536,7 @@ def build_remote_client(
     )
 
 
-async def resolve_tool_space(slug: str) -> ResolvedInstalledToolSpace:
+async def resolve_tool_space(slug: str) -> InstalledToolSpace:
     """Validate and discover tools from one HF Space, authenticating private Spaces with the HF token."""
     validated_slug = validate_space_slug(slug)
     alias = normalize_space_alias(validated_slug)
@@ -576,7 +565,7 @@ async def resolve_tool_space(slug: str) -> ResolvedInstalledToolSpace:
     except McpClientError as exc:
         raise RuntimeError(f"Failed to discover MCP tools for '{validated_slug}': {exc}") from exc
 
-    return ResolvedInstalledToolSpace(
+    return InstalledToolSpace(
         slug=validated_slug,
         alias=alias,
         mcp_url=mcp_url,
@@ -585,7 +574,7 @@ async def resolve_tool_space(slug: str) -> ResolvedInstalledToolSpace:
     )
 
 
-def resolve_tool_space_sync(slug: str) -> ResolvedInstalledToolSpace:
+def resolve_tool_space_sync(slug: str) -> InstalledToolSpace:
     """Resolve one Space synchronously."""
     return asyncio.run(resolve_tool_space(slug))
 
@@ -625,17 +614,10 @@ def install_tool_space(
             )
 
         refreshed = any(installed_space.slug == resolved_space.slug for installed_space in manifest.spaces)
-        installed_space = InstalledToolSpace(
-            slug=resolved_space.slug,
-            alias=resolved_space.alias,
-            mcp_url=resolved_space.mcp_url,
-            private=resolved_space.private,
-            tools=resolved_space.tools,
-        )
         updated_manifest = InstalledToolSpacesManifest(
             version=INSTALLED_TOOL_SPACES_VERSION,
             spaces=sorted(
-                [space for space in manifest.spaces if space.slug != resolved_space.slug] + [installed_space],
+                [space for space in manifest.spaces if space.slug != resolved_space.slug] + [resolved_space],
                 key=lambda space: space.slug,
             ),
         )
@@ -650,13 +632,6 @@ def install_tool_space(
             try:
                 added_tool_ids = enable_profile_tools(target_profile, tool_ids, instance_path)
             except (OSError, RuntimeError, UnicodeError, ValueError) as exc:
-                try:
-                    _restore_profile_toolsets(instance_path, profile_toolsets, profile_settings_existed)
-                except (OSError, RuntimeError, UnicodeError, ValueError) as rollback_exc:
-                    raise ToolSpaceProfileUpdateError(
-                        f"Could not enable '{resolved_space.slug}' in profile '{target_profile}', and restoring "
-                        f"the previous profile tool settings also failed: {rollback_exc}"
-                    ) from rollback_exc
                 raise ToolSpaceProfileUpdateError(
                     f"Could not enable '{resolved_space.slug}' in profile '{target_profile}': {exc}"
                 ) from exc
@@ -715,13 +690,6 @@ def remove_tool_space(
                 instance_path,
             )
         except (OSError, RuntimeError, UnicodeError, ValueError) as exc:
-            try:
-                _restore_profile_toolsets(instance_path, profile_toolsets, profile_settings_existed)
-            except (OSError, RuntimeError, UnicodeError, ValueError) as rollback_exc:
-                raise ToolSpaceProfileUpdateError(
-                    f"Could not update profile tool access while removing '{validated_slug}', and restoring the "
-                    f"previous profile tool settings also failed: {rollback_exc}"
-                ) from rollback_exc
             raise ToolSpaceProfileUpdateError(
                 f"Could not remove '{validated_slug}' because its profile tool access could not be updated: {exc}"
             ) from exc
@@ -744,7 +712,7 @@ def remove_tool_space(
     )
 
 
-def format_space_tool_listing(space: ResolvedInstalledToolSpace | InstalledToolSpace) -> str:
+def format_space_tool_listing(space: InstalledToolSpace) -> str:
     """Format one installed or resolved Space for terminal output."""
     lines = [
         f"{space.slug} ({space.alias})",

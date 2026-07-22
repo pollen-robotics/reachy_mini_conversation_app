@@ -13,8 +13,8 @@ from fastapi.testclient import TestClient
 from reachy_mini.apps.jsonrpc_server import JsonRpcServer
 from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY, config
 from reachy_mini_conversation_app.tool_spaces import (
+    InstalledToolSpace,
     InstalledToolSpaceTool,
-    ResolvedInstalledToolSpace,
     InstalledToolSpacesManifest,
     read_installed_tool_spaces,
     write_installed_tool_spaces,
@@ -33,8 +33,8 @@ SPACE_ALIAS = "example_search_tool"
 TOOL_NAME = f"{SPACE_ALIAS}__search_web"
 
 
-def _resolved_space() -> ResolvedInstalledToolSpace:
-    return ResolvedInstalledToolSpace(
+def _resolved_space() -> InstalledToolSpace:
+    return InstalledToolSpace(
         slug=SPACE_SLUG,
         alias=SPACE_ALIAS,
         mcp_url="https://example-search-tool.hf.space/gradio_api/mcp/",
