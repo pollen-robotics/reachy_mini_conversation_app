@@ -72,7 +72,7 @@ def choose_idle_tool_call(
 ) -> tuple[str, dict[str, Any]] | None:
     """Choose a weighted idle tool call from the tools available to the session."""
     available = set(available_tool_names)
-    registry = core_tools.ALL_TOOLS if tool_registry is None else tool_registry
+    registry = core_tools.get_tools() if tool_registry is None else tool_registry
     candidates = [
         (tool.name, candidate)
         for candidate in _IDLE_TOOL_CANDIDATES

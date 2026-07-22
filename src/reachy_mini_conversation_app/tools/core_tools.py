@@ -5,6 +5,7 @@ import asyncio
 import inspect
 import logging
 import importlib
+import threading
 import importlib.util
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Callable, ClassVar, Sequence, TypedDict
@@ -94,6 +95,8 @@ _TOOLS_SIGNATURE: tuple[str, str, str | None, bool, str | None] | None = None
 _TOOLS_INSTANCE_PATH: str | Path | None = None
 _LOADED_TOOL_CLASS_CACHE: Dict[tuple[str, str], List[type[Tool]]] = {}
 _REMOTE_TOOL_RETRY_DELAY_S = 0.25
+_TOOLS_LOCK = threading.RLock()
+_EXTERNAL_TOOL_MODULE_NAMESPACE = "reachy_mini_conversation_app._external_tools"
 
 
 class RemoteMcpTool(Tool):
@@ -250,7 +253,7 @@ def _try_load_tool_classes(
             "file",
             *_load_cached_tool_classes(
                 _cache_key_for_file(tool_file),
-                lambda: _load_module_from_file(tool_name, tool_file),
+                lambda: _load_module_from_file(f"{_EXTERNAL_TOOL_MODULE_NAMESPACE}.{tool_name}", tool_file),
             ),
         )
 
@@ -413,44 +416,53 @@ def initialize_tools(instance_path: str | Path | None = None, *, force: bool = F
     """
     global ALL_TOOLS, ALL_TOOL_SPECS, _TOOLS_INITIALIZED, _TOOLS_SIGNATURE, _TOOLS_INSTANCE_PATH
 
-    if force:
-        _LOADED_TOOL_CLASS_CACHE.clear()
-        _LOADED_REMOTE_TOOL_CACHE.clear()
+    with _TOOLS_LOCK:
+        if force:
+            _LOADED_TOOL_CLASS_CACHE.clear()
+            _LOADED_REMOTE_TOOL_CACHE.clear()
 
-    if instance_path is not None:
-        _TOOLS_INSTANCE_PATH = instance_path
-    effective_instance_path = _TOOLS_INSTANCE_PATH
-    signature = _tool_registry_signature(effective_instance_path)
+        if instance_path is not None:
+            _TOOLS_INSTANCE_PATH = instance_path
+        effective_instance_path = _TOOLS_INSTANCE_PATH
+        signature = _tool_registry_signature(effective_instance_path)
 
-    if _TOOLS_INITIALIZED and not force and signature == _TOOLS_SIGNATURE:
-        logger.debug("Tools already initialized for active profile; skipping reinitialization.")
-        return
-    if _TOOLS_INITIALIZED:
-        logger.info("Reloading tool registry for active profile/configuration change.")
+        if _TOOLS_INITIALIZED and not force and signature == _TOOLS_SIGNATURE:
+            logger.debug("Tools already initialized for active profile; skipping reinitialization.")
+            return
+        if _TOOLS_INITIALIZED:
+            logger.info("Reloading tool registry for active profile/configuration change.")
 
-    tool_names = _read_profile_tool_names(effective_instance_path)
-    remote_tools = _resolve_remote_tools(tool_names, effective_instance_path)
-    remote_tool_names = {tool.name for tool in remote_tools}
-    loaded_tool_classes = _load_enabled_tools(tool_names, remote_tool_names)
+        tool_names = _read_profile_tool_names(effective_instance_path)
+        remote_tools = _resolve_remote_tools(tool_names, effective_instance_path)
+        remote_tool_names = {tool.name for tool in remote_tools}
+        loaded_tool_classes = _load_enabled_tools(tool_names, remote_tool_names)
+        tools = _build_tool_registry(
+            loaded_tool_classes,
+            extra_tools=remote_tools,
+        )
+        tool_specs = [tool.spec() for tool in tools.values()]
+        ALL_TOOLS = tools
+        ALL_TOOL_SPECS = tool_specs
+        _TOOLS_INITIALIZED = True
+        _TOOLS_SIGNATURE = signature
 
-    ALL_TOOLS = _build_tool_registry(
-        loaded_tool_classes,
-        extra_tools=remote_tools,
-    )
-    ALL_TOOL_SPECS = [tool.spec() for tool in ALL_TOOLS.values()]
-
-    for tool_name, tool in ALL_TOOLS.items():
-        logger.info("tool registered: %s - %s", tool_name, tool.description)
-
-    _TOOLS_INITIALIZED = True
-    _TOOLS_SIGNATURE = signature
+        for tool_name, tool in tools.items():
+            logger.info("tool registered: %s - %s", tool_name, tool.description)
 
 
 def get_tool_specs(exclusion_list: list[str] | None = None) -> list[ToolSpec]:
     """Get tool specs, optionally excluding some tools."""
     initialize_tools()
     exclusion_list = exclusion_list or []
-    return [spec for spec in ALL_TOOL_SPECS if spec["name"] not in exclusion_list]
+    with _TOOLS_LOCK:
+        return [spec for spec in ALL_TOOL_SPECS if spec["name"] not in exclusion_list]
+
+
+def get_tools() -> dict[str, Tool]:
+    """Return a shallow snapshot of the active tool registry."""
+    initialize_tools()
+    with _TOOLS_LOCK:
+        return dict(ALL_TOOLS)
 
 
 # Dispatcher
@@ -464,8 +476,7 @@ def _safe_load_obj(args_json: str) -> Dict[str, Any]:
 
 
 async def _dispatch_tool_call(tool_name: str, args: Dict[str, Any], deps: ToolDependencies) -> Dict[str, Any]:
-    initialize_tools()
-    tool = ALL_TOOLS.get(tool_name)
+    tool = get_tools().get(tool_name)
     if not tool:
         return {"error": f"unknown tool: {tool_name}"}
     try:

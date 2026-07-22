@@ -1,7 +1,10 @@
 import sys
+import json
 import importlib
+import threading
 from types import ModuleType
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -12,12 +15,10 @@ from reachy_mini_conversation_app.profile_store import write_profile
 def _reload_core_tools() -> ModuleType:
     """Reload core_tools after config object has been patched."""
     for module_name in list(sys.modules):
-        if module_name.startswith("reachy_mini_conversation_app.tools."):
+        if module_name.startswith(
+            ("reachy_mini_conversation_app.tools.", "reachy_mini_conversation_app._external_tools.")
+        ):
             sys.modules.pop(module_name, None)
-    # External file-loaded modules are registered by bare tool name.
-    sys.modules.pop("ext_ping", None)
-    sys.modules.pop("ext_dup_a", None)
-    sys.modules.pop("ext_dup_b", None)
 
     sys.modules.pop("reachy_mini_conversation_app.tools.core_tools", None)
     core_tools_mod = importlib.import_module("reachy_mini_conversation_app.tools.core_tools")
@@ -86,7 +87,7 @@ def test_external_tools_can_be_loaded_without_external_profile(
     external_tools_root = tmp_path / "external_tools"
     external_tools_root.mkdir(parents=True)
 
-    (external_tools_root / "ext_ping.py").write_text(
+    (external_tools_root / "json.py").write_text(
         "\n".join(
             [
                 "from typing import Any, Dict",
@@ -109,10 +110,13 @@ def test_external_tools_can_be_loaded_without_external_profile(
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", config_mod.DEFAULT_PROFILES_DIRECTORY)
     monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", external_tools_root)
     monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", True)
+    monkeypatch.setitem(sys.modules, "json", json)
 
     core_tools_mod = _reload_core_tools()
 
+    assert sys.modules["json"] is json
     assert "ext_ping" in core_tools_mod.ALL_TOOLS
+    assert "reachy_mini_conversation_app._external_tools.json" in sys.modules
 
 
 def test_external_tools_fail_on_duplicate_tool_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -197,3 +201,49 @@ def test_forced_tool_registry_reload_does_not_duplicate_shared_tool(
     core_tools_mod.initialize_tools(force=True)
 
     assert "sweep_look" in core_tools_mod.ALL_TOOLS
+
+
+def test_tool_registry_reads_wait_for_forced_reload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec readers should observe one complete registry generation during reload."""
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "default")
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", config_mod.DEFAULT_PROFILES_DIRECTORY)
+    monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
+    monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
+    core_tools_mod = _reload_core_tools()
+
+    reload_entered = threading.Event()
+    release_reload = threading.Event()
+    read_started = threading.Event()
+    read_tool_names = core_tools_mod._read_profile_tool_names
+
+    def pause_profile_read(instance_path: str | Path | None) -> list[str]:
+        if not reload_entered.is_set():
+            reload_entered.set()
+            assert release_reload.wait(timeout=1.0)
+        return read_tool_names(instance_path)
+
+    def read_specs() -> list[dict[str, object]]:
+        read_started.set()
+        return core_tools_mod.get_tool_specs()
+
+    monkeypatch.setattr(core_tools_mod, "_read_profile_tool_names", pause_profile_read)
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "mars_rover")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        reload_future = executor.submit(core_tools_mod.initialize_tools, force=True)
+        try:
+            assert reload_entered.wait(timeout=1.0)
+            read_future = executor.submit(read_specs)
+            assert read_started.wait(timeout=1.0)
+            with pytest.raises(TimeoutError):
+                read_future.result(timeout=0.1)
+        finally:
+            release_reload.set()
+        reload_future.result(timeout=1.0)
+        spec_names = {spec["name"] for spec in read_future.result(timeout=1.0)}
+
+    assert "move_head" in spec_names
+    assert "sweep_look" not in spec_names
+    assert spec_names == set(core_tools_mod.get_tools())

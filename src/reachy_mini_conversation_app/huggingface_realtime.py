@@ -676,7 +676,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             if isinstance(completed_tool.id, str):
                 self._in_flight_tool_calls.discard(completed_tool.id)
 
-            tool = core_tools.ALL_TOOLS.get(completed_tool.tool_name)
+            tool = core_tools.get_tools().get(completed_tool.tool_name)
             # Always surface errors, skip the spoken follow-up for tools that opt out.
             if model_result_submitted and (completed_tool.error is not None or tool is None or tool.needs_response):
                 self._tool_batch_needs_response = True
