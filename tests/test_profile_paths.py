@@ -48,7 +48,7 @@ def _git_tracked_files(project_root: Path) -> list[Path]:
     """Return git-tracked files that still exist in the working tree."""
     try:
         result = subprocess.run(
-            ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+            ["git", "ls-files", "--cached"],
             cwd=project_root,
             check=True,
             capture_output=True,
