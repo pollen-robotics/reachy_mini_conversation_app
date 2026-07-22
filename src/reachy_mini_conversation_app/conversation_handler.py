@@ -34,6 +34,7 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     last_activity_time: float
     last_idle_behavior_time: float
     _activity_observer: Callable[[str], None] | None = None
+    _transcript_observer: Callable[[str, str, bool], None] | None = None
 
     def __init__(self) -> None:
         """Initialize the stream handler and shared idle/activity tracking."""
@@ -44,6 +45,19 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     def set_activity_observer(self, observer: Callable[[str], None] | None) -> None:
         """Attach or detach an activity observer. Pass None to clear."""
         self._activity_observer = observer
+
+    def set_transcript_observer(self, observer: Callable[[str, str, bool], None] | None) -> None:
+        """Attach/detach a transcript observer, called (role, text, final)."""
+        self._transcript_observer = observer
+
+    def _emit_transcript(self, role: str, text: str, final: bool = True) -> None:
+        """Forward one transcript chunk to the observer, if attached."""
+        observer = self._transcript_observer
+        if observer is not None and text:
+            try:
+                observer(role, text, final)
+            except Exception:
+                logger.debug("transcript observer raised (ignored)", exc_info=True)
 
     def _mark_activity(self, reason: str) -> None:
         """Record non-idle conversation activity for the idle timer."""
@@ -132,4 +146,14 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     @abstractmethod
     async def change_voice(self, voice: str) -> str:
         """Change the current voice."""
+        ...
+
+    @abstractmethod
+    async def say(self, text: str) -> None:
+        """Make the robot speak ``text`` now (injected turn; not verbatim TTS).
+
+        The backend is speech-to-speech, so ``text`` is an instruction the
+        model voices, not a guaranteed-literal string. Raises if no session is
+        open.
+        """
         ...

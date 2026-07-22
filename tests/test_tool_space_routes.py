@@ -1,7 +1,8 @@
-"""Tests for Hugging Face Space and profile-tool management routes."""
+"""Tests for Hugging Face Space and profile-tool management methods."""
 
 import asyncio
 import threading
+from typing import Any
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -9,6 +10,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from reachy_mini.apps.jsonrpc_server import JsonRpcServer
 from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY, config
 from reachy_mini_conversation_app.tool_spaces import (
     InstalledToolSpaceTool,
@@ -22,8 +24,8 @@ from reachy_mini_conversation_app.profile_toolsets import (
     read_profile_tool_names,
     read_profile_tool_override,
 )
-from reachy_mini_conversation_app.tool_space_routes import mount_tool_space_routes
-from reachy_mini_conversation_app.profile_tool_routes import mount_profile_tool_routes
+from reachy_mini_conversation_app.tool_space_routes import register_tool_space_methods
+from reachy_mini_conversation_app.profile_tool_routes import register_profile_tool_methods
 
 
 SPACE_SLUG = "example/search-tool"
@@ -70,26 +72,33 @@ def _configure_profiles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tupl
     return instance_path, profiles_root
 
 
-def _mount_routes(
+def _rpc_call(client: TestClient, method: str, params: dict[str, object] | None = None) -> dict[str, Any]:
+    with client.websocket_connect("/rpc") as websocket:
+        websocket.send_json({"jsonrpc": "2.0", "id": "1", "method": method, "params": params or {}})
+        response: dict[str, Any] = websocket.receive_json()
+        return response
+
+
+def _mount_rpc(
     instance_path: Path,
     get_loop: MagicMock,
     restart_conversation: AsyncMock,
 ) -> TestClient:
     app = FastAPI()
-    mount_tool_space_routes(
-        app,
+    rpc = JsonRpcServer()
+    register_tool_space_methods(
+        rpc,
         get_loop,
         restart_conversation,
         instance_path=instance_path,
-        api_prefix="/api/v1",
     )
-    mount_profile_tool_routes(
-        app,
+    register_profile_tool_methods(
+        rpc,
         get_loop,
         restart_conversation,
         instance_path=instance_path,
-        api_prefix="/api/v1",
     )
+    rpc.mount(app)
     return TestClient(app)
 
 
@@ -103,12 +112,11 @@ def test_web_install_adds_global_inventory_without_enabling_a_profile(
     initialize_tools = MagicMock()
     monkeypatch.setattr("reachy_mini_conversation_app.tool_settings.initialize_tools", initialize_tools)
     restart_conversation = AsyncMock()
-    client = _mount_routes(instance_path, MagicMock(return_value=None), restart_conversation)
+    client = _mount_rpc(instance_path, MagicMock(return_value=None), restart_conversation)
 
-    response = client.post("/api/v1/tool_spaces", json={"slug": SPACE_SLUG})
+    response = _rpc_call(client, "tool_spaces.add", {"slug": SPACE_SLUG})
 
-    assert response.status_code == 200
-    added = response.json()
+    added = response["result"]
     assert added["spaces"] == [{"slug": SPACE_SLUG, "private": False, "tool_count": 1}]
     assert added["editable"] is True
     assert "ready to assign to personalities" in added["message"]
@@ -117,11 +125,10 @@ def test_web_install_adds_global_inventory_without_enabling_a_profile(
     initialize_tools.assert_not_called()
     restart_conversation.assert_not_called()
 
-    profile_response = client.get("/api/v1/profile_tools", params={"profile": "default"})
-    profile_tools = profile_response.json()
+    profile_tools = _rpc_call(client, "profile_tools.get", {"profile": "default"})["result"]
     assert profile_tools["enabled_tools"] == ["dance"]
     assert TOOL_NAME in {tool["id"] for tool in profile_tools["available_tools"]}
-    assert client.get("/api/v1/tool_spaces").json() == {"spaces": added["spaces"], "editable": True}
+    assert _rpc_call(client, "tool_spaces.list")["result"] == {"spaces": added["spaces"], "editable": True}
 
 
 def test_preinstalled_space_tools_are_available_to_every_profile(
@@ -132,12 +139,11 @@ def test_preinstalled_space_tools_are_available_to_every_profile(
     monkeypatch.setattr(config, "INSTANCE_PATH", tmp_path)
     monkeypatch.setattr(config, "PROFILES_DIRECTORY", DEFAULT_PROFILES_DIRECTORY)
     monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "mars_rover")
-    client = _mount_routes(tmp_path, MagicMock(return_value=None), AsyncMock())
+    client = _mount_rpc(tmp_path, MagicMock(return_value=None), AsyncMock())
 
-    response = client.get("/api/v1/profile_tools", params={"profile": "mars_rover"})
+    response = _rpc_call(client, "profile_tools.get", {"profile": "mars_rover"})
 
-    assert response.status_code == 200
-    payload = response.json()
+    payload = response["result"]
     available_ids = {tool["id"] for tool in payload["available_tools"]}
     preinstalled_tool_ids = {
         "pollen_robotics_reachy_mini_search_tool__search_web",
@@ -148,7 +154,7 @@ def test_preinstalled_space_tools_are_available_to_every_profile(
     assert preinstalled_tool_ids.isdisjoint(payload["enabled_tools"])
 
 
-def test_profile_tools_put_and_delete_control_one_profile(
+def test_profile_tools_save_and_reset_control_one_profile(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -157,16 +163,16 @@ def test_profile_tools_put_and_delete_control_one_profile(
     guide_profile_text = (profiles_root / "guide" / "profile.md").read_text(encoding="utf-8")
     initialize_tools = MagicMock()
     monkeypatch.setattr("reachy_mini_conversation_app.tool_settings.initialize_tools", initialize_tools)
-    client = _mount_routes(instance_path, MagicMock(return_value=None), AsyncMock())
-    assert client.post("/api/v1/tool_spaces", json={"slug": SPACE_SLUG}).status_code == 200
+    client = _mount_rpc(instance_path, MagicMock(return_value=None), AsyncMock())
+    assert "result" in _rpc_call(client, "tool_spaces.add", {"slug": SPACE_SLUG})
 
-    update_response = client.put(
-        "/api/v1/profile_tools",
-        json={"profile": "guide", "enabled_tools": ["camera", TOOL_NAME, TOOL_NAME]},
+    update_response = _rpc_call(
+        client,
+        "profile_tools.save",
+        {"profile": "guide", "enabled_tools": ["camera", TOOL_NAME, TOOL_NAME]},
     )
 
-    assert update_response.status_code == 200
-    updated = update_response.json()
+    updated = update_response["result"]
     assert updated["profile"] == "guide"
     assert updated["is_active"] is False
     assert updated["overridden"] is True
@@ -176,10 +182,9 @@ def test_profile_tools_put_and_delete_control_one_profile(
     assert (profiles_root / "guide" / "profile.md").read_text(encoding="utf-8") == guide_profile_text
     initialize_tools.assert_not_called()
 
-    reset_response = client.delete("/api/v1/profile_tools", params={"profile": "guide"})
+    reset_response = _rpc_call(client, "profile_tools.reset", {"profile": "guide"})
 
-    assert reset_response.status_code == 200
-    reset = reset_response.json()
+    reset = reset_response["result"]
     assert reset["overridden"] is False
     assert reset["enabled_tools"] == ["camera"]
     assert "next time this personality is selected" in reset["message"]
@@ -195,28 +200,23 @@ def test_remove_tool_space_disables_its_tools_in_every_profile(
     instance_path, _ = _configure_profiles(tmp_path, monkeypatch)
     initialize_tools = MagicMock()
     monkeypatch.setattr("reachy_mini_conversation_app.tool_settings.initialize_tools", initialize_tools)
-    client = _mount_routes(instance_path, MagicMock(return_value=None), AsyncMock())
-    assert client.post("/api/v1/tool_spaces", json={"slug": SPACE_SLUG}).status_code == 200
-    assert (
-        client.put(
-            "/api/v1/profile_tools",
-            json={"profile": "default", "enabled_tools": ["dance", TOOL_NAME]},
-        ).status_code
-        == 200
+    client = _mount_rpc(instance_path, MagicMock(return_value=None), AsyncMock())
+    assert "result" in _rpc_call(client, "tool_spaces.add", {"slug": SPACE_SLUG})
+    assert "result" in _rpc_call(
+        client,
+        "profile_tools.save",
+        {"profile": "default", "enabled_tools": ["dance", TOOL_NAME]},
     )
-    assert (
-        client.put(
-            "/api/v1/profile_tools",
-            json={"profile": "guide", "enabled_tools": ["camera", TOOL_NAME]},
-        ).status_code
-        == 200
+    assert "result" in _rpc_call(
+        client,
+        "profile_tools.save",
+        {"profile": "guide", "enabled_tools": ["camera", TOOL_NAME]},
     )
     initialize_tools.reset_mock()
 
-    remove_response = client.delete("/api/v1/tool_spaces", params={"slug": SPACE_SLUG})
+    remove_response = _rpc_call(client, "tool_spaces.remove", {"slug": SPACE_SLUG})
 
-    assert remove_response.status_code == 200
-    removed = remove_response.json()
+    removed = remove_response["result"]
     assert removed["spaces"] == []
     assert "Disabled 2 tools across personalities" in removed["message"]
     assert read_profile_tool_names("default", instance_path) == ["dance"]
@@ -226,21 +226,20 @@ def test_remove_tool_space_disables_its_tools_in_every_profile(
 
 
 def test_add_tool_space_rejects_invalid_slug_without_network_access(tmp_path: Path) -> None:
-    """The UI route should only accept Hugging Face owner/Space slugs."""
+    """The UI method should only accept Hugging Face owner/Space slugs."""
     app = FastAPI()
-    mount_tool_space_routes(
-        app,
+    rpc = JsonRpcServer()
+    register_tool_space_methods(
+        rpc,
         lambda: None,
         AsyncMock(),
         instance_path=tmp_path,
-        api_prefix="/api/v1",
     )
+    rpc.mount(app)
 
-    response = TestClient(app).post("/api/v1/tool_spaces", json={"slug": "https://example.com/mcp"})
+    response = _rpc_call(TestClient(app), "tool_spaces.add", {"slug": "https://example.com/mcp"})
 
-    assert response.status_code == 400
-    assert set(response.json()) == {"error", "detail"}
-    assert response.json()["error"] == "invalid_tool_space_slug"
+    assert response["error"]["data"]["reason"] == "invalid_tool_space_slug"
 
 
 def test_locked_mode_exposes_inventory_but_rejects_tool_edits(
@@ -251,20 +250,19 @@ def test_locked_mode_exposes_inventory_but_rejects_tool_edits(
     instance_path, _ = _configure_profiles(tmp_path, monkeypatch)
     monkeypatch.setattr("reachy_mini_conversation_app.tool_space_routes.LOCKED_PROFILE", "default")
     monkeypatch.setattr("reachy_mini_conversation_app.profile_tool_routes.LOCKED_PROFILE", "default")
-    client = _mount_routes(instance_path, MagicMock(return_value=None), AsyncMock())
+    client = _mount_rpc(instance_path, MagicMock(return_value=None), AsyncMock())
 
-    assert client.get("/api/v1/tool_spaces").json()["editable"] is False
-    assert client.get("/api/v1/profile_tools", params={"profile": "default"}).json()["editable"] is False
-    assert client.post("/api/v1/tool_spaces", json={"slug": SPACE_SLUG}).status_code == 403
-    assert client.delete("/api/v1/tool_spaces", params={"slug": SPACE_SLUG}).status_code == 403
+    assert _rpc_call(client, "tool_spaces.list")["result"]["editable"] is False
+    assert _rpc_call(client, "profile_tools.get", {"profile": "default"})["result"]["editable"] is False
+    assert _rpc_call(client, "tool_spaces.add", {"slug": SPACE_SLUG})["error"]["data"]["reason"] == "profile_locked"
+    assert _rpc_call(client, "tool_spaces.remove", {"slug": SPACE_SLUG})["error"]["data"]["reason"] == "profile_locked"
     assert (
-        client.put(
-            "/api/v1/profile_tools",
-            json={"profile": "default", "enabled_tools": []},
-        ).status_code
-        == 403
+        _rpc_call(client, "profile_tools.save", {"profile": "default", "enabled_tools": []})["error"]["data"]["reason"]
+        == "profile_locked"
     )
-    assert client.delete("/api/v1/profile_tools", params={"profile": "default"}).status_code == 403
+    assert (
+        _rpc_call(client, "profile_tools.reset", {"profile": "default"})["error"]["data"]["reason"] == "profile_locked"
+    )
 
 
 def test_active_profile_tool_update_restarts_a_running_conversation(
@@ -285,30 +283,30 @@ def test_active_profile_tool_update_restarts_a_running_conversation(
 
     try:
         app = FastAPI()
-        mount_tool_space_routes(
-            app,
+        rpc = JsonRpcServer()
+        register_tool_space_methods(
+            rpc,
             lambda: conversation_loop,
             _restart_conversation,
             instance_path=instance_path,
-            api_prefix="/api/v1",
         )
-        mount_profile_tool_routes(
-            app,
+        register_profile_tool_methods(
+            rpc,
             lambda: conversation_loop,
             _restart_conversation,
             instance_path=instance_path,
-            api_prefix="/api/v1",
         )
+        rpc.mount(app)
         client = TestClient(app)
-        assert client.post("/api/v1/tool_spaces", json={"slug": SPACE_SLUG}).status_code == 200
+        assert "result" in _rpc_call(client, "tool_spaces.add", {"slug": SPACE_SLUG})
 
-        response = client.put(
-            "/api/v1/profile_tools",
-            json={"profile": "default", "enabled_tools": ["dance", TOOL_NAME]},
+        response = _rpc_call(
+            client,
+            "profile_tools.save",
+            {"profile": "default", "enabled_tools": ["dance", TOOL_NAME]},
         )
 
-        assert response.status_code == 200
-        assert "Reconnecting the conversation" in response.json()["message"]
+        assert "Reconnecting the conversation" in response["result"]["message"]
         assert restart_called.wait(timeout=1.0)
     finally:
         conversation_loop.call_soon_threadsafe(conversation_loop.stop)
@@ -326,13 +324,13 @@ def test_saved_tool_change_reports_success_when_runtime_reload_fails(
         "reachy_mini_conversation_app.tool_settings.initialize_tools",
         MagicMock(side_effect=RuntimeError("reload failed")),
     )
-    client = _mount_routes(instance_path, MagicMock(return_value=None), AsyncMock())
+    client = _mount_rpc(instance_path, MagicMock(return_value=None), AsyncMock())
 
-    response = client.put(
-        "/api/v1/profile_tools",
-        json={"profile": "default", "enabled_tools": ["dance"]},
+    response = _rpc_call(
+        client,
+        "profile_tools.save",
+        {"profile": "default", "enabled_tools": ["dance"]},
     )
 
-    assert response.status_code == 200
-    assert "Restart the conversation app" in response.json()["message"]
+    assert "Restart the conversation app" in response["result"]["message"]
     assert read_profile_tool_override("default", instance_path) == ["dance"]

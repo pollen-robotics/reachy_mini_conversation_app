@@ -2,12 +2,12 @@
 
 import asyncio
 import logging
+from typing import NoReturn
 from pathlib import Path
 from collections.abc import Callable, Coroutine
 from concurrent.futures import Future
 
-from fastapi.responses import JSONResponse
-
+from reachy_mini.io.jsonrpc import JsonRpcError
 from reachy_mini_conversation_app.tools.core_tools import initialize_tools
 
 
@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 RestartCallback = Callable[[str], Coroutine[None, None, None]]
 
 
-def error_response(error: str, detail: str, status_code: int) -> JSONResponse:
-    """Return the common tool-settings error payload."""
-    return JSONResponse({"error": error, "detail": detail}, status_code=status_code)
+def raise_tool_settings_error(reason: str, detail: str) -> NoReturn:
+    """Raise a stable tool-settings error with user-facing detail."""
+    raise JsonRpcError(detail, reason=reason, data={"detail": detail})
 
 
 def _log_restart_completion(future: Future[None]) -> None:

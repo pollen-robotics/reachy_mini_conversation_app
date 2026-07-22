@@ -1,14 +1,12 @@
-"""FastAPI routes for managing installed Hugging Face Space tools."""
+"""JSON-RPC methods for managing installed Hugging Face Space tools."""
 
 import asyncio
 import logging
+from typing import Any
 from pathlib import Path
 from collections.abc import Callable
 
-from fastapi import Query, FastAPI
-from pydantic import BaseModel
-from fastapi.responses import JSONResponse
-
+from reachy_mini.apps.jsonrpc_server import JsonRpcServer
 from reachy_mini_conversation_app.config import LOCKED_PROFILE, config
 from reachy_mini_conversation_app.tool_spaces import (
     ToolSpaceNotInstalledError,
@@ -20,17 +18,15 @@ from reachy_mini_conversation_app.tool_spaces import (
     read_installed_tool_spaces,
 )
 from reachy_mini_conversation_app.profile_store import canonical_profile_name
-from reachy_mini_conversation_app.tool_settings import RestartCallback, error_response, apply_tool_change
+from reachy_mini_conversation_app.tool_settings import (
+    RestartCallback,
+    apply_tool_change,
+    raise_tool_settings_error,
+)
 from reachy_mini_conversation_app.profile_toolsets import read_profile_tool_names
 
 
 logger = logging.getLogger(__name__)
-
-
-class AddToolSpacePayload(BaseModel):
-    """Body of the add-tool-Space endpoint."""
-
-    slug: str
 
 
 def _space_settings_payload(manifest: InstalledToolSpacesManifest) -> dict[str, object]:
@@ -51,58 +47,63 @@ def _error_detail(error: BaseException) -> str:
     return str(error).strip() or type(error).__name__
 
 
-def mount_tool_space_routes(
-    app: FastAPI,
+def _required_slug(params: dict[str, Any]) -> str:
+    slug = params.get("slug")
+    if not isinstance(slug, str):
+        raise_tool_settings_error("invalid_tool_space_slug", "Enter a Space in owner/name format.")
+    return slug
+
+
+def register_tool_space_methods(
+    rpc: JsonRpcServer,
     get_loop: Callable[[], asyncio.AbstractEventLoop | None],
     restart_conversation: RestartCallback,
     *,
     instance_path: str | Path | None,
-    api_prefix: str | None = None,
 ) -> None:
-    """Register Hugging Face Space tool-management endpoints on a FastAPI app."""
-    route_path = f"{(api_prefix or '').rstrip('/')}/tool_spaces"
+    """Register Hugging Face Space tool-management methods."""
 
-    @app.get(route_path)
-    async def _list_tool_spaces() -> JSONResponse:
+    async def _list_tool_spaces(_params: dict[str, Any]) -> dict[str, object]:
         try:
             manifest = await asyncio.to_thread(read_installed_tool_spaces, instance_path)
         except Exception as exc:
             logger.exception("Failed to list installed tool Spaces")
-            return error_response("tool_spaces_unavailable", _error_detail(exc), 500)
-        return JSONResponse(_space_settings_payload(manifest))
+            raise_tool_settings_error("tool_spaces_unavailable", _error_detail(exc))
+        return _space_settings_payload(manifest)
 
-    @app.post(route_path)
-    async def _add_tool_space(payload: AddToolSpacePayload) -> JSONResponse:
+    async def _add_tool_space(params: dict[str, Any]) -> dict[str, object]:
         if LOCKED_PROFILE is not None:
-            return error_response("profile_locked", "Tool Space editing is locked.", 403)
+            raise_tool_settings_error("profile_locked", "Tool Space editing is locked.")
+        slug = _required_slug(params)
         try:
             result = await asyncio.to_thread(
                 install_tool_space,
-                payload.slug,
+                slug,
                 instance_path,
                 install_only=True,
             )
         except ToolSpaceAliasConflictError as exc:
             logger.warning("Tool Space alias conflict: %s", exc)
-            return error_response("tool_space_alias_conflict", _error_detail(exc), 409)
+            raise_tool_settings_error("tool_space_alias_conflict", _error_detail(exc))
         except ValueError as exc:
-            logger.warning("Invalid tool Space slug %r: %s", payload.slug, exc)
-            return error_response("invalid_tool_space_slug", _error_detail(exc), 400)
+            logger.warning("Invalid tool Space slug %r: %s", slug, exc)
+            raise_tool_settings_error("invalid_tool_space_slug", _error_detail(exc))
         except RuntimeError as exc:
-            logger.error("Failed to install tool Space %r: %s", payload.slug, exc)
-            return error_response("tool_space_install_failed", _error_detail(exc), 502)
+            logger.error("Failed to install tool Space %r: %s", slug, exc)
+            raise_tool_settings_error("tool_space_install_failed", _error_detail(exc))
         except Exception as exc:
-            logger.exception("Unexpected failure installing tool Space %r", payload.slug)
-            return error_response("tool_space_install_failed", _error_detail(exc), 500)
+            logger.exception("Unexpected failure installing tool Space %r", slug)
+            raise_tool_settings_error("tool_space_install_failed", _error_detail(exc))
 
         active_profile = canonical_profile_name(config.REACHY_MINI_CUSTOM_PROFILE)
         try:
-            active_tools = read_profile_tool_names(active_profile, instance_path)
+            active_tools = await asyncio.to_thread(read_profile_tool_names, active_profile, instance_path)
         except (FileNotFoundError, RuntimeError, ValueError) as exc:
             logger.warning("Installed Tool Space but could not inspect active profile %r: %s", active_profile, exc)
             active_tools = []
         apply_detail = (
-            apply_tool_change(
+            await asyncio.to_thread(
+                apply_tool_change,
                 instance_path,
                 get_loop,
                 restart_conversation,
@@ -120,39 +121,38 @@ def mount_tool_space_routes(
             "Choose which personalities can use them in Tool access. "
             f"{apply_detail}"
         )
-        return JSONResponse(
-            {
-                **_space_settings_payload(result.manifest),
-                "message": message,
-            }
-        )
+        return {
+            **_space_settings_payload(result.manifest),
+            "message": message,
+        }
 
-    @app.delete(route_path)
-    async def _remove_tool_space(slug: str = Query(...)) -> JSONResponse:
+    async def _remove_tool_space(params: dict[str, Any]) -> dict[str, object]:
         if LOCKED_PROFILE is not None:
-            return error_response("profile_locked", "Tool Space editing is locked.", 403)
+            raise_tool_settings_error("profile_locked", "Tool Space editing is locked.")
+        slug = _required_slug(params)
         try:
             result = await asyncio.to_thread(remove_tool_space, slug, instance_path)
             disabled_profiles = result.disabled_profiles
         except ToolSpaceNotInstalledError as exc:
             logger.warning("Cannot remove tool Space %r: %s", slug, exc)
-            return error_response("tool_space_not_installed", _error_detail(exc), 404)
+            raise_tool_settings_error("tool_space_not_installed", _error_detail(exc))
         except ToolSpaceProfileUpdateError as exc:
             logger.error("Failed to disable removed tool Space: %s", exc)
-            return error_response("profile_disable_failed", _error_detail(exc), 500)
+            raise_tool_settings_error("profile_disable_failed", _error_detail(exc))
         except ValueError as exc:
             logger.warning("Invalid tool Space slug %r: %s", slug, exc)
-            return error_response("invalid_tool_space_slug", _error_detail(exc), 400)
+            raise_tool_settings_error("invalid_tool_space_slug", _error_detail(exc))
         except RuntimeError as exc:
             logger.error("Failed to remove tool Space %r: %s", slug, exc)
-            return error_response("tool_space_remove_failed", _error_detail(exc), 500)
+            raise_tool_settings_error("tool_space_remove_failed", _error_detail(exc))
         except Exception as exc:
             logger.exception("Unexpected failure removing tool Space %r", slug)
-            return error_response("tool_space_remove_failed", _error_detail(exc), 500)
+            raise_tool_settings_error("tool_space_remove_failed", _error_detail(exc))
 
         active_profile = canonical_profile_name(config.REACHY_MINI_CUSTOM_PROFILE)
         apply_detail = (
-            apply_tool_change(
+            await asyncio.to_thread(
+                apply_tool_change,
                 instance_path,
                 get_loop,
                 restart_conversation,
@@ -168,9 +168,11 @@ def mount_tool_space_routes(
             f"Removed {result.removed_space.slug}. Disabled {disabled_tool_count} {tool_label} across personalities. "
             f"{apply_detail}"
         )
-        return JSONResponse(
-            {
-                **_space_settings_payload(result.manifest),
-                "message": message,
-            }
-        )
+        return {
+            **_space_settings_payload(result.manifest),
+            "message": message,
+        }
+
+    rpc.register("tool_spaces.list", _list_tool_spaces)
+    rpc.register("tool_spaces.add", _add_tool_space)
+    rpc.register("tool_spaces.remove", _remove_tool_space)

@@ -1,17 +1,15 @@
 /**
- * Talk view: conversation orb driven by the SSE activity stream.
+ * Talk view: conversation orb driven by the RPC activity stream.
  * Audio I/O runs entirely in Python; the orb doubles as the mic toggle.
  * Robot stays live, tapping the orb only mutes or unmutes the user's mic.
  */
 
-import { API_PREFIX, applyPersonality, getMicState, listPersonalities, setMicMuted } from "../api.js";
+import { applyPersonality, getMicState, listPersonalities, setMicMuted, subscribe } from "../api.js";
 import { ORB_STATES } from "../constants.js";
 import { createOrb, mapActivityToState } from "../orb.js";
 import { consumePendingApply } from "../pending-apply.js";
 import { setPersonality } from "../personality-badge.js";
 import { h, prettifyProfileName } from "../ui.js";
-
-const SSE_ENDPOINT = `${API_PREFIX}/conversation_events`;
 
 const CAPTION_BY_STATE = Object.freeze({
   [ORB_STATES.MUTED]: "Muted",
@@ -76,7 +74,7 @@ export async function mountTalkView({ outlet, signal }) {
       return;
     }
     if (signal.aborted) return;
-    // SSE "ready" will flip the orb to its resting state next tick.
+    // The activity subscription will flip the orb to its resting state next tick.
     caption.textContent = CAPTION_BY_STATE[ORB_STATES.CONNECTING];
     void refreshPersonalityState();
   } else {
@@ -91,11 +89,9 @@ export async function mountTalkView({ outlet, signal }) {
   orb.root.disabled = false;
   syncMicAria();
 
-  let everConnected = false;
   subscription = subscribeConversationEvents({
-    // Re-sync mic state on (re)connect: another tab may have toggled it.
+    // Re-sync mic state after subscribing: another tab may have toggled it.
     onReady: async () => {
-      everConnected = true;
       if (!togglePending) {
         try {
           muted = Boolean((await getMicState())?.muted);
@@ -113,11 +109,6 @@ export async function mountTalkView({ outlet, signal }) {
       const next = mapActivityToState(reason);
       if (next == null) return;
       orb.setState(next);
-    },
-    onError: () => {
-      // SSE auto-retries (e.g. 404 before routes exist), so a failure here is transient.
-      orb.setState(ORB_STATES.CONNECTING);
-      caption.textContent = everConnected ? "Reconnecting..." : CAPTION_BY_STATE[ORB_STATES.CONNECTING];
     },
   });
 
@@ -210,44 +201,24 @@ async function fetchPersonalityState() {
   }
 }
 
-const SSE_RECONNECT_MS = 2000;
-
-function subscribeConversationEvents({ onActivity, onReady, onError } = {}) {
+function subscribeConversationEvents({ onActivity, onReady } = {}) {
   if (typeof onActivity !== "function") {
     throw new TypeError("subscribeConversationEvents: onActivity is required");
   }
 
-  let source = null;
-  let retryTimer = null;
-  let closed = false;
+  // Activity reasons now arrive as conversation.activity notifications over the
+  // /rpc WebSocket; the shared client (api.js) owns reconnection.
+  const unsubscribe = subscribe("conversation.activity", (params) => {
+    const reason = (params?.reason || "").trim();
+    if (reason) onActivity(reason);
+  });
 
-  function connect() {
-    source = new EventSource(SSE_ENDPOINT);
-
-    source.addEventListener("activity", (ev) => {
-      const reason = (ev.data || "").trim();
-      if (reason) onActivity(reason);
-    });
-
-    source.addEventListener("ready", () => onReady());
-
-    source.addEventListener("error", (err) => {
-      onError(err);
-      // EventSource gives up on HTTP errors (e.g. 404 while the backend is
-      // still registering routes); recreate it until the route exists.
-      if (!closed && source.readyState === EventSource.CLOSED) {
-        retryTimer = setTimeout(connect, SSE_RECONNECT_MS);
-      }
-    });
-  }
-
-  connect();
+  // The socket connects lazily, so schedule the initial mic and orb sync.
+  if (typeof onReady === "function") Promise.resolve().then(onReady);
 
   return {
     close() {
-      closed = true;
-      if (retryTimer != null) clearTimeout(retryTimer);
-      source.close();
+      unsubscribe();
     },
   };
 }
