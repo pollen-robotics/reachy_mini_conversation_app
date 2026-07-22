@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from reachy_mini.apps.jsonrpc_server import JsonRpcServer
+import reachy_mini_conversation_app.personality as personality_mod
 from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY, config
 from reachy_mini_conversation_app.profile_store import (
     write_profile,
@@ -145,6 +146,49 @@ def test_editing_personality_preserves_tool_defaults_and_override(
     assert profile.instructions == "New instructions."
     assert profile.greeting == "Hello there."
     assert profile.default_tools == ("dance",)
+    assert read_profile_tool_override("user_personalities/guide", tmp_path) == ["camera"]
+
+
+def test_personality_save_rolls_back_profile_and_tool_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed combined save must restore both profile storage layers."""
+    monkeypatch.setattr(config, "INSTANCE_PATH", tmp_path)
+    profile_directory = tmp_path / "user_personalities" / "guide"
+    write_profile(
+        "guide",
+        profile_directory,
+        "Old instructions.",
+        ["dance"],
+        greeting="Old greeting.",
+        hidden=True,
+    )
+    write_profile_tool_override("user_personalities/guide", ["camera"], tmp_path)
+
+    def fail_after_override_write(profile: str, tool_names: list[str], instance_path: Path) -> Path:
+        write_profile_tool_override(profile, tool_names, instance_path)
+        raise OSError("override write failed")
+
+    monkeypatch.setattr(personality_mod, "write_profile_tool_override", fail_after_override_write)
+
+    response = _rpc_call(
+        _client(),
+        "personalities.save",
+        {
+            "name": "guide",
+            "instructions": "New instructions.",
+            "greeting": "New greeting.",
+            "tools_text": "go_to_sleep\n",
+            "overwrite": True,
+        },
+    )
+
+    assert response["error"]["data"]["reason"] == "profile_save_failed"
+    profile = read_profile_from_directory("guide", profile_directory)
+    assert profile.instructions == "Old instructions."
+    assert profile.greeting == "Old greeting."
+    assert profile.hidden is True
     assert read_profile_tool_override("user_personalities/guide", tmp_path) == ["camera"]
 
 

@@ -34,6 +34,7 @@ from reachy_mini_conversation_app.profile_toolsets import (
     write_profile_toolsets,
     read_profile_tool_names,
     get_profile_toolsets_path,
+    profile_toolsets_transaction,
     disable_profile_tools_by_prefix,
 )
 
@@ -607,7 +608,7 @@ def install_tool_space(
             ) from exc
 
     resolved_space = resolve_tool_space_sync(slug)
-    with _MANIFEST_LOCK:
+    with _MANIFEST_LOCK, profile_toolsets_transaction():
         manifest = read_installed_tool_spaces(instance_path)
         alias_conflict = next(
             (
@@ -690,7 +691,7 @@ def remove_tool_space(
 ) -> ToolSpaceRemovalResult:
     """Remove one installed Space and disable its tools in all profiles."""
     validated_slug = validate_space_slug(slug)
-    with _MANIFEST_LOCK:
+    with _MANIFEST_LOCK, profile_toolsets_transaction():
         manifest = read_installed_tool_spaces(instance_path)
         removed_space = next((space for space in manifest.spaces if space.slug == validated_slug), None)
         if removed_space is None:

@@ -29,7 +29,6 @@ from reachy_mini_conversation_app.profile_store import (
 )
 from reachy_mini_conversation_app.profile_toolsets import (
     read_profile_tool_override,
-    write_profile_tool_override,
 )
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 
@@ -212,9 +211,8 @@ class PersonalityOps:
                 voice,
                 greeting,
                 overwrite=overwrite,
+                enabled_tools=enabled_tools,
             )
-            if enabled_tools is not None:
-                write_profile_tool_override(value, enabled_tools, config.INSTANCE_PATH)
         except FileExistsError as exc:
             raise RouteError("profile_exists") from exc
         except ProfileFormatError as exc:

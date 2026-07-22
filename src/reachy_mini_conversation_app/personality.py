@@ -5,6 +5,7 @@ import shutil
 import logging
 from typing import Literal, TypedDict
 from pathlib import Path
+from collections.abc import Iterable
 
 from reachy_mini_conversation_app.config import (
     USER_PERSONALITIES_DIRNAME,
@@ -14,6 +15,7 @@ from reachy_mini_conversation_app.config import (
 )
 from reachy_mini_conversation_app.tool_spaces import read_installed_tool_spaces
 from reachy_mini_conversation_app.profile_store import (
+    PROFILE_FILENAME,
     DEFAULT_PROFILE_NAME,
     ProfileFormatError,
     write_profile,
@@ -22,7 +24,12 @@ from reachy_mini_conversation_app.profile_store import (
     read_packaged_default_profile,
 )
 from reachy_mini_conversation_app.profile_toolsets import (
+    read_profile_toolsets,
+    write_profile_toolsets,
+    get_profile_toolsets_path,
     clear_profile_tool_override,
+    write_profile_tool_override,
+    profile_toolsets_transaction,
 )
 from reachy_mini_conversation_app.tools.tool_constants import SystemTool
 
@@ -126,26 +133,68 @@ def save_user_personality(
     greeting: str | None = None,
     *,
     overwrite: bool = False,
+    enabled_tools: Iterable[str] | None = None,
 ) -> str:
-    """Save a custom personality while preserving its authored tool defaults."""
+    """Save a custom personality with an optional tool override."""
     profile_name = name.strip()
     if re.fullmatch(r"[a-zA-Z0-9_-]+", profile_name) is None:
         raise ValueError("Profile names may contain only letters, numbers, dashes, and underscores.")
 
     profile_directory = config.user_personalities_root() / profile_name
-    if profile_directory.exists() and not overwrite:
-        raise FileExistsError(f"Personality {profile_name!r} already exists.")
-    try:
-        default_tools = read_profile_from_directory(profile_name, profile_directory).default_tools
-    except FileNotFoundError:
-        default_tools = read_packaged_default_profile().default_tools
-    write_profile(
-        profile_name,
-        profile_directory,
-        instructions,
-        default_tools,
-        voice=voice or get_default_voice(),
-        greeting=greeting,
-        overwrite=overwrite,
-    )
-    return f"{USER_PERSONALITIES_DIRNAME}/{profile_name}"
+    profile_path = profile_directory / PROFILE_FILENAME
+    selection = f"{USER_PERSONALITIES_DIRNAME}/{profile_name}"
+    with profile_toolsets_transaction():
+        if profile_directory.exists() and not overwrite:
+            raise FileExistsError(f"Personality {profile_name!r} already exists.")
+        try:
+            previous_profile = read_profile_from_directory(profile_name, profile_directory)
+            default_tools = previous_profile.default_tools
+            hidden = previous_profile.hidden
+        except FileNotFoundError:
+            previous_profile = None
+            default_tools = read_packaged_default_profile().default_tools
+            hidden = False
+        toolsets_path = get_profile_toolsets_path(config.INSTANCE_PATH)
+        toolsets_existed = toolsets_path.is_file()
+        previous_toolsets = read_profile_toolsets(config.INSTANCE_PATH) if enabled_tools is not None else None
+
+        write_profile(
+            profile_name,
+            profile_directory,
+            instructions,
+            default_tools,
+            voice=voice or get_default_voice(),
+            greeting=greeting,
+            hidden=hidden,
+            overwrite=overwrite,
+        )
+        if enabled_tools is not None:
+            try:
+                write_profile_tool_override(selection, enabled_tools, config.INSTANCE_PATH)
+            except (OSError, RuntimeError):
+                try:
+                    if toolsets_existed and previous_toolsets is not None:
+                        write_profile_toolsets(config.INSTANCE_PATH, previous_toolsets)
+                    elif not toolsets_existed:
+                        toolsets_path.unlink(missing_ok=True)
+                except OSError as exc:
+                    logger.warning("Failed to restore profile toolsets after saving %r: %s", profile_name, exc)
+                try:
+                    if previous_profile is None:
+                        profile_path.unlink(missing_ok=True)
+                        if profile_directory.is_dir() and not any(profile_directory.iterdir()):
+                            profile_directory.rmdir()
+                    else:
+                        write_profile(
+                            profile_name,
+                            profile_directory,
+                            previous_profile.instructions,
+                            previous_profile.default_tools,
+                            voice=previous_profile.voice,
+                            greeting=previous_profile.greeting,
+                            hidden=previous_profile.hidden,
+                        )
+                except OSError as exc:
+                    logger.warning("Failed to restore profile %r after a partial save: %s", profile_name, exc)
+                raise
+    return selection

@@ -1,7 +1,9 @@
 """Tests for instance-local personality tool selections."""
 
 import json
+import threading
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -86,6 +88,45 @@ def test_enabling_an_authored_default_does_not_create_an_override(configured_pro
     assert enable_profile_tools("default", ["dance"], instance_path) == []
     assert read_profile_tool_override("default", instance_path) is None
     assert not get_profile_toolsets_path(instance_path).exists()
+
+
+def test_enabling_tools_does_not_overwrite_a_concurrent_profile_save(
+    configured_profiles: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A profile save that starts after an enable operation should be applied last."""
+    instance_path = configured_profiles
+    enable_read = threading.Event()
+    release_enable = threading.Event()
+    profile_save_started = threading.Event()
+    original_read = read_profile_tool_names
+
+    def paused_read(profile: str | None, path: str | Path | None) -> list[str]:
+        tool_names = original_read(profile, path)
+        enable_read.set()
+        if not release_enable.wait(timeout=1.0):
+            raise TimeoutError("Timed out waiting to continue tool enable")
+        return tool_names
+
+    def save_profile_tools() -> None:
+        profile_save_started.set()
+        write_profile_tool_override("guide", ["camera"], instance_path)
+
+    monkeypatch.setattr("reachy_mini_conversation_app.profile_toolsets.read_profile_tool_names", paused_read)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        enable_future = executor.submit(enable_profile_tools, "guide", ["new_space__search"], instance_path)
+        assert enable_read.wait(timeout=1.0)
+        profile_save_future = executor.submit(save_profile_tools)
+        try:
+            assert profile_save_started.wait(timeout=1.0)
+            with pytest.raises(TimeoutError):
+                profile_save_future.result(timeout=0.1)
+        finally:
+            release_enable.set()
+        assert enable_future.result(timeout=1.0) == ["new_space__search"]
+        profile_save_future.result(timeout=1.0)
+
+    assert read_profile_tool_override("guide", instance_path) == ["camera"]
 
 
 def test_disabling_space_tools_preserves_other_tools_for_every_profile(configured_profiles: Path) -> None:

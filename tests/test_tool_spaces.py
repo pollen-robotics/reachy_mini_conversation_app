@@ -1,9 +1,11 @@
 import sys
 import json
+import threading
 from types import SimpleNamespace
 from pathlib import Path
 from argparse import Namespace
 from unittest.mock import MagicMock
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 import pytest
@@ -525,6 +527,50 @@ def test_tool_space_install_manifest_failure_rolls_back_profile(
 
     assert read_profile_tool_override("guide", instance_path) is None
     assert not (instance_path / "installed_tool_spaces.json").exists()
+
+
+def test_tool_space_install_rollback_does_not_overwrite_concurrent_profile_save(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A profile save that waits on a failed install should be applied after rollback."""
+    _mock_add(monkeypatch, tmp_path)
+    _setup_profile(tmp_path, "guide", ["dance"])
+    instance_path = tmp_path / "instance"
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", tmp_path)
+    manifest_write_started = threading.Event()
+    release_manifest_write = threading.Event()
+    profile_save_started = threading.Event()
+
+    def fail_manifest_write(_instance_path: object, _manifest: object) -> None:
+        manifest_write_started.set()
+        if not release_manifest_write.wait(timeout=1.0):
+            raise TimeoutError("Timed out waiting to fail manifest write")
+        raise OSError("manifest store unavailable")
+
+    def save_profile_tools() -> None:
+        profile_save_started.set()
+        write_profile_tool_override("guide", ["camera"], instance_path)
+
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.write_installed_tool_spaces",
+        fail_manifest_write,
+    )
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        install_future = executor.submit(install_tool_space, SEARCH_SPACE_SLUG, instance_path, profile="guide")
+        assert manifest_write_started.wait(timeout=1.0)
+        profile_save_future = executor.submit(save_profile_tools)
+        try:
+            assert profile_save_started.wait(timeout=1.0)
+            with pytest.raises(TimeoutError):
+                profile_save_future.result(timeout=0.1)
+        finally:
+            release_manifest_write.set()
+        with pytest.raises(RuntimeError, match="manifest store unavailable"):
+            install_future.result(timeout=1.0)
+        profile_save_future.result(timeout=1.0)
+
+    assert read_profile_tool_override("guide", instance_path) == ["camera"]
 
 
 def test_tool_space_remove_manifest_failure_rolls_back_profiles(

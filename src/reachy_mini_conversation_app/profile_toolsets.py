@@ -5,8 +5,9 @@ import json
 import logging
 import threading
 from pathlib import Path
+from contextlib import contextmanager
 from dataclasses import field, dataclass
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 
 from reachy_mini_conversation_app.profile_store import (
     read_profile,
@@ -28,6 +29,13 @@ class ProfileToolsets:
     """Instance-local tool overrides keyed by canonical profile name."""
 
     profiles: dict[str, list[str]] = field(default_factory=dict)
+
+
+@contextmanager
+def profile_toolsets_transaction() -> Iterator[None]:
+    """Serialize related profile and toolset persistence operations."""
+    with _STORE_LOCK:
+        yield
 
 
 def get_profile_toolsets_path(instance_path: str | Path | None) -> Path:
@@ -163,11 +171,12 @@ def enable_profile_tools(
     instance_path: str | Path | None,
 ) -> list[str]:
     """Enable additional tools for one profile and return newly enabled IDs."""
-    current = read_profile_tool_names(profile, instance_path)
-    additions = [tool_name for tool_name in normalize_tool_names(tool_names) if tool_name not in current]
-    if additions:
-        write_profile_tool_override(profile, [*current, *additions], instance_path)
-    return additions
+    with profile_toolsets_transaction():
+        current = read_profile_tool_names(profile, instance_path)
+        additions = [tool_name for tool_name in normalize_tool_names(tool_names) if tool_name not in current]
+        if additions:
+            write_profile_tool_override(profile, [*current, *additions], instance_path)
+        return additions
 
 
 def disable_profile_tools_by_prefix(

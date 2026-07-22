@@ -171,6 +171,7 @@ def write_profile(
     *,
     voice: str | None = None,
     greeting: str | None = None,
+    hidden: bool = False,
     overwrite: bool = True,
 ) -> Path:
     """Atomically write one declarative profile document."""
@@ -180,6 +181,8 @@ def write_profile(
         _FRONT_MATTER_DELIMITER,
         f"schema_version = {PROFILE_SCHEMA_VERSION}",
     ]
+    if hidden:
+        lines.append("hidden = true")
     if voice and voice.strip():
         lines.append(f"voice = {json.dumps(voice.strip(), ensure_ascii=False)}")
     if greeting and greeting.strip():
