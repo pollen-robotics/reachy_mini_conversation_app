@@ -348,7 +348,10 @@ async def test_build_realtime_client_local_uses_explicit_hf_token_only(
             "hf-cached",
             "0123456789abcdef",
             None,
-            {"User-Agent": "reachy-mini-conversation-app", "Authorization": "Bearer hf-secret"},
+            {
+                "User-Agent": "reachy-mini-conversation-app",
+                "X-Reachy-Mini-Authorization": "Bearer hf-secret",
+            },
             "hf-secret",
             {"hardware_id": "0123456789abcdef"},
         ),
@@ -357,7 +360,10 @@ async def test_build_realtime_client_local_uses_explicit_hf_token_only(
             "hf-cached",
             None,
             None,
-            {"User-Agent": "reachy-mini-conversation-app", "Authorization": "Bearer hf-cached"},
+            {
+                "User-Agent": "reachy-mini-conversation-app",
+                "X-Reachy-Mini-Authorization": "Bearer hf-cached",
+            },
             "hf-cached",
             {},
         ),

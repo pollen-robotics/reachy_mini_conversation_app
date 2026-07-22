@@ -1054,7 +1054,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         bearer_token = configured_bearer_token or (get_token() or "").strip()
         allocator_headers = {"User-Agent": "reachy-mini-conversation-app"}
         if bearer_token:
-            allocator_headers["Authorization"] = f"Bearer {bearer_token}"
+            allocator_headers["X-Reachy-Mini-Authorization"] = f"Bearer {bearer_token}"
         allocator_payload: dict[str, str] = {}
         try:
             hardware_id = self.deps.reachy_mini.client.get_status(wait=False).hardware_id
