@@ -15,7 +15,6 @@ from reachy_mini_conversation_app.config import (
 )
 from reachy_mini_conversation_app.tool_spaces import read_installed_tool_spaces
 from reachy_mini_conversation_app.profile_store import (
-    PROFILE_FILENAME,
     DEFAULT_PROFILE_NAME,
     ProfileFormatError,
     write_profile,
@@ -139,10 +138,13 @@ def save_user_personality(
     profile_name = name.strip()
     if re.fullmatch(r"[a-zA-Z0-9_-]+", profile_name) is None:
         raise ValueError("Profile names may contain only letters, numbers, dashes, and underscores.")
+    if not instructions.strip():
+        raise ValueError(f"Profile {profile_name!r} must have non-empty instructions.")
 
     profile_directory = config.user_personalities_root() / profile_name
-    profile_path = profile_directory / PROFILE_FILENAME
     selection = f"{USER_PERSONALITIES_DIRNAME}/{profile_name}"
+    selected_voice = voice or get_default_voice()
+    selected_tools = list(enabled_tools) if enabled_tools is not None else None
     with profile_toolsets_transaction():
         if profile_directory.exists() and not overwrite:
             raise FileExistsError(f"Personality {profile_name!r} already exists.")
@@ -151,50 +153,33 @@ def save_user_personality(
             default_tools = previous_profile.default_tools
             hidden = previous_profile.hidden
         except FileNotFoundError:
-            previous_profile = None
             default_tools = read_packaged_default_profile().default_tools
             hidden = False
         toolsets_path = get_profile_toolsets_path(config.INSTANCE_PATH)
         toolsets_existed = toolsets_path.is_file()
-        previous_toolsets = read_profile_toolsets(config.INSTANCE_PATH) if enabled_tools is not None else None
+        previous_toolsets = read_profile_toolsets(config.INSTANCE_PATH) if selected_tools is not None else None
 
-        write_profile(
-            profile_name,
-            profile_directory,
-            instructions,
-            default_tools,
-            voice=voice or get_default_voice(),
-            greeting=greeting,
-            hidden=hidden,
-            overwrite=overwrite,
-        )
-        if enabled_tools is not None:
+        if selected_tools is not None:
+            write_profile_tool_override(selection, selected_tools, config.INSTANCE_PATH)
+
+        try:
+            write_profile(
+                profile_name,
+                profile_directory,
+                instructions,
+                default_tools,
+                voice=selected_voice,
+                greeting=greeting,
+                hidden=hidden,
+                overwrite=overwrite,
+            )
+        except OSError:
             try:
-                write_profile_tool_override(selection, enabled_tools, config.INSTANCE_PATH)
-            except (OSError, RuntimeError):
-                try:
-                    if toolsets_existed and previous_toolsets is not None:
-                        write_profile_toolsets(config.INSTANCE_PATH, previous_toolsets)
-                    elif not toolsets_existed:
-                        toolsets_path.unlink(missing_ok=True)
-                except OSError as exc:
-                    logger.warning("Failed to restore profile toolsets after saving %r: %s", profile_name, exc)
-                try:
-                    if previous_profile is None:
-                        profile_path.unlink(missing_ok=True)
-                        if profile_directory.is_dir() and not any(profile_directory.iterdir()):
-                            profile_directory.rmdir()
-                    else:
-                        write_profile(
-                            profile_name,
-                            profile_directory,
-                            previous_profile.instructions,
-                            previous_profile.default_tools,
-                            voice=previous_profile.voice,
-                            greeting=previous_profile.greeting,
-                            hidden=previous_profile.hidden,
-                        )
-                except OSError as exc:
-                    logger.warning("Failed to restore profile %r after a partial save: %s", profile_name, exc)
-                raise
+                if toolsets_existed and previous_toolsets is not None:
+                    write_profile_toolsets(config.INSTANCE_PATH, previous_toolsets)
+                elif selected_tools is not None:
+                    toolsets_path.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning("Failed to restore profile toolsets after saving profile %r: %s", profile_name, exc)
+            raise
     return selection

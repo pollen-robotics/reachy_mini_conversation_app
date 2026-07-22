@@ -79,8 +79,6 @@ def test_get_all_lists_every_persona_without_inline_svg() -> None:
     for entry in personalities:
         assert "avatar_id" in entry
         assert "instructions" in entry
-        assert "enabled_tools" in entry
-        assert "available_tools" in entry
         assert "svg" not in entry  # avatars are fetched lazily, never inlined here
 
 

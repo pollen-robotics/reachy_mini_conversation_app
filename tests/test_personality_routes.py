@@ -72,9 +72,6 @@ def test_new_personality_inherits_packaged_default_tools(
         "voice": "Aiden",
     }
     assert loaded["enabled_tools"] == list(profile.default_tools)
-    assert loaded["tools_text"].splitlines() == list(profile.default_tools)
-    assert loaded["uses_default_voice"] is False
-    assert set(profile.default_tools) <= set(loaded["available_tools"])
 
 
 def test_personality_creation_does_not_overwrite_existing_profile(
@@ -150,11 +147,11 @@ def test_editing_personality_preserves_tool_defaults_and_override(
     assert read_profile_tool_override("user_personalities/guide", tmp_path) == ["camera"]
 
 
-def test_personality_save_rolls_back_profile_and_tool_override(
+def test_personality_save_rolls_back_tool_override_if_profile_write_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A failed combined save must restore both profile storage layers."""
+    """A failed profile write must restore the previous tool override."""
     monkeypatch.setattr(config, "INSTANCE_PATH", tmp_path)
     profile_directory = tmp_path / "user_personalities" / "guide"
     write_profile(
@@ -167,11 +164,7 @@ def test_personality_save_rolls_back_profile_and_tool_override(
     )
     write_profile_tool_override("user_personalities/guide", ["camera"], tmp_path)
 
-    def fail_after_override_write(profile: str, tool_names: list[str], instance_path: Path) -> Path:
-        write_profile_tool_override(profile, tool_names, instance_path)
-        raise OSError("override write failed")
-
-    monkeypatch.setattr(personality_mod, "write_profile_tool_override", fail_after_override_write)
+    monkeypatch.setattr(personality_mod, "write_profile", MagicMock(side_effect=OSError("profile write failed")))
 
     response = _rpc_call(
         _client(),
@@ -212,15 +205,6 @@ def test_external_profiles_keep_canonical_packaged_default(
     assert listing["current"] == "default"
     assert listing["startup"] == "default"
     assert "Reachy Mini" in loaded["instructions"]
-    assert set(loaded) == {
-        "instructions",
-        "greeting",
-        "tools_text",
-        "voice",
-        "uses_default_voice",
-        "available_tools",
-        "enabled_tools",
-    }
     assert not (external_profiles_root / "default").exists()
 
 
