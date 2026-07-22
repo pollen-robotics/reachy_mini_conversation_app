@@ -89,8 +89,6 @@ class Tool(abc.ABC):
 
 
 ALL_TOOLS: Dict[str, Tool] = {}
-ALL_TOOL_SPECS: list[ToolSpec] = []
-_TOOLS_INITIALIZED = False
 _TOOLS_SIGNATURE: tuple[str, str, str | None, bool, str | None] | None = None
 _TOOLS_INSTANCE_PATH: str | Path | None = None
 _LOADED_TOOL_CLASS_CACHE: Dict[tuple[str, str], List[type[Tool]]] = {}
@@ -184,16 +182,6 @@ def _normalize_signature_path(value: str | Path | None) -> str | None:
         return str(value)
 
 
-def _cache_key_for_file(file_path: Path) -> tuple[str, str]:
-    """Return the cache key for a file-backed tool source."""
-    return ("file", _normalize_signature_path(file_path) or str(file_path))
-
-
-def _cache_key_for_module(module_path: str) -> tuple[str, str]:
-    """Return the cache key for an importable module-backed tool source."""
-    return ("module", module_path)
-
-
 def _tool_classes_from_module(module: ModuleType) -> List[type[Tool]]:
     """Return auto-registerable Tool classes defined directly in module."""
     tool_classes: List[type[Tool]] = []
@@ -241,7 +229,7 @@ def _try_load_tool_classes(
         return (
             "module",
             *_load_cached_tool_classes(
-                _cache_key_for_module(module_path),
+                ("module", module_path),
                 lambda: importlib.import_module(module_path),
             ),
         )
@@ -252,7 +240,7 @@ def _try_load_tool_classes(
         return (
             "file",
             *_load_cached_tool_classes(
-                _cache_key_for_file(tool_file),
+                ("file", _normalize_signature_path(tool_file) or str(tool_file)),
                 lambda: _load_module_from_file(f"{_EXTERNAL_TOOL_MODULE_NAMESPACE}.{tool_name}", tool_file),
             ),
         )
@@ -414,7 +402,7 @@ def initialize_tools(instance_path: str | Path | None = None, *, force: bool = F
     When ``force`` is true, file-backed tools are re-executed, while importable
     tool modules still follow normal ``importlib``/``sys.modules`` caching.
     """
-    global ALL_TOOLS, ALL_TOOL_SPECS, _TOOLS_INITIALIZED, _TOOLS_SIGNATURE, _TOOLS_INSTANCE_PATH
+    global ALL_TOOLS, _TOOLS_SIGNATURE, _TOOLS_INSTANCE_PATH
 
     with _TOOLS_LOCK:
         if force:
@@ -426,10 +414,10 @@ def initialize_tools(instance_path: str | Path | None = None, *, force: bool = F
         effective_instance_path = _TOOLS_INSTANCE_PATH
         signature = _tool_registry_signature(effective_instance_path)
 
-        if _TOOLS_INITIALIZED and not force and signature == _TOOLS_SIGNATURE:
+        if _TOOLS_SIGNATURE is not None and not force and signature == _TOOLS_SIGNATURE:
             logger.debug("Tools already initialized for active profile; skipping reinitialization.")
             return
-        if _TOOLS_INITIALIZED:
+        if _TOOLS_SIGNATURE is not None:
             logger.info("Reloading tool registry for active profile/configuration change.")
 
         tool_names = _read_profile_tool_names(effective_instance_path)
@@ -440,10 +428,7 @@ def initialize_tools(instance_path: str | Path | None = None, *, force: bool = F
             loaded_tool_classes,
             extra_tools=remote_tools,
         )
-        tool_specs = [tool.spec() for tool in tools.values()]
         ALL_TOOLS = tools
-        ALL_TOOL_SPECS = tool_specs
-        _TOOLS_INITIALIZED = True
         _TOOLS_SIGNATURE = signature
 
         for tool_name, tool in tools.items():
@@ -455,7 +440,7 @@ def get_tool_specs(exclusion_list: list[str] | None = None) -> list[ToolSpec]:
     initialize_tools()
     exclusion_list = exclusion_list or []
     with _TOOLS_LOCK:
-        return [spec for spec in ALL_TOOL_SPECS if spec["name"] not in exclusion_list]
+        return [tool.spec() for tool in ALL_TOOLS.values() if tool.name not in exclusion_list]
 
 
 def get_tools() -> dict[str, Tool]:
