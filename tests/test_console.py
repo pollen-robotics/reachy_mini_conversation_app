@@ -1,6 +1,7 @@
 """Tests for the headless console stream."""
 
 import asyncio
+import threading
 from types import SimpleNamespace
 from typing import Any
 from pathlib import Path
