@@ -4,14 +4,12 @@
  * Robot stays live, tapping the orb only mutes or unmutes the user's mic.
  */
 
-import { API_PREFIX, applyPersonality, getMicState, listPersonalities, setMicMuted } from "../api.js";
+import { applyPersonality, getMicState, listPersonalities, setMicMuted, subscribe } from "../api.js";
 import { BUILT_IN_DEFAULT_OPTION, ORB_STATES } from "../constants.js";
 import { createOrb, mapActivityToState } from "../orb.js";
 import { consumePendingApply } from "../pending-apply.js";
 import { setPersonality } from "../personality-badge.js";
 import { h, prettifyProfileName } from "../ui.js";
-
-const SSE_ENDPOINT = `${API_PREFIX}/conversation_events`;
 
 const CAPTION_BY_STATE = Object.freeze({
   [ORB_STATES.MUTED]: "Muted",
@@ -199,44 +197,25 @@ async function fetchPersonalityState() {
   }
 }
 
-const SSE_RECONNECT_MS = 2000;
-
-function subscribeConversationEvents({ onActivity, onReady, onError } = {}) {
+function subscribeConversationEvents({ onActivity, onReady } = {}) {
   if (typeof onActivity !== "function") {
     throw new TypeError("subscribeConversationEvents: onActivity is required");
   }
 
-  let source = null;
-  let retryTimer = null;
-  let closed = false;
+  // Activity reasons now arrive as conversation.activity notifications over the
+  // /rpc WebSocket; the shared client (api.js) owns reconnection.
+  const unsubscribe = subscribe("conversation.activity", (params) => {
+    const reason = (params?.reason || "").trim();
+    if (reason) onActivity(reason);
+  });
 
-  function connect() {
-    source = new EventSource(SSE_ENDPOINT);
-
-    source.addEventListener("activity", (ev) => {
-      const reason = (ev.data || "").trim();
-      if (reason) onActivity(reason);
-    });
-
-    source.addEventListener("ready", () => onReady());
-
-    source.addEventListener("error", (err) => {
-      onError(err);
-      // EventSource gives up on HTTP errors (e.g. 404 while the backend is
-      // still registering routes); recreate it until the route exists.
-      if (!closed && source.readyState === EventSource.CLOSED) {
-        retryTimer = setTimeout(connect, SSE_RECONNECT_MS);
-      }
-    });
-  }
-
-  connect();
+  // The socket connects lazily; kick off the initial sync (mic/personality)
+  // like the old SSE "ready" event did.
+  if (typeof onReady === "function") Promise.resolve().then(onReady);
 
   return {
     close() {
-      closed = true;
-      if (retryTimer != null) clearTimeout(retryTimer);
-      source.close();
+      unsubscribe();
     },
   };
 }
