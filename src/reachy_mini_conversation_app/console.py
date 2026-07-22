@@ -8,12 +8,15 @@ import os
 import time
 import asyncio
 import logging
-import threading
-from typing import List, Optional
+from typing import Any, List, Optional
 from pathlib import Path
-from collections.abc import Callable, AsyncGenerator
+from collections.abc import Callable
+
+import numpy as np
 
 from reachy_mini import ReachyMini
+from reachy_mini.io.jsonrpc import JsonRpcError
+from reachy_mini.apps.jsonrpc_server import JsonRpcServer
 from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.config import (
     HF_BACKEND,
@@ -36,30 +39,27 @@ from reachy_mini_conversation_app.config import (
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_float32
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
 from reachy_mini_conversation_app.tools.core_tools import initialize_tools
-from reachy_mini_conversation_app.personality_routes import mount_personality_routes
+from reachy_mini_conversation_app.personality_routes import (
+    build_personality_ops,
+    register_personality_methods,
+)
 from reachy_mini_conversation_app.audio.startup_config import apply_audio_startup_config
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 
 
 try:
     # FastAPI is provided by the Reachy Mini Apps runtime
-    from fastapi import FastAPI, Request, Response
+    from fastapi import FastAPI, Response
     from pydantic import BaseModel
-    from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+    from fastapi.responses import FileResponse
     from starlette.staticfiles import StaticFiles
 except Exception:  # pragma: no cover - only loaded when settings_app is used
     FastAPI = object  # type: ignore
     FileResponse = object  # type: ignore
-    JSONResponse = object  # type: ignore
-    StreamingResponse = object  # type: ignore
     StaticFiles = object  # type: ignore
     BaseModel = object  # type: ignore
-    Request = object  # type: ignore
 
 logger = logging.getLogger(__name__)
-
-_SSE_KEEPALIVE_INTERVAL_SECONDS = 15.0  # below typical 60s proxy idle timeout
-SETTINGS_API_PREFIX = "/api/v1"
 
 
 def _detach_framework_root_routes(app: "FastAPI") -> None:
@@ -77,75 +77,6 @@ def _detach_framework_root_routes(app: "FastAPI") -> None:
             continue
         survivors.append(route)
     routes[:] = survivors
-
-
-class ConversationEventBus:
-    """Thread-safe fan-out bus that delivers conversation activity events to SSE subscribers."""
-
-    MAX_QUEUE_SIZE = 64
-
-    def __init__(self) -> None:
-        """Initialize the bus."""
-        # Each entry is (loop, queue); loop captured at subscribe() time for cross-thread delivery.
-        self._subscribers: list[tuple[asyncio.AbstractEventLoop, "asyncio.Queue[str]"]] = []
-        self._lock = threading.Lock()
-
-    def subscribe(self) -> tuple["asyncio.Queue[str]", Callable[[], None]]:
-        """Return a per-subscriber queue and its unsubscribe callback. Must be called from a coroutine."""
-        loop = asyncio.get_running_loop()
-        queue: "asyncio.Queue[str]" = asyncio.Queue(maxsize=self.MAX_QUEUE_SIZE)
-        entry = (loop, queue)
-        with self._lock:
-            self._subscribers.append(entry)
-
-        def unsubscribe() -> None:
-            with self._lock:
-                try:
-                    self._subscribers.remove(entry)
-                except ValueError:
-                    pass
-
-        return queue, unsubscribe
-
-    def publish(self, event: str) -> None:
-        """Broadcast to all subscribers via call_soon_threadsafe. Drops events for full or closed queues."""
-        with self._lock:
-            snapshot = list(self._subscribers)
-        for loop, queue in snapshot:
-            try:
-                loop.call_soon_threadsafe(self._enqueue_safely, queue, event)
-            except RuntimeError:
-                pass  # loop closed; subscriber will clean itself up on disconnect
-
-    @staticmethod
-    def _enqueue_safely(queue: "asyncio.Queue[str]", event: str) -> None:
-        try:
-            queue.put_nowait(event)
-        except asyncio.QueueFull:
-            logger.debug("conversation event dropped (subscriber queue full): %s", event)
-
-
-async def _conversation_events_stream(
-    bus: ConversationEventBus,
-    request: "Request",
-) -> "AsyncGenerator[str, None]":
-    """Yield SSE lines for one subscriber; emits keep-alive comments during idle periods."""
-    queue, unsubscribe = bus.subscribe()
-    try:
-        yield "retry: 2000\n\n"
-        yield "event: ready\ndata: connected\n\n"
-
-        while True:
-            if await request.is_disconnected():
-                return
-            try:
-                event = await asyncio.wait_for(queue.get(), timeout=_SSE_KEEPALIVE_INTERVAL_SECONDS)
-            except asyncio.TimeoutError:
-                yield ": keep-alive\n\n"
-                continue
-            yield f"event: activity\ndata: {event}\n\n"
-    finally:
-        unsubscribe()
 
 
 LOCAL_PLAYER_BACKEND = (
@@ -196,22 +127,90 @@ class LocalStream:
         self._backend_connection_state = "not_started"
         self._backend_error: str | None = None
         self._backend_retry_delay = BACKEND_RETRY_DELAY_SECONDS
-        # One bus for the stream's lifetime: the conversation events route
-        # closes over it, so handler rebuilds must keep publishing into it.
-        self._event_bus = ConversationEventBus()
+        # JSON-RPC control surface (mounted at /rpc in _init_settings_ui_if_needed).
+        # Notifications (conversation.turn/phase/transcript/activity) are pushed
+        # here from activity + transcripts. Survives handler rebuilds (mounted once).
+        self._rpc: Optional[JsonRpcServer] = None
+        self._last_turn_state: Optional[str] = None
+        # Per-role throttle timestamps for conversation.level (orb audio meter).
+        self._last_level_emit: dict[str, float] = {}
         self._install_handler(handler)
 
     def _install_handler(self, handler: ConversationHandler) -> None:
         """Set the active handler and wire LocalStream-owned helpers into it."""
         self.handler = handler
         self.handler._clear_queue = self.clear_audio_queue
-        self._attach_event_bus_to_handler()
+        self._attach_observers_to_handler()
 
-    def _attach_event_bus_to_handler(self) -> None:
-        """Wire the event bus as the handler's activity observer, if supported."""
+    def _attach_observers_to_handler(self) -> None:
+        """Wire the handler's activity + transcript observers to JSON-RPC pushes."""
         setter = getattr(self.handler, "set_activity_observer", None)
         if callable(setter):
-            setter(self._event_bus.publish)
+            setter(self._dispatch_activity)
+        transcript_setter = getattr(self.handler, "set_transcript_observer", None)
+        if callable(transcript_setter):
+            transcript_setter(self._dispatch_transcript)
+
+    def _dispatch_transcript(self, role: str, text: str, final: bool) -> None:
+        """Push a conversation.transcript notification to JSON-RPC clients."""
+        if self._rpc is not None:
+            self._rpc.broadcast_threadsafe(
+                "conversation.transcript",
+                {"role": role, "text": text, "final": final},
+            )
+
+    # Audio level meter for the client orb. RMS is scaled into a visible 0..1
+    # range and capped to ~15 Hz so it stays light on the DataChannel.
+    _LEVEL_INTERVAL_S = 1.0 / 15.0
+    _LEVEL_GAIN = 6.0
+
+    def _emit_level(self, role: str, frame: Any) -> None:
+        """Emit a throttled conversation.level (RMS) for ``role`` (user/assistant)."""
+        if self._rpc is None:
+            return
+        now = time.monotonic()
+        if now - self._last_level_emit.get(role, 0.0) < self._LEVEL_INTERVAL_S:
+            return
+        self._last_level_emit[role] = now
+        try:
+            samples = audio_to_float32(frame)
+            rms = float(np.sqrt(np.mean(np.square(samples)))) if samples.size else 0.0
+        except Exception:
+            return
+        level = max(0.0, min(1.0, rms * self._LEVEL_GAIN))
+        self._rpc.broadcast_threadsafe("conversation.level", {"role": role, "rms": round(level, 3)})
+
+    # Map backend activity reasons to the orb's turn states (mirrors the old
+    # browser orb's mapActivityToState so the orb reliably reaches listening/
+    # thinking/speaking across the reasons the HF handler actually emits).
+    # Transcript text is delivered separately via the transcript observer.
+    _REASON_TO_TURN = {
+        "user_speech_started": "listening",
+        "user_transcription_delta": "listening",
+        "user_speech_stopped": "thinking",
+        "user_transcription_completed": "thinking",
+        "response_created": "thinking",
+        "tool_call_received": "thinking",
+        "tool_result_ready": "thinking",
+        "assistant_audio_delta": "speaking",
+        "assistant_transcript_done": "ready",
+    }
+
+    def _dispatch_activity(self, reason: str) -> None:
+        """Fan one activity reason out to JSON-RPC clients."""
+        if self._rpc is not None:
+            # Raw reason (the browser orb maps it exactly like the old SSE feed)...
+            self._rpc.broadcast_threadsafe("conversation.activity", {"reason": reason})
+            # ...plus a semantic turn state for clients without that mapping (mobile).
+            state = self._REASON_TO_TURN.get(reason)
+            if state and state != self._last_turn_state:
+                self._last_turn_state = state
+                self._rpc.broadcast_threadsafe("conversation.turn", {"state": state})
+
+    def _emit_phase(self, phase: str, reason: Optional[str] = None) -> None:
+        """Push a conversation.phase notification to JSON-RPC clients."""
+        if self._rpc is not None:
+            self._rpc.broadcast_threadsafe("conversation.phase", {"phase": phase, "reason": reason})
 
     def seconds_since_activity(self) -> float:
         """Seconds since the live handler last saw conversation activity."""
@@ -541,11 +540,6 @@ class LocalStream:
             except Exception:
                 pass
 
-        class BackendPayload(BaseModel):
-            hf_mode: Optional[str] = None
-            hf_host: Optional[str] = None
-            hf_port: Optional[int] = None
-
         def _status_payload() -> dict[str, object]:
             hf_session_url = get_hf_session_url()
             hf_ws_url = get_hf_direct_ws_url()
@@ -578,77 +572,81 @@ class LocalStream:
         def _favicon() -> Response:
             return Response(status_code=204)
 
-        @settings_app.get(f"{SETTINGS_API_PREFIX}/status")
-        def _status() -> JSONResponse:
-            return JSONResponse(_status_payload())
+        # ── JSON-RPC control surface (/rpc) ──────────────────────────────
+        # The single wire format both the local browser UI and remote WebRTC
+        # clients use (the daemon relays it over the DataChannel). Notifications
+        # (conversation.turn/phase/transcript/activity) are pushed from activity.
+        rpc = JsonRpcServer()
 
-        event_bus = self._event_bus
+        # SDK isn't marked py.typed, so mypy sees rpc.method as untyped; safe here.
+        @rpc.method("conversation.status")  # type: ignore[untyped-decorator]
+        def _rpc_status(_params: dict[str, object]) -> dict[str, object]:
+            return _status_payload()
 
-        @settings_app.get(f"{SETTINGS_API_PREFIX}/conversation_events")
-        async def _conversation_events(request: Request) -> StreamingResponse:
-            return StreamingResponse(
-                _conversation_events_stream(event_bus, request),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "X-Accel-Buffering": "no",  # disable proxy buffering (e.g. nginx)
-                    "Connection": "keep-alive",
-                },
-            )
+        @rpc.method("conversation.say")  # type: ignore[untyped-decorator]
+        async def _rpc_say(params: dict[str, object]) -> dict[str, object]:
+            text = str(params.get("text", "")).strip()
+            if not text:
+                raise JsonRpcError("say requires 'text'", reason="invalid_params", code=-32602)
+            if not self.handler._is_connected():
+                raise JsonRpcError("no active session", reason="not_running")
+            self.clear_audio_queue()  # barge in if mid-utterance
+            await self.handler.say(text)
+            return {"ok": True}
 
-        class MicPayload(BaseModel):
-            muted: bool
+        @rpc.method("conversation.interrupt")  # type: ignore[untyped-decorator]
+        def _rpc_interrupt(_params: dict[str, object]) -> dict[str, object]:
+            if not self.handler._is_connected():
+                raise JsonRpcError("no active session", reason="not_running")
+            self.clear_audio_queue()
+            self._last_turn_state = "listening"
+            rpc.broadcast_threadsafe("conversation.turn", {"state": "listening", "reason": "interrupted"})
+            return {"ok": True}
 
-        @settings_app.get(f"{SETTINGS_API_PREFIX}/mic")
-        def _mic_state() -> JSONResponse:
-            return JSONResponse({"muted": self._mic_muted})
+        @rpc.method("conversation.mic")  # type: ignore[untyped-decorator]
+        def _rpc_mic(params: dict[str, object]) -> dict[str, object]:
+            if "muted" in params:
+                self._mic_muted = bool(params["muted"])
+                logger.info("Microphone %s via /rpc", "muted" if self._mic_muted else "unmuted")
+            return {"muted": self._mic_muted}
 
-        @settings_app.post(f"{SETTINGS_API_PREFIX}/mic")
-        def _set_mic(payload: MicPayload) -> JSONResponse:
-            self._mic_muted = bool(payload.muted)
-            logger.info("Microphone %s via web UI", "muted" if self._mic_muted else "unmuted")
-            return JSONResponse({"muted": self._mic_muted})
-
-        @settings_app.post(f"{SETTINGS_API_PREFIX}/backend_config")
-        def _set_backend(payload: BackendPayload) -> JSONResponse:
+        @rpc.method("backend.config")  # type: ignore[untyped-decorator]
+        def _rpc_backend_config(params: dict[str, object]) -> dict[str, object]:
             hf_selection = get_hf_connection_selection()
-            hf_mode = (payload.hf_mode or hf_selection.mode).strip().lower()
+            hf_mode = str(params.get("hf_mode") or hf_selection.mode).strip().lower()
             if hf_mode == HF_LOCAL_CONNECTION_MODE:
                 existing_host, existing_port = parse_hf_direct_target(hf_selection.direct_ws_url)
-                host = (payload.hf_host or "").strip() or existing_host or ""
+                host = str(params.get("hf_host") or "").strip() or existing_host or ""
                 if not host:
-                    return JSONResponse({"ok": False, "error": "empty_hf_host"}, status_code=400)
+                    raise JsonRpcError("Hugging Face host required", reason="empty_hf_host", code=-32602)
                 if "://" in host or "/" in host or "?" in host or "#" in host:
-                    return JSONResponse({"ok": False, "error": "invalid_hf_host"}, status_code=400)
-
-                port = payload.hf_port if payload.hf_port is not None else existing_port or 8765
+                    raise JsonRpcError("invalid Hugging Face host", reason="invalid_hf_host", code=-32602)
+                raw_port = params.get("hf_port")
+                port = int(raw_port) if isinstance(raw_port, (int, float, str)) else (existing_port or 8765)
                 if port < 1 or port > 65535:
-                    return JSONResponse({"ok": False, "error": "invalid_hf_port"}, status_code=400)
-
+                    raise JsonRpcError("invalid Hugging Face port", reason="invalid_hf_port", code=-32602)
                 self._persist_hf_direct_connection(host, port)
             elif hf_mode == HF_DEPLOYED_CONNECTION_MODE:
                 if not bool(get_hf_session_url()):
-                    return JSONResponse({"ok": False, "error": "missing_hf_session_url"}, status_code=400)
+                    raise JsonRpcError(
+                        "missing Hugging Face session url", reason="missing_hf_session_url", code=-32602
+                    )
                 self._persist_hf_allocator_connection()
             else:
-                return JSONResponse({"ok": False, "error": "invalid_hf_mode"}, status_code=400)
+                raise JsonRpcError("invalid Hugging Face mode", reason="invalid_hf_mode", code=-32602)
 
             if self._can_rebuild_handler():
                 self._mark_restart_requested("backend_config_changed")
                 message = "Connection saved. Reconnecting backend."
             else:
                 message = "Connection saved. Restart Reachy Mini Conversation from the desktop app to apply it."
-            return JSONResponse(
-                {
-                    "ok": True,
-                    "message": message,
-                    **_status_payload(),
-                }
-            )
+            return {"ok": True, "message": message, **_status_payload()}
+
+        rpc.mount(settings_app)
+        self._rpc = rpc
 
         try:
-            mount_personality_routes(
-                self._settings_app,
+            personality_ops = build_personality_ops(
                 self.handler,
                 lambda: self._asyncio_loop,
                 persist_personality=self._persist_personality,
@@ -657,10 +655,12 @@ class LocalStream:
                 get_voices=self.get_available_voices,
                 get_current_voice=self.get_current_voice,
                 change_voice=self.change_voice,
-                api_prefix=SETTINGS_API_PREFIX,
             )
+            # personalities.* / voices.* over JSON-RPC — the local UI and remote
+            # clients drive personalities the same way, one control surface.
+            register_personality_methods(rpc, personality_ops)
         except Exception:
-            logger.exception("Failed to mount personality routes; the personality UI will be unavailable")
+            logger.exception("Failed to register personality methods; the personality UI will be unavailable")
 
         self._settings_initialized = True
 
@@ -867,6 +867,7 @@ class LocalStream:
             audio_frame = self._robot.media.get_audio_sample()
             if audio_frame is not None and not self._mic_muted:
                 await self.handler.receive((input_sample_rate, audio_frame))
+                self._emit_level("user", audio_frame)
             await asyncio.sleep(0)  # avoid busy loop
 
     async def play_loop(self) -> None:
@@ -908,6 +909,7 @@ class LocalStream:
                 audio_frame = audio_to_float32(audio_data)
 
                 self._robot.media.push_audio_sample(audio_frame)
+                self._emit_level("assistant", audio_frame)
 
             else:
                 logger.debug("Ignoring output type=%s", type(handler_output).__name__)

@@ -445,6 +445,28 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         """
         await self._pending_responses.put(kwargs)
 
+    async def say(self, text: str) -> None:
+        """Inject ``text`` as a turn and have the model voice it now.
+
+        Mirrors the startup-greeting path: create a user message item, then
+        queue a ``response.create`` through the serial sender. Not verbatim TTS
+        (speech-to-speech may rephrase). Raises if the session is closed.
+        """
+        text = (text or "").strip()
+        if not text:
+            raise ValueError("say: empty text")
+        if not self.connection:
+            raise RuntimeError("say: no active session")
+        await self.connection.conversation.item.create(
+            item={
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": text}],
+            },
+        )
+        self._mark_activity("say")
+        await self._safe_response_create()
+
     async def _send_startup_greeting_prompt(self) -> None:
         """Prompt the model to open the conversation once the session is ready."""
         if self._startup_greeting_sent or not self.connection:
@@ -820,6 +842,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         self._tool_batch_needs_response = False
 
                         await self.output_queue.put(AdditionalOutputs({"role": "user", "content": transcript}))
+                        self._emit_transcript("user", transcript, True)
 
                     # Handle assistant transcription
                     if event.type == "response.output_audio_transcript.done":
@@ -828,6 +851,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         await self.output_queue.put(
                             AdditionalOutputs({"role": "assistant", "content": event.transcript})
                         )
+                        self._emit_transcript("assistant", event.transcript or "", True)
 
                     # Handle audio delta
                     if event.type == "response.output_audio.delta":

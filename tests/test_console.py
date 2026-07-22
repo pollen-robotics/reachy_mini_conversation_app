@@ -1,7 +1,6 @@
 """Tests for the headless console stream."""
 
 import asyncio
-import threading
 from types import SimpleNamespace
 from typing import Any
 from pathlib import Path
@@ -18,7 +17,17 @@ from reachy_mini_conversation_app.startup_settings import (
     StartupSettings,
     load_startup_settings_into_runtime,
 )
-from reachy_mini_conversation_app.personality_routes import mount_personality_routes
+from reachy_mini_conversation_app.personality_routes import (
+    RouteError,
+    build_personality_ops,
+)
+
+
+def _rpc_call(app: FastAPI, method: str, params: Any = None) -> dict[str, Any]:
+    """Send one JSON-RPC request over /rpc and return the response envelope."""
+    with TestClient(app).websocket_connect("/rpc") as ws:
+        ws.send_json({"jsonrpc": "2.0", "id": "1", "method": method, "params": params or {}})
+        return ws.receive_json()
 
 
 async def _wait_until(predicate: Any, timeout: float = 1.0) -> None:
@@ -81,53 +90,41 @@ def test_clear_audio_queue_drains_queue_in_place() -> None:
     assert queue.empty()
 
 
-def test_mic_endpoints_report_and_toggle_mute_state() -> None:
-    """The mic starts live; the settings API exposes and flips the pause state."""
+def test_mic_reports_and_toggles_mute_state_over_rpc() -> None:
+    """The mic starts live; conversation.mic exposes and flips the pause state."""
     app = FastAPI()
     robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
     stream = LocalStream(MagicMock(), robot, settings_app=app)
     stream._init_settings_ui_if_needed()
-    client = TestClient(app)
 
-    assert client.get("/api/v1/mic").json() == {"muted": False}
-
-    assert client.post("/api/v1/mic", json={"muted": True}).json() == {"muted": True}
+    assert _rpc_call(app, "conversation.mic")["result"] == {"muted": False}
+    assert _rpc_call(app, "conversation.mic", {"muted": True})["result"] == {"muted": True}
     assert stream._mic_muted is True
-
-    assert client.post("/api/v1/mic", json={"muted": False}).json() == {"muted": False}
+    assert _rpc_call(app, "conversation.mic", {"muted": False})["result"] == {"muted": False}
     assert stream._mic_muted is False
 
     # headless streams keep the mic live
     assert LocalStream(MagicMock(), robot)._mic_muted is False
 
 
-def test_settings_api_uses_versioned_routes_only() -> None:
-    """Settings clients should use the versioned API paths."""
+def test_rest_api_is_removed_in_favor_of_rpc() -> None:
+    """The /api/v1 REST + SSE surface is gone; control is JSON-RPC over /rpc."""
     app = FastAPI()
     robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
     stream = LocalStream(MagicMock(), robot, settings_app=app)
     stream._init_settings_ui_if_needed()
     client = TestClient(app)
 
-    assert client.get("/api/v1/mic").json() == {"muted": False}
+    for path in ("/api/v1/status", "/api/v1/mic", "/api/v1/personalities", "/api/v1/voices"):
+        assert client.get(path).status_code == 404
+    assert client.get("/api/v1/conversation_events").status_code == 404
 
-    response = client.post("/api/v1/mic", json={"muted": True})
-
-    assert response.status_code == 200
-    assert response.json() == {"muted": True}
-    assert stream._mic_muted is True
-    assert client.get("/api/v1/status").json()["backend"]
-    assert client.get("/api/v1/ready").status_code == 404
-    assert client.get("/status").status_code == 404
-    assert client.get("/ready").status_code == 404
-    assert client.post("/backend_config", json={"backend": "openai"}).status_code == 404
-    assert client.get("/mic").status_code == 404
-    assert client.post("/mic", json={"muted": False}).status_code == 404
-    assert client.get("/conversation_events").status_code == 404
+    # ...but /rpc drives it fine.
+    assert _rpc_call(app, "conversation.status")["result"]["backend"]
 
 
-def test_settings_ui_detaches_framework_catch_all_before_api_routes() -> None:
-    """Framework fallback routes should not shadow the settings API."""
+def test_settings_ui_detaches_framework_catch_all_before_own_routes() -> None:
+    """Framework fallback routes should not shadow the UI or the /rpc endpoint."""
     app = FastAPI()
 
     @app.get("/{path:path}")
@@ -141,31 +138,33 @@ def test_settings_ui_detaches_framework_catch_all_before_api_routes() -> None:
 
     assert client.get("/").status_code == 200
     assert client.get("/static/js/api.js").status_code == 200
-    assert client.get("/api/v1/mic").status_code == 200
-    assert client.get("/api/v1/personalities").status_code == 200
+    assert _rpc_call(app, "conversation.status")["result"]["backend"]
 
 
 @pytest.mark.asyncio
-async def test_conversation_events_survive_handler_rebuild() -> None:
-    """Activity from a rebuilt handler must reach subscribers of the original event bus."""
+async def test_activity_from_rebuilt_handler_reaches_rpc_clients() -> None:
+    """Activity from a rebuilt handler must still reach /rpc subscribers."""
 
     class FakeHandler:
         def __init__(self) -> None:
-            self.observer = None
+            self.observer: Any = None
 
         def set_activity_observer(self, observer: Any) -> None:
             self.observer = observer
 
     rebuilt = FakeHandler()
+    app = FastAPI()
     robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
-    stream = LocalStream(FakeHandler(), robot, settings_app=FastAPI(), handler_factory=lambda voice: rebuilt)
+    stream = LocalStream(FakeHandler(), robot, settings_app=app, handler_factory=lambda voice: rebuilt)
+    stream._init_settings_ui_if_needed()
+    stream._build_handler_for_current_backend()  # rebuild re-wires the observer
 
-    queue, unsubscribe = stream._event_bus.subscribe()
-    stream._build_handler_for_current_backend()
-    rebuilt.observer("assistant_audio_delta")
-
-    assert await asyncio.wait_for(queue.get(), timeout=1.0) == "assistant_audio_delta"
-    unsubscribe()
+    with TestClient(app).websocket_connect("/rpc") as ws:
+        rebuilt.observer("assistant_audio_delta")
+        # First frame is conversation.activity (raw reason).
+        msg = ws.receive_json()
+    assert msg["method"] == "conversation.activity"
+    assert msg["params"] == {"reason": "assistant_audio_delta"}
 
 
 def test_backend_config_requests_in_process_restart_with_handler_factory(
@@ -191,13 +190,8 @@ def test_backend_config_requests_in_process_restart_with_handler_factory(
     )
     stream._init_settings_ui_if_needed()
 
-    response = TestClient(app).post(
-        "/api/v1/backend_config",
-        json={"hf_mode": "local", "hf_host": "localhost", "hf_port": 8765},
-    )
+    data = _rpc_call(app, "backend.config", {"hf_mode": "local", "hf_host": "localhost", "hf_port": 8765})["result"]
 
-    assert response.status_code == 200
-    data = response.json()
     assert data["ok"] is True
     assert data["message"] == "Connection saved. Reconnecting backend."
     assert data["backend"] == "huggingface"
@@ -224,18 +218,8 @@ def test_backend_config_persists_local_hf_selection_and_status(
     stream = LocalStream(MagicMock(), robot, settings_app=app, instance_path=str(tmp_path))
     stream._init_settings_ui_if_needed()
 
-    client = TestClient(app)
-    response = client.post(
-        "/api/v1/backend_config",
-        json={
-            "hf_mode": "local",
-            "hf_host": "localhost",
-            "hf_port": 8765,
-        },
-    )
+    data = _rpc_call(app, "backend.config", {"hf_mode": "local", "hf_host": "localhost", "hf_port": 8765})["result"]
 
-    assert response.status_code == 200
-    data = response.json()
     assert data["ok"] is True
     assert data["backend"] == "huggingface"
     assert data["has_hf_ws_url"] is True
@@ -273,16 +257,8 @@ def test_backend_config_persists_deployed_mode_without_clearing_local_hf_ws_url(
     stream = LocalStream(MagicMock(), robot, settings_app=app, instance_path=str(tmp_path))
     stream._init_settings_ui_if_needed()
 
-    client = TestClient(app)
-    response = client.post(
-        "/api/v1/backend_config",
-        json={
-            "hf_mode": "deployed",
-        },
-    )
+    data = _rpc_call(app, "backend.config", {"hf_mode": "deployed"})["result"]
 
-    assert response.status_code == 200
-    data = response.json()
     assert data["ok"] is True
     assert data["has_hf_session_url"] is True
     assert data["has_hf_ws_url"] is True
@@ -316,14 +292,8 @@ def test_backend_config_switches_to_saved_local_hf_connection_without_payload_ta
     stream = LocalStream(MagicMock(), robot, settings_app=app, instance_path=str(tmp_path))
     stream._init_settings_ui_if_needed()
 
-    client = TestClient(app)
-    response = client.post(
-        "/api/v1/backend_config",
-        json={},
-    )
+    data = _rpc_call(app, "backend.config", {})["result"]
 
-    assert response.status_code == 200
-    data = response.json()
     assert data["ok"] is True
     assert data["backend"] == "huggingface"
     assert data["hf_connection_mode"] == "local"
@@ -349,19 +319,13 @@ def test_backend_config_rejects_invalid_hf_port_zero(
     stream = LocalStream(MagicMock(), robot, settings_app=app, instance_path=str(tmp_path))
     stream._init_settings_ui_if_needed()
 
-    client = TestClient(app)
-    response = client.post(
-        "/api/v1/backend_config",
-        json={
-            "backend": "huggingface",
-            "hf_mode": "local",
-            "hf_host": "localhost",
-            "hf_port": 0,
-        },
+    resp = _rpc_call(
+        app,
+        "backend.config",
+        {"backend": "huggingface", "hf_mode": "local", "hf_host": "localhost", "hf_port": 0},
     )
 
-    assert response.status_code == 400
-    assert response.json()["error"] == "invalid_hf_port"
+    assert resp["error"]["data"]["reason"] == "invalid_hf_port"
 
 
 def test_status_reports_direct_hf_ws_url_as_ready(
@@ -378,11 +342,8 @@ def test_status_reports_direct_hf_ws_url_as_ready(
     stream = LocalStream(MagicMock(), robot, settings_app=app, instance_path=str(tmp_path))
     stream._init_settings_ui_if_needed()
 
-    client = TestClient(app)
-    response = client.get("/api/v1/status")
+    data = _rpc_call(app, "conversation.status")["result"]
 
-    assert response.status_code == 200
-    data = response.json()
     assert data["backend"] == "huggingface"
     assert data["has_hf_session_url"] is False
     assert data["has_hf_ws_url"] is True
@@ -408,11 +369,7 @@ def test_status_reports_backend_connection_failure(
     stream._set_backend_connection_state("disconnected", RuntimeError("connect failed"))
     stream._init_settings_ui_if_needed()
 
-    client = TestClient(app)
-    response = client.get("/api/v1/status")
-
-    assert response.status_code == 200
-    data = response.json()
+    data = _rpc_call(app, "conversation.status")["result"]
     assert data["backend"] == "huggingface"
     assert data["backend_connected"] is False
     assert data["backend_connection_state"] == "disconnected"
@@ -459,11 +416,7 @@ def test_backend_startup_failure_is_recorded_without_raising(
         asyncio.set_event_loop(asyncio.new_event_loop())
 
     handler.start_up.assert_awaited_once()
-    client = TestClient(app)
-    response = client.get("/api/v1/status")
-
-    assert response.status_code == 200
-    data = response.json()
+    data = _rpc_call(app, "conversation.status")["result"]
     assert data["backend_connected"] is False
     assert data["backend_connection_state"] == "disconnected"
     assert data["backend_error"] == "RuntimeError: local server unavailable"
@@ -533,208 +486,112 @@ async def test_startup_loop_rebuilds_handler_on_restart_request(monkeypatch: pyt
             pass
 
 
-def test_personality_routes_return_hf_voices() -> None:
-    """Headless personality UI should expose the Hugging Face voices."""
-    app = FastAPI()
-    handler = MagicMock()
-    mount_personality_routes(app, handler, lambda: None)
-
-    client = TestClient(app)
-    response = client.get("/voices")
-
-    assert response.status_code == 200
-    assert response.json() == HF_AVAILABLE_VOICES
+@pytest.mark.asyncio
+async def test_personality_ops_return_hf_voices() -> None:
+    """With no running loop, voices() falls back to the Hugging Face catalog."""
+    ops = build_personality_ops(MagicMock(), lambda: None)
+    assert await ops.voices() == HF_AVAILABLE_VOICES
 
 
-def test_personality_routes_mount_versioned_paths() -> None:
-    """Personality and voice endpoints should use the configured API prefix."""
-    app = FastAPI()
-    handler = MagicMock()
-
-    mount_personality_routes(
-        app,
-        handler,
-        lambda: None,
-        api_prefix="/api/v1",
-    )
-
-    client = TestClient(app)
-    response = client.get("/api/v1/voices")
-    delete_response = client.delete("/api/v1/personalities", params={"name": "mad_scientist_assistant"})
-
-    assert response.status_code == 200
-    assert delete_response.status_code == 404
-    assert delete_response.json()["error"] == "not_deletable"
-    assert client.get("/personalities").status_code == 404
-    assert client.get("/voices").status_code == 404
-    assert client.delete("/personalities", params={"name": "mad_scientist_assistant"}).status_code == 404
-    assert client.post("/voices/apply?voice=cedar").status_code == 404
+def test_personality_ops_delete_builtin_is_not_deletable() -> None:
+    """Deleting a built-in personality raises not_deletable (was REST 404)."""
+    ops = build_personality_ops(MagicMock(), lambda: None)
+    with pytest.raises(RouteError) as ei:
+        ops.delete("mad_scientist_assistant")
+    assert ei.value.reason == "not_deletable"
 
 
-def test_personality_routes_load_builtin_default_tools() -> None:
-    """Headless personality UI should expose built-in default tools on initial load."""
-    app = FastAPI()
-    handler = MagicMock()
-    mount_personality_routes(app, handler, lambda: None)
-
-    client = TestClient(app)
-    response = client.get("/personalities/load", params={"name": "(built-in default)"})
-
-    assert response.status_code == 200
-    data = response.json()
+def test_personality_ops_load_builtin_default_tools() -> None:
+    """load('(built-in default)') exposes the built-in default tools."""
+    ops = build_personality_ops(MagicMock(), lambda: None)
+    data = ops.load("(built-in default)")
     assert data["tools_text"]
     assert "dance" in data["enabled_tools"]
     assert "camera" in data["enabled_tools"]
 
 
-def test_personality_routes_apply_voice_accepts_query_param() -> None:
-    """Headless personality UI should apply a voice change from a POST query param."""
-    app = FastAPI()
+@pytest.mark.asyncio
+async def test_personality_ops_apply_voice() -> None:
+    """apply_voice delegates to the handler and reports the status."""
     handler = MagicMock()
     handler.change_voice = AsyncMock(return_value="Voice changed to cedar.")
+    ops = build_personality_ops(handler, lambda: asyncio.get_running_loop())
 
-    loop = asyncio.new_event_loop()
-    started = threading.Event()
+    result = await ops.apply_voice("cedar")
 
-    def _run_loop() -> None:
-        asyncio.set_event_loop(loop)
-        started.set()
-        loop.run_forever()
-
-    thread = threading.Thread(target=_run_loop, daemon=True)
-    thread.start()
-    started.wait(timeout=1.0)
-
-    try:
-        mount_personality_routes(app, handler, lambda: loop, api_prefix="/api/v1")
-
-        client = TestClient(app)
-        response = client.post("/api/v1/voices/apply?voice=cedar")
-
-        assert response.status_code == 200
-        assert response.json() == {"ok": True, "status": "Voice changed to cedar."}
-        handler.change_voice.assert_awaited_once_with("cedar")
-    finally:
-        loop.call_soon_threadsafe(loop.stop)
-        thread.join(timeout=1.0)
-        loop.close()
+    assert result == {"ok": True, "status": "Voice changed to cedar."}
+    handler.change_voice.assert_awaited_once_with("cedar")
 
 
-def test_personality_routes_persist_startup_with_voice_override() -> None:
-    """Saving a startup personality should persist the active manual voice override."""
-    app = FastAPI()
+@pytest.mark.asyncio
+async def test_personality_ops_persist_startup_with_voice_override() -> None:
+    """Applying with persist=True saves the active manual voice override."""
     handler = MagicMock()
     handler.apply_personality = AsyncMock(return_value="Applied personality and restarted realtime session.")
     handler.get_current_voice = MagicMock(return_value="shimmer")
     persist_personality = MagicMock()
+    ops = build_personality_ops(handler, lambda: asyncio.get_running_loop(), persist_personality=persist_personality)
 
-    loop = asyncio.new_event_loop()
-    started = threading.Event()
+    result = await ops.apply("sorry_bro", persist=True)
 
-    def _run_loop() -> None:
-        asyncio.set_event_loop(loop)
-        started.set()
-        loop.run_forever()
-
-    thread = threading.Thread(target=_run_loop, daemon=True)
-    thread.start()
-    started.wait(timeout=1.0)
-
-    try:
-        mount_personality_routes(app, handler, lambda: loop, persist_personality=persist_personality)
-
-        client = TestClient(app)
-        response = client.post("/personalities/apply", json={"name": "sorry_bro", "persist": True})
-
-        assert response.status_code == 200
-        assert response.json()["ok"] is True
-        handler.apply_personality.assert_awaited_once_with("sorry_bro")
-        persist_personality.assert_called_once_with("sorry_bro", "shimmer")
-    finally:
-        loop.call_soon_threadsafe(loop.stop)
-        thread.join(timeout=1.0)
-        loop.close()
+    assert result["ok"] is True
+    handler.apply_personality.assert_awaited_once_with("sorry_bro")
+    persist_personality.assert_called_once_with("sorry_bro", "shimmer")
 
 
-def test_personality_routes_apply_same_profile_does_not_restart(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Re-applying the active personality should be a no-op for the realtime handler."""
+@pytest.mark.asyncio
+async def test_personality_ops_apply_same_profile_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Re-applying the active personality is a no-op for the realtime handler."""
     monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "sorry_bro")
-    app = FastAPI()
     handler = MagicMock()
     handler.apply_personality = AsyncMock(return_value="should not be called")
     handler.get_current_voice = MagicMock(return_value="shimmer")
-    mount_personality_routes(app, handler, lambda: None)
+    ops = build_personality_ops(handler, lambda: None)
 
-    response = TestClient(app).post("/personalities/apply", json={"name": "sorry_bro"})
+    result = await ops.apply("sorry_bro")
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "Personality unchanged."
+    assert result["status"] == "Personality unchanged."
     handler.apply_personality.assert_not_awaited()
     handler.get_current_voice.assert_not_called()
 
 
-def test_personality_routes_startup_choice_survives_runtime_profile_change(
+def test_personality_ops_startup_choice_survives_runtime_change(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Runtime profile switching should not redefine the saved startup personality."""
     monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "captain_circuit")
-    app = FastAPI()
-    handler = MagicMock()
-    mount_personality_routes(app, handler, lambda: None)
-    client = TestClient(app)
+    ops = build_personality_ops(MagicMock(), lambda: None)
 
-    initial_response = client.get("/personalities")
-    assert initial_response.status_code == 200
-    assert initial_response.json()["current"] == "captain_circuit"
-    assert initial_response.json()["startup"] == "captain_circuit"
+    first = ops.get_choices()
+    assert first["current"] == "captain_circuit"
+    assert first["startup"] == "captain_circuit"
 
     monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "chess_coach")
 
-    switched_response = client.get("/personalities")
-    assert switched_response.status_code == 200
-    assert switched_response.json()["current"] == "chess_coach"
-    assert switched_response.json()["startup"] == "captain_circuit"
+    second = ops.get_choices()
+    assert second["current"] == "chess_coach"
+    assert second["startup"] == "captain_circuit"
 
 
-def test_headless_personality_routes_can_use_stream_callbacks() -> None:
-    """Headless personality routes can delegate apply/restart ownership to LocalStream."""
-    app = FastAPI()
+@pytest.mark.asyncio
+async def test_personality_ops_use_apply_callback() -> None:
+    """Apply delegates to the injected apply_personality callback, not the handler."""
     handler = MagicMock()
     handler.apply_personality = AsyncMock(return_value="handler should not be called")
     apply_personality = AsyncMock(return_value="Applied personality and restarting backend.")
     get_current_voice = MagicMock(return_value="cedar")
+    ops = build_personality_ops(
+        handler,
+        lambda: asyncio.get_running_loop(),
+        apply_personality=apply_personality,
+        get_current_voice=get_current_voice,
+    )
 
-    loop = asyncio.new_event_loop()
-    started = threading.Event()
+    result = await ops.apply("sorry_bro")
 
-    def _run_loop() -> None:
-        asyncio.set_event_loop(loop)
-        started.set()
-        loop.run_forever()
-
-    thread = threading.Thread(target=_run_loop, daemon=True)
-    thread.start()
-    started.wait(timeout=1.0)
-
-    try:
-        mount_personality_routes(
-            app,
-            handler,
-            lambda: loop,
-            apply_personality=apply_personality,
-            get_current_voice=get_current_voice,
-        )
-
-        response = TestClient(app).post("/personalities/apply", json={"name": "sorry_bro"})
-
-        assert response.status_code == 200
-        assert response.json()["status"] == "Applied personality and restarting backend."
-        apply_personality.assert_awaited_once_with("sorry_bro")
-        handler.apply_personality.assert_not_awaited()
-    finally:
-        loop.call_soon_threadsafe(loop.stop)
-        thread.join(timeout=1.0)
-        loop.close()
+    assert result["status"] == "Applied personality and restarting backend."
+    apply_personality.assert_awaited_once_with("sorry_bro")
+    handler.apply_personality.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -841,3 +698,83 @@ def test_local_stream_launch_waits_for_missing_hf_target_without_starting_media(
     init_settings_ui.assert_called_once()
     media.start_recording.assert_not_called()
     media.start_playing.assert_not_called()
+
+
+def _rpc_robot() -> SimpleNamespace:
+    """Return a robot mock whose audio pipeline supports clear_audio_queue()."""
+    audio = SimpleNamespace(clear_player=MagicMock(), clear_output_buffer=MagicMock())
+    return SimpleNamespace(media=SimpleNamespace(audio=audio))
+
+
+def test_rpc_status_and_mic_over_websocket() -> None:
+    """conversation.status/mic are reachable over the /rpc JSON-RPC WebSocket."""
+    app = FastAPI()
+    stream = LocalStream(MagicMock(), _rpc_robot(), settings_app=app)
+    stream._init_settings_ui_if_needed()
+    client = TestClient(app)
+    with client.websocket_connect("/rpc") as ws:
+        ws.send_json({"jsonrpc": "2.0", "id": "1", "method": "conversation.status"})
+        resp = ws.receive_json()
+        assert resp["id"] == "1"
+        assert "result" in resp
+
+        ws.send_json({"jsonrpc": "2.0", "id": "2", "method": "conversation.mic", "params": {"muted": True}})
+        resp = ws.receive_json()
+        assert resp["result"] == {"muted": True}
+    assert stream._mic_muted is True
+
+
+def test_rpc_interrupt_broadcasts_turn_listening() -> None:
+    """conversation.interrupt clears playback and pushes a turn:listening event."""
+    handler = MagicMock()
+    handler.output_queue = asyncio.Queue()
+    handler._is_connected.return_value = True
+    app = FastAPI()
+    stream = LocalStream(handler, _rpc_robot(), settings_app=app)
+    stream._init_settings_ui_if_needed()
+    with TestClient(app).websocket_connect("/rpc") as ws:
+        ws.send_json({"jsonrpc": "2.0", "id": "1", "method": "conversation.interrupt"})
+        msgs = [ws.receive_json(), ws.receive_json()]
+    results = [m for m in msgs if "result" in m]
+    notes = [m for m in msgs if m.get("method") == "conversation.turn"]
+    assert results and results[0]["result"] == {"ok": True}
+    assert notes and notes[0]["params"] == {"state": "listening", "reason": "interrupted"}
+
+
+def test_rpc_say_requires_active_session() -> None:
+    """conversation.say fails with not_running when no session is connected."""
+    handler = MagicMock()
+    handler._is_connected.return_value = False
+    app = FastAPI()
+    stream = LocalStream(handler, _rpc_robot(), settings_app=app)
+    stream._init_settings_ui_if_needed()
+    with TestClient(app).websocket_connect("/rpc") as ws:
+        ws.send_json({"jsonrpc": "2.0", "id": "1", "method": "conversation.say", "params": {"text": "hi"}})
+        resp = ws.receive_json()
+    assert resp["error"]["data"]["reason"] == "not_running"
+
+
+def test_rpc_transcript_notification_broadcast() -> None:
+    """The handler's transcript observer pushes conversation.transcript events."""
+    app = FastAPI()
+    stream = LocalStream(MagicMock(), _rpc_robot(), settings_app=app)
+    stream._init_settings_ui_if_needed()
+    with TestClient(app).websocket_connect("/rpc") as ws:
+        stream._dispatch_transcript("assistant", "hello there", True)
+        msg = ws.receive_json()
+    assert msg["method"] == "conversation.transcript"
+    assert msg["params"] == {"role": "assistant", "text": "hello there", "final": True}
+
+
+def test_rpc_personalities_and_voices_methods() -> None:
+    """personalities.* / voices.* are reachable over /rpc (same ops as REST)."""
+    app = FastAPI()
+    stream = LocalStream(MagicMock(), _rpc_robot(), settings_app=app)
+    stream._init_settings_ui_if_needed()
+    with TestClient(app).websocket_connect("/rpc") as ws:
+        ws.send_json({"jsonrpc": "2.0", "id": "1", "method": "personalities.list"})
+        r1 = ws.receive_json()
+        ws.send_json({"jsonrpc": "2.0", "id": "2", "method": "voices.list"})
+        r2 = ws.receive_json()
+    assert "choices" in r1["result"] and "current" in r1["result"]
+    assert isinstance(r2["result"], list)
