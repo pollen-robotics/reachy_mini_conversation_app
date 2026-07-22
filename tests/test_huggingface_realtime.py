@@ -106,11 +106,21 @@ def _fake_openai_client(captured_kwargs: dict[str, Any]) -> type:
 
 def _fake_allocator(
     connect_url: str,
+    gets: list[tuple[str, dict[str, str] | None]],
     posts: list[tuple[str, dict[str, str] | None, dict[str, str] | None]],
 ) -> type:
     """Return a fake httpx.AsyncClient that records allocator requests."""
 
-    class FakeResponse:
+    class FakeDiscoveryResponse:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict[str, str]:
+            return {
+                "session_url": "https://allocator.us-east-1.aws.endpoints.huggingface.cloud/session",
+            }
+
+    class FakeAllocatorResponse:
         def raise_for_status(self) -> None:
             pass
 
@@ -127,14 +137,22 @@ def _fake_allocator(
         async def __aexit__(self, *_a: Any) -> bool:
             return False
 
+        async def get(
+            self,
+            url: str,
+            headers: dict[str, str] | None = None,
+        ) -> FakeDiscoveryResponse:
+            gets.append((url, headers))
+            return FakeDiscoveryResponse()
+
         async def post(
             self,
             url: str,
             headers: dict[str, str] | None = None,
             json: dict[str, str] | None = None,
-        ) -> FakeResponse:
+        ) -> FakeAllocatorResponse:
             posts.append((url, headers, json))
-            return FakeResponse()
+            return FakeAllocatorResponse()
 
     return FakeAsyncClient
 
@@ -387,10 +405,11 @@ async def test_build_realtime_client_deployed_resolves_hf_token(
 ) -> None:
     """Deployed allocation reports available credentials and robot identity."""
     client_kwargs: dict[str, Any] = {}
+    gets: list[tuple[str, dict[str, str] | None]] = []
     posts: list[tuple[str, dict[str, str] | None, dict[str, str] | None]] = []
     connect_url = "wss://hf.example.test/v1/realtime?session_token=allocated"
     monkeypatch.setattr(hf_mod, "AsyncOpenAI", _fake_openai_client(client_kwargs))
-    monkeypatch.setattr(hf_mod.httpx, "AsyncClient", _fake_allocator(connect_url, posts))
+    monkeypatch.setattr(hf_mod.httpx, "AsyncClient", _fake_allocator(connect_url, gets, posts))
     monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "deployed")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", "https://lb.example.test/session")
     # A stale local URL must be ignored in deployed mode.
@@ -407,7 +426,16 @@ async def test_build_realtime_client_deployed_resolves_hf_token(
     client = await handler._build_realtime_client()
 
     assert client is not None
-    assert posts == [("https://lb.example.test/session", expected_header, expected_payload)]
+    assert gets == [
+        ("https://lb.example.test/session-url", {"User-Agent": "reachy-mini-conversation-app"}),
+    ]
+    assert posts == [
+        (
+            "https://allocator.us-east-1.aws.endpoints.huggingface.cloud/session",
+            expected_header,
+            expected_payload,
+        )
+    ]
     reachy_mini.client.get_status.assert_called_once_with(wait=False)
     if status_error:
         assert "Daemon status unavailable for realtime session allocation" in caplog.text
