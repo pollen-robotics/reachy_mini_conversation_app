@@ -1065,29 +1065,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 allocator_payload["hardware_id"] = hardware_id
 
         async with httpx.AsyncClient(timeout=10.0) as http_client:
-            # The Space front end consumes bearer credentials, so use it only to discover the current allocator.
-            discovery_response = await http_client.get(
-                f"{session_url}-url",
-                headers={"User-Agent": "reachy-mini-conversation-app"},
-            )
-            discovery_response.raise_for_status()
-            discovered_session_url = discovery_response.json().get("session_url")
-            if not isinstance(discovered_session_url, str) or not discovered_session_url:
-                raise RuntimeError("Session discovery response did not contain a valid session_url")
-            try:
-                parsed_session_url = httpx.URL(discovered_session_url)
-            except httpx.InvalidURL as e:
-                raise RuntimeError("Session discovery response contained an invalid session_url") from e
-            if parsed_session_url.scheme != "https" or not parsed_session_url.host.endswith(
-                ".endpoints.huggingface.cloud"
-            ):
-                raise RuntimeError("Session discovery response contained an untrusted session_url")
-
-            response = await http_client.post(
-                discovered_session_url,
-                headers=allocator_headers,
-                json=allocator_payload,
-            )
+            response = await http_client.post(session_url, headers=allocator_headers, json=allocator_payload)
             response.raise_for_status()
             payload = response.json()
 
