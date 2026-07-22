@@ -1,5 +1,6 @@
 """Tests for personality editing routes."""
 
+import asyncio
 from typing import Any
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -251,6 +252,27 @@ def test_applying_default_persists_runtime_none(monkeypatch: pytest.MonkeyPatch)
 
     assert response["result"]["startup"] == "default"
     persist_personality.assert_called_once_with(None, "Aiden")
+
+
+def test_force_reloads_active_personality(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An active profile edit must reload the running conversation."""
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "user_personalities/guide")
+    app = FastAPI()
+    handler = MagicMock()
+    handler.apply_personality = AsyncMock(return_value="Personality reloaded.")
+    ops = build_personality_ops(handler, lambda: asyncio.get_running_loop())
+    rpc = JsonRpcServer()
+    register_personality_methods(rpc, ops)
+    rpc.mount(app)
+
+    response = _rpc_call(
+        TestClient(app),
+        "personalities.apply",
+        {"name": "user_personalities/guide", "force": True},
+    )
+
+    assert response["result"]["status"] == "Personality reloaded."
+    handler.apply_personality.assert_awaited_once_with("user_personalities/guide")
 
 
 def test_external_tools_are_available_without_autoload(

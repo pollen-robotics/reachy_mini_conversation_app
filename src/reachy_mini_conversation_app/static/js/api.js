@@ -130,8 +130,8 @@ export const getStatus = () => rpcCall("conversation.status");
 export const listPersonalities = () => rpcCall("personalities.list");
 export const loadPersonality = (name) => rpcCall("personalities.load", { name });
 export const savePersonality = (payload) => rpcCall("personalities.save", payload);
-export const applyPersonality = (name, { persist = false } = {}) =>
-  rpcCall("personalities.apply", { name, persist });
+export const applyPersonality = (name, { persist = false, force = false } = {}) =>
+  rpcCall("personalities.apply", { name, persist, force });
 export const deletePersonality = (name) => rpcCall("personalities.delete", { name });
 
 export const getMicState = () => rpcCall("conversation.mic", {});

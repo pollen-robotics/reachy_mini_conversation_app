@@ -59,7 +59,7 @@ export async function mountHomeView({ outlet, signal, navigate }) {
   grid.replaceChildren();
   for (const name of choices) {
     const disabled = Boolean(lockedTo) && name !== lockedTo;
-    const editable = name.startsWith("user_personalities/") && !disabled;
+    const editable = !personalities?.locked && name.startsWith("user_personalities/");
     grid.appendChild(
       buildPersonalityCard({
         name,
@@ -173,7 +173,7 @@ export async function mountHomeView({ outlet, signal, navigate }) {
     // otherwise the changes take effect the next time it is selected.
     if (name === current) {
       setPersonality(name);
-      setPendingApply({ name, promise: applyPersonality(name, { persist: false }) });
+      setPendingApply({ name, promise: applyPersonality(name, { persist: false, force: true }) });
       navigate(ROUTES.TALK);
     } else {
       status.textContent = `Saved "${prettifyProfileName(name)}". It will apply next time you select it.`;

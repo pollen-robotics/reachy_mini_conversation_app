@@ -252,7 +252,7 @@ export function buildProfileToolsSection({ signal, initialProfile = null, onProf
       const payload = await saveProfileTools(currentPayload.profile, enabledTools);
       if (signal?.aborted) return;
       render(payload);
-      status.textContent = "Tool access saved.";
+      status.textContent = payload?.message || "Tool access saved.";
     } catch (error) {
       if (signal?.aborted) return;
       status.textContent = `Could not save tool access: ${describeError(error)}`;
@@ -279,7 +279,7 @@ export function buildProfileToolsSection({ signal, initialProfile = null, onProf
       const payload = await resetProfileTools(currentPayload.profile);
       if (signal?.aborted) return;
       render(payload);
-      status.textContent = "Profile defaults restored.";
+      status.textContent = payload?.message || "Profile defaults restored.";
     } catch (error) {
       if (signal?.aborted) return;
       status.textContent = `Could not restore defaults: ${describeError(error)}`;

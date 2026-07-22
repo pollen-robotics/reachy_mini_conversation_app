@@ -242,8 +242,8 @@ class PersonalityOps:
             raise RouteError("not_deletable", extra={"choices": choices})
         return {"ok": True, "choices": list_personalities()}
 
-    async def apply(self, name: str, persist: bool = False) -> dict[str, Any]:
-        """Apply a personality and optionally persist it for startup."""
+    async def apply(self, name: str, persist: bool = False, *, force: bool = False) -> dict[str, Any]:
+        """Apply or reload a personality and optionally persist it for startup."""
         if LOCKED_PROFILE is not None:
             raise RouteError("profile_locked", extra={"locked_to": LOCKED_PROFILE})
         selected_name = canonical_profile_name(name)
@@ -263,7 +263,7 @@ class PersonalityOps:
             except Exception as exc:
                 logger.warning("Failed to persist startup personality: %s", exc)
 
-        if selected_name == self._current_choice():
+        if selected_name == self._current_choice() and not force:
             _persist_if_requested()
             return {"ok": True, "status": "Personality unchanged.", "startup": persisted_choice}
 
@@ -379,7 +379,13 @@ def register_personality_methods(rpc: JsonRpcServer, ops: PersonalityOps) -> Non
     rpc.register("personalities.delete", _wrap(lambda params: ops.delete(str(params["name"]))))
     rpc.register(
         "personalities.apply",
-        _wrap(lambda params: ops.apply(str(params.get("name", "")), bool(params.get("persist", False)))),
+        _wrap(
+            lambda params: ops.apply(
+                str(params.get("name", "")),
+                bool(params.get("persist", False)),
+                force=bool(params.get("force", False)),
+            )
+        ),
     )
     rpc.register("voices.list", _wrap(lambda params: ops.voices()))
     rpc.register("voices.current", _wrap(lambda params: ops.current_voice()))
