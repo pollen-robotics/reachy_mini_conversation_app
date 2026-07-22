@@ -1,3 +1,4 @@
+/* Hugging Face Space landing page; application UI styles live under src/. */
 :root {
 	--bg: #060c1d;
 	--panel: #0c172b;
@@ -179,9 +180,10 @@ a {
 	transform: translateY(-2px);
 }
 
-.btn.wide {
-	width: 100%;
-	justify-content: center;
+.btn:focus-visible,
+.footer a:focus-visible {
+	outline: 3px solid var(--accent);
+	outline-offset: 3px;
 }
 
 .hero-badges {
@@ -382,5 +384,12 @@ a {
 
 	.hero-badges {
 		gap: 0.4rem;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.btn,
+	.feature-card {
+		transition: none;
 	}
 }
