@@ -120,8 +120,26 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return default
 
 
+def _env_float(name: str, default: float) -> float:
+    """Parse a float environment value, falling back to ``default`` on errors."""
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("Invalid float value for %s=%r, using default=%s", name, raw, default)
+        return default
+
+
 APP_TIMEOUT_MINUTES_ENV = "REACHY_MINI_APP_TIMEOUT_MINUTES"
 DEFAULT_APP_TIMEOUT_MINUTES = 1440.0
+
+STANDBY_ON_SLEEP_ENV = "STANDBY_ON_SLEEP"
+WAKE_WORD_MODEL_ENV = "WAKE_WORD_MODEL"
+WAKE_WORD_THRESHOLD_ENV = "WAKE_WORD_THRESHOLD"
+DEFAULT_WAKE_WORD_MODEL = "hey_jarvis_v0.1"
+DEFAULT_WAKE_WORD_THRESHOLD = 0.5
 
 
 def resolve_app_timeout_minutes() -> float | None:
@@ -322,6 +340,12 @@ class Config:
     AUTOLOAD_EXTERNAL_TOOLS = _env_flag("AUTOLOAD_EXTERNAL_TOOLS", default=False)
     REACHY_MINI_CUSTOM_PROFILE = LOCKED_PROFILE or os.getenv("REACHY_MINI_CUSTOM_PROFILE")
 
+    # Standby mode: "go to sleep" closes the realtime connection but keeps the
+    # app alive, listening for a local wake word instead of exiting.
+    STANDBY_ON_SLEEP = _env_flag(STANDBY_ON_SLEEP_ENV, default=False)
+    WAKE_WORD_MODEL = (os.getenv(WAKE_WORD_MODEL_ENV) or DEFAULT_WAKE_WORD_MODEL).strip()
+    WAKE_WORD_THRESHOLD = _env_float(WAKE_WORD_THRESHOLD_ENV, DEFAULT_WAKE_WORD_THRESHOLD)
+
     logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")
 
     def __init__(self) -> None:
@@ -413,6 +437,9 @@ def refresh_runtime_config_from_env() -> None:
     )
     config.HF_TOKEN = os.getenv("HF_TOKEN")
     config.REACHY_MINI_CUSTOM_PROFILE = LOCKED_PROFILE or os.getenv("REACHY_MINI_CUSTOM_PROFILE")
+    config.STANDBY_ON_SLEEP = _env_flag(STANDBY_ON_SLEEP_ENV, default=False)
+    config.WAKE_WORD_MODEL = (os.getenv(WAKE_WORD_MODEL_ENV) or DEFAULT_WAKE_WORD_MODEL).strip()
+    config.WAKE_WORD_THRESHOLD = _env_float(WAKE_WORD_THRESHOLD_ENV, DEFAULT_WAKE_WORD_THRESHOLD)
 
 
 def get_available_voices() -> list[str]:
