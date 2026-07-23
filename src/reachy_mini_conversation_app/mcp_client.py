@@ -7,7 +7,7 @@ downloading third-party Python code.
 
 from __future__ import annotations
 import re
-from typing import TYPE_CHECKING, Any, Mapping, AsyncIterator
+from typing import TYPE_CHECKING, Any, Mapping, Sequence, AsyncIterator
 from datetime import timedelta
 from contextlib import asynccontextmanager
 from dataclasses import field, dataclass
@@ -31,7 +31,7 @@ class McpClientError(RuntimeError):
 
 
 class McpDependencyError(McpClientError):
-    """Raised when the optional MCP SDK is not installed."""
+    """Raised when a required MCP client dependency is not installed."""
 
 
 class McpTransportError(McpClientError):
@@ -136,8 +136,7 @@ def _load_mcp_sdk() -> tuple[type["ClientSession"], Any]:
         from mcp.client.streamable_http import streamable_http_client
     except ImportError as exc:
         raise McpDependencyError(
-            "Remote MCP tools require the optional 'remote_tools' dependencies. "
-            "Install the project with the 'remote_tools' extra before using this module."
+            "Remote MCP tools require the app's MCP client dependencies. Reinstall or update the app environment."
         ) from exc
     return ClientSession, streamable_http_client
 
@@ -147,8 +146,7 @@ def _load_httpx() -> Any:
         import httpx
     except ImportError as exc:
         raise McpDependencyError(
-            "Remote MCP tools require the optional 'remote_tools' dependencies. "
-            "Install the project with the 'remote_tools' extra before using this module."
+            "Remote MCP tools require the app's HTTP client dependencies. Reinstall or update the app environment."
         ) from exc
     return httpx
 
@@ -273,10 +271,10 @@ class RemoteToolCallResponse:
 class RemoteMcpToolClient:
     """Minimal async client for allowlisted remote MCP tool servers."""
 
-    def __init__(self, server: RemoteMcpServerConfig) -> None:
+    def __init__(self, server: RemoteMcpServerConfig, known_tools: Sequence[RemoteToolSpec] = ()) -> None:
         """Store one allowlisted server configuration and an in-memory tool cache."""
         self.server = server
-        self._tool_index: dict[str, RemoteToolSpec] = {}
+        self._tool_index = _index_remote_tools(list(known_tools))
 
     async def list_tool_specs(self) -> list[RemoteToolSpec]:
         """Discover remote tools and translate them into app-facing specs."""

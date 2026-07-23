@@ -5,13 +5,14 @@ import base64
 import random
 import asyncio
 import logging
-from typing import Any, Final, Tuple, Optional
+from typing import TYPE_CHECKING, Any, Final, Tuple, Optional
 
 import httpx
 import numpy as np
 from openai import AsyncOpenAI
 from pydantic import Field, BaseModel
 from numpy.typing import NDArray
+from huggingface_hub import get_token
 from typing_extensions import Literal, TypedDict
 from openai.types.realtime import (
     AudioTranscriptionParam,
@@ -23,7 +24,6 @@ from openai.types.realtime import (
     RealtimeSessionCreateRequestParam,
 )
 from websockets.exceptions import ConnectionClosedError
-from openai.resources.realtime.realtime import AsyncRealtimeConnection
 from openai.types.realtime.realtime_audio_input_turn_detection_param import ServerVad
 
 from reachy_mini_conversation_app.tools import core_tools
@@ -53,6 +53,10 @@ from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolNotification,
     BackgroundToolManager,
 )
+
+
+if TYPE_CHECKING:
+    from openai.resources.realtime.realtime import AsyncRealtimeConnection
 
 
 logger = logging.getLogger(__name__)
@@ -126,7 +130,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self.deps = deps
 
         self.client: AsyncOpenAI
-        self.connection: AsyncRealtimeConnection | None = None
+        self.connection: "AsyncRealtimeConnection | None" = None
         self.output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]" = asyncio.Queue()
 
         self.instance_path = instance_path
@@ -156,6 +160,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self._turn_response_created_at: float | None = None
         self._turn_first_audio_at: float | None = None
         self._startup_greeting_sent = False
+        self._in_flight_tool_calls: set[str] = set()
+        self._tool_batch_needs_response = False
 
     @staticmethod
     def _sanitize_tool_result_for_model(tool_name: str, tool_result: dict[str, Any]) -> dict[str, Any]:
@@ -443,6 +449,28 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         """
         await self._pending_responses.put(kwargs)
 
+    async def say(self, text: str) -> None:
+        """Inject ``text`` as a turn and have the model voice it now.
+
+        Mirrors the startup-greeting path: create a user message item, then
+        queue a ``response.create`` through the serial sender. Not verbatim TTS
+        (speech-to-speech may rephrase). Raises if the session is closed.
+        """
+        text = (text or "").strip()
+        if not text:
+            raise ValueError("say: empty text")
+        if not self.connection:
+            raise RuntimeError("say: no active session")
+        await self.connection.conversation.item.create(
+            item={
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": text}],
+            },
+        )
+        self._mark_activity("say")
+        await self._safe_response_create()
+
     async def _send_startup_greeting_prompt(self) -> None:
         """Prompt the model to open the conversation once the session is ready."""
         if self._startup_greeting_sent or not self.connection:
@@ -669,9 +697,17 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         jpeg_bytes,
                     )
 
+            if isinstance(completed_tool.id, str):
+                self._in_flight_tool_calls.discard(completed_tool.id)
+
             tool = core_tools.ALL_TOOLS.get(completed_tool.tool_name)
             # Always surface errors, skip the spoken follow-up for tools that opt out.
             if model_result_submitted and (completed_tool.error is not None or tool is None or tool.needs_response):
+                self._tool_batch_needs_response = True
+
+            # Parallel tool calls in one turn: respond once every result is in, not per tool.
+            if self._tool_batch_needs_response and not self._in_flight_tool_calls:
+                self._tool_batch_needs_response = False
                 await self._safe_response_create()
 
         except ConnectionClosedError:
@@ -741,6 +777,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         logger.debug("User speech stopped - server will auto-commit with VAD")
 
                     if event.type == "response.output_audio.done":
+                        self.deps.movement_manager.set_speaking(False)
                         logger.debug("response completed")
 
                     if event.type == "response.output_text.delta":
@@ -751,6 +788,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
                     if event.type == "response.created":
                         self._mark_activity("response_created")
+                        self.deps.movement_manager.set_speaking(True)
                         self._response_done_event.clear()
                         self._response_started_or_rejected_event.set()
                         if self._turn_user_done_at is not None and self._turn_response_created_at is None:
@@ -761,6 +799,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
                     if event.type == "response.done":
                         # Doesn't mean the audio is done playing
+                        # Resume tracking for responses that emit no audio (text-only / tool-only).
+                        self.deps.movement_manager.set_speaking(False)
                         self._response_done_event.set()
                         self._response_started_or_rejected_event.set()
                         logger.debug("Response done")
@@ -802,8 +842,11 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         self._turn_user_done_at = time.perf_counter()
                         self._turn_response_created_at = None
                         self._turn_first_audio_at = None
+                        self._in_flight_tool_calls.clear()
+                        self._tool_batch_needs_response = False
 
                         await self.output_queue.put(AdditionalOutputs({"role": "user", "content": transcript}))
+                        self._emit_transcript("user", transcript, True)
 
                     # Handle assistant transcription
                     if event.type == "response.output_audio_transcript.done":
@@ -812,6 +855,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         await self.output_queue.put(
                             AdditionalOutputs({"role": "assistant", "content": event.transcript})
                         )
+                        self._emit_transcript("assistant", event.transcript or "", True)
 
                     # Handle audio delta
                     if event.type == "response.output_audio.delta":
@@ -853,6 +897,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                             )
                             continue
 
+                        self._in_flight_tool_calls.add(call_id)
                         background_tool = await self.tool_manager.start_tool(
                             call_id=call_id,
                             tool_call_routine=ToolCallRoutine(
@@ -989,7 +1034,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
     async def _build_realtime_client(self) -> AsyncOpenAI:
         """Build the Hugging Face OpenAI-compatible realtime client."""
-        bearer_token = (config.HF_TOKEN or "").strip()
+        configured_bearer_token = (config.HF_TOKEN or "").strip()
         connection_selection = get_hf_connection_selection()
         direct_realtime_url = get_hf_direct_ws_url()
         if connection_selection.mode == HF_LOCAL_CONNECTION_MODE:
@@ -997,7 +1042,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 raise RuntimeError("HF_REALTIME_WS_URL must be set when HF_REALTIME_CONNECTION_MODE=local")
             client, connect_query = _build_openai_compatible_client_from_realtime_url(
                 direct_realtime_url,
-                bearer_token,
+                configured_bearer_token,
             )
             self._realtime_connect_query = connect_query
             logger.info("Using direct Hugging Face realtime endpoint %s", direct_realtime_url)
@@ -1009,9 +1054,21 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         if direct_realtime_url:
             logger.info("HF_REALTIME_CONNECTION_MODE=deployed; ignoring HF_REALTIME_WS_URL.")
 
-        allocator_headers = {"Authorization": f"Bearer {bearer_token}"} if bearer_token else None
+        bearer_token = configured_bearer_token or (get_token() or "").strip()
+        allocator_headers = {"User-Agent": "reachy-mini-conversation-app"}
+        if bearer_token:
+            allocator_headers["X-Reachy-Mini-Authorization"] = f"Bearer {bearer_token}"
+        allocator_payload: dict[str, str] = {}
+        try:
+            hardware_id = self.deps.reachy_mini.client.get_status(wait=False).hardware_id
+        except (AssertionError, ConnectionError, TimeoutError) as e:
+            logger.warning("Daemon status unavailable for realtime session allocation: %s", e)
+        else:
+            if hardware_id:
+                allocator_payload["hardware_id"] = hardware_id
+
         async with httpx.AsyncClient(timeout=10.0) as http_client:
-            response = await http_client.post(session_url, headers=allocator_headers)
+            response = await http_client.post(session_url, headers=allocator_headers, json=allocator_payload)
             response.raise_for_status()
             payload = response.json()
 

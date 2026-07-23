@@ -8,13 +8,15 @@ active/startup profile from being removed underneath a running app.
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 import reachy_mini_conversation_app.personality as personality_mod
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.personality import delete_personality
-from reachy_mini_conversation_app.personality_routes import mount_personality_routes
+from reachy_mini_conversation_app.personality_routes import (
+    RouteError,
+    PersonalityOps,
+    build_personality_ops,
+)
 
 
 def _make_user_profile(name: str) -> None:
@@ -52,65 +54,60 @@ def test_delete_refuses_path_outside_user_root(tmp_path: Path, monkeypatch: pyte
     assert victim.is_dir()
 
 
-def _client(monkeypatch: pytest.MonkeyPatch, persisted: str | None = None) -> TestClient:
-    """Mount the personality routes with stub callbacks for delete-guard tests."""
-    app = FastAPI()
-    mount_personality_routes(
-        app,
-        handler=object(),  # type: ignore[arg-type]  # delete route does not touch the handler
-        get_loop=lambda: None,
+def _ops(persisted: str | None = None) -> PersonalityOps:
+    """Build personality ops with stub callbacks for delete-guard tests."""
+    return build_personality_ops(
+        object(),  # type: ignore[arg-type]  # delete does not touch the handler
+        lambda: None,
         get_persisted_personality=(lambda: persisted),
     )
-    return TestClient(app)
 
 
-def test_route_refuses_deleting_current_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ops_refuses_deleting_current_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Deleting the live profile would break get_session_instructions() next startup."""
     monkeypatch.setattr(config, "INSTANCE_PATH", tmp_path)
     monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "user_personalities/live")
     _make_user_profile("live")
 
-    resp = _client(monkeypatch).delete("/personalities", params={"name": "user_personalities/live"})
+    with pytest.raises(RouteError) as ei:
+        _ops().delete("user_personalities/live")
 
-    assert resp.status_code == 409
-    assert resp.json()["error"] == "profile_in_use"
+    assert ei.value.reason == "profile_in_use"
     assert (tmp_path / "user_personalities" / "live").is_dir()
 
 
-def test_route_refuses_deleting_startup_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ops_refuses_deleting_startup_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The persisted startup profile is guarded even when it is not the live one."""
     monkeypatch.setattr(config, "INSTANCE_PATH", tmp_path)
     monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
     _make_user_profile("boots")
 
-    client = _client(monkeypatch, persisted="user_personalities/boots")
-    resp = client.delete("/personalities", params={"name": "user_personalities/boots"})
+    with pytest.raises(RouteError) as ei:
+        _ops(persisted="user_personalities/boots").delete("user_personalities/boots")
 
-    assert resp.status_code == 409
-    assert resp.json()["error"] == "profile_in_use"
+    assert ei.value.reason == "profile_in_use"
     assert (tmp_path / "user_personalities" / "boots").is_dir()
 
 
-def test_route_deletes_inactive_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ops_deletes_inactive_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A profile that is neither live nor startup is deleted and returns ok."""
     monkeypatch.setattr(config, "INSTANCE_PATH", tmp_path)
     monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "user_personalities/live")
     _make_user_profile("live")
     _make_user_profile("spare")
 
-    resp = _client(monkeypatch).delete("/personalities", params={"name": "user_personalities/spare"})
+    result = _ops().delete("user_personalities/spare")
 
-    assert resp.status_code == 200
-    assert resp.json()["ok"] is True
+    assert result["ok"] is True
     assert not (tmp_path / "user_personalities" / "spare").exists()
 
 
-def test_route_returns_404_for_non_deletable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Built-in/missing deletes report a non-2xx so the UI keeps the card."""
+def test_ops_refuses_non_deletable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Built-in/missing deletes raise not_deletable so the UI keeps the card."""
     monkeypatch.setattr(config, "INSTANCE_PATH", tmp_path)
     monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
 
-    resp = _client(monkeypatch).delete("/personalities", params={"name": "mad_scientist_assistant"})
+    with pytest.raises(RouteError) as ei:
+        _ops().delete("mad_scientist_assistant")
 
-    assert resp.status_code == 404
-    assert resp.json()["error"] == "not_deletable"
+    assert ei.value.reason == "not_deletable"
