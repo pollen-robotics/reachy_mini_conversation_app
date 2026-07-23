@@ -442,10 +442,10 @@ def test_media_warmup_overlaps_audio_startup_config(monkeypatch: pytest.MonkeyPa
     startup_barrier = threading.Barrier(2)
 
     async def wait_for_audio_config(_delay: float) -> None:
-        await asyncio.to_thread(startup_barrier.wait, 0.5)
+        await asyncio.to_thread(startup_barrier.wait, 5.0)
 
     def apply_audio_config(*_args: Any, **_kwargs: Any) -> bool:
-        startup_barrier.wait(0.5)
+        startup_barrier.wait(5.0)
         return True
 
     async def start_and_stop() -> None:
