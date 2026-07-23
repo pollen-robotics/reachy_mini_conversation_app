@@ -779,8 +779,10 @@ class LocalStream:
             # Connect the backend first so it overlaps the warmup and audio config below.
             handler_task = asyncio.create_task(self._run_handler_startup_loop(), name="realtime-handler")
             self._tasks = [handler_task]
-            await asyncio.sleep(1)  # give the pipelines time to start
-            await asyncio.to_thread(apply_audio_startup_config, self._robot, logger=logger)
+            await asyncio.gather(
+                asyncio.sleep(1),  # give the pipelines time to start
+                asyncio.to_thread(apply_audio_startup_config, self._robot, logger=logger),
+            )
             self._tasks += [
                 asyncio.create_task(self.record_loop(), name="stream-record-loop"),
                 asyncio.create_task(self.play_loop(), name="stream-play-loop"),

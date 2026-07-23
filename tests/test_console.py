@@ -1,6 +1,7 @@
 """Tests for the headless console stream."""
 
 import asyncio
+import threading
 from types import SimpleNamespace
 from typing import Any
 from pathlib import Path
@@ -420,6 +421,44 @@ def test_backend_startup_failure_is_recorded_without_raising(
     assert data["backend_connected"] is False
     assert data["backend_connection_state"] == "disconnected"
     assert data["backend_error"] == "RuntimeError: local server unavailable"
+
+
+def test_media_warmup_overlaps_audio_startup_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Audio configuration should run while the media pipelines warm up."""
+    monkeypatch.setattr("reachy_mini_conversation_app.console.has_hf_realtime_target", lambda: True)
+
+    handler = MagicMock()
+    handler.shutdown = AsyncMock()
+    media = SimpleNamespace(
+        audio=None,
+        backend=None,
+        start_recording=MagicMock(),
+        start_playing=MagicMock(),
+    )
+    stream = LocalStream(handler, SimpleNamespace(media=media))
+    stream.record_loop = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    stream.play_loop = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    startup_barrier = threading.Barrier(2)
+
+    async def wait_for_audio_config(_delay: float) -> None:
+        await asyncio.to_thread(startup_barrier.wait, 5.0)
+
+    def apply_audio_config(*_args: Any, **_kwargs: Any) -> bool:
+        startup_barrier.wait(5.0)
+        return True
+
+    async def start_and_stop() -> None:
+        stream._stop_event.set()
+
+    handler.start_up = AsyncMock(side_effect=start_and_stop)
+    monkeypatch.setattr("reachy_mini_conversation_app.console.asyncio.sleep", wait_for_audio_config)
+    monkeypatch.setattr("reachy_mini_conversation_app.console.apply_audio_startup_config", apply_audio_config)
+
+    try:
+        stream.launch()
+    finally:
+        asyncio.set_event_loop(asyncio.new_event_loop())
 
 
 @pytest.mark.asyncio
