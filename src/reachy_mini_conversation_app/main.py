@@ -286,8 +286,21 @@ def run(
     deps.go_to_sleep = go_to_sleep_and_stop_app
 
     def wake_robot_from_standby() -> None:
-        """Physically wake the robot when standby exits (runs off the event loop)."""
-        app_lifecycle.wake_up_if_sleeping(robot, logger)
+        """Physically wake the robot when standby exits (runs off the event loop).
+
+        Unconditional (no sleep-pose check): standby always follows
+        goto_sleep, and the head MUST be back in the open pose before the
+        backend reconnects — speaking from inside the sleep shell muffles
+        audio into the robot's own mic.
+        """
+        try:
+            robot.enable_motors()
+        except Exception as e:
+            logger.debug("Error enabling motors on wake: %s", e)
+        try:
+            robot.wake_up()  # blocking: head is up before this returns
+        except Exception as e:
+            logger.error("Wake-up movement failed: %s", e)
         movement_manager.start()
         try:
             robot.enable_wobbling()

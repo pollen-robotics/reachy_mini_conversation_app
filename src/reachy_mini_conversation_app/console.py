@@ -8,6 +8,7 @@ import os
 import time
 import asyncio
 import logging
+import threading
 from typing import Any, List, Optional
 from pathlib import Path
 from collections.abc import Callable
@@ -137,7 +138,11 @@ class LocalStream:
         # Standby: backend disconnected, mic routed to the local wake-word
         # detector only. _on_wake runs the physical wake-up (motors, wobbling).
         self._standby = False
+        # Set the instant standby is requested, before the (possibly slow)
+        # detector build: from that moment mic frames stop reaching the backend.
+        self._standby_pending = False
         self._wake_detector: Any = None
+        self._wake_detector_lock = threading.Lock()
         self._on_wake: Callable[[], None] | None = None
         self._install_handler(handler)
 
@@ -231,6 +236,29 @@ class LocalStream:
         """Set the callback that physically wakes the robot on standby exit."""
         self._on_wake = on_wake
 
+    def _build_wake_detector_if_needed(self) -> Any:
+        """Build (or return) the wake-word detector; safe from any thread."""
+        with self._wake_detector_lock:
+            if self._wake_detector is None:
+                from reachy_mini_conversation_app.standby import build_wake_word_detector
+
+                self._wake_detector = build_wake_word_detector(
+                    config.WAKE_WORD_MODEL, config.WAKE_WORD_THRESHOLD
+                )
+            return self._wake_detector
+
+    def warm_up_wake_word_detector(self) -> None:
+        """Pre-build the wake-word detector in the background at startup.
+
+        Loading the model cold can take >10 s on-robot; doing it here keeps
+        the sleep-to-standby transition (and its mic cutoff) near-instant.
+        """
+        threading.Thread(
+            target=self._build_wake_detector_if_needed,
+            daemon=True,
+            name="wake-word-warmup",
+        ).start()
+
     def enter_standby(self) -> bool:
         """Enter standby from any thread. Returns False if standby is unavailable.
 
@@ -243,18 +271,19 @@ class LocalStream:
         if not self._can_rebuild_handler():
             logger.error("Standby unavailable: no handler factory to reconnect with later.")
             return False
-        if self._wake_detector is None:
-            from reachy_mini_conversation_app.standby import build_wake_word_detector
 
-            self._wake_detector = build_wake_word_detector(
-                config.WAKE_WORD_MODEL, config.WAKE_WORD_THRESHOLD
-            )
-        if self._wake_detector is None:
+        # Cut the mic off from the backend immediately; the detector build
+        # below may take seconds on a cold start and the robot is already
+        # visibly asleep when this is called.
+        self._standby_pending = True
+        if self._build_wake_detector_if_needed() is None:
+            self._standby_pending = False
             logger.error("Standby unavailable: wake word detector could not be initialized.")
             return False
 
         loop = self._asyncio_loop
         if loop is None or not loop.is_running():
+            self._standby_pending = False
             logger.error("Standby unavailable: stream loop is not running.")
             return False
         asyncio.run_coroutine_threadsafe(self._enter_standby(), loop)
@@ -263,9 +292,14 @@ class LocalStream:
     async def _enter_standby(self) -> None:
         """Loop-side standby entry: close the backend and arm the wake word."""
         if self._standby:
+            self._standby_pending = False
             return
         self._wake_detector.reset()
         self._standby = True
+        self._standby_pending = False
+        # Flush any in-flight assistant speech: the robot is asleep and must
+        # not keep talking (its own muffled audio can read as a barge-in).
+        self.clear_audio_queue()
         self._set_backend_connection_state("standby")
         self._emit_phase("standby", "go_to_sleep")
         await self._shutdown_active_handler()
@@ -285,6 +319,7 @@ class LocalStream:
             return
         logger.info("Waking from standby (%s).", reason)
         self._standby = False
+        self._standby_pending = False
         self._emit_phase("waking", reason)
         if self._on_wake is not None:
             try:
@@ -860,6 +895,10 @@ class LocalStream:
                 return
             self._set_backend_connection_state("not_started")
 
+        # Pre-load the wake-word model so entering standby later is instant.
+        if bool(getattr(config, "STANDBY_ON_SLEEP", False)):
+            self.warm_up_wake_word_detector()
+
         # Start media after key is set/available
         self._robot.media.start_recording()
         self._robot.media.start_playing()
@@ -966,6 +1005,10 @@ class LocalStream:
                     detector = self._wake_detector
                     if detector is not None and detector.process(input_sample_rate, audio_frame):
                         await self._exit_standby("wake_word")
+                elif self._standby_pending:
+                    # Sleep requested but standby not armed yet: drop the
+                    # frame — nothing may reach the backend anymore.
+                    pass
                 else:
                     await self.handler.receive((input_sample_rate, audio_frame))
                     self._emit_level("user", audio_frame)
