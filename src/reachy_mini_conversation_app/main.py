@@ -34,15 +34,23 @@ def _start_inactivity_timeout_thread(
     go_to_sleep: Callable[[], dict[str, Any]] | None = None,
 ) -> threading.Thread:
     """Start a daemon that puts the app to sleep after inactivity."""
-    timeout_seconds = timeout_minutes * 60.0
 
     def poll_inactivity_timeout() -> None:
+        from reachy_mini_conversation_app.config import resolve_app_timeout_minutes
+
         logger.info("App inactivity timeout enabled: %.1f minutes.", timeout_minutes)
         while app_stop_event is None or not app_stop_event.is_set():
             if stream_manager.in_standby:
                 # Asleep already; the wake word re-arms the timer via a fresh handler.
                 time.sleep(1.0)
                 continue
+            # Re-read each pass so runtime changes (e.g. a voice tool updating
+            # the env var) take effect without an app restart.
+            current_minutes = resolve_app_timeout_minutes()
+            if current_minutes is None:
+                time.sleep(5.0)
+                continue
+            timeout_seconds = current_minutes * 60.0
             elapsed = stream_manager.seconds_since_activity()
             if elapsed >= timeout_seconds:
                 logger.info("No activity for %.1f minutes; going to sleep.", elapsed / 60.0)
