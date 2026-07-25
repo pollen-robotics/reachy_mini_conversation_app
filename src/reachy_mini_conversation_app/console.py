@@ -141,6 +141,9 @@ class LocalStream:
         # Set the instant standby is requested, before the (possibly slow)
         # detector build: from that moment mic frames stop reaching the backend.
         self._standby_pending = False
+        # True while the physical wake-up move runs; keeps the backend gated
+        # and the detector quiet until the head is back in the open pose.
+        self._waking = False
         self._wake_detector: Any = None
         self._wake_detector_lock = threading.Lock()
         self._on_wake: Callable[[], None] | None = None
@@ -314,18 +317,30 @@ class LocalStream:
         return True
 
     async def _exit_standby(self, reason: str) -> None:
-        """Loop-side standby exit: wake the robot and reconnect the backend."""
-        if not self._standby:
+        """Loop-side standby exit: wake the robot, THEN reconnect the backend.
+
+        ``_standby`` stays True while the wake move runs so the startup loop
+        cannot reconnect (and the model cannot speak) until the head is back
+        in the open pose — muffled in-shell speech feeds the robot's own mic.
+        """
+        if not self._standby or self._waking:
             return
+        self._waking = True
         logger.info("Waking from standby (%s).", reason)
-        self._standby = False
-        self._standby_pending = False
         self._emit_phase("waking", reason)
-        if self._on_wake is not None:
-            try:
-                await asyncio.to_thread(self._on_wake)
-            except Exception:
-                logger.exception("Physical wake-up failed; reconnecting backend anyway.")
+        try:
+            if self._on_wake is not None:
+                try:
+                    await asyncio.to_thread(self._on_wake)
+                except Exception:
+                    logger.exception("Physical wake-up failed; reconnecting backend anyway.")
+        finally:
+            # No awaits between clearing the gate and requesting the restart:
+            # the startup loop must observe both together.
+            self._standby = False
+            self._standby_pending = False
+            self._waking = False
+        logger.info("Wake-up move complete; reconnecting backend.")
         self._set_backend_connection_state("connecting")
         self._restart_requested.set()
 
@@ -1002,8 +1017,13 @@ class LocalStream:
                 if self._standby:
                     # Local wake-word scoring only — the backend is down and
                     # this frame goes no further than the detector's window.
+                    # Quiet during the wake move (its chime must not re-fire).
                     detector = self._wake_detector
-                    if detector is not None and detector.process(input_sample_rate, audio_frame):
+                    if (
+                        not self._waking
+                        and detector is not None
+                        and detector.process(input_sample_rate, audio_frame)
+                    ):
                         await self._exit_standby("wake_word")
                 elif self._standby_pending:
                     # Sleep requested but standby not armed yet: drop the
