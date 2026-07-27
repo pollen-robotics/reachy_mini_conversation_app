@@ -12,6 +12,7 @@ import numpy as np
 from openai import AsyncOpenAI
 from pydantic import Field, BaseModel
 from numpy.typing import NDArray
+from huggingface_hub import get_token
 from typing_extensions import Literal, TypedDict
 from openai.types.realtime import (
     AudioTranscriptionParam,
@@ -1013,7 +1014,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
     async def _build_realtime_client(self) -> AsyncOpenAI:
         """Build the Hugging Face OpenAI-compatible realtime client."""
-        bearer_token = (config.HF_TOKEN or "").strip()
+        configured_bearer_token = (config.HF_TOKEN or "").strip()
         connection_selection = get_hf_connection_selection()
         direct_realtime_url = get_hf_direct_ws_url()
         if connection_selection.mode == HF_LOCAL_CONNECTION_MODE:
@@ -1021,7 +1022,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 raise RuntimeError("HF_REALTIME_WS_URL must be set when HF_REALTIME_CONNECTION_MODE=local")
             client, connect_query = _build_openai_compatible_client_from_realtime_url(
                 direct_realtime_url,
-                bearer_token,
+                configured_bearer_token,
             )
             self._realtime_connect_query = connect_query
             logger.info("Using direct Hugging Face realtime endpoint %s", direct_realtime_url)
@@ -1033,9 +1034,21 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         if direct_realtime_url:
             logger.info("HF_REALTIME_CONNECTION_MODE=deployed; ignoring HF_REALTIME_WS_URL.")
 
-        allocator_headers = {"Authorization": f"Bearer {bearer_token}"} if bearer_token else None
+        bearer_token = configured_bearer_token or (get_token() or "").strip()
+        allocator_headers = {"User-Agent": "reachy-mini-conversation-app"}
+        if bearer_token:
+            allocator_headers["X-Reachy-Mini-Authorization"] = f"Bearer {bearer_token}"
+        allocator_payload: dict[str, str] = {}
+        try:
+            hardware_id = self.deps.reachy_mini.client.get_status(wait=False).hardware_id
+        except (AssertionError, ConnectionError, TimeoutError) as e:
+            logger.warning("Daemon status unavailable for realtime session allocation: %s", e)
+        else:
+            if hardware_id:
+                allocator_payload["hardware_id"] = hardware_id
+
         async with httpx.AsyncClient(timeout=10.0) as http_client:
-            response = await http_client.post(session_url, headers=allocator_headers)
+            response = await http_client.post(session_url, headers=allocator_headers, json=allocator_payload)
             response.raise_for_status()
             payload = response.json()
 

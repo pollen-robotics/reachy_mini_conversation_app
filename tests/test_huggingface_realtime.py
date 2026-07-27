@@ -104,8 +104,11 @@ def _fake_openai_client(captured_kwargs: dict[str, Any]) -> type:
     return FakeClient
 
 
-def _fake_allocator(connect_url: str, posts: list[tuple[str, dict[str, str] | None]]) -> type:
-    """Return a fake httpx.AsyncClient whose POST records (url, headers) and returns `connect_url`."""
+def _fake_allocator(
+    connect_url: str,
+    posts: list[tuple[str, dict[str, str] | None, dict[str, str] | None]],
+) -> type:
+    """Return a fake httpx.AsyncClient that records allocator requests."""
 
     class FakeResponse:
         def raise_for_status(self) -> None:
@@ -124,8 +127,13 @@ def _fake_allocator(connect_url: str, posts: list[tuple[str, dict[str, str] | No
         async def __aexit__(self, *_a: Any) -> bool:
             return False
 
-        async def post(self, url: str, headers: dict[str, str] | None = None) -> FakeResponse:
-            posts.append((url, headers))
+        async def post(
+            self,
+            url: str,
+            headers: dict[str, str] | None = None,
+            json: dict[str, str] | None = None,
+        ) -> FakeResponse:
+            posts.append((url, headers, json))
             return FakeResponse()
 
     return FakeAsyncClient
@@ -288,9 +296,14 @@ async def test_run_realtime_session_passes_allocated_session_query(monkeypatch: 
     assert captured_connect["extra_query"] == {"session_token": "abc123"}
 
 
+@pytest.mark.parametrize(("hf_token", "expected_api_key"), [(None, "DUMMY"), ("hf-secret", "hf-secret")])
 @pytest.mark.asyncio
-async def test_build_realtime_client_uses_direct_hf_ws_url(monkeypatch: Any) -> None:
-    """Hugging Face direct websocket mode should bypass the session allocator."""
+async def test_build_realtime_client_local_uses_explicit_hf_token_only(
+    monkeypatch: Any,
+    hf_token: str | None,
+    expected_api_key: str,
+) -> None:
+    """Local websocket mode must never forward cached Hugging Face credentials."""
     client_kwargs: dict[str, Any] = {}
 
     def _no_allocator(*_args: Any, **_kwargs: Any) -> Any:
@@ -300,7 +313,8 @@ async def test_build_realtime_client_uses_direct_hf_ws_url(monkeypatch: Any) -> 
     monkeypatch.setattr(hf_mod.httpx, "AsyncClient", _no_allocator)
     monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "local")
     monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", "https://lb.example.test/session")
-    monkeypatch.setattr(config, "HF_TOKEN", None)
+    monkeypatch.setattr(config, "HF_TOKEN", hf_token)
+    monkeypatch.setattr(hf_mod, "get_token", lambda: "hf-cached")
     monkeypatch.setattr(
         config,
         "HF_REALTIME_WS_URL",
@@ -312,29 +326,74 @@ async def test_build_realtime_client_uses_direct_hf_ws_url(monkeypatch: Any) -> 
     client = await handler._build_realtime_client()
 
     assert client is not None
-    assert client_kwargs["api_key"] == "DUMMY"
+    assert client_kwargs["api_key"] == expected_api_key
     assert client_kwargs["base_url"] == "http://127.0.0.1:8765/v1"
     assert client_kwargs["websocket_base_url"] == "ws://127.0.0.1:8765/v1"
     assert handler._realtime_connect_query == {"session_token": "abc123"}
 
 
 @pytest.mark.parametrize(
-    ("hf_token", "expected_header", "expected_api_key"),
+    (
+        "hf_token",
+        "cached_token",
+        "hardware_id",
+        "status_error",
+        "expected_header",
+        "expected_api_key",
+        "expected_payload",
+    ),
     [
-        ("hf-secret", {"Authorization": "Bearer hf-secret"}, "hf-secret"),
-        (None, None, "DUMMY"),
+        (
+            "hf-secret",
+            "hf-cached",
+            "0123456789abcdef",
+            None,
+            {
+                "User-Agent": "reachy-mini-conversation-app",
+                "X-Reachy-Mini-Authorization": "Bearer hf-secret",
+            },
+            "hf-secret",
+            {"hardware_id": "0123456789abcdef"},
+        ),
+        (
+            None,
+            "hf-cached",
+            None,
+            None,
+            {
+                "User-Agent": "reachy-mini-conversation-app",
+                "X-Reachy-Mini-Authorization": "Bearer hf-cached",
+            },
+            "hf-cached",
+            {},
+        ),
+        (None, None, None, None, {"User-Agent": "reachy-mini-conversation-app"}, "DUMMY", {}),
+        (
+            None,
+            None,
+            None,
+            TimeoutError("status unavailable"),
+            {"User-Agent": "reachy-mini-conversation-app"},
+            "DUMMY",
+            {},
+        ),
     ],
 )
 @pytest.mark.asyncio
-async def test_build_realtime_client_deployed_allocates_with_hf_token_only(
+async def test_build_realtime_client_deployed_resolves_hf_token(
     monkeypatch: Any,
+    caplog: pytest.LogCaptureFixture,
     hf_token: str | None,
-    expected_header: dict[str, str] | None,
+    cached_token: str | None,
+    hardware_id: str | None,
+    status_error: Exception | None,
+    expected_header: dict[str, str],
     expected_api_key: str,
+    expected_payload: dict[str, str],
 ) -> None:
-    """Deployed mode allocates via the session URL, authenticating with HF_TOKEN only (never an OpenAI key)."""
+    """Deployed allocation reports available credentials and robot identity."""
     client_kwargs: dict[str, Any] = {}
-    posts: list[tuple[str, dict[str, str] | None]] = []
+    posts: list[tuple[str, dict[str, str] | None, dict[str, str] | None]] = []
     connect_url = "wss://hf.example.test/v1/realtime?session_token=allocated"
     monkeypatch.setattr(hf_mod, "AsyncOpenAI", _fake_openai_client(client_kwargs))
     monkeypatch.setattr(hf_mod.httpx, "AsyncClient", _fake_allocator(connect_url, posts))
@@ -343,13 +402,21 @@ async def test_build_realtime_client_deployed_allocates_with_hf_token_only(
     # A stale local URL must be ignored in deployed mode.
     monkeypatch.setattr(config, "HF_REALTIME_WS_URL", "ws://127.0.0.1:8765/v1/realtime")
     monkeypatch.setattr(config, "HF_TOKEN", hf_token)
+    monkeypatch.setattr(hf_mod, "get_token", lambda: cached_token)
 
-    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    reachy_mini = MagicMock()
+    reachy_mini.client.get_status.return_value.hardware_id = hardware_id
+    if status_error:
+        reachy_mini.client.get_status.side_effect = status_error
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=reachy_mini, movement_manager=MagicMock()))
 
     client = await handler._build_realtime_client()
 
     assert client is not None
-    assert posts == [("https://lb.example.test/session", expected_header)]
+    assert posts == [("https://lb.example.test/session", expected_header, expected_payload)]
+    reachy_mini.client.get_status.assert_called_once_with(wait=False)
+    if status_error:
+        assert "Daemon status unavailable for realtime session allocation" in caplog.text
     assert client_kwargs["api_key"] == expected_api_key
     assert client_kwargs["base_url"] == "https://hf.example.test/v1"
     assert client_kwargs["websocket_base_url"] == "wss://hf.example.test/v1"

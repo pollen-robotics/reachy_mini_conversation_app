@@ -67,6 +67,7 @@ def wake_up_if_sleeping(robot: ReachyMini, logger: logging.Logger) -> bool:
 
     logger.info("Robot is in sleep pose; running wake-up movement.")
     try:
+        robot.enable_motors()
         robot.wake_up()
     except Exception as e:
         logger.error("Failed to run wake-up movement: %s", e)
