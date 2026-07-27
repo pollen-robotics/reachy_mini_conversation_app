@@ -147,6 +147,36 @@ def test_editing_personality_preserves_tool_defaults_and_override(
     assert read_profile_tool_override("user_personalities/guide", tmp_path) == ["camera"]
 
 
+def test_personality_save_materializes_submitted_tools(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Submitted profile tools should remain portable without a local override."""
+    monkeypatch.setattr(config, "INSTANCE_PATH", tmp_path)
+    profile_directory = tmp_path / "user_personalities" / "guide"
+    write_profile("guide", profile_directory, "Old instructions.", ["dance"])
+    write_profile_tool_override("user_personalities/guide", ["camera"], tmp_path)
+
+    response = _rpc_call(
+        _client(),
+        "personalities.save",
+        {
+            "name": "guide",
+            "instructions": "New instructions.",
+            "tools_text": "go_to_sleep\n",
+            "overwrite": True,
+        },
+    )
+
+    assert "result" in response
+    profile = read_profile_from_directory("guide", profile_directory)
+    assert profile.default_tools == ("go_to_sleep",)
+    assert read_profile_tool_override("user_personalities/guide", tmp_path) is None
+    loaded = _rpc_call(_client(), "personalities.load", {"name": "user_personalities/guide"})["result"]
+    assert loaded["enabled_tools"] == ["go_to_sleep"]
+    assert loaded["tools_text"] == "go_to_sleep\n"
+
+
 def test_personality_save_rolls_back_tool_override_if_profile_write_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

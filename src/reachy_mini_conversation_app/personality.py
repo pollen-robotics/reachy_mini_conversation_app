@@ -27,7 +27,6 @@ from reachy_mini_conversation_app.profile_toolsets import (
     write_profile_toolsets,
     get_profile_toolsets_path,
     clear_profile_tool_override,
-    write_profile_tool_override,
     profile_toolsets_transaction,
 )
 from reachy_mini_conversation_app.tools.tool_constants import SystemTool
@@ -132,9 +131,9 @@ def save_user_personality(
     greeting: str | None = None,
     *,
     overwrite: bool = False,
-    enabled_tools: Iterable[str] | None = None,
+    default_tools: Iterable[str] | None = None,
 ) -> str:
-    """Save a custom personality with an optional tool override."""
+    """Save a custom personality with optional authored tool defaults."""
     profile_name = name.strip()
     if re.fullmatch(r"[a-zA-Z0-9_-]+", profile_name) is None:
         raise ValueError("Profile names may contain only letters, numbers, dashes, and underscores.")
@@ -144,30 +143,33 @@ def save_user_personality(
     profile_directory = config.user_personalities_root() / profile_name
     selection = f"{USER_PERSONALITIES_DIRNAME}/{profile_name}"
     selected_voice = voice or get_default_voice()
-    selected_tools = list(enabled_tools) if enabled_tools is not None else None
+    authored_tools = tuple(default_tools) if default_tools is not None else None
     with profile_toolsets_transaction():
         if profile_directory.exists() and not overwrite:
             raise FileExistsError(f"Personality {profile_name!r} already exists.")
         try:
             previous_profile = read_profile_from_directory(profile_name, profile_directory)
-            default_tools = previous_profile.default_tools
+            profile_tools = previous_profile.default_tools
             hidden = previous_profile.hidden
         except FileNotFoundError:
-            default_tools = read_packaged_default_profile().default_tools
+            profile_tools = read_packaged_default_profile().default_tools
             hidden = False
+        if authored_tools is not None:
+            profile_tools = authored_tools
+
         toolsets_path = get_profile_toolsets_path(config.INSTANCE_PATH)
         toolsets_existed = toolsets_path.is_file()
-        previous_toolsets = read_profile_toolsets(config.INSTANCE_PATH) if selected_tools is not None else None
+        previous_toolsets = read_profile_toolsets(config.INSTANCE_PATH) if authored_tools is not None else None
 
-        if selected_tools is not None:
-            write_profile_tool_override(selection, selected_tools, config.INSTANCE_PATH)
+        if authored_tools is not None:
+            clear_profile_tool_override(selection, config.INSTANCE_PATH)
 
         try:
             write_profile(
                 profile_name,
                 profile_directory,
                 instructions,
-                default_tools,
+                profile_tools,
                 voice=selected_voice,
                 greeting=greeting,
                 hidden=hidden,
@@ -177,7 +179,7 @@ def save_user_personality(
             try:
                 if toolsets_existed and previous_toolsets is not None:
                     write_profile_toolsets(config.INSTANCE_PATH, previous_toolsets)
-                elif selected_tools is not None:
+                elif authored_tools is not None:
                     toolsets_path.unlink(missing_ok=True)
             except OSError as exc:
                 logger.warning("Failed to restore profile toolsets after saving profile %r: %s", profile_name, exc)

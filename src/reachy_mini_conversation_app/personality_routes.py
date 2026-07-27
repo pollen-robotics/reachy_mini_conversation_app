@@ -200,7 +200,7 @@ class PersonalityOps:
         voice = str(payload["voice"]) if payload.get("voice") is not None else None
         greeting = str(payload["greeting"]) if payload.get("greeting") is not None else None
         has_tools_text = "tools_text" in payload
-        enabled_tools = (
+        default_tools = (
             normalize_tool_names(str(payload.get("tools_text") or "").splitlines()) if has_tools_text else None
         )
         overwrite = bool(payload.get("overwrite", has_tools_text))
@@ -211,7 +211,7 @@ class PersonalityOps:
                 voice,
                 greeting,
                 overwrite=overwrite,
-                enabled_tools=enabled_tools,
+                default_tools=default_tools,
             )
         except FileExistsError as exc:
             raise RouteError("profile_exists") from exc
