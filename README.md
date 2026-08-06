@@ -26,6 +26,7 @@ Conversational app for the Reachy Mini robot combining realtime voice, vision, p
 - [Configuration](#configuration)
 - [Running the app](#running-the-app)
 - [LLM tools](#llm-tools-exposed-to-the-assistant)
+- [Creating and adding tools](#creating-and-adding-tools)
 - [Advanced features](#advanced-features)
 - [Contributing](#contributing)
 - [License](#license)
@@ -206,6 +207,105 @@ Every bundled profile enables `head_tracking` by default; users can still disabl
 > [!NOTE]
 > `remember`/`forget` facts are stored in `memory.v1.json` inside the app's instance data directory (`~/.local/share/reachy_mini_conversation_app/` by default, or the instance path used by the desktop launcher). `forget` only removes facts matched by query. To reset all remembered facts, delete this file.
 
+## Creating and adding tools
+
+Tools can run locally as Python code or remotely in an MCP-compatible Hugging Face Space. Keep robot, camera, and local-data operations in local tools. A Space is a better fit for shareable, stateless services such as search and external API lookups.
+
+### Local tools
+
+Create one Python module per tool, with the file name matching the tool's unique `name`. For example, save this as `word_count.py`:
+
+```python
+from typing import Any
+
+from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
+
+
+class WordCount(Tool):
+    """Count words in text."""
+
+    name = "word_count"
+    description = "Count the whitespace-separated words in a piece of text."
+    parameters_schema = {
+        "type": "object",
+        "properties": {
+            "text": {
+                "type": "string",
+                "description": "Text whose words should be counted.",
+            },
+        },
+        "required": ["text"],
+    }
+
+    async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> dict[str, Any]:
+        """Return the number of words in the supplied text."""
+        text = kwargs.get("text")
+        if not isinstance(text, str):
+            return {"error": "text must be a string"}
+        return {"word_count": len(text.split())}
+```
+
+The class must define `name`, a model-facing `description`, an object-shaped JSON Schema in `parameters_schema`, and the async `__call__` method. `ToolDependencies` provides the Reachy Mini instance, movement manager, and optional runtime services. Set `needs_response = False` for a physical action that should not trigger a spoken follow-up. Catch expected operational failures, log them with the module logger, and return `{"error": "..."}` so the conversation can continue.
+
+Put the module in one of these locations:
+
+- `src/reachy_mini_conversation_app/tools/word_count.py` for a shared tool contributed to the app.
+- A directory such as `external_content/external_tools/` for a local extension kept outside the package. Set `REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY` to that directory in `.env`.
+
+Restart the app after adding the module. Use Tools → Tool access to enable `word_count` for a personality, or add it to that profile's `default_tools` in `profile.md`. `AUTOLOAD_EXTERNAL_TOOLS=1` can enable every valid module in the configured external directory without a per-profile selection. Add a focused test under `tests/tools/` for a shared tool; external loading itself is covered by `tests/test_external_loading.py`.
+
+### Hugging Face Space tools
+
+To publish a remote tool, create a Gradio Space and expose its API as MCP. Gradio derives the tool name, description, and input schema from the function name, docstring, type hints, and components. A minimal Space has these files:
+
+```text
+app.py
+requirements.txt
+```
+
+```text
+# requirements.txt
+gradio[mcp]
+```
+
+```python
+# app.py
+import gradio as gr
+
+
+def count_words(text: str) -> int:
+    """Count whitespace-separated words in text.
+
+    Args:
+        text: Text whose words should be counted.
+
+    Returns:
+        Number of words in the text.
+    """
+    return len(text.split())
+
+
+demo = gr.Interface(
+    fn=count_words,
+    inputs=gr.Textbox(label="Text"),
+    outputs=gr.Number(label="Word count"),
+    api_name="count_words",
+)
+
+if __name__ == "__main__":
+    demo.launch(mcp_server=True)
+```
+
+Push the files to a Gradio Space and verify that `https://<space-subdomain>.hf.space/gradio_api/mcp/schema` lists the tool. Clear type hints and docstrings matter because the realtime model uses the generated schema to decide when and how to call it. See Gradio's [MCP server guide](https://www.gradio.app/guides/building-mcp-server-with-gradio) for multiple endpoints, authentication headers, files, and progress reporting.
+
+Install and enable the Space in the active profile through Tools → Tool Spaces, or run:
+
+```bash
+reachy-mini-conversation-app tool-spaces add <owner/space-name>
+```
+
+The app discovers the Space's tools and assigns namespaced local IDs, so do not guess or hard-code those IDs before installation. Use `--profile <name>` to enable them elsewhere or `--install-only` to install without enabling. Private Spaces are supported when `HF_TOKEN` is set or `hf auth login` has authenticated an account with access. The app accepts Hugging Face Spaces exposing the standard `/gradio_api/mcp/` endpoint, not arbitrary MCP URLs.
+
 ## Advanced features
 
 Built-in motion content is published as open Hugging Face datasets:
@@ -245,6 +345,8 @@ You are a concise, friendly robot guide.
 `default_tools` is the authored baseline. Tools → Tool access stores overrides in instance-local `profile_toolsets.json` without changing bundled profiles. Restoring defaults removes the override. Active-profile changes reconnect the conversation; other changes apply when selected.
 
 Profile directories are data-only. Python tool implementations belong in `src/reachy_mini_conversation_app/tools/`, or in `REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY` for external tools. Each enabled tool ID must resolve to a shared tool, an external tool, or a tool from an installed Hugging Face Space.
+
+See [Creating and adding tools](#creating-and-adding-tools) for the local tool interface and a complete example.
 
 To manage personalities in the UI:
 
@@ -320,7 +422,7 @@ Loading rules:
 <details>
 <summary>Hugging Face Space tools</summary>
 
-You can install MCP-compatible Hugging Face Spaces as remote tool sources for this app. Private Spaces work too, as long as `HF_TOKEN` is set (or you have run `hf auth login`) for an account that can access them.
+You can install MCP-compatible Hugging Face Spaces as remote tool sources for this app. Private Spaces work too, as long as `HF_TOKEN` is set (or you have run `hf auth login`) for an account that can access them. To publish a new Space, follow [Creating and adding tools](#hugging-face-space-tools).
 
 Tools → Tool Spaces installs or refreshes a global source. Its tools then appear under Tools → Tool access for per-profile selection. Removing a Space removes its tools from every profile. Active-profile changes reconnect the conversation; other changes apply when selected.
 
