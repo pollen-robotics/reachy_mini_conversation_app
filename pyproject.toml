@@ -22,7 +22,14 @@ dependencies = [
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy-mini>=1.10.0rc2",
-    "mcp>=1.27.1",
+    # MCP v2 (2026-07-28 spec). The v1 client exposed the wire's camelCase field
+    # names; v2 exposes snake_case attributes with camelCase aliases, so an
+    # unpinned "mcp>=1.x" floor silently reads empty tool schemas once it
+    # resolves to 2.x. mcp exact-pins mcp-types, so both move in lockstep.
+    "mcp==2.0.0",
+    "mcp-types==2.0.0",
+    # The transport the v2 SDK is built on; plain httpx stays for the HF backend.
+    "httpx2>=2.5.0",
 ]
 
 [dependency-groups]
