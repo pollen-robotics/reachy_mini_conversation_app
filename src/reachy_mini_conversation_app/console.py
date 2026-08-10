@@ -8,7 +8,7 @@ import os
 import time
 import asyncio
 import logging
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 from pathlib import Path
 from collections.abc import Callable
 
@@ -41,6 +41,7 @@ from reachy_mini_conversation_app.prompts import get_session_voice, get_session_
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_float32
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
 from reachy_mini_conversation_app.tools.core_tools import initialize_tools
+from reachy_mini_conversation_app.mcp_server_routes import register_mcp_server_methods
 from reachy_mini_conversation_app.tool_space_routes import register_tool_space_methods
 from reachy_mini_conversation_app.personality_routes import (
     build_personality_ops,
@@ -64,6 +65,23 @@ except Exception:  # pragma: no cover - only loaded when settings_app is used
     BaseModel = object  # type: ignore
 
 logger = logging.getLogger(__name__)
+
+
+# Unquoted, these make python-dotenv return a different value than was written:
+# `#` starts an inline comment, quotes are stripped, and backslash/whitespace
+# parsing varies. Quoting keeps the value literal — except `${VAR}`, which
+# python-dotenv interpolates in any quoting style, so those values are refused
+# in `_persist_env_values` instead. Not dotenv.set_key: it escapes quotes but
+# not backslashes, so values containing `\\` do not round-trip.
+_ENV_VALUE_CHARS_NEEDING_QUOTES = " \t#'\"$\\"
+
+
+def _format_env_line(name: str, value: str) -> str:
+    """Format a `.env` line so the value round-trips through python-dotenv unchanged."""
+    if any(char in value for char in _ENV_VALUE_CHARS_NEEDING_QUOTES):
+        escaped = value.replace("\\", "\\\\").replace("'", "\\'")
+        return f"{name}='{escaped}'"
+    return f"{name}={value}"
 
 
 def _detach_framework_root_routes(app: "FastAPI") -> None:
@@ -336,12 +354,25 @@ class LocalStream:
             "backend_error": None if connected else self._backend_error,
         }
 
-    def _persist_env_values(self, updates: dict[str, str]) -> None:
-        """Persist non-empty environment values in memory and in the instance `.env`."""
+    def _persist_env_values(self, updates: dict[str, str]) -> Literal["persisted", "session", "failed"]:
+        """Apply non-empty environment values to the runtime and the instance `.env`.
+
+        Raises ValueError before anything is applied if a value cannot round-trip
+        through the `.env`: line breaks corrupt the file, and `${` triggers
+        python-dotenv interpolation that has no escape syntax. Returns "persisted"
+        when the `.env` was written, "session" when there is nothing to write to
+        (terminal mode), and "failed" when the `.env` write errored — so callers
+        can warn that the value will not survive a restart.
+        """
         normalized_updates = {name: (value or "").strip() for name, value in updates.items()}
+        unsafe_names = sorted(
+            name for name, value in normalized_updates.items() if "\n" in value or "\r" in value or "${" in value
+        )
+        if unsafe_names:
+            raise ValueError(f"Values must not contain line breaks or '${{': {', '.join(unsafe_names)}.")
         normalized_updates = {name: value for name, value in normalized_updates.items() if value}
         if not normalized_updates:
-            return
+            return "session"
 
         for env_name, value in normalized_updates.items():
             try:
@@ -351,7 +382,7 @@ class LocalStream:
         refresh_runtime_config_from_env()
 
         if not self._instance_path:
-            return
+            return "session"
         try:
             inst = Path(self._instance_path)
             env_path = inst / ".env"
@@ -360,11 +391,11 @@ class LocalStream:
                 replaced = False
                 for i, ln in enumerate(lines):
                     if ln.strip().startswith(f"{env_name}="):
-                        lines[i] = f"{env_name}={value}"
+                        lines[i] = _format_env_line(env_name, value)
                         replaced = True
                         break
                 if not replaced:
-                    lines.append(f"{env_name}={value}")
+                    lines.append(_format_env_line(env_name, value))
             final_text = "\n".join(lines) + "\n"
             env_path.write_text(final_text, encoding="utf-8")
             logger.info("Persisted %s to %s", ", ".join(sorted(normalized_updates)), env_path)
@@ -376,8 +407,10 @@ class LocalStream:
             except Exception:
                 pass
             refresh_runtime_config_from_env()
+            return "persisted"
         except Exception as e:
             logger.warning("Failed to persist %s: %s", ", ".join(sorted(normalized_updates)), e)
+            return "failed"
 
     def _remove_persisted_env_values(self, env_names: tuple[str, ...]) -> None:
         """Remove keys from the instance `.env` without mutating the current runtime."""
@@ -662,6 +695,17 @@ class LocalStream:
             )
         except Exception:
             logger.exception("Failed to register Tool Space methods; remote tool settings will be unavailable")
+
+        try:
+            register_mcp_server_methods(
+                rpc,
+                lambda: self._asyncio_loop,
+                self.request_backend_restart,
+                self._persist_env_values,
+                instance_path=self._instance_path,
+            )
+        except Exception:
+            logger.exception("Failed to register MCP server methods; custom MCP settings will be unavailable")
 
         try:
             register_profile_tool_methods(
