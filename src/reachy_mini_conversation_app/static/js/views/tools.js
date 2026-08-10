@@ -9,6 +9,7 @@ import {
 import { ROUTES } from "../constants.js";
 import { h } from "../ui.js";
 import { confirmDialog } from "../components/confirm-dialog.js";
+import { buildMcpServersSection } from "../components/mcp-servers.js";
 import { buildProfileToolsSection } from "../components/profile-tools.js";
 
 export async function mountToolsView({ outlet, signal, searchParams, setLeaveGuard, replaceRoute }) {
@@ -31,6 +32,11 @@ export async function mountToolsView({ outlet, signal, searchParams, setLeaveGua
     onBeforeChange: profileToolsSection.confirmDiscard,
     onChanged: profileToolsSection.refresh,
   });
+  const mcpServersSection = buildMcpServersSection({
+    signal,
+    onBeforeChange: profileToolsSection.confirmDiscard,
+    onChanged: profileToolsSection.refresh,
+  });
   const view = h(
     "section",
     { class: "view view--tools" },
@@ -41,15 +47,20 @@ export async function mountToolsView({ outlet, signal, searchParams, setLeaveGua
       h(
         "p",
         { class: "view-subtitle" },
-        "Choose tool access by personality and manage Tool Spaces."
+        "Choose tool access by personality and manage Tool Spaces and MCP servers."
       )
     ),
     profileToolsSection.element,
-    toolSpacesSection.element
+    toolSpacesSection.element,
+    mcpServersSection.element
   );
   outlet.replaceChildren(view);
 
-  await Promise.all([profileToolsSection.refresh(), toolSpacesSection.refresh()]);
+  await Promise.all([
+    profileToolsSection.refresh(),
+    toolSpacesSection.refresh(),
+    mcpServersSection.refresh(),
+  ]);
 }
 
 function buildToolSpacesSection({ signal, onBeforeChange, onChanged } = {}) {

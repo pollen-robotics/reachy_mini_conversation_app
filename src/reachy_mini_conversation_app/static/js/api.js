@@ -149,6 +149,14 @@ export const addToolSpace = (slug) =>
 export const removeToolSpace = (slug) =>
   rpcCall("tool_spaces.remove", { slug }, { timeoutMs: TOOL_SPACE_TIMEOUT_MS });
 
+export const listMcpServers = () => rpcCall("mcp_servers.list");
+export const addMcpServer = (payload) =>
+  rpcCall("mcp_servers.add", payload, { timeoutMs: TOOL_SPACE_TIMEOUT_MS });
+export const removeMcpServer = (alias) =>
+  rpcCall("mcp_servers.remove", { alias }, { timeoutMs: TOOL_SPACE_TIMEOUT_MS });
+export const saveMcpServerToken = (alias, token) =>
+  rpcCall("mcp_servers.save_token", { alias, token });
+
 export const getProfileTools = (profile) =>
   rpcCall("profile_tools.get", profile ? { profile } : {});
 export const saveProfileTools = (profile, enabledTools) =>
@@ -177,6 +185,20 @@ const ERROR_MESSAGES = Object.freeze({
   not_deletable: "This personality can't be deleted.",
   loop_unavailable: "Reachy is still starting up. Try again in a moment.",
   tool_space_not_installed: "That Tool Space is no longer installed.",
+  invalid_mcp_alias: "Enter a short alias using letters, numbers and underscores.",
+  invalid_mcp_url: "Enter the server's MCP endpoint URL.",
+  invalid_mcp_token_env: "Enter a valid environment variable name, e.g. MY_SERVER_TOKEN.",
+  invalid_mcp_timeout: "Timeouts must be a number of seconds greater than zero.",
+  invalid_mcp_server: "That MCP server configuration isn't valid.",
+  mcp_server_alias_conflict: "That alias is already used by another tool source.",
+  mcp_server_not_configured: "That MCP server is no longer configured.",
+  mcp_servers_unavailable: "Couldn't read the MCP server list. Check mcp_servers.json for errors.",
+  mcp_servers_manifest_damaged:
+    "mcp_servers.json has entries that can't be read. Fix them before adding or removing servers.",
+  unknown_mcp_server: "That MCP server is no longer configured.",
+  empty_token: "Enter a token first.",
+  invalid_token: "Tokens can't contain line breaks or '${'.",
+  token_save_failed: "Couldn't store that token.",
 });
 
 /** Map a thrown error to user-facing copy, falling back to its raw message. */
