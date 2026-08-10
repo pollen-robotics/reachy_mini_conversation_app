@@ -13,6 +13,7 @@ from reachy_mini_conversation_app.config import (
     get_default_voice,
     list_tool_module_names,
 )
+from reachy_mini_conversation_app.companion import COMPANION_TOOL_NAMES
 from reachy_mini_conversation_app.tool_spaces import read_installed_tool_spaces
 from reachy_mini_conversation_app.profile_store import (
     DEFAULT_PROFILE_NAME,
@@ -76,6 +77,7 @@ def available_tool_catalog() -> list[AvailableTool]:
     catalog: dict[str, AvailableTool] = {}
     excluded_modules = {"__init__", "core_tools", "background_tool_manager", "tool_constants"}
     excluded_modules.update(tool.value for tool in SystemTool)
+    excluded_modules.update(COMPANION_TOOL_NAMES)
     for tool_name in list_tool_module_names(Path(__file__).parent / "tools"):
         if tool_name in excluded_modules:
             continue

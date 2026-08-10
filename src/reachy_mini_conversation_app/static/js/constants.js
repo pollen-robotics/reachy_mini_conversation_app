@@ -40,8 +40,14 @@ export const ROUTES = Object.freeze({
   TALK: "#/",
   PERSONALITIES: "#/personalities",
   SETTINGS: "#/settings",
+  TASKS: "#/tasks",
   TOOLS: "#/tools",
 });
+
+export const ACTIVE_COMPANION_SETUP_STATES = Object.freeze([
+  "provisioning",
+  "verifying",
+]);
 
 export function avatarFor(profileName) {
   const file = AVATAR_BY_PROFILE[profileName] || AVATAR_BY_PROFILE.default;

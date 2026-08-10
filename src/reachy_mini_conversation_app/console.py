@@ -31,6 +31,7 @@ from reachy_mini_conversation_app.config import (
     set_custom_profile,
     get_available_voices,
     get_hf_direct_ws_url,
+    is_companion_enabled,
     build_hf_direct_ws_url,
     has_hf_realtime_target,
     parse_hf_direct_target,
@@ -39,6 +40,7 @@ from reachy_mini_conversation_app.config import (
 )
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_float32
+from reachy_mini_conversation_app.companion.routes import register_companion_methods
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
 from reachy_mini_conversation_app.tools.core_tools import initialize_tools
 from reachy_mini_conversation_app.tool_space_routes import register_tool_space_methods
@@ -49,6 +51,10 @@ from reachy_mini_conversation_app.personality_routes import (
 from reachy_mini_conversation_app.profile_tool_routes import register_profile_tool_methods
 from reachy_mini_conversation_app.audio.startup_config import apply_audio_startup_config
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
+from reachy_mini_conversation_app.companion.coordinator import (
+    CompanionNotification,
+    CompanionTaskCoordinator,
+)
 
 
 try:
@@ -96,6 +102,7 @@ LEGACY_STARTUP_ENV_NAMES = (
     "REACHY_MINI_VOICE_OVERRIDE",
 )
 BACKEND_RETRY_DELAY_SECONDS = 5.0
+COMPANION_PRESENCE_WINDOW_SECONDS = 300.0
 
 
 class LocalStream:
@@ -110,6 +117,7 @@ class LocalStream:
         instance_path: Optional[str] = None,
         handler_factory: HandlerFactory | None = None,
         startup_voice: Optional[str] = None,
+        companion_tasks: CompanionTaskCoordinator | None = None,
     ):
         """Initialize the stream with a realtime handler and pipelines.
 
@@ -131,6 +139,8 @@ class LocalStream:
         self._backend_connection_state = "not_started"
         self._backend_error: str | None = None
         self._backend_retry_delay = BACKEND_RETRY_DELAY_SECONDS
+        self._companion_tasks = companion_tasks
+        self._last_user_presence_time: float | None = None
         # JSON-RPC control surface (mounted at /rpc in _init_settings_ui_if_needed).
         # Notifications (conversation.turn/phase/transcript/activity) are pushed
         # here from activity + transcripts. Survives handler rebuilds (mounted once).
@@ -157,6 +167,8 @@ class LocalStream:
 
     def _dispatch_transcript(self, role: str, text: str, final: bool) -> None:
         """Push a conversation.transcript notification to JSON-RPC clients."""
+        if role == "user" and final and text.strip():
+            self._last_user_presence_time = time.monotonic()
         if self._rpc is not None:
             self._rpc.broadcast_threadsafe(
                 "conversation.transcript",
@@ -210,6 +222,26 @@ class LocalStream:
             if state and state != self._last_turn_state:
                 self._last_turn_state = state
                 self._rpc.broadcast_threadsafe("conversation.turn", {"state": state})
+
+    async def _deliver_companion_notification(self, notification: CompanionNotification) -> bool:
+        """Queue a task notice through the current voice handler at a quiet gap."""
+        if not is_companion_enabled():
+            return False
+        last_user_presence_time = self._last_user_presence_time
+        if (
+            last_user_presence_time is None
+            or time.monotonic() - last_user_presence_time > COMPANION_PRESENCE_WINDOW_SECONDS
+        ):
+            return False
+        handler = self.handler
+        if not handler.notification_ready():
+            return False
+        try:
+            await handler.say(notification.instruction, allow_tools=False)
+            return True
+        except Exception as e:
+            logger.warning("Could not queue companion task %s notice: %s", notification.task_id, e)
+            return False
 
     def _emit_phase(self, phase: str, reason: Optional[str] = None) -> None:
         """Push a conversation.phase notification to JSON-RPC clients."""
@@ -673,6 +705,17 @@ class LocalStream:
         except Exception:
             logger.exception("Failed to register profile tool methods; personality tool settings will be unavailable")
 
+        try:
+            register_companion_methods(
+                rpc,
+                self._companion_tasks,
+                lambda: self._asyncio_loop,
+                self.request_backend_restart,
+                instance_path=self._instance_path,
+            )
+        except Exception:
+            logger.exception("Failed to register companion methods; Tasks will be unavailable")
+
         self._settings_initialized = True
 
     async def _run_handler_startup_loop(self) -> None:
@@ -790,6 +833,16 @@ class LocalStream:
             # Connect the backend first so it overlaps the warmup and audio config below.
             handler_task = asyncio.create_task(self._run_handler_startup_loop(), name="realtime-handler")
             self._tasks = [handler_task]
+            if self._companion_tasks is not None:
+                self._tasks.append(
+                    asyncio.create_task(
+                        self._companion_tasks.run(
+                            self._deliver_companion_notification,
+                            is_companion_enabled,
+                        ),
+                        name="companion-task-coordinator",
+                    )
+                )
             await asyncio.gather(
                 asyncio.sleep(1),  # give the pipelines time to start
                 asyncio.to_thread(apply_audio_startup_config, self._robot, logger=logger),

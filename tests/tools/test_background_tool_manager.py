@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.tool_constants import ToolState
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolProgress,
@@ -83,6 +84,15 @@ class TestToolProgress:
             ToolProgress(progress=-0.1)
         with pytest.raises(Exception):
             ToolProgress(progress=1.1)
+
+
+def test_tool_call_routine_accepts_dependencies() -> None:
+    """Construct the routine used for realtime tool calls."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock())
+
+    routine = ToolCallRoutine(tool_name="test_tool", args_json_str="{}", deps=deps)
+
+    assert routine.deps is deps
 
 
 class TestToolNotification:

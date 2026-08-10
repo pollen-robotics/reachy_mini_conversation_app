@@ -105,7 +105,9 @@ Copy `.env.example` to `.env` when you want to point Hugging Face at your own lo
 | `REALTIME_TRANSCRIPTION_LANGUAGE` | Optional input transcription language for the realtime backend. Defaults to `en`; set to a backend-supported code such as `zh` for Chinese. |
 | `HF_REALTIME_CONNECTION_MODE` | Hugging Face connection selector: `deployed` uses the built-in Hugging Face server; `local` uses `HF_REALTIME_WS_URL`. Defaults to `deployed`. |
 | `HF_REALTIME_WS_URL` | Direct websocket endpoint for your own Hugging Face backend. Accepts either a base URL like `ws://127.0.0.1:8765/v1` or the full websocket URL `ws://127.0.0.1:8765/v1/realtime`. Used when `HF_REALTIME_CONNECTION_MODE=local`. |
-| `HF_TOKEN` | Optional token for Hugging Face access. Local endpoints receive only this explicitly configured token. |
+| `HF_TOKEN` | Optional Hugging Face credential, falls back to `hf auth login` for deployed services and assistant setup. Only an explicitly configured token is sent to local endpoints. |
+| `SMOL_ASSISTANT_API_URL` | Optional background-assistant API override. Requires `SMOL_ASSISTANT_API_TOKEN`; setting either override disables managed setup. |
+| `SMOL_ASSISTANT_API_TOKEN` | Token for the API override. Without a URL, it targets `http://127.0.0.1:8765`; setting either override disables managed setup. |
 | `REACHY_MINI_APP_TIMEOUT_MINUTES` | Minutes of inactivity before Reachy goes to sleep and the app stops. Defaults to `1440` (one day); set to `0` to disable. |
 
 ### Hugging Face Connection Modes
@@ -149,6 +151,24 @@ HF_REALTIME_WS_URL=ws://127.0.0.1:8765/v1/realtime
 
 In the web UI's Settings view, the Connection section lets you choose either the built-in server or a local `host:port` target. The UI writes `HF_REALTIME_CONNECTION_MODE` for you, and the local path writes `HF_REALTIME_WS_URL` with a default of `localhost:8765`.
 
+### Background assistant tasks
+
+The optional background assistant runs long tasks without blocking the conversation.
+Sign in with `hf auth login` or set `HF_TOKEN`, then configure it under
+**Settings → Background assistant**. Choose your PRO account or a writable, trusted
+Team/Enterprise organization; setup creates or reconnects its managed private Space and
+Bucket. Restart once when prompted. Organization access rules apply to both resources.
+Setup assigns inference billing automatically: to the token owner for personal Spaces and
+to the selected organization for organization-owned Spaces.
+
+Use **Tasks** to follow work, view questions, cancel active tasks, and open completed
+Markdown Briefs. Answer questions through Reachy. Disabling the assistant stops
+delegation and notifications but does not cancel remote work.
+
+For local development, set `SMOL_ASSISTANT_API_TOKEN` and optionally
+`SMOL_ASSISTANT_API_URL`. Without a URL, the override uses
+`http://127.0.0.1:8765`.
+
 ## Running the app
 
 Activate your virtual environment, then launch:
@@ -183,8 +203,9 @@ reachy-mini-conversation-app --ui
 
 ## LLM tools exposed to the assistant
 
-The default profile exposes these tools. Use Tools → Tool access to customize any profile.
-Every bundled profile enables `head_tracking` by default; users can still disable it per personality.
+The app can expose these tools. Use Tools → Tool access to customize profile tools.
+Background-assistant tools follow the global assistant switch instead. Every bundled profile enables
+`head_tracking` by default; users can still disable it per personality.
 
 | Tool | Action | Dependencies |
 |------|--------|--------------|
@@ -200,6 +221,11 @@ Every bundled profile enables `head_tracking` by default; users can still disabl
 | `sweep_look` | Sweep Reachy's head left, right, and back to center. | Shared tool, enabled by default in the default profile. |
 | `remember` | Save one short, stable fact about the user for future sessions. | Core install only. Stored in the app instance data directory. |
 | `forget` | Remove a saved memory fact by matching a short query. | Core install only. |
+| `companion_start` | Queue a background task. | Background assistant enabled. |
+| `companion_answer` | Answer a task's pending question. | Background assistant enabled. |
+| `companion_status` | Read a task's current state. | Background assistant enabled. |
+| `companion_result` | Read a completed Markdown Brief. | Background assistant enabled. |
+| `companion_cancel` | Cancel active background work. | Background assistant enabled. |
 | `pollen_robotics_reachy_mini_search_tool__search_web` | Search the web and return a short list of results. | Preinstalled MCP Space: `pollen-robotics/reachy-mini-search-tool`. |
 | `pollen_robotics_reachy_mini_weather_tool__get_weather` | Report today's weather for a place: current conditions, high and low temperature, and rain chance. | Preinstalled MCP Space: `pollen-robotics/reachy-mini-weather-tool`. |
 | `pollen_robotics_reachy_mini_time_tool__get_time` | Report the current time for a timezone or the user's local time, or the difference between two timezones. | Preinstalled MCP Space: `pollen-robotics/reachy-mini-time-tool`. |

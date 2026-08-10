@@ -42,6 +42,7 @@ from reachy_mini_conversation_app.prompts import (
     get_session_instructions,
     get_session_greeting_prompt,
 )
+from reachy_mini_conversation_app.companion import COMPANION_TOOL_NAMES
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_int16
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolSpec,
@@ -163,6 +164,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self._startup_greeting_sent = False
         self._in_flight_tool_calls: set[str] = set()
         self._tool_batch_needs_response = False
+        self._tool_batch_disallow_tools = False
 
     @staticmethod
     def _sanitize_tool_result_for_model(tool_name: str, tool_result: dict[str, Any]) -> dict[str, Any]:
@@ -429,7 +431,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         """
         await self._pending_responses.put(kwargs)
 
-    async def say(self, text: str) -> None:
+    async def say(self, text: str, *, allow_tools: bool = True) -> None:
         """Inject ``text`` as a turn and have the model voice it now.
 
         Mirrors the startup-greeting path: create a user message item, then
@@ -449,7 +451,10 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             },
         )
         self._mark_activity("say")
-        await self._safe_response_create()
+        if allow_tools:
+            await self._safe_response_create()
+        else:
+            await self._safe_response_create(response={"tool_choice": "none"})
 
     async def _send_startup_greeting_prompt(self) -> None:
         """Prompt the model to open the conversation once the session is ready."""
@@ -684,11 +689,20 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             # Always surface errors, skip the spoken follow-up for tools that opt out.
             if model_result_submitted and (completed_tool.error is not None or tool is None or tool.needs_response):
                 self._tool_batch_needs_response = True
+            if model_result_submitted and completed_tool.tool_name in COMPANION_TOOL_NAMES:
+                self._tool_batch_disallow_tools = True
 
             # Parallel tool calls in one turn: respond once every result is in, not per tool.
-            if self._tool_batch_needs_response and not self._in_flight_tool_calls:
+            if not self._in_flight_tool_calls:
+                needs_response = self._tool_batch_needs_response
+                disallow_tools = self._tool_batch_disallow_tools
                 self._tool_batch_needs_response = False
-                await self._safe_response_create()
+                self._tool_batch_disallow_tools = False
+                if needs_response:
+                    if disallow_tools:
+                        await self._safe_response_create(response={"tool_choice": "none"})
+                    else:
+                        await self._safe_response_create()
 
         except ConnectionClosedError:
             logger.warning("Connection closed while sending tool result")
@@ -725,6 +739,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
             # Manage events received from the realtime server.
             self.connection = conn
+            self.user_is_speaking = False
             try:
                 self._connected_event.set()
             except Exception:
@@ -742,6 +757,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 async for event in self.connection:
                     logger.debug("Realtime event: %s", event.type)
                     if event.type == "input_audio_buffer.speech_started":
+                        self.user_is_speaking = True
                         self._mark_activity("user_speech_started")
                         self._turn_user_done_at = None
                         self._turn_response_created_at = None
@@ -752,6 +768,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         logger.debug("User speech started")
 
                     if event.type == "input_audio_buffer.speech_stopped":
+                        self.user_is_speaking = False
                         self._mark_activity("user_speech_stopped")
                         self.deps.movement_manager.set_listening(False)
                         logger.debug("User speech stopped - server will auto-commit with VAD")
@@ -807,6 +824,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
                     # Handle completed transcription (user finished speaking)
                     if event.type == "conversation.item.input_audio_transcription.completed":
+                        self.user_is_speaking = False
                         self._mark_activity("user_transcription_completed")
                         raw_transcript = event.transcript or ""
                         transcript = raw_transcript.strip()
@@ -824,6 +842,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         self._turn_first_audio_at = None
                         self._in_flight_tool_calls.clear()
                         self._tool_batch_needs_response = False
+                        self._tool_batch_disallow_tools = False
 
                         await self.output_queue.put(AdditionalOutputs({"role": "user", "content": transcript}))
                         self._emit_transcript("user", transcript, True)
@@ -921,6 +940,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                             logger.error("Realtime error [%s]: %s (raw=%s)", code, msg, err)
 
                         if code == "input_audio_buffer_commit_empty":
+                            self.user_is_speaking = False
                             self.deps.movement_manager.set_listening(False)
 
                         # Only show user-facing errors, not internal state errors.
@@ -939,6 +959,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         await response_sender_task
                     except asyncio.CancelledError:
                         pass
+                self.user_is_speaking = False
 
                 # Stop background tool manager tasks (listener + cleanup) in all paths.
                 await self.tool_manager.shutdown()

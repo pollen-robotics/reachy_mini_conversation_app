@@ -88,7 +88,10 @@ def run(
     from reachy_mini_conversation_app.moves import MovementManager
     from reachy_mini_conversation_app.config import (
         HF_LOCAL_CONNECTION_MODE,
+        config,
         set_instance_path,
+        is_companion_enabled,
+        get_companion_connection,
         get_hf_connection_selection,
         resolve_app_timeout_minutes,
         refresh_runtime_config_from_env,
@@ -97,6 +100,7 @@ def run(
         StartupSettings,
         load_startup_settings_into_runtime,
     )
+    from reachy_mini_conversation_app.companion.settings import read_companion_settings
 
     logger = setup_logger(args.debug)
     logger.info("Starting Reachy Mini Conversation App")
@@ -120,14 +124,19 @@ def run(
         except Exception as e:
             logger.warning("Failed to load startup settings: %s", e)
 
+    companion_settings = read_companion_settings(instance_path)
+    config.COMPANION_ENABLED = companion_settings.enabled
+
     logger.info(
         "Configured Hugging Face realtime backend, connection mode: %s",
         get_hf_connection_selection().mode,
     )
 
     from reachy_mini_conversation_app.console import LocalStream
+    from reachy_mini_conversation_app.companion.client import CompanionClient
     from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, initialize_tools
     from reachy_mini_conversation_app.conversation_handler import ConversationHandler
+    from reachy_mini_conversation_app.companion.coordinator import CompanionTaskCoordinator
 
     if robot is None:
         try:
@@ -156,12 +165,29 @@ def run(
     app_lifecycle.wake_up_if_sleeping(robot, logger)
 
     movement_manager = MovementManager(current_robot=robot)
+    companion_tasks: CompanionTaskCoordinator | None = None
+    companion_connection = get_companion_connection(companion_settings)
+    config.COMPANION_CONFIGURED = companion_connection is not None
+    if companion_connection is not None:
+        companion_tasks = CompanionTaskCoordinator(
+            CompanionClient(
+                companion_connection.api_url,
+                companion_connection.api_token,
+                companion_connection.hf_token,
+            )
+        )
+        logger.info(
+            "Background assistant %s at %s",
+            "enabled" if is_companion_enabled() else "configured but disabled",
+            companion_connection.api_url,
+        )
 
     deps = ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
         instance_path=instance_path,
         camera_enabled=not args.no_camera,
+        companion_tasks=companion_tasks,
     )
 
     def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
@@ -204,6 +230,7 @@ def run(
         instance_path=instance_path,
         handler_factory=build_handler,
         startup_voice=startup_settings.voice,
+        companion_tasks=companion_tasks,
     )
 
     # The page is served immediately, so the API must be live before the slow startup work below.

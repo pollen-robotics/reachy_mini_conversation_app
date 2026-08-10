@@ -3,11 +3,18 @@ import re
 import sys
 import logging
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import field, dataclass
 from urllib.parse import urlsplit, parse_qsl, urlunsplit
 from importlib.resources import files
 
 from dotenv import find_dotenv, load_dotenv
+from huggingface_hub import get_token
+
+from reachy_mini_conversation_app.companion.settings import (
+    CompanionSettings,
+    normalize_companion_api_url,
+    normalize_companion_api_token,
+)
 
 
 # Locked profile: set to a profile name (e.g., "astronomer") to lock the app
@@ -64,9 +71,14 @@ HF_BACKEND = "huggingface"
 HF_REALTIME_CONNECTION_MODE_ENV = "HF_REALTIME_CONNECTION_MODE"
 HF_REALTIME_WS_URL_ENV = "HF_REALTIME_WS_URL"
 REALTIME_TRANSCRIPTION_LANGUAGE_ENV = "REALTIME_TRANSCRIPTION_LANGUAGE"
+HF_TOKEN_ENV = "HF_TOKEN"
+MAX_HF_TOKEN_CHARS = 4_096
 HF_LOCAL_CONNECTION_MODE = "local"
 HF_DEPLOYED_CONNECTION_MODE = "deployed"
 HF_REALTIME_SESSION_PROXY_URL = "https://pollen-robotics-reachy-mini-realtime-url.hf.space/session"
+SMOL_ASSISTANT_API_URL_ENV = "SMOL_ASSISTANT_API_URL"
+SMOL_ASSISTANT_API_TOKEN_ENV = "SMOL_ASSISTANT_API_TOKEN"
+DEFAULT_SMOL_ASSISTANT_API_URL = "http://127.0.0.1:8765"
 
 
 @dataclass(frozen=True)
@@ -180,6 +192,15 @@ class HFRealtimeURLParts:
     host: str | None
     port: int | None
     has_realtime_path: bool
+
+
+@dataclass(frozen=True)
+class CompanionConnection:
+    """Configured standalone companion API connection."""
+
+    api_url: str
+    api_token: str = field(repr=False)
+    hf_token: str | None = field(repr=False)
 
 
 def parse_hf_realtime_url(realtime_url: str) -> HFRealtimeURLParts:
@@ -317,7 +338,7 @@ class Config:
     HF_REALTIME_SESSION_URL = HF_DEFAULTS.session_url
     HF_REALTIME_WS_URL = os.getenv(HF_REALTIME_WS_URL_ENV)
     REALTIME_TRANSCRIPTION_LANGUAGE = _normalize_transcription_language(os.getenv(REALTIME_TRANSCRIPTION_LANGUAGE_ENV))
-    HF_TOKEN = os.getenv("HF_TOKEN")  # Optional, falls back to hf auth login if not set
+    HF_TOKEN = os.getenv(HF_TOKEN_ENV)  # Optional, falls back to hf auth login if not set
 
     logger.debug(
         "HF mode: %s, HF session URL set: %s, HF direct URL set: %s",
@@ -333,6 +354,8 @@ class Config:
     _tools_directory_env = os.getenv("REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY")
     TOOLS_DIRECTORY = Path(_tools_directory_env) if _tools_directory_env else None
     AUTOLOAD_EXTERNAL_TOOLS = _env_flag("AUTOLOAD_EXTERNAL_TOOLS", default=False)
+    COMPANION_ENABLED = True
+    COMPANION_CONFIGURED = False
     REACHY_MINI_CUSTOM_PROFILE = LOCKED_PROFILE or os.getenv("REACHY_MINI_CUSTOM_PROFILE")
 
     logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")
@@ -429,7 +452,7 @@ def refresh_runtime_config_from_env() -> None:
     config.REALTIME_TRANSCRIPTION_LANGUAGE = _normalize_transcription_language(
         os.getenv(REALTIME_TRANSCRIPTION_LANGUAGE_ENV)
     )
-    config.HF_TOKEN = os.getenv("HF_TOKEN")
+    config.HF_TOKEN = os.getenv(HF_TOKEN_ENV)
     config.REACHY_MINI_CUSTOM_PROFILE = LOCKED_PROFILE or os.getenv("REACHY_MINI_CUSTOM_PROFILE")
 
 
@@ -476,6 +499,59 @@ def get_hf_connection_selection() -> HFConnectionSelection:
 def has_hf_realtime_target() -> bool:
     """Return whether Hugging Face has a target for the selected mode."""
     return get_hf_connection_selection().has_target
+
+
+def get_companion_connection(settings: CompanionSettings) -> CompanionConnection | None:
+    """Resolve one saved connection or a complete developer environment override."""
+    url_from_environment = SMOL_ASSISTANT_API_URL_ENV in os.environ
+    token_from_environment = SMOL_ASSISTANT_API_TOKEN_ENV in os.environ
+    if url_from_environment or token_from_environment:
+        configured_url = (
+            os.environ.get(SMOL_ASSISTANT_API_URL_ENV, "") if url_from_environment else DEFAULT_SMOL_ASSISTANT_API_URL
+        )
+        token = os.environ.get(SMOL_ASSISTANT_API_TOKEN_ENV, "")
+        hosted_only = False
+    else:
+        if settings.api_url is None or settings.api_token is None:
+            return None
+        configured_url = settings.api_url
+        token = settings.api_token
+        hosted_only = True
+
+    try:
+        configured_url = normalize_companion_api_url(configured_url, hosted_only=hosted_only)
+        token = normalize_companion_api_token(token)
+    except ValueError as exc:
+        source = "environment override" if url_from_environment or token_from_environment else "saved connection"
+        logger.warning("Ignoring invalid companion %s: %s", source, exc)
+        return None
+
+    hf_token: str | None = None
+    parsed_url = urlsplit(configured_url)
+    if parsed_url.scheme == "https" and parsed_url.hostname is not None and parsed_url.hostname.endswith(".hf.space"):
+        configured_hf_token = (config.HF_TOKEN or "").strip() or (get_token() or "").strip()
+        if configured_hf_token and (
+            len(configured_hf_token) > MAX_HF_TOKEN_CHARS
+            or not configured_hf_token.isascii()
+            or any(not 0x21 <= ord(character) <= 0x7E for character in configured_hf_token)
+        ):
+            logger.warning("Ignoring invalid %s.", HF_TOKEN_ENV)
+            return None
+        if not configured_hf_token:
+            logger.warning(
+                "%s is not configured; private background assistant Spaces will not be accessible.",
+                HF_TOKEN_ENV,
+            )
+            if hosted_only:
+                return None
+        hf_token = configured_hf_token or None
+
+    return CompanionConnection(api_url=configured_url, api_token=token, hf_token=hf_token)
+
+
+def is_companion_enabled() -> bool:
+    """Return whether the configured companion is enabled for this app instance."""
+    return config.COMPANION_ENABLED and config.COMPANION_CONFIGURED
 
 
 def set_instance_path(instance_path: str | Path | None) -> None:

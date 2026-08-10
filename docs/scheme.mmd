@@ -36,6 +36,12 @@ flowchart TB
 
     Handlers -- results --> Backend
 
+    Assistant@{ label: "<span style='font-size:16px;font-weight:bold;'>Optional Background Assistant</span><br><span style='font-size:12px;color:#7b1fa2;'>Durable delegated tasks</span>" }
+
+    UI -. setup + tasks .-> Assistant
+    Handlers -. task delegation .-> Assistant
+    Assistant -. results + notifications .-> Handlers
+
      User:::userStyle
      UI:::uiStyle
      Backend:::aiStyle
@@ -43,6 +49,7 @@ flowchart TB
      Profiles:::toolStyle
      Handlers:::toolStyle
      Robot:::hardwareStyle
+     Assistant:::aiStyle
     classDef userStyle fill:#e1f5fe,stroke:#01579b,stroke-width:3px
     classDef uiStyle fill:#b3e5fc,stroke:#0277bd,stroke-width:2px
     classDef aiStyle fill:#e1bee7,stroke:#7b1fa2,stroke-width:3px

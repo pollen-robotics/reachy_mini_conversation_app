@@ -71,3 +71,5 @@ external_content/external_tools/*
 external_content/user_personalities/
 external_content/installed_tool_spaces.json
 external_content/profile_toolsets.json
+external_content/companion_settings.json
+external_content/.companion_settings.json.*.tmp

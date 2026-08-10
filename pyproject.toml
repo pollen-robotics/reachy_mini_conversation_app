@@ -10,7 +10,7 @@ description = ""
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "huggingface-hub>=1.17.0",
+    "huggingface-hub>=1.20.0",
     "httpx>=0.28.1",
 
     #Environment variables

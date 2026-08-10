@@ -27,12 +27,14 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     """Shared app handler contract and idle behavior for realtime conversation backends."""
 
     IDLE_BEHAVIOR_THRESHOLD_S: ClassVar[float] = 180.0
+    NOTIFICATION_QUIET_PERIOD_S: ClassVar[float] = 1.5
 
     deps: ToolDependencies
     tool_manager: BackgroundToolManager
     output_queue: asyncio.Queue[QueueItem]
     last_activity_time: float
     last_idle_behavior_time: float
+    user_is_speaking: bool
     _activity_observer: Callable[[str], None] | None = None
     _transcript_observer: Callable[[str, str, bool], None] | None = None
 
@@ -41,6 +43,7 @@ class ConversationHandler(AsyncStreamHandler, ABC):
         super().__init__()
         self.last_activity_time = time.monotonic()
         self.last_idle_behavior_time = self.last_activity_time
+        self.user_is_speaking = False
 
     def set_activity_observer(self, observer: Callable[[str], None] | None) -> None:
         """Attach or detach an activity observer. Pass None to clear."""
@@ -72,6 +75,15 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     def _idle_behavior_ready(self) -> bool:
         """Return whether idle behavior may run now. Backends can add guards."""
         return True
+
+    def notification_ready(self) -> bool:
+        """Return whether a background notice can enter the conversation."""
+        return (
+            self._is_connected()
+            and self._idle_behavior_ready()
+            and not self.user_is_speaking
+            and time.monotonic() - self.last_activity_time >= self.NOTIFICATION_QUIET_PERIOD_S
+        )
 
     async def emit(self) -> HandlerOutput:
         """Emit the next queued output, triggering local idle behavior when due."""
@@ -149,11 +161,11 @@ class ConversationHandler(AsyncStreamHandler, ABC):
         ...
 
     @abstractmethod
-    async def say(self, text: str) -> None:
+    async def say(self, text: str, *, allow_tools: bool = True) -> None:
         """Make the robot speak ``text`` now (injected turn; not verbatim TTS).
 
         The backend is speech-to-speech, so ``text`` is an instruction the
         model voices, not a guaranteed-literal string. Raises if no session is
-        open.
+        open. Set ``allow_tools`` false for notice-only turns.
         """
         ...

@@ -13,11 +13,13 @@ from pathlib import Path
 from dataclasses import dataclass
 
 from reachy_mini import ReachyMini
-from reachy_mini_conversation_app.config import config, list_tool_module_names
+from reachy_mini_conversation_app.config import config, is_companion_enabled, list_tool_module_names
+from reachy_mini_conversation_app.companion import COMPANION_TOOL_NAMES
 from reachy_mini_conversation_app.mcp_client import McpToolTimeoutError, McpToolInvocationError
 from reachy_mini_conversation_app.tool_spaces import build_remote_client, read_installed_tool_spaces
 from reachy_mini_conversation_app.profile_toolsets import read_profile_tool_names
 from reachy_mini_conversation_app.tools.tool_constants import SystemTool
+from reachy_mini_conversation_app.companion.coordinator import CompanionTaskCoordinator
 
 
 if TYPE_CHECKING:
@@ -43,6 +45,7 @@ class ToolDependencies:
     camera_enabled: bool = False
     motion_duration_s: float = 1.0
     go_to_sleep: Callable[[], dict[str, Any]] | None = None
+    companion_tasks: CompanionTaskCoordinator | None = None
 
 
 class ToolSpec(TypedDict):
@@ -89,7 +92,7 @@ class Tool(abc.ABC):
 
 
 ALL_TOOLS: Dict[str, Tool] = {}
-_TOOLS_SIGNATURE: tuple[str, str, str | None, bool, str | None] | None = None
+_TOOLS_SIGNATURE: tuple[str, str, str | None, bool, str | None, bool] | None = None
 _TOOLS_INSTANCE_PATH: str | Path | None = None
 _LOADED_TOOL_CLASS_CACHE: Dict[tuple[str, str], List[type[Tool]]] = {}
 _REMOTE_TOOL_RETRY_DELAY_S = 0.25
@@ -280,7 +283,7 @@ def _build_tool_registry(
     return {tool.name: tool for tool in tool_instances}
 
 
-def _tool_registry_signature(instance_path: str | Path | None) -> tuple[str, str, str | None, bool, str | None]:
+def _tool_registry_signature(instance_path: str | Path | None) -> tuple[str, str, str | None, bool, str | None, bool]:
     """Return the runtime inputs that determine the active tool registry."""
     return (
         config.REACHY_MINI_CUSTOM_PROFILE or "default",
@@ -288,6 +291,7 @@ def _tool_registry_signature(instance_path: str | Path | None) -> tuple[str, str
         _normalize_signature_path(config.TOOLS_DIRECTORY),
         bool(config.AUTOLOAD_EXTERNAL_TOOLS),
         _normalize_signature_path(instance_path),
+        is_companion_enabled(),
     )
 
 
@@ -301,6 +305,11 @@ def _read_profile_tool_names(instance_path: str | Path | None) -> list[str]:
     except (OSError, RuntimeError, ValueError) as exc:
         logger.error("Failed to read tools for profile %r: %s", profile, exc)
         raise RuntimeError(f"Failed to read tools for profile {profile!r}") from exc
+
+    if not is_companion_enabled():
+        tool_names = [tool_name for tool_name in tool_names if tool_name not in COMPANION_TOOL_NAMES]
+    else:
+        tool_names.extend(tool_name for tool_name in COMPANION_TOOL_NAMES if tool_name not in tool_names)
 
     tool_names.extend(tool.value for tool in SystemTool if tool.value not in tool_names)
 

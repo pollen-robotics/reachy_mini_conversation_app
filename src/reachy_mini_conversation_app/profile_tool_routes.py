@@ -8,6 +8,7 @@ from collections.abc import Callable
 
 from reachy_mini.apps.jsonrpc_server import JsonRpcServer
 from reachy_mini_conversation_app.config import LOCKED_PROFILE, config
+from reachy_mini_conversation_app.companion import COMPANION_TOOL_NAMES
 from reachy_mini_conversation_app.personality import AvailableTool, list_personalities, available_tool_catalog
 from reachy_mini_conversation_app.profile_store import (
     DEFAULT_PROFILE_NAME,
@@ -29,6 +30,11 @@ from reachy_mini_conversation_app.profile_toolsets import (
 
 
 logger = logging.getLogger(__name__)
+
+
+def _configurable_tool_names(tool_names: list[str]) -> list[str]:
+    """Remove instance-wide tools from a per-profile selection."""
+    return [tool_name for tool_name in tool_names if tool_name not in COMPANION_TOOL_NAMES]
 
 
 def _known_profile_names() -> list[str]:
@@ -65,6 +71,7 @@ def _profile_tool_payload(
     *,
     overridden: bool,
 ) -> dict[str, object]:
+    enabled_tools = _configurable_tool_names(enabled_tools)
     active_profile = canonical_profile_name(config.REACHY_MINI_CUSTOM_PROFILE)
     available_ids = {tool["id"] for tool in available_tools}
     return {
@@ -127,7 +134,7 @@ def register_profile_tool_methods(
             isinstance(tool_name, str) for tool_name in requested_tools
         ):
             raise_tool_settings_error("invalid_tool_selection", "Enabled tools must be a list of tool names.")
-        enabled_tools = normalize_tool_names(requested_tools)
+        enabled_tools = _configurable_tool_names(normalize_tool_names(requested_tools))
         try:
             known_profile_names = await asyncio.to_thread(_known_profile_names)
             profile_name = _validated_profile(requested_profile, known_profile_names)

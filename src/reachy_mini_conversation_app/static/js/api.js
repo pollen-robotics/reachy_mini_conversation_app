@@ -1,6 +1,7 @@
 /** JSON-RPC-over-WebSocket client for the settings backend (/rpc). */
 
 const DEFAULT_TIMEOUT_MS = 8000;
+const COMPANION_TIMEOUT_MS = 20000;
 const TOOL_SPACE_TIMEOUT_MS = 60000;
 
 const RPC_URL = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/rpc`;
@@ -143,6 +144,13 @@ export const applyVoice = (voice) => rpcCall("voices.apply", { voice });
 
 export const saveBackendConfig = (payload) => rpcCall("backend.config", payload);
 
+export const getCompanionConfig = () => rpcCall("companion.config.get");
+export const saveCompanionConfig = (enabled) =>
+  rpcCall("companion.config.save", { enabled });
+export const getCompanionNamespaces = () => rpcCall("companion.setup.namespaces");
+export const startCompanionSetup = (namespace) =>
+  rpcCall("companion.setup.start", { namespace });
+
 export const listToolSpaces = () => rpcCall("tool_spaces.list");
 export const addToolSpace = (slug) =>
   rpcCall("tool_spaces.add", { slug }, { timeoutMs: TOOL_SPACE_TIMEOUT_MS });
@@ -155,6 +163,13 @@ export const saveProfileTools = (profile, enabledTools) =>
   rpcCall("profile_tools.save", { profile, enabled_tools: enabledTools });
 export const resetProfileTools = (profile) =>
   rpcCall("profile_tools.reset", { profile });
+
+export const listCompanionTasks = () =>
+  rpcCall("companion.tasks.list", {}, { timeoutMs: COMPANION_TIMEOUT_MS });
+export const getCompanionTaskResult = (taskId) =>
+  rpcCall("companion.tasks.result", { task_id: taskId }, { timeoutMs: COMPANION_TIMEOUT_MS });
+export const cancelCompanionTask = (taskId) =>
+  rpcCall("companion.tasks.cancel", { task_id: taskId }, { timeoutMs: COMPANION_TIMEOUT_MS });
 
 /** Backend error codes that need friendlier copy than the raw code. */
 const ERROR_MESSAGES = Object.freeze({
@@ -177,6 +192,23 @@ const ERROR_MESSAGES = Object.freeze({
   not_deletable: "This personality can't be deleted.",
   loop_unavailable: "Reachy is still starting up. Try again in a moment.",
   tool_space_not_installed: "That Tool Space is no longer installed.",
+  companion_not_configured: "Configure the background assistant to see its tasks.",
+  invalid_companion_setting: "Choose whether to use the background assistant.",
+  companion_settings_save_failed: "The background-assistant setting could not be saved.",
+  companion_hf_login_required:
+    "Sign in to Hugging Face on this device with hf auth login, then try again.",
+  invalid_companion_namespace: "Choose an available Hugging Face account or organization.",
+  companion_namespace_lookup_failed:
+    "The available Hugging Face accounts and organizations could not be loaded.",
+  companion_setup_overridden:
+    "Remove SMOL_ASSISTANT_API_URL and SMOL_ASSISTANT_API_TOKEN before using automatic setup.",
+  companion_setup_failed: "The background assistant could not be set up.",
+  companion_starting: "The background assistant is still starting. Try again in a moment.",
+  companion_timeout: "The background assistant took too long to respond.",
+  companion_unavailable: "The background assistant is unavailable.",
+  companion_request_failed: "The background assistant could not complete this request.",
+  companion_invalid_response: "The background assistant returned an invalid response.",
+  companion_result_unavailable: "This task does not have a brief to open.",
 });
 
 /** Map a thrown error to user-facing copy, falling back to its raw message. */

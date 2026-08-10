@@ -10,6 +10,7 @@ import {
 import { $ } from "./ui.js";
 import { mountHomeView } from "./views/home.js";
 import { mountTalkView } from "./views/talk.js";
+import { mountTasksView } from "./views/tasks.js";
 import { mountSettingsView } from "./views/settings.js";
 import { mountToolsView } from "./views/tools.js";
 
@@ -19,7 +20,9 @@ const SETTINGS_RETURN_KEY = "settings-return-route";
 function readSettingsReturn() {
   try {
     const route = sessionStorage.getItem(SETTINGS_RETURN_KEY) || "";
-    return [ROUTES.TALK, ROUTES.PERSONALITIES, ROUTES.TOOLS].includes(route.split("?")[0])
+    return [ROUTES.TALK, ROUTES.PERSONALITIES, ROUTES.TASKS, ROUTES.TOOLS].includes(
+      route.split("?")[0]
+    )
       ? route
       : ROUTES.TALK;
   } catch {
@@ -52,18 +55,34 @@ function boot() {
     return;
   }
 
+  // Settings is an overlay: closing it returns to where it was opened.
+  let settingsReturn = readSettingsReturn();
   const router = createRouter(
     {
       [ROUTES.TALK]: (ctx) => mountTalkView(ctx),
       [ROUTES.PERSONALITIES]: (ctx) => mountHomeView({ ...ctx, navigate: router.navigate }),
       [ROUTES.SETTINGS]: (ctx) => mountSettingsView(ctx),
+      [ROUTES.TASKS]: (ctx) =>
+        mountTasksView({
+          ...ctx,
+          openSettings() {
+            settingsReturn = ROUTES.TASKS;
+            storeSettingsReturn(settingsReturn);
+            return router.navigate(ROUTES.SETTINGS);
+          },
+        }),
       [ROUTES.TOOLS]: (ctx) => mountToolsView(ctx),
     },
     { fallback: ROUTES.TALK, outlet, onRouteChange: syncHeaderForRoute }
   );
 
-  // Settings is an overlay: closing it returns to where it was opened
-  let settingsReturn = readSettingsReturn();
+  const tasks = $('[data-action="open-tasks"]');
+  if (tasks) {
+    tasks.addEventListener("click", (event) => {
+      event.preventDefault();
+      router.navigate(ROUTES.TASKS);
+    });
+  }
   const tools = $('[data-action="open-tools"]');
   if (tools) {
     tools.addEventListener("click", (event) => {
@@ -120,6 +139,12 @@ function boot() {
 
   function syncHeaderForRoute(route = router.currentRoute() || ROUTES.TALK) {
     const routeName = route.split("?")[0];
+    if (tasks) {
+      const onTasks = routeName === ROUTES.TASKS;
+      tasks.classList.toggle("is-active", onTasks);
+      if (onTasks) tasks.setAttribute("aria-current", "page");
+      else tasks.removeAttribute("aria-current");
+    }
     if (tools) {
       const onTools = routeName === ROUTES.TOOLS;
       tools.classList.toggle("is-active", onTools);
@@ -137,6 +162,7 @@ function boot() {
       if (routeName === ROUTES.SETTINGS) {
         const returnName = settingsReturn.split("?")[0];
         if (returnName === ROUTES.PERSONALITIES) backLabel = "Back to personalities";
+        if (returnName === ROUTES.TASKS) backLabel = "Back to tasks";
         if (returnName === ROUTES.TOOLS) backLabel = "Back to tools";
       } else if (
         routeName === ROUTES.TOOLS &&
