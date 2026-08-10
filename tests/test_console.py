@@ -852,3 +852,53 @@ def test_rpc_settings_methods() -> None:
     assert isinstance(r2["result"], list)
     assert "spaces" in r3["result"]
     assert "enabled_tools" in r4["result"]
+
+
+def test_persist_env_values_round_trips_special_characters_through_dotenv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Values with `#`, quotes, or spaces must survive a python-dotenv reload of the .env."""
+    import os
+
+    from dotenv import dotenv_values
+
+    token_env = "MCP_CONSOLE_QUOTED_TOKEN"
+    monkeypatch.setenv(token_env, "")
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(MagicMock(), robot, settings_app=FastAPI(), instance_path=str(tmp_path))
+
+    token = 'abc #123 it\'s "fine"'
+    assert stream._persist_env_values({token_env: token}) == "persisted"
+    assert os.environ[token_env] == token
+    assert dotenv_values(tmp_path / ".env")[token_env] == token
+
+    # python-dotenv interpolates ${VAR} in every quoting style, with no escape syntax.
+    with pytest.raises(ValueError):
+        stream._persist_env_values({token_env: "abc${HOME}def"})
+
+
+def test_backend_config_rejects_hf_host_with_line_break(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A host carrying a line break would inject extra assignments into the instance .env."""
+    monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "deployed")
+    monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", None)
+    monkeypatch.setattr(config, "HF_REALTIME_WS_URL", None)
+
+    app = FastAPI()
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(MagicMock(), robot, settings_app=app, instance_path=str(tmp_path))
+    stream._init_settings_ui_if_needed()
+
+    resp = _rpc_call(
+        app,
+        "backend.config",
+        {"backend": "huggingface", "hf_mode": "local", "hf_host": "host\nSOME_OTHER_VAR=1", "hf_port": 8765},
+    )
+
+    assert resp["error"]["data"]["reason"] == "invalid_hf_host"
+    env_path = tmp_path / ".env"
+    written = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+    assert "SOME_OTHER_VAR" not in written

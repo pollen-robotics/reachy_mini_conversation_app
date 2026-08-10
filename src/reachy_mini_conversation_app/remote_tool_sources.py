@@ -10,7 +10,7 @@ on Space-specific machinery.
 import os
 import json
 import logging
-from typing import Any
+from typing import Any, Protocol
 from pathlib import Path
 from dataclasses import dataclass
 from collections.abc import Sequence
@@ -81,6 +81,35 @@ def configured_server_aliases(instance_path: str | Path | None) -> set[str]:
         return set()
     entries, _version = envelope
     return {str(entry["alias"]) for entry in entries if isinstance(entry, dict) and entry.get("alias")}
+
+
+class CachedToolRecord(Protocol):
+    """Structural type for a cached tool record from any source manifest.
+
+    Spaces and generic MCP servers keep separate record types (their manifests
+    have different shapes around them), but the registry only needs these five
+    fields to build an adapter, so it accepts either.
+    """
+
+    @property
+    def local_name(self) -> str:
+        """Tool ID as it appears in a profile's enabled tools."""
+
+    @property
+    def client_tool_name(self) -> str:
+        """Namespaced name the MCP client dispatches on."""
+
+    @property
+    def remote_name(self) -> str:
+        """Tool name on the remote server."""
+
+    @property
+    def description(self) -> str:
+        """Description handed to the model."""
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        """JSON Schema for the tool's arguments."""
 
 
 @dataclass(frozen=True)

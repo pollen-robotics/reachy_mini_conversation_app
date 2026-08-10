@@ -649,7 +649,12 @@ class LocalStream:
                 port = int(raw_port) if isinstance(raw_port, (int, float, str)) else (existing_port or 8765)
                 if port < 1 or port > 65535:
                     raise JsonRpcError("invalid Hugging Face port", reason="invalid_hf_port", code=-32602)
-                self._persist_hf_direct_connection(host, port)
+                try:
+                    self._persist_hf_direct_connection(host, port)
+                except ValueError as exc:
+                    # A host carrying a line break would otherwise write extra
+                    # lines into the instance `.env`, setting variables nobody asked for.
+                    raise JsonRpcError("invalid Hugging Face host", reason="invalid_hf_host", code=-32602) from exc
             elif hf_mode == HF_DEPLOYED_CONNECTION_MODE:
                 if not bool(get_hf_session_url()):
                     raise JsonRpcError(

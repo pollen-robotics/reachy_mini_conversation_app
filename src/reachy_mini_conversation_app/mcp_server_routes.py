@@ -127,6 +127,11 @@ def register_mcp_server_methods(
         alias = _required_string(params, "alias", "invalid_mcp_alias", "Enter a short alias, e.g. my_server.")
         url = _required_string(params, "url", "invalid_mcp_url", "Enter the server's MCP endpoint URL.")
         auth = _auth_from_params(params)
+        # Validate before the try: these raise their own JsonRpcError, and the
+        # broad `except Exception` below would otherwise remap it to a generic
+        # add-failed reason and lose the specific message.
+        request_timeout_s = _optional_float(params, "request_timeout_s")
+        tool_timeout_s = _optional_float(params, "tool_timeout_s")
 
         try:
             result = await asyncio.to_thread(
@@ -135,8 +140,8 @@ def register_mcp_server_methods(
                 url,
                 instance_path,
                 auth=auth,
-                request_timeout_s=_optional_float(params, "request_timeout_s"),
-                tool_timeout_s=_optional_float(params, "tool_timeout_s"),
+                request_timeout_s=request_timeout_s,
+                tool_timeout_s=tool_timeout_s,
                 install_only=True,
             )
         except McpServerAliasConflictError as exc:

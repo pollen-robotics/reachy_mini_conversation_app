@@ -24,7 +24,7 @@ from reachy_mini_conversation_app.tools.tool_constants import SystemTool
 
 if TYPE_CHECKING:
     from reachy_mini_conversation_app.mcp_client import RemoteMcpToolClient
-    from reachy_mini_conversation_app.remote_tool_sources import CachedRemoteTool
+    from reachy_mini_conversation_app.remote_tool_sources import CachedToolRecord
     from reachy_mini_conversation_app.tools.background_tool_manager import BackgroundToolManager
 
 
@@ -338,7 +338,7 @@ def _resolve_cached_manifest_tools(
     source_id: str,
     source_label: str,
     refresh_command: str,
-    cached_tools: Sequence["CachedRemoteTool"],
+    cached_tools: Sequence["CachedToolRecord"],
     make_client: Callable[[], "RemoteMcpToolClient"],
 ) -> list[RemoteMcpTool]:
     """Build the RemoteMcpTool adapters one manifest source contributes to the profile, without network calls."""
@@ -396,8 +396,9 @@ def _resolve_remote_tools(tool_names: list[str], instance_path: str | Path | Non
     """Build Space tools enabled by the active profile from the cached install manifest, without any network calls."""
     try:
         manifest = read_installed_tool_spaces(instance_path)
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:
         # A corrupt manifest must not take down the whole tool registry at boot.
+        # ValueError too: the manifest's slug and URL validators raise it directly.
         logger.error("Skipping installed tool Spaces: %s", exc)
         return []
 
@@ -428,7 +429,7 @@ def _resolve_generic_mcp_tools(tool_names: list[str], instance_path: str | Path 
     """Build custom MCP server tools enabled by the active profile from the cached manifest, without network calls."""
     try:
         manifest = read_mcp_servers(instance_path)
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:
         # A corrupt manifest must not take down the whole tool registry at boot.
         logger.error("Skipping custom MCP servers: %s", exc)
         return []

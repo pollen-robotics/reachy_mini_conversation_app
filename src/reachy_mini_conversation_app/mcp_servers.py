@@ -32,8 +32,8 @@ from reachy_mini_conversation_app.mcp_client import (
     RemoteToolSpec,
     RemoteMcpToolClient,
     RemoteMcpServerConfig,
-    _require_alias_segment,
     validate_http_mcp_url,
+    _require_alias_segment,
     is_plaintext_remote_url,
 )
 from reachy_mini_conversation_app.tool_spaces import read_installed_tool_spaces
