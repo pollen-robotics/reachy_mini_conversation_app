@@ -27,6 +27,7 @@ from reachy_mini_conversation_app.mcp_client import (
     build_namespaced_tool_name,
 )
 from reachy_mini_conversation_app.profile_store import DEFAULT_PROFILE_NAME, list_profile_names
+from reachy_mini_conversation_app.remote_tool_sources import configured_server_aliases
 from reachy_mini_conversation_app.profile_toolsets import (
     ProfileToolsets,
     enable_profile_tools,
@@ -611,6 +612,22 @@ def install_tool_space(
             raise ToolSpaceAliasConflictError(
                 f"Cannot install '{resolved_space.slug}': its local alias '{resolved_space.alias}' conflicts with "
                 f"already-installed '{alias_conflict.slug}'. Rename one Space on Hugging Face to get a distinct alias."
+            )
+
+        # Fail closed against the other manifest too: aliases namespace tool IDs
+        # across both sources, so a collision would make one source's tools
+        # shadow the other's at registration time.
+        try:
+            server_aliases = configured_server_aliases(instance_path)
+        except RuntimeError as exc:
+            raise ToolSpaceAliasConflictError(
+                f"Cannot install '{resolved_space.slug}': the MCP servers manifest is unreadable, so the alias "
+                f"cannot be checked for collisions. Fix it first: {exc}"
+            ) from exc
+        if resolved_space.alias in server_aliases:
+            raise ToolSpaceAliasConflictError(
+                f"Cannot install '{resolved_space.slug}': its local alias '{resolved_space.alias}' collides with a "
+                "configured MCP server. Remove that server, or rename the Space on Hugging Face."
             )
 
         refreshed = any(installed_space.slug == resolved_space.slug for installed_space in manifest.spaces)

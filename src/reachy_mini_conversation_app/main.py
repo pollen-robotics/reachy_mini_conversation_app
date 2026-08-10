@@ -73,6 +73,15 @@ def main() -> None:
         except Exception as exc:
             logger.error("tool-spaces command failed: %s", exc)
             raise SystemExit(1) from exc
+    if args.command == "mcp-servers":
+        from reachy_mini_conversation_app.mcp_servers import handle_mcp_servers_command
+
+        logger = setup_logger(args.debug)
+        try:
+            raise SystemExit(handle_mcp_servers_command(args))
+        except Exception as exc:
+            logger.error("mcp-servers command failed: %s", exc)
+            raise SystemExit(1) from exc
     run(args)
 
 
