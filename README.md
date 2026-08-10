@@ -361,6 +361,39 @@ Tags are advisory; installation still requires successful MCP validation.
 </details>
 
 <details>
+<summary>Custom MCP server tools</summary>
+
+Any HTTP(S) MCP server can be a tool source, not just Hugging Face Spaces. Tools → MCP servers adds one by alias and endpoint URL; its tools then appear under Tools → Tool access for per-profile selection, exactly like Space tools.
+
+The alias namespaces the server's tools, so a server added as `weather` contributes `weather__get_forecast`. It must be a valid identifier that does not contain `__` or end in `_`, since that would blur the namespace separator. An alias cannot be shared with an installed Space.
+
+```bash
+# add + enable in active profile
+reachy-mini-conversation-app mcp-servers add <alias> <https://example.com/mcp>
+
+# add a server that needs a bearer token, read from an environment variable
+reachy-mini-conversation-app mcp-servers add <alias> <url> --token-env MY_SERVER_TOKEN
+
+# add without enabling, or enable in a specific profile
+reachy-mini-conversation-app mcp-servers add <alias> <url> --install-only
+reachy-mini-conversation-app mcp-servers add <alias> <url> --profile NAME
+
+# list configured servers, and remove one
+reachy-mini-conversation-app mcp-servers list
+reachy-mini-conversation-app mcp-servers remove <alias>
+```
+
+Re-running `add` for a configured alias refreshes its cached tools and keeps stored options that are not repeated.
+
+**Tokens are never written to the manifest.** `--token-env` records only the *name* of the environment variable; the value is read from the environment when a client is built. Set it in the instance `.env`, in the environment, or through the token field the UI shows for servers that declare one. A server whose token is missing has its tools skipped with a warning rather than registered as guaranteed-to-fail.
+
+Endpoints must be HTTPS, except on the local network — loopback, private, and link-local addresses plus `*.local` names may use plain HTTP. Sending a bearer token over plain HTTP to anything but loopback additionally requires `--allow-insecure-token`, because the token is then visible to everyone on the network.
+
+Tool metadata is cached in `mcp_servers.json`, beside `installed_tool_spaces.json` (the managed app instance directory, or `external_content/` in terminal mode). Startup reads that cache with no network access; discovery happens only on add or refresh.
+
+</details>
+
+<details>
 <summary>Multiple robots on the same subnet</summary>
 
 If you run multiple Reachy Mini daemons on the same network, use:
