@@ -54,12 +54,20 @@ def test_invalid_profile_document_is_rejected(tmp_path: Path, document: str, err
         read_profile_from_directory("invalid", profile_directory)
 
 
-def test_profile_listing_requires_profile_document(tmp_path: Path) -> None:
-    """Directories without profile.md should not be treated as profiles."""
+def test_profile_listing_ignores_directories_that_are_not_profiles(tmp_path: Path) -> None:
+    """Arbitrary directories should not be treated as profiles.
+
+    This used to assert that a legacy instructions.txt directory was excluded
+    too. That exclusion is what silently unlisted user profiles authored before
+    profile.md and, combined with the fatal tool load, stopped the app from
+    starting at all. Legacy directories are now readable and therefore listed;
+    see test_profile_legacy_layout.py. The original intent, that a directory
+    holding no profile of either shape is not a profile, is kept here.
+    """
     write_profile("visible", tmp_path / "visible", "Hello.", [])
-    legacy_directory = tmp_path / "legacy"
-    legacy_directory.mkdir()
-    (legacy_directory / "instructions.txt").write_text("Legacy.\n", encoding="utf-8")
+    unrelated_directory = tmp_path / "not_a_profile"
+    unrelated_directory.mkdir()
+    (unrelated_directory / "notes.md").write_text("Just notes.\n", encoding="utf-8")
 
     assert list_profile_names(tmp_path) == ["visible"]
 

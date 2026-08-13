@@ -17,6 +17,14 @@ logger = logging.getLogger(__name__)
 PROFILE_FILENAME = "profile.md"
 PROFILE_SCHEMA_VERSION = 1
 DEFAULT_PROFILE_NAME = "default"
+
+# Layout used before profiles became a single declarative document. User
+# profiles authored then still sit on disk in this shape, and nothing migrated
+# them, so they are read in place rather than treated as missing.
+LEGACY_INSTRUCTIONS_FILENAME = "instructions.txt"
+LEGACY_TOOLS_FILENAME = "tools.txt"
+LEGACY_VOICE_FILENAME = "voice.txt"
+LEGACY_GREETING_FILENAME = "greeting.txt"
 _FRONT_MATTER_DELIMITER = "+++"
 _PROFILE_METADATA_FIELDS = {"schema_version", "default_tools", "voice", "greeting", "hidden"}
 _STORE_LOCK = threading.Lock()
@@ -123,10 +131,83 @@ def _parse_profile_document(source_path: Path) -> ProfileDefinition:
     )
 
 
+_WARNED_LEGACY_PROFILE_DIRS: set[str] = set()
+# Deliberately not _STORE_LOCK: that one guards profile writes and is not
+# reentrant, so borrowing it here would couple logging to the write path.
+_LEGACY_WARNING_LOCK = threading.Lock()
+
+
+def _mark_legacy_profile_warned(profile_directory: Path) -> bool:
+    """Return whether this directory still owes a legacy-layout warning."""
+    key = str(profile_directory)
+    with _LEGACY_WARNING_LOCK:
+        if key in _WARNED_LEGACY_PROFILE_DIRS:
+            return False
+        _WARNED_LEGACY_PROFILE_DIRS.add(key)
+        return True
+
+
+def _read_optional_legacy_text(source_path: Path) -> str | None:
+    """Read one optional legacy sidecar file, or None when it is absent."""
+    if not source_path.is_file():
+        return None
+    try:
+        return source_path.read_text(encoding="utf-8").strip() or None
+    except (OSError, UnicodeError) as exc:
+        raise ProfileFormatError(f"Failed to read profile from {source_path}: {exc}") from exc
+
+
+def read_legacy_profile_from_directory(profile_name: str, profile_directory: Path) -> ProfileDefinition | None:
+    """Read a profile authored before ``profile.md``, or None if it is not one.
+
+    Profiles used to be a directory of sidecar files. Users authored profiles in
+    that shape and no migration ever ran over them, so a perfectly valid profile
+    stops being readable the moment its app is upgraded. Read it where it lies
+    instead of losing the user's persona.
+    """
+    instructions_path = profile_directory / LEGACY_INSTRUCTIONS_FILENAME
+    if not instructions_path.is_file():
+        return None
+
+    instructions = _read_optional_legacy_text(instructions_path)
+    if not instructions:
+        raise ProfileFormatError(f"Profile {profile_name!r} has an empty {LEGACY_INSTRUCTIONS_FILENAME}.")
+
+    tools_text = _read_optional_legacy_text(profile_directory / LEGACY_TOOLS_FILENAME)
+    if tools_text is not None:
+        default_tools = tuple(normalize_tool_names(tools_text.splitlines()))
+    elif canonical_profile_name(profile_name) == DEFAULT_PROFILE_NAME:
+        default_tools = ()
+    else:
+        # Builds of that era fell back to the bundled default's tool list when a
+        # profile shipped no tools.txt, so profiles were authored relying on it.
+        default_tools = read_packaged_default_profile().default_tools
+
+    return ProfileDefinition(
+        instructions=instructions,
+        default_tools=default_tools,
+        voice=_read_optional_legacy_text(profile_directory / LEGACY_VOICE_FILENAME),
+        greeting=_read_optional_legacy_text(profile_directory / LEGACY_GREETING_FILENAME),
+        hidden=False,
+    )
+
+
 def read_profile_from_directory(profile_name: str, profile_directory: Path) -> ProfileDefinition:
     """Read a profile document from its directory."""
     profile_path = profile_directory / PROFILE_FILENAME
     if not profile_path.is_file():
+        legacy_profile = read_legacy_profile_from_directory(profile_name, profile_directory)
+        if legacy_profile is not None:
+            # The profile is re-read on every session, prompt and tool lookup, so
+            # warn once per directory rather than on each read.
+            if _mark_legacy_profile_warned(profile_directory):
+                logger.warning(
+                    "Profile %r uses the pre-%s layout; reading it in place. Re-save it from the "
+                    "settings UI to convert it.",
+                    profile_name,
+                    PROFILE_FILENAME,
+                )
+            return legacy_profile
         raise FileNotFoundError(f"Profile {profile_name!r} has no {PROFILE_FILENAME} at {profile_directory}")
     return _parse_profile_document(profile_path)
 
@@ -148,8 +229,14 @@ def read_packaged_default_profile() -> ProfileDefinition:
 
 
 def profile_directory_has_definition(profile_directory: Path) -> bool:
-    """Return whether a directory contains a profile definition."""
-    return (profile_directory / PROFILE_FILENAME).is_file()
+    """Return whether a directory contains a profile definition.
+
+    Legacy directories count, so a profile that is readable is also selectable
+    rather than working while staying invisible in the profile list.
+    """
+    return (profile_directory / PROFILE_FILENAME).is_file() or (
+        profile_directory / LEGACY_INSTRUCTIONS_FILENAME
+    ).is_file()
 
 
 def list_profile_names(profiles_root: Path) -> list[str]:
