@@ -4,6 +4,7 @@ import asyncio
 import logging
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
@@ -11,7 +12,9 @@ import numpy.typing as npt
 from reachy_mini import ReachyMini
 from reachy_mini.reachy_mini import SLEEP_HEAD_POSE
 from reachy_mini.utils.interpolation import distance_between_poses
-from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.config import config, set_custom_profile
+from reachy_mini_conversation_app.profile_store import DEFAULT_PROFILE_NAME
+from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, initialize_tools
 from reachy_mini_conversation_app.tools.go_to_sleep import GoToSleep
 
 
@@ -19,6 +22,54 @@ _STOP_CURRENT_APP_PATH = "/api/apps/stop-current-app"
 _STOP_CURRENT_APP_TIMEOUT_S = 2.0
 _SLEEP_HEAD_TRANSLATION_TOLERANCE_M = 0.05
 _SLEEP_HEAD_ROTATION_TOLERANCE_RAD = 0.35
+
+
+def initialize_tools_with_default_fallback(
+    instance_path: str | Path | None,
+    logger: logging.Logger,
+) -> str | None:
+    """Load the tool registry, degrading to the default profile if need be.
+
+    The selected profile is persisted across restarts and upgrades, so it can
+    become unreadable long after it was chosen: the app moves past the profile
+    format the profile was authored in, or its directory is partly removed.
+    Treating that as fatal is unrecoverable in practice, because the profile can
+    only be changed from a UI that never comes up. Degrade to the packaged
+    default instead, matching what ``prompts.py`` already does for instructions,
+    voice and greeting.
+
+    Returns the profile that was abandoned, or None when the selection loaded.
+    """
+    try:
+        initialize_tools(instance_path=instance_path)
+        return None
+    except Exception as exc:
+        selected_profile = config.REACHY_MINI_CUSTOM_PROFILE
+        if not selected_profile or selected_profile == DEFAULT_PROFILE_NAME:
+            raise
+
+        # set_custom_profile is a no-op while the build pins LOCKED_PROFILE, so
+        # confirm the switch actually took effect rather than announcing a
+        # fallback that cannot happen and retrying the same broken profile.
+        set_custom_profile(DEFAULT_PROFILE_NAME)
+        if config.REACHY_MINI_CUSTOM_PROFILE != DEFAULT_PROFILE_NAME:
+            logger.error(
+                "Profile %r could not be loaded (%s) and this build is locked to it, "
+                "so there is no profile to fall back to.",
+                selected_profile,
+                exc,
+            )
+            raise
+
+        logger.error(
+            "Profile %r could not be loaded (%s); starting on the %r profile instead. "
+            "Reselect or repair it from the settings UI to restore it.",
+            selected_profile,
+            exc,
+            DEFAULT_PROFILE_NAME,
+        )
+        initialize_tools(instance_path=instance_path, force=True)
+        return selected_profile
 
 
 def request_stop_current_app(robot: ReachyMini, logger: logging.Logger) -> bool:
