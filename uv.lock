@@ -13,7 +13,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-07-13T14:36:32.296430344Z"
+exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P7D"
 
 [options.exclude-newer-package]
@@ -2511,7 +2511,7 @@ wheels = [
 
 [[package]]
 name = "reachy-mini"
-version = "1.10.0rc2"
+version = "1.10.0rc5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -2550,14 +2550,14 @@ dependencies = [
     { name = "websockets" },
     { name = "zeroconf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/07/01/31bc16e421ff27425bbb694aa6bdb86db6214d4f32efc86a36971e7f4a2a/reachy_mini-1.10.0rc2.tar.gz", hash = "sha256:93877b93cae7a958c8ba5e79cea0e31109b8130562c40020726f6c61e116a903", size = 24114364, upload-time = "2026-07-20T14:08:17.548Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3a/1d/160cb45d92b05642d1d8d792126bbb866788601cacc4f15f2ef55076b8dd/reachy_mini-1.10.0rc5.tar.gz", hash = "sha256:7f33454a8b0f97fce75da1a7ad2dc8942ac776980773484450a91c4f09fbe138", size = 24162044, upload-time = "2026-08-13T07:59:25.07Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5f/d8/a99ae001ccdf0ce99f434d4e78d0bb41e66b09a0d6df685f8df89730ca24/reachy_mini-1.10.0rc2-py3-none-any.whl", hash = "sha256:faea66b0c315f5fa9e6845c76b33c58c209e6b8fd0fa98aace84f377d8b308e5", size = 24197820, upload-time = "2026-07-20T14:08:15.07Z" },
+    { url = "https://files.pythonhosted.org/packages/07/30/2c9e0501d4bb5935fb0ec985095cbd3be3613b7aa5c4893647eb80093407/reachy_mini-1.10.0rc5-py3-none-any.whl", hash = "sha256:9769ca13b6a0fc151729097b75edc4dd66b95435078416824cf7fec60df27b6a", size = 24248732, upload-time = "2026-08-13T07:59:22.314Z" },
 ]
 
 [[package]]
 name = "reachy-mini-conversation-app"
-version = "1.0.0"
+version = "1.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -2584,10 +2584,10 @@ dev = [
 requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "huggingface-hub", specifier = ">=1.17.0" },
-    { name = "mcp", specifier = ">=1.27.1" },
+    { name = "mcp", specifier = ">=1.27.1,<2" },
     { name = "openai", specifier = "==2.28.0" },
     { name = "python-dotenv" },
-    { name = "reachy-mini", specifier = ">=1.10.0rc2" },
+    { name = "reachy-mini", specifier = ">=1.10.0rc5" },
     { name = "reachy-mini-dances-library" },
 ]
 

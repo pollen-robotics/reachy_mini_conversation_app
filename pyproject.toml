@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reachy_mini_conversation_app"
-version = "1.0.0"
+version = "1.0.1"
 authors = [{ name = "Pollen Robotics", email = "contact@pollen-robotics.com" }]
 description = ""
 readme = "README.md"
@@ -21,8 +21,8 @@ dependencies = [
 
     #Reachy mini
     "reachy_mini_dances_library",
-    "reachy-mini>=1.10.0rc2",
-    "mcp>=1.27.1",
+    "reachy-mini>=1.10.0rc5",
+    "mcp>=1.27.1,<2",
 ]
 
 [dependency-groups]
