@@ -76,6 +76,29 @@ def test_migration_never_touches_an_existing_profile_document(tmp_path: Path) ->
     assert profile.instructions == "version actuelle"
 
 
+def test_migration_loses_a_race_against_a_concurrent_save(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A profile.md saved from the UI mid-migration must not be overwritten."""
+    import reachy_mini_conversation_app.profile_store as store
+
+    _write_legacy(tmp_path / "racy", instructions="ancienne version")
+    real_read = store._read_legacy_profile
+
+    def read_then_save_from_ui(profile_name: str, profile_directory: Path) -> store.ProfileDefinition:
+        legacy = real_read(profile_name, profile_directory)
+        write_profile(profile_name, profile_directory, "sauvegarde UI", ["dance"])
+        return legacy
+
+    monkeypatch.setattr(store, "_read_legacy_profile", read_then_save_from_ui)
+
+    assert migrate_legacy_profiles(tmp_path) == []
+
+    profile = read_profile_from_directory("racy", tmp_path / "racy")
+    assert profile.instructions == "sauvegarde UI"
+
+
 def test_migration_skips_broken_directories_without_raising(tmp_path: Path) -> None:
     """One broken profile must not block the others or startup."""
     _write_legacy(tmp_path / "empty", instructions="   \n")

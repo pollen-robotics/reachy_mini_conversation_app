@@ -175,6 +175,8 @@ def migrate_legacy_profiles(profiles_root: Path) -> list[str]:
         profile_name = profile_directory.name
         try:
             legacy = _read_legacy_profile(profile_name, profile_directory)
+            # overwrite=False: the settings UI is already up, so a profile.md
+            # saved mid-migration must win over the converted sidecars.
             write_profile(
                 profile_name,
                 profile_directory,
@@ -182,6 +184,7 @@ def migrate_legacy_profiles(profiles_root: Path) -> list[str]:
                 legacy.default_tools,
                 voice=legacy.voice,
                 greeting=legacy.greeting,
+                overwrite=False,
             )
         except Exception as exc:
             logger.warning("Could not migrate legacy profile %r: %s", profile_name, exc)
