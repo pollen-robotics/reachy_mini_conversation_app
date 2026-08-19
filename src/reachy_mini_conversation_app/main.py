@@ -34,18 +34,32 @@ def _start_inactivity_timeout_thread(
     go_to_sleep: Callable[[], dict[str, Any]] | None = None,
 ) -> threading.Thread:
     """Start a daemon that puts the app to sleep after inactivity."""
-    timeout_seconds = timeout_minutes * 60.0
 
     def poll_inactivity_timeout() -> None:
+        from reachy_mini_conversation_app.config import resolve_app_timeout_minutes
+
         logger.info("App inactivity timeout enabled: %.1f minutes.", timeout_minutes)
         while app_stop_event is None or not app_stop_event.is_set():
+            if stream_manager.in_standby:
+                # Asleep already; the wake word re-arms the timer via a fresh handler.
+                time.sleep(1.0)
+                continue
+            # Re-read each pass so runtime changes (e.g. a voice tool updating
+            # the env var) take effect without an app restart.
+            current_minutes = resolve_app_timeout_minutes()
+            if current_minutes is None:
+                time.sleep(5.0)
+                continue
+            timeout_seconds = current_minutes * 60.0
             elapsed = stream_manager.seconds_since_activity()
             if elapsed >= timeout_seconds:
                 logger.info("No activity for %.1f minutes; going to sleep.", elapsed / 60.0)
                 try:
-                    if go_to_sleep is not None:
-                        go_to_sleep()
-                    else:
+                    result = go_to_sleep() if go_to_sleep is not None else None
+                    if result is not None and str(result.get("status", "")).startswith("standby"):
+                        time.sleep(1.0)
+                        continue
+                    if go_to_sleep is None:
                         stream_manager.close()
                 except Exception as e:
                     logger.error("Error while going to sleep after inactivity timeout: %s", e)
@@ -88,6 +102,7 @@ def run(
     from reachy_mini_conversation_app.moves import MovementManager
     from reachy_mini_conversation_app.config import (
         HF_LOCAL_CONNECTION_MODE,
+        config,
         set_instance_path,
         get_hf_connection_selection,
         resolve_app_timeout_minutes,
@@ -221,9 +236,12 @@ def run(
         try:
             if go_to_sleep_requested.is_set():
                 return {"status": "already_requested"}
-            go_to_sleep_requested.set()
 
-            logger.info("Going to sleep before stopping conversation app.")
+            standby_enabled = bool(getattr(config, "STANDBY_ON_SLEEP", False))
+            logger.info(
+                "Going to sleep (%s).",
+                "standby with local wake word" if standby_enabled else "stopping conversation app",
+            )
             sleep_error: str | None = None
 
             try:
@@ -239,6 +257,16 @@ def run(
                 sleep_error = f"{type(e).__name__}: {e}"
                 logger.error("Failed to move Reachy Mini to sleep pose: %s", e)
 
+            if standby_enabled and stream_manager.enter_standby():
+                result_status = "standby" if sleep_error is None else "standby_requested"
+                standby_result: dict[str, Any] = {"status": result_status}
+                if sleep_error is not None:
+                    standby_result["error"] = f"go_to_sleep movement failed: {sleep_error}"
+                return standby_result
+            if standby_enabled:
+                logger.warning("Standby unavailable; falling back to stopping the app.")
+
+            go_to_sleep_requested.set()
             stop_current_app_requested = False
             if app_stop_event is None or not app_stop_event.is_set():
                 stop_current_app_requested = app_lifecycle.request_stop_current_app(robot, logger)
@@ -264,6 +292,30 @@ def run(
             go_to_sleep_lock.release()
 
     deps.go_to_sleep = go_to_sleep_and_stop_app
+
+    def wake_robot_from_standby() -> None:
+        """Physically wake the robot when standby exits (runs off the event loop).
+
+        Unconditional (no sleep-pose check): standby always follows
+        goto_sleep, and the head MUST be back in the open pose before the
+        backend reconnects — speaking from inside the sleep shell muffles
+        audio into the robot's own mic.
+        """
+        try:
+            robot.enable_motors()
+        except Exception as e:
+            logger.debug("Error enabling motors on wake: %s", e)
+        try:
+            robot.wake_up()  # blocking: head is up before this returns
+        except Exception as e:
+            logger.error("Wake-up movement failed: %s", e)
+        movement_manager.start()
+        try:
+            robot.enable_wobbling()
+        except Exception as e:
+            logger.debug("Error re-enabling wobbling on wake: %s", e)
+
+    stream_manager.set_on_wake(wake_robot_from_standby)
 
     def run_go_to_sleep_tool() -> dict[str, Any]:
         return app_lifecycle.run_go_to_sleep_tool(deps, logger)
