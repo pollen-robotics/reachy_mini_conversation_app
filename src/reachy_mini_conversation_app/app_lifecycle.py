@@ -13,7 +13,7 @@ from reachy_mini import ReachyMini
 from reachy_mini.reachy_mini import SLEEP_HEAD_POSE
 from reachy_mini.utils.interpolation import distance_between_poses
 from reachy_mini_conversation_app.config import config, set_custom_profile
-from reachy_mini_conversation_app.profile_store import DEFAULT_PROFILE_NAME
+from reachy_mini_conversation_app.profile_store import DEFAULT_PROFILE_NAME, migrate_legacy_profiles
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, initialize_tools
 from reachy_mini_conversation_app.tools.go_to_sleep import GoToSleep
 
@@ -30,16 +30,15 @@ def initialize_tools_with_default_fallback(
 ) -> str | None:
     """Load the tool registry, degrading to the default profile if need be.
 
-    The selected profile is persisted across restarts and upgrades, so it can
-    become unreadable long after it was chosen: the app moves past the profile
-    format the profile was authored in, or its directory is partly removed.
-    Treating that as fatal is unrecoverable in practice, because the profile can
-    only be changed from a UI that never comes up. Degrade to the packaged
-    default instead, matching what ``prompts.py`` already does for instructions,
-    voice and greeting.
-
     Returns the profile that was abandoned, or None when the selection loaded.
     """
+    # User profiles predating profile.md were never migrated on disk; convert
+    # them here so the strict readers below (and the settings UI) see them.
+    try:
+        migrate_legacy_profiles(config.user_personalities_root())
+    except Exception as exc:
+        logger.warning("Legacy profile migration failed: %s", exc)
+
     try:
         initialize_tools(instance_path=instance_path)
         return None
@@ -48,9 +47,8 @@ def initialize_tools_with_default_fallback(
         if not selected_profile or selected_profile == DEFAULT_PROFILE_NAME:
             raise
 
-        # set_custom_profile is a no-op while the build pins LOCKED_PROFILE, so
-        # confirm the switch actually took effect rather than announcing a
-        # fallback that cannot happen and retrying the same broken profile.
+        # set_custom_profile is a no-op while LOCKED_PROFILE is pinned, so
+        # confirm the switch took effect before announcing a fallback.
         set_custom_profile(DEFAULT_PROFILE_NAME)
         if config.REACHY_MINI_CUSTOM_PROFILE != DEFAULT_PROFILE_NAME:
             logger.error(
