@@ -17,6 +17,12 @@ logger = logging.getLogger(__name__)
 PROFILE_FILENAME = "profile.md"
 PROFILE_SCHEMA_VERSION = 1
 DEFAULT_PROFILE_NAME = "default"
+
+# Sidecar-file layout used before profile.md; converted by migrate_legacy_profiles.
+LEGACY_INSTRUCTIONS_FILENAME = "instructions.txt"
+LEGACY_TOOLS_FILENAME = "tools.txt"
+LEGACY_VOICE_FILENAME = "voice.txt"
+LEGACY_GREETING_FILENAME = "greeting.txt"
 _FRONT_MATTER_DELIMITER = "+++"
 _PROFILE_METADATA_FIELDS = {"schema_version", "default_tools", "voice", "greeting", "hidden"}
 _STORE_LOCK = threading.Lock()
@@ -121,6 +127,71 @@ def _parse_profile_document(source_path: Path) -> ProfileDefinition:
         greeting=_optional_string(metadata, "greeting", source_path),
         hidden=hidden,
     )
+
+
+def _read_optional_legacy_text(source_path: Path) -> str | None:
+    """Read one optional legacy sidecar file, or None when it is absent."""
+    if not source_path.is_file():
+        return None
+    try:
+        return source_path.read_text(encoding="utf-8").strip() or None
+    except (OSError, UnicodeError) as exc:
+        raise ProfileFormatError(f"Failed to read profile from {source_path}: {exc}") from exc
+
+
+def _read_legacy_profile(profile_name: str, profile_directory: Path) -> ProfileDefinition:
+    """Read a profile authored in the pre-profile.md sidecar-file layout."""
+    instructions = _read_optional_legacy_text(profile_directory / LEGACY_INSTRUCTIONS_FILENAME)
+    if not instructions:
+        raise ProfileFormatError(f"Profile {profile_name!r} has an empty {LEGACY_INSTRUCTIONS_FILENAME}.")
+    tools_text = _read_optional_legacy_text(profile_directory / LEGACY_TOOLS_FILENAME)
+    if tools_text is not None:
+        default_tools = tuple(normalize_tool_names(tools_text.splitlines()))
+    else:
+        # Builds of that era fell back to the bundled default's tool list, so
+        # profiles without a tools.txt were authored relying on it.
+        default_tools = read_packaged_default_profile().default_tools
+    return ProfileDefinition(
+        instructions=instructions,
+        default_tools=default_tools,
+        voice=_read_optional_legacy_text(profile_directory / LEGACY_VOICE_FILENAME),
+        greeting=_read_optional_legacy_text(profile_directory / LEGACY_GREETING_FILENAME),
+        hidden=False,
+    )
+
+
+def migrate_legacy_profiles(profiles_root: Path) -> list[str]:
+    """Write a profile.md for each sidecar-file profile under a root; sidecars stay in place."""
+    if not profiles_root.is_dir():
+        return []
+    migrated: list[str] = []
+    for profile_directory in sorted(profiles_root.iterdir()):
+        if (
+            not profile_directory.is_dir()
+            or (profile_directory / PROFILE_FILENAME).is_file()
+            or not (profile_directory / LEGACY_INSTRUCTIONS_FILENAME).is_file()
+        ):
+            continue
+        profile_name = profile_directory.name
+        try:
+            legacy = _read_legacy_profile(profile_name, profile_directory)
+            # overwrite=False: the settings UI is already up, so a profile.md
+            # saved mid-migration must win over the converted sidecars.
+            write_profile(
+                profile_name,
+                profile_directory,
+                legacy.instructions,
+                legacy.default_tools,
+                voice=legacy.voice,
+                greeting=legacy.greeting,
+                overwrite=False,
+            )
+        except Exception as exc:
+            logger.warning("Could not migrate legacy profile %r: %s", profile_name, exc)
+            continue
+        logger.info("Migrated legacy profile %r to %s.", profile_name, PROFILE_FILENAME)
+        migrated.append(profile_name)
+    return migrated
 
 
 def read_profile_from_directory(profile_name: str, profile_directory: Path) -> ProfileDefinition:

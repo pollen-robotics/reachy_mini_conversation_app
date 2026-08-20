@@ -16,6 +16,7 @@ from reachy_mini import ReachyMini
 from reachy_mini_conversation_app.config import config, list_tool_module_names
 from reachy_mini_conversation_app.mcp_client import McpToolTimeoutError, McpToolInvocationError
 from reachy_mini_conversation_app.tool_spaces import build_remote_client, read_installed_tool_spaces
+from reachy_mini_conversation_app.profile_store import DEFAULT_PROFILE_NAME
 from reachy_mini_conversation_app.profile_toolsets import read_profile_tool_names
 from reachy_mini_conversation_app.tools.tool_constants import SystemTool
 
@@ -294,7 +295,7 @@ def _tool_registry_signature(instance_path: str | Path | None) -> tuple[str, str
 # Registry & specs (dynamic)
 def _read_profile_tool_names(instance_path: str | Path | None) -> list[str]:
     """Read enabled tool names from the active profile's effective toolset."""
-    profile = config.REACHY_MINI_CUSTOM_PROFILE or "default"
+    profile = config.REACHY_MINI_CUSTOM_PROFILE or DEFAULT_PROFILE_NAME
     logger.info("Loading tools for profile: %s", profile)
     try:
         tool_names = read_profile_tool_names(profile, instance_path)

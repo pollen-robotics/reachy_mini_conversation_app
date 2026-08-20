@@ -126,7 +126,7 @@ def run(
     )
 
     from reachy_mini_conversation_app.console import LocalStream
-    from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, initialize_tools
+    from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
     from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 
     if robot is None:
@@ -278,7 +278,7 @@ def run(
         logger.info("Web UI available at http://localhost:7860")
 
     try:
-        initialize_tools(instance_path=instance_path)
+        app_lifecycle.initialize_tools_with_default_fallback(instance_path, logger)
     except Exception as e:
         logger.error("Failed to initialize tools: %s", e)
         sys.exit(1)
