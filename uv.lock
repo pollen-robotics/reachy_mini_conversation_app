@@ -3,12 +3,12 @@ revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
     "python_full_version >= '3.15' and sys_platform != 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'win32'",
     "python_full_version == '3.14.*' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'win32'",
-    "python_full_version < '3.12' and sys_platform == 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform != 'win32'",
+    "python_full_version < '3.12' and sys_platform == 'win32'",
     "python_full_version < '3.12' and sys_platform != 'win32'",
 ]
 
@@ -1791,8 +1791,8 @@ version = "2.5.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
     "python_full_version >= '3.15' and sys_platform != 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'win32'",
     "python_full_version == '3.14.*' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform != 'win32'",
@@ -2148,8 +2148,8 @@ name = "pycaw"
 version = "20251023"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "comtypes", marker = "sys_platform == 'win32'" },
-    { name = "psutil", marker = "sys_platform == 'win32'" },
+    { name = "comtypes" },
+    { name = "psutil" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d1/81/19181e3118a503f94d8689fbbed60616e85d08cee3a295c11245ae73018f/pycaw-20251023.tar.gz", hash = "sha256:19935b92eb5efc3f3ea5ee8a2d37ca49009e9dc00f83d067b74b9922e84b5b3b", size = 23421, upload-time = "2025-10-23T18:26:45.087Z" }
 wheels = [
@@ -2310,7 +2310,7 @@ name = "pygobject"
 version = "3.46.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pycairo", marker = "sys_platform != 'win32'" },
+    { name = "pycairo" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ac/4a/f24ddf1d20cc4b56affc7921e29928559a06c922eb60077448392792b914/PyGObject-3.46.0.tar.gz", hash = "sha256:481437b05af0a66b7c366ea052710eb3aacbb979d22d30b797f7ec29347ab1e6", size = 723367, upload-time = "2023-09-10T09:56:26.737Z" }
 
@@ -2511,7 +2511,7 @@ wheels = [
 
 [[package]]
 name = "reachy-mini"
-version = "1.10.0rc5"
+version = "1.10.0rc6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -2550,9 +2550,9 @@ dependencies = [
     { name = "websockets" },
     { name = "zeroconf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3a/1d/160cb45d92b05642d1d8d792126bbb866788601cacc4f15f2ef55076b8dd/reachy_mini-1.10.0rc5.tar.gz", hash = "sha256:7f33454a8b0f97fce75da1a7ad2dc8942ac776980773484450a91c4f09fbe138", size = 24162044, upload-time = "2026-08-13T07:59:25.07Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/17/0e/d2be50165f255e7d43315ab95d74cb8c127b31295a0f846998bbee2c56a5/reachy_mini-1.10.0rc6.tar.gz", hash = "sha256:8a34fd3b5201d13f2ad706603845617d95f4da010251502ee02c16ac1906ffa1", size = 24159165, upload-time = "2026-08-21T09:40:11.432Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/07/30/2c9e0501d4bb5935fb0ec985095cbd3be3613b7aa5c4893647eb80093407/reachy_mini-1.10.0rc5-py3-none-any.whl", hash = "sha256:9769ca13b6a0fc151729097b75edc4dd66b95435078416824cf7fec60df27b6a", size = 24248732, upload-time = "2026-08-13T07:59:22.314Z" },
+    { url = "https://files.pythonhosted.org/packages/e8/15/5f961ec8127d35484851fb1b5e2ab2bd7d3571564fa88d4404316d8aca34/reachy_mini-1.10.0rc6-py3-none-any.whl", hash = "sha256:9ffb77c2f79c39fb1ad2efc5b8ac6697d4554d92a5998ccec302a9948df3c112", size = 24246306, upload-time = "2026-08-21T09:40:08.73Z" },
 ]
 
 [[package]]
@@ -2587,7 +2587,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.27.1,<2" },
     { name = "openai", specifier = "==2.28.0" },
     { name = "python-dotenv" },
-    { name = "reachy-mini", specifier = ">=1.10.0rc5" },
+    { name = "reachy-mini", specifier = "==1.10.0rc6" },
     { name = "reachy-mini-dances-library" },
 ]
 
@@ -2984,7 +2984,7 @@ resolution-markers = [
     "python_full_version < '3.12' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" } },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7a/97/5a3609c4f8d58b039179648e62dd220f89864f56f7357f5d4f45c29eb2cc/scipy-1.17.1.tar.gz", hash = "sha256:95d8e012d8cb8816c226aef832200b1d45109ed4464303e997c5b13122b297c0", size = 30573822, upload-time = "2026-02-23T00:26:24.851Z" }
 wheels = [
@@ -3056,14 +3056,14 @@ version = "1.18.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
     "python_full_version >= '3.15' and sys_platform != 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'win32'",
     "python_full_version == '3.14.*' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "numpy", version = "2.5.0", source = { registry = "https://pypi.org/simple" } },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a7/25/c2700dfaf6442b4effaa91af24ebce5dc9d31bb4a69706313aae70d72cd0/scipy-1.18.0.tar.gz", hash = "sha256:67b2ad2ad54c72ca6d04975a9b2df8c3638c34ddd5b28738e94fc2b57929d378", size = 30774447, upload-time = "2026-06-19T15:01:43.456Z" }
 wheels = [
