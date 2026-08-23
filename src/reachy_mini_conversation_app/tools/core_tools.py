@@ -322,8 +322,16 @@ def _read_profile_tool_names(instance_path: str | Path | None) -> list[str]:
 
 def _resolve_remote_tools(tool_names: list[str], instance_path: str | Path | None) -> list[RemoteMcpTool]:
     """Build Space tools enabled by the active profile from the cached install manifest, without any network calls."""
+    try:
+        manifest = read_installed_tool_spaces(instance_path)
+    except (RuntimeError, ValueError) as exc:
+        # Skip the installed Spaces rather than take the whole registry down.
+        # ValueError too: validate_space_slug and validate_space_mcp_url raise it.
+        logger.error("Skipping installed tool Spaces: %s", exc)
+        return []
+
     remote_tools: list[RemoteMcpTool] = []
-    for installed_space in read_installed_tool_spaces(instance_path).spaces:
+    for installed_space in manifest.spaces:
         enabled_tool_names = {name for name in tool_names if name.startswith(f"{installed_space.alias}__")}
         if not enabled_tool_names:
             continue
