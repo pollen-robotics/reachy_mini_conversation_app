@@ -107,6 +107,7 @@ Copy `.env.example` to `.env` when you want to point Hugging Face at your own lo
 | `HF_REALTIME_WS_URL` | Direct websocket endpoint for your own Hugging Face backend. Accepts either a base URL like `ws://127.0.0.1:8765/v1` or the full websocket URL `ws://127.0.0.1:8765/v1/realtime`. Used when `HF_REALTIME_CONNECTION_MODE=local`. |
 | `HF_TOKEN` | Optional token for Hugging Face access. Local endpoints receive only this explicitly configured token. |
 | `REACHY_MINI_APP_TIMEOUT_MINUTES` | Minutes of inactivity before Reachy goes to sleep and the app stops. Defaults to `1440` (one day); set to `0` to disable. |
+| `REACHY_MINI_INSTANCE_PATH` | Directory for this instance's data: long-term memory, profiles and settings. Defaults to the installed package directory, where an app reinstall deletes it. Set this to a directory you own to keep that data across updates. |
 
 ### Hugging Face Connection Modes
 

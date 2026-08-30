@@ -1,6 +1,7 @@
 """Entrypoint for the Reachy Mini conversation app."""
 
 from __future__ import annotations
+import os
 import sys
 import time
 import asyncio
@@ -346,6 +347,36 @@ def run(
         logger.info("Shutdown complete.")
 
 
+def _resolve_instance_path(default: Path) -> Path:
+    """Return the instance directory, honouring REACHY_MINI_INSTANCE_PATH.
+
+    ``default`` is the installed package directory. Writing user data there
+    means an app reinstall deletes it, and it is not somewhere a user can
+    reasonably find or back up their own stored facts. Setting the environment
+    variable puts memory, profiles and settings in a directory the user owns.
+
+    Unset keeps the previous behaviour, so existing installs are unaffected.
+    """
+    override = os.getenv("REACHY_MINI_INSTANCE_PATH")
+    if not override:
+        return default
+
+    path = Path(override).expanduser()
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        logging.getLogger(__name__).warning(
+            "REACHY_MINI_INSTANCE_PATH=%s is unusable (%s); falling back to %s",
+            override,
+            exc,
+            default,
+        )
+        return default
+
+    logging.getLogger(__name__).info("Using instance path %s", path)
+    return path
+
+
 class ReachyMiniConversationApp(ReachyMiniApp):  # type: ignore[misc]
     """Reachy Mini Apps entry point for the conversation app."""
 
@@ -358,7 +389,7 @@ class ReachyMiniConversationApp(ReachyMiniApp):  # type: ignore[misc]
 
         args, _ = parse_args()
 
-        instance_path = self._get_instance_path().parent
+        instance_path = _resolve_instance_path(self._get_instance_path().parent)
         run(
             args,
             robot=reachy_mini,
