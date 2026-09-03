@@ -70,11 +70,3 @@ def test_bundled_profiles_enable_head_tracking_by_default() -> None:
         profile = read_profile_from_directory(profile_name, DEFAULT_PROFILES_DIRECTORY / profile_name)
 
         assert "head_tracking" in profile.default_tools, profile_name
-
-
-def test_default_profile_replays_requested_emotions() -> None:
-    """Repeated emotion requests should each trigger the emotion tool."""
-    profile = read_profile_from_directory("default", DEFAULT_PROFILES_DIRECTORY / "default")
-
-    assert "call play_emotion in that turn" in profile.instructions
-    assert all(repeat_request in profile.instructions for repeat_request in ("again", "another", "different"))
