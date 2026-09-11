@@ -1,4 +1,4 @@
-/** Tiny DOM helpers: h(tag, attrs, ...children), $, prettifyProfileName. */
+/** Tiny DOM and display-name helpers. */
 export function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs || {})) {
@@ -46,4 +46,9 @@ export function prettifyProfileName(name) {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+export function prettifyToolName(toolId) {
+  const leafName = toolId.includes("__") ? toolId.split("__").at(-1) : toolId;
+  return prettifyProfileName(leafName);
 }

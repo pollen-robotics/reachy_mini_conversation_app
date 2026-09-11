@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import numpy as np
 
@@ -33,15 +33,19 @@ def test_request_stop_current_app_posts_to_daemon(monkeypatch) -> None:
     assert app_lifecycle.request_stop_current_app(robot, MagicMock())
 
 
-def test_wake_up_if_sleeping_runs_wake_up_from_sleep_head_pose() -> None:
-    """Startup should play the wake-up movement when the robot head is sleeping."""
+def test_wake_up_if_sleeping_enables_motors_before_wake_up() -> None:
+    """Startup should enable sleeping motors before playing the wake-up movement."""
     robot = MagicMock()
     robot.get_current_head_pose.return_value = SLEEP_HEAD_POSE.copy()
 
     assert app_lifecycle.wake_up_if_sleeping(robot, MagicMock())
 
     robot.get_current_joint_positions.assert_not_called()
-    robot.wake_up.assert_called_once_with()
+    assert robot.method_calls == [
+        call.get_current_head_pose(),
+        call.enable_motors(),
+        call.wake_up(),
+    ]
 
 
 def test_wake_up_if_sleeping_skips_non_sleep_head_pose() -> None:
@@ -52,6 +56,7 @@ def test_wake_up_if_sleeping_skips_non_sleep_head_pose() -> None:
     assert not app_lifecycle.wake_up_if_sleeping(robot, MagicMock())
 
     robot.get_current_joint_positions.assert_not_called()
+    robot.enable_motors.assert_not_called()
     robot.wake_up.assert_not_called()
 
 

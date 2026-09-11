@@ -1,33 +1,29 @@
-/** Modal to create or edit a personality. Returns { name, instructions, greeting, tools } or null. */
+/** Modal to create or edit a personality. */
 
-import { h } from "../ui.js";
+import { h, prettifyProfileName } from "../ui.js";
 
 const NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
 /**
  * @param {{
  *   mode?: "create" | "edit",
- *   initial?: { name?: string, instructions?: string, greeting?: string, enabledTools?: string[] },
- *   availableTools?: string[],
+ *   initial?: { name?: string, instructions?: string, greeting?: string },
  *   signal?: AbortSignal,
  * }} [options]
- * @returns {Promise<{ name: string, instructions: string, greeting: string, tools: string[] }|null>}
+ * @returns {Promise<{ name: string, instructions: string, greeting: string }|null>}
  */
-export function openProfileModal({ mode = "create", initial = {}, availableTools = [], signal } = {}) {
+export function openProfileModal({ mode = "create", initial = {}, signal } = {}) {
   const isEdit = mode === "edit";
-  const enabledTools = initial.enabledTools || [];
-  // Create starts from the available palette with everything enabled. Edit shows the union of
-  // available and currently-enabled tools (so tools that aren't importable modules, e.g. a profile's
-  // own files, still appear pre-checked) and never silently drops an enabled tool on save.
-  const enabledSet = new Set(enabledTools);
-  const toolChoices = isEdit
-    ? [...new Set([...availableTools, ...enabledTools])].sort()
-    : [...availableTools].sort();
-  const isToolChecked = isEdit ? (tool) => enabledSet.has(tool) : () => true;
 
   return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve(null);
+      return;
+    }
+
+    const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const overlay = buildOverlay();
-    const dialog = buildDialog({ isEdit, initial, toolChoices, isToolChecked });
+    const dialog = buildDialog({ isEdit, initial });
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
 
@@ -37,8 +33,12 @@ export function openProfileModal({ mode = "create", initial = {}, availableTools
       target?.focus();
     });
 
+    let settled = false;
     function close(value) {
+      if (settled) return;
+      settled = true;
       cleanup();
+      if (returnFocus?.isConnected) returnFocus.focus();
       resolve(value);
     }
 
@@ -83,7 +83,7 @@ export function openProfileModal({ mode = "create", initial = {}, availableTools
     });
 
     window.addEventListener("keydown", onKeydown);
-    signal?.addEventListener("abort", onAbort);
+    signal?.addEventListener("abort", onAbort, { once: true });
 
     dialog.querySelector("[data-action='cancel']").addEventListener("click", () => close(null));
 
@@ -108,8 +108,7 @@ export function openProfileModal({ mode = "create", initial = {}, availableTools
       }
       if (!instructions) return showError(errorBox, "Please write some instructions.");
 
-      const tools = Array.from(dialog.querySelectorAll('input[name="tool"]:checked')).map((el) => el.value);
-      close({ name, instructions, greeting, tools });
+      close({ name, instructions, greeting });
     });
   });
 }
@@ -121,7 +120,7 @@ function buildOverlay() {
   });
 }
 
-function buildDialog({ isEdit, initial, toolChoices, isToolChecked }) {
+function buildDialog({ isEdit, initial }) {
   return h(
     "div",
     {
@@ -136,12 +135,12 @@ function buildDialog({ isEdit, initial, toolChoices, isToolChecked }) {
       h(
         "h2",
         { id: "custom-profile-title", class: "modal__title" },
-        isEdit ? `Edit ${initial.name || "personality"}` : "Create a custom personality"
+        isEdit ? `Edit ${prettifyProfileName(initial.name || "personality")}` : "Create a custom personality"
       ),
       h(
         "p",
         { class: "modal__subtitle" },
-        "Define how Reachy should behave and which tools it can use."
+        "Define how Reachy should behave and greet people."
       )
     ),
     h(
@@ -196,34 +195,12 @@ function buildDialog({ isEdit, initial, toolChoices, isToolChecked }) {
           initial.greeting || ""
         )
       ),
-      buildToolsField(toolChoices, isToolChecked),
       h("p", { class: "modal__error", role: "alert", "aria-live": "polite" }),
       h(
         "div",
         { class: "modal__actions" },
         h("button", { type: "button", class: "btn btn--ghost", "data-action": "cancel" }, "Cancel"),
         h("button", { type: "submit", class: "btn btn--primary" }, isEdit ? "Save changes" : "Create & start")
-      )
-    )
-  );
-}
-
-/** Render the tool checklist; isToolChecked decides each box's initial state. */
-function buildToolsField(toolChoices, isToolChecked) {
-  return h(
-    "fieldset",
-    { class: "modal__field modal__tools" },
-    h("legend", { class: "modal__label" }, "Tools"),
-    h(
-      "div",
-      { class: "modal__tools-grid" },
-      ...toolChoices.map((tool) =>
-        h(
-          "label",
-          { class: "modal__tool" },
-          h("input", { type: "checkbox", name: "tool", value: tool, checked: isToolChecked(tool) ? "checked" : null }),
-          h("span", null, tool)
-        )
       )
     )
   );

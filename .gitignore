@@ -61,10 +61,13 @@ cache/
 .Trash-*
 .nfs*
 
-# User-created personalities (managed by UI)
-src/reachy_mini_conversation_app/profiles/user_personalities/
-
 # Terminal-mode runtime content
 external_content/external_profiles/*
+!external_content/external_profiles/starter_profile/
+external_content/external_profiles/starter_profile/*
+!external_content/external_profiles/starter_profile/profile.md
 external_content/external_tools/*
+!external_content/external_tools/starter_custom_tool.py
+external_content/user_personalities/
 external_content/installed_tool_spaces.json
+external_content/profile_toolsets.json

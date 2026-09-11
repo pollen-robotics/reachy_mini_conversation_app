@@ -1,39 +1,18 @@
 /**
- * Minimal hash router. Handlers receive a ViewContext { outlet, signal, route };
- * signal is aborted when the view is replaced so cleanups (timers, SSE) can use it.
+ * Minimal hash router. Handlers receive
+ * { outlet, signal, searchParams, setLeaveGuard, replaceRoute }.
  */
 
-export function createRouter(routes, { fallback = "#/", outlet } = {}) {
+export function createRouter(routes, { fallback = "#/", outlet, onRouteChange } = {}) {
   if (!outlet) throw new Error("createRouter: outlet is required");
   let currentController = null;
-  let lastRoute = null;
+  let currentRoute = null;
+  let leaveGuard = null;
+  let pendingTransition = Promise.resolve();
 
-  function resolve() {
-    const raw = window.location.hash || fallback;
-    return Object.prototype.hasOwnProperty.call(routes, raw) ? raw : fallback;
-  }
-
-  function dispatch() {
-    const route = resolve();
-    if (route === lastRoute) return;
-
-    // Tear down the previous view first.
-    if (currentController) {
-      currentController.abort();
-      currentController = null;
-    }
-    outlet.replaceChildren();
-
-    lastRoute = route;
-    currentController = new AbortController();
-    /** @type {ViewContext} */
-    const ctx = { outlet, signal: currentController.signal, route };
-    try {
-      routes[route](ctx);
-    } catch (error) {
-      console.error("Route handler failed for", route, error);
-      outlet.replaceChildren(renderRouteError(route, error));
-    }
+  function resolve(route = window.location.hash || fallback) {
+    const routeName = route.split("?")[0];
+    return Object.prototype.hasOwnProperty.call(routes, routeName) ? route : fallback;
   }
 
   function renderRouteError(route, error) {
@@ -43,20 +22,102 @@ export function createRouter(routes, { fallback = "#/", outlet } = {}) {
     return div;
   }
 
+  function mount(route) {
+    leaveGuard = null;
+    currentController?.abort();
+    outlet.replaceChildren();
+
+    currentRoute = route;
+    currentController = new AbortController();
+    const controller = currentController;
+    const routeName = route.split("?")[0];
+    const queryStart = route.indexOf("?");
+    const searchParams = new URLSearchParams(queryStart === -1 ? "" : route.slice(queryStart + 1));
+    const context = {
+      outlet,
+      signal: controller.signal,
+      searchParams,
+      setLeaveGuard(guard) {
+        if (!controller.signal.aborted) leaveGuard = guard;
+      },
+      replaceRoute(nextRoute) {
+        if (controller.signal.aborted) return;
+        const resolvedRoute = resolve(nextRoute);
+        if (resolvedRoute.split("?")[0] !== routeName) {
+          throw new Error("replaceRoute cannot change views");
+        }
+        currentRoute = resolvedRoute;
+        window.history.replaceState(null, "", resolvedRoute);
+        onRouteChange?.(resolvedRoute);
+      },
+    };
+    try {
+      Promise.resolve(routes[routeName](context)).catch((error) => {
+        if (context.signal.aborted) return;
+        console.error("Route handler failed for", route, error);
+        outlet.replaceChildren(renderRouteError(route, error));
+      });
+    } catch (error) {
+      console.error("Route handler failed for", route, error);
+      outlet.replaceChildren(renderRouteError(route, error));
+    }
+    onRouteChange?.(route);
+  }
+
+  async function transitionTo(route, updateHash) {
+    const nextRoute = resolve(route);
+    if (nextRoute === currentRoute) {
+      if (currentRoute && window.location.hash !== currentRoute) {
+        window.history.replaceState(null, "", currentRoute);
+      }
+      return true;
+    }
+
+    if (leaveGuard?.shouldBlock() && !(await leaveGuard.confirm())) {
+      if (currentRoute && window.location.hash !== currentRoute) {
+        window.location.hash = currentRoute;
+      }
+      return false;
+    }
+
+    if (updateHash && window.location.hash !== nextRoute) {
+      window.location.hash = nextRoute;
+    } else if (window.location.hash !== nextRoute) {
+      window.history.replaceState(null, "", nextRoute);
+    }
+    mount(nextRoute);
+    return true;
+  }
+
+  function enqueueTransition(route, updateHash = false) {
+    const transition = pendingTransition.then(() => transitionTo(route, updateHash));
+    pendingTransition = transition.catch((error) => {
+      console.error("Route transition failed", error);
+    });
+    return transition;
+  }
+
+  function onBeforeUnload(event) {
+    if (!leaveGuard?.shouldBlock()) return;
+    event.preventDefault();
+    event.returnValue = "";
+  }
+
   return {
     start() {
-      window.addEventListener("hashchange", dispatch);
+      window.addEventListener("hashchange", () => enqueueTransition(window.location.hash));
+      window.addEventListener("beforeunload", onBeforeUnload);
       const target = resolve();
       if (window.location.hash !== target) {
-        window.location.replace(target);
+        window.history.replaceState(null, "", target);
       }
-      dispatch();
+      void enqueueTransition(target);
     },
-    /** Navigate and dispatch synchronously; the resulting hashchange is a no-op via lastRoute. */
     navigate(route) {
-      if (window.location.hash === route) return;
-      window.location.hash = route;
-      dispatch();
+      return enqueueTransition(route, true);
+    },
+    currentRoute() {
+      return currentRoute;
     },
   };
 }

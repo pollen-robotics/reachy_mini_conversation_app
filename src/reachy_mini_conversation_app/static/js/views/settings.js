@@ -1,4 +1,4 @@
-/** Settings view: Hugging Face connection, voice, and status. */
+/** Settings view: Hugging Face connection, voice, and runtime status. */
 
 import {
   applyVoice,
@@ -42,7 +42,7 @@ export async function mountSettingsView({ outlet, signal }) {
       "header",
       { class: "view-header" },
       h("h1", { class: "view-title" }, "Settings"),
-      h("p", { class: "view-subtitle" }, "Connection and voice for Reachy Mini.")
+      h("p", { class: "view-subtitle" }, "Connection, voice, and runtime state for Reachy Mini.")
     ),
     connectionSection.element,
     voiceSection.element,
@@ -99,6 +99,7 @@ function buildConnectionSection({ onSaved } = {}) {
   );
   const hint = h("p", { class: "settings-hint" }, "");
   const status = h("p", { class: "settings-status", role: "status", "aria-live": "polite" });
+  const submitButton = h("button", { type: "submit", class: "btn btn--primary" }, "Save connection");
 
   const form = h(
     "form",
@@ -111,11 +112,7 @@ function buildConnectionSection({ onSaved } = {}) {
     ),
     hfLocalFields,
     hint,
-    h(
-      "div",
-      { class: "settings-actions" },
-      h("button", { type: "submit", class: "btn btn--primary" }, "Save connection")
-    ),
+    h("div", { class: "settings-actions" }, submitButton),
     status
   );
 
@@ -140,6 +137,12 @@ function buildConnectionSection({ onSaved } = {}) {
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (submitButton.disabled) return;
+    submitButton.disabled = true;
+    hfModeSelect.disabled = true;
+    hfHostInput.disabled = true;
+    hfPortInput.disabled = true;
+    form.setAttribute("aria-busy", "true");
     status.classList.remove("is-error");
     status.textContent = "Saving…";
     try {
@@ -157,6 +160,11 @@ function buildConnectionSection({ onSaved } = {}) {
     } catch (error) {
       status.textContent = `Failed to save: ${describeError(error)}`;
       status.classList.add("is-error");
+    } finally {
+      submitButton.disabled = false;
+      hfModeSelect.disabled = false;
+      syncLocalFields();
+      form.removeAttribute("aria-busy");
     }
   });
 
@@ -180,17 +188,22 @@ function buildConnectionSection({ onSaved } = {}) {
 }
 
 function buildVoiceSection() {
-  const select = h("select", { class: "settings-select", name: "voice" });
+  const select = h(
+    "select",
+    { class: "settings-select", name: "voice", disabled: "disabled" },
+    h("option", { value: "" }, "Loading voices…")
+  );
   const status = h("p", { class: "settings-status", role: "status", "aria-live": "polite" });
+  const submitButton = h(
+    "button",
+    { type: "submit", class: "btn btn--primary", disabled: "disabled" },
+    "Apply voice"
+  );
   const form = h(
     "form",
     { class: "settings-form" },
     h("label", { class: "settings-field" }, h("span", { class: "settings-label" }, "Voice"), select),
-    h(
-      "div",
-      { class: "settings-actions" },
-      h("button", { type: "submit", class: "btn btn--primary" }, "Apply voice")
-    ),
+    h("div", { class: "settings-actions" }, submitButton),
     status
   );
 
@@ -203,8 +216,11 @@ function buildVoiceSection() {
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (submitButton.disabled || !select.value) return;
+    submitButton.disabled = true;
+    select.disabled = true;
+    form.setAttribute("aria-busy", "true");
     status.classList.remove("is-error");
-    if (!select.value) return;
     status.textContent = "Applying…";
     try {
       const result = await applyVoice(select.value);
@@ -212,6 +228,10 @@ function buildVoiceSection() {
     } catch (error) {
       status.textContent = `Failed to apply: ${describeError(error)}`;
       status.classList.add("is-error");
+    } finally {
+      submitButton.disabled = !select.value;
+      select.disabled = !select.value;
+      form.removeAttribute("aria-busy");
     }
   });
 
@@ -219,17 +239,31 @@ function buildVoiceSection() {
     element,
     setOptions(voices, current) {
       select.replaceChildren();
+      if (!voices.length) {
+        select.appendChild(h("option", { value: "" }, "No voices available"));
+        select.disabled = true;
+        submitButton.disabled = true;
+        status.textContent = "Voices are unavailable right now.";
+        return;
+      }
       for (const v of voices) {
         const opt = h("option", { value: v }, v);
         if (v === current) opt.selected = true;
         select.appendChild(opt);
       }
+      select.disabled = false;
+      submitButton.disabled = false;
+      status.textContent = "";
     },
   };
 }
 
 function buildStatusSection() {
-  const list = h("dl", { class: "settings-status-grid" });
+  const list = h(
+    "dl",
+    { class: "settings-status-grid" },
+    statusRow("Backend", "Loading…")
+  );
   const element = h(
     "section",
     { class: "settings-section" },
@@ -246,11 +280,39 @@ function buildStatusSection() {
         list.appendChild(statusRow("HF target", formatHfTarget(payload)));
       }
       list.appendChild(
-        statusRow("Connection", payload.has_key ? "Ready" : "Missing", payload.has_key ? "ok" : "warn")
+        statusRow(
+          "Configuration",
+          payload.has_hf_connection ? "Ready" : "Missing",
+          payload.has_hf_connection ? "ok" : "warn"
+        )
       );
+      const backendState = payload.backend_connected
+        ? "connected"
+        : payload.backend_connection_state || "not_started";
+      const backendLabels = {
+        connected: "Connected",
+        connecting: "Connecting…",
+        disconnected: "Disconnected",
+        not_started: "Not started",
+        restart_required: "Restart required",
+        waiting_for_config: "Waiting for configuration",
+      };
+      list.appendChild(
+        statusRow(
+          "Backend",
+          backendLabels[backendState] || "Unavailable",
+          backendState === "connected" ? "ok" : backendState === "not_started" ? undefined : "warn"
+        )
+      );
+      if (payload.backend_error) {
+        list.appendChild(statusRow("Backend error", payload.backend_error, "warn"));
+      }
       if (payload.requires_restart) {
         list.appendChild(statusRow("Restart", "Required to apply changes", "warn"));
       }
+    },
+    renderUnavailable(error) {
+      list.replaceChildren(statusRow("Backend", `Unavailable: ${describeError(error)}`, "warn"));
     },
   };
 }
@@ -283,8 +345,9 @@ async function refreshStatus({ statusSection, connectionSection, signal }) {
     if (signal.aborted) return;
     statusSection.render(payload);
     connectionSection.syncFromStatus(payload);
-  } catch {
-    // Status panel just stays empty; not critical for the rest of the UI.
+  } catch (error) {
+    if (signal.aborted) return;
+    statusSection.renderUnavailable(error);
   }
 }
 
@@ -296,6 +359,7 @@ async function refreshVoices({ voiceSection, signal }) {
   } catch {
     voices = [];
   }
+  if (signal.aborted) return;
   try {
     const data = await getCurrentVoice();
     current = data?.voice || "";

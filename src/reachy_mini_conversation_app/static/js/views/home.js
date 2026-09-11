@@ -9,12 +9,7 @@ import {
   savePersonality,
   untilReady,
 } from "../api.js";
-import {
-  AVATAR_BY_PROFILE,
-  BUILT_IN_DEFAULT_OPTION,
-  ROUTES,
-  avatarFor,
-} from "../constants.js";
+import { AVATAR_BY_PROFILE, ROUTES, avatarFor } from "../constants.js";
 import { $, h, prettifyProfileName } from "../ui.js";
 import { openProfileModal } from "../components/profile-modal.js";
 import { confirmDialog } from "../components/confirm-dialog.js";
@@ -57,20 +52,22 @@ export async function mountHomeView({ outlet, signal, navigate }) {
   }
   if (signal.aborted) return;
 
-  const choices = (personalities?.choices || []).filter((name) => name !== BUILT_IN_DEFAULT_OPTION);
+  const choices = personalities?.choices || [];
   const current = personalities?.current;
   const lockedTo = personalities?.locked ? personalities.locked_to : null;
 
   grid.replaceChildren();
   for (const name of choices) {
     const disabled = Boolean(lockedTo) && name !== lockedTo;
-    const editable = name.startsWith("user_personalities/") && !disabled;
+    const editable = !personalities?.locked && name.startsWith("user_personalities/");
     grid.appendChild(
       buildPersonalityCard({
         name,
         isActive: name === current,
         disabled,
         onSelect: () => handleSelection(name),
+        onManageTools: () =>
+          navigate(`${ROUTES.TOOLS}?profile=${encodeURIComponent(name)}&from=personalities`),
         onEdit: editable ? () => handleEditClick(name) : null,
         // No delete affordance for the active personality: it would keep
         // running with no card to manage it.
@@ -78,10 +75,10 @@ export async function mountHomeView({ outlet, signal, navigate }) {
       })
     );
   }
-  grid.appendChild(buildCustomCard({ onClick: handleCustomClick }));
+  if (!lockedTo) grid.appendChild(buildCustomCard({ onClick: handleCustomClick }));
 
   if (lockedTo) {
-    status.textContent = `Profile locked to "${lockedTo}" by REACHY_MINI_LOCKED_PROFILE; switching is disabled.`;
+    status.textContent = `Personality locked to “${prettifyProfileName(lockedTo)}”; switching is disabled.`;
     status.classList.add("is-warning");
   }
 
@@ -102,21 +99,8 @@ export async function mountHomeView({ outlet, signal, navigate }) {
   }
 
   async function handleCustomClick() {
-    // Load the available tool palette so the modal can offer a checklist.
-    let defaults;
-    try {
-      defaults = await loadPersonality(BUILT_IN_DEFAULT_OPTION);
-    } catch (error) {
-      if (signal.aborted) return;
-      status.textContent = `Could not load tools: ${describeError(error)}`;
-      status.classList.add("is-error");
-      return;
-    }
-    if (signal.aborted) return;
-
     const created = await openProfileModal({
       mode: "create",
-      availableTools: defaults?.available_tools || [],
       signal,
     });
     if (!created || signal.aborted) return;
@@ -128,7 +112,6 @@ export async function mountHomeView({ outlet, signal, navigate }) {
         name: created.name,
         instructions: created.instructions,
         greeting: created.greeting || null,
-        tools_text: created.tools.join("\n"),
         voice: "", // falls back to backend default; user can change in Settings
       });
       if (signal.aborted) return;
@@ -159,12 +142,10 @@ export async function mountHomeView({ outlet, signal, navigate }) {
 
     const edited = await openProfileModal({
       mode: "edit",
-      availableTools: data?.available_tools || [],
       initial: {
-        name,
+        name: stripUserPrefix(name),
         instructions: data?.instructions || "",
         greeting: data?.greeting || "",
-        enabledTools: data?.enabled_tools || [],
       },
       signal,
     });
@@ -177,8 +158,8 @@ export async function mountHomeView({ outlet, signal, navigate }) {
         name: stripUserPrefix(name),
         instructions: edited.instructions,
         greeting: edited.greeting,
-        tools_text: edited.tools.join("\n"),
         voice: data?.voice || "", // keep the profile's existing voice
+        overwrite: true,
       });
     } catch (error) {
       if (signal.aborted) return;
@@ -192,7 +173,7 @@ export async function mountHomeView({ outlet, signal, navigate }) {
     // otherwise the changes take effect the next time it is selected.
     if (name === current) {
       setPersonality(name);
-      setPendingApply({ name, promise: applyPersonality(name, { persist: false }) });
+      setPendingApply({ name, promise: applyPersonality(name, { persist: false, force: true }) });
       navigate(ROUTES.TALK);
     } else {
       status.textContent = `Saved "${prettifyProfileName(name)}". It will apply next time you select it.`;
@@ -205,6 +186,7 @@ export async function mountHomeView({ outlet, signal, navigate }) {
       message: `"${prettifyProfileName(name)}" will be permanently removed.`,
       confirmLabel: "Delete",
       danger: true,
+      signal,
     });
     if (!ok || signal.aborted) return;
     status.classList.remove("is-warning", "is-error");
@@ -222,7 +204,7 @@ export async function mountHomeView({ outlet, signal, navigate }) {
   }
 }
 
-function buildPersonalityCard({ name, isActive, disabled, onSelect, onEdit, onDelete }) {
+function buildPersonalityCard({ name, isActive, disabled, onSelect, onManageTools, onEdit, onDelete }) {
   const hasAvatar = Object.prototype.hasOwnProperty.call(AVATAR_BY_PROFILE, stripUserPrefix(name));
   const card = h(
     "button",
@@ -250,7 +232,28 @@ function buildPersonalityCard({ name, isActive, disabled, onSelect, onEdit, onDe
     isActive && checkBadge()
   );
   // Wrap so the edit/delete buttons are siblings, not nested <button>s inside the card button.
-  const slot = h("div", { class: "personality-card-slot", role: "listitem" }, card);
+  const slot = h(
+    "div",
+    {
+      class: ["personality-card-slot", isActive && "is-active", onManageTools && "has-tools-action"],
+      role: "listitem",
+    },
+    card
+  );
+  if (onManageTools) {
+    slot.appendChild(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "personality-card__tools",
+          "aria-label": `Manage tools for ${prettifyProfileName(name)}`,
+          onClick: onManageTools,
+        },
+        "Manage tools"
+      )
+    );
+  }
   if (onDelete) slot.appendChild(buildDeleteButton({ name, onDelete: () => onDelete(slot) }));
   if (onEdit) slot.appendChild(buildEditButton({ name, onEdit }));
   return slot;
@@ -299,12 +302,11 @@ function checkBadge() {
 }
 
 function buildCustomCard({ onClick }) {
-  return h(
+  const card = h(
     "button",
     {
       type: "button",
       class: "personality-card personality-card--custom",
-      role: "listitem",
       "aria-label": "Create a custom personality",
       onClick,
     },
@@ -312,6 +314,7 @@ function buildCustomCard({ onClick }) {
     h("span", { class: "personality-card__name" }, "Custom"),
     h("span", { class: "personality-card__hint" }, "Write your own prompt")
   );
+  return h("div", { class: "personality-card-slot", role: "listitem" }, card);
 }
 
 function stripUserPrefix(name) {

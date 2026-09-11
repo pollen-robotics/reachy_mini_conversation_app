@@ -1,155 +1,187 @@
-"""Personality (profile) data layer.
+"""Personality profile data layer."""
 
-Provides functions to list, read, and write personality profiles stored
-on disk. No HTTP or framework dependencies — importable anywhere.
-"""
-
-from __future__ import annotations
-from typing import List
+import re
+import shutil
+import logging
+from typing import Literal, TypedDict
 from pathlib import Path
+from collections.abc import Iterable
 
-from .config import DEFAULT_PROFILES_DIRECTORY, USER_PERSONALITIES_DIRNAME, config, get_default_voice
-from .tools.tool_constants import SystemTool
+from reachy_mini_conversation_app.config import (
+    USER_PERSONALITIES_DIRNAME,
+    config,
+    get_default_voice,
+    list_tool_module_names,
+)
+from reachy_mini_conversation_app.tool_spaces import read_installed_tool_spaces
+from reachy_mini_conversation_app.profile_store import (
+    DEFAULT_PROFILE_NAME,
+    ProfileFormatError,
+    write_profile,
+    list_profile_names,
+    read_profile_from_directory,
+    read_packaged_default_profile,
+)
+from reachy_mini_conversation_app.profile_toolsets import (
+    read_profile_toolsets,
+    write_profile_toolsets,
+    get_profile_toolsets_path,
+    clear_profile_tool_override,
+    profile_toolsets_transaction,
+)
+from reachy_mini_conversation_app.tools.tool_constants import SystemTool
 
 
-DEFAULT_OPTION = "(built-in default)"
-
-# Dev-only profiles, hidden from the UI, but still loadable via REACHY_MINI_CUSTOM_PROFILE
-UNLISTED_PROFILES = {"tedai"}
+logger = logging.getLogger(__name__)
 
 
-def _tools_dir() -> Path:
-    return Path(__file__).parent / "tools"
+class AvailableTool(TypedDict):
+    """Tool metadata used by personality configuration surfaces."""
+
+    id: str
+    kind: Literal["shared", "external", "tool_space"]
+    source: str
+    description: str
 
 
-def _sanitize_name(name: str) -> str:
-    import re
+def _visible_profile_names(profiles_root: Path, prefix: str = "") -> list[str]:
+    visible: list[str] = []
+    for profile_name in list_profile_names(profiles_root):
+        try:
+            profile = read_profile_from_directory(profile_name, profiles_root / profile_name)
+        except (FileNotFoundError, ProfileFormatError) as exc:
+            logger.warning("Skipping invalid profile %r: %s", profile_name, exc)
+            continue
+        if not profile.hidden:
+            visible.append(f"{prefix}{profile_name}")
+    return visible
 
-    s = name.strip()
-    s = re.sub(r"\s+", "_", s)
-    s = re.sub(r"[^a-zA-Z0-9_-]", "", s)
-    return s
 
-
-def list_personalities() -> List[str]:
-    """List available personality profile names."""
-    names: List[str] = []
-    try:
-        builtin_root = config.PROFILES_DIRECTORY
-        if builtin_root.exists():
-            for p in sorted(builtin_root.iterdir()):
-                if p.name == USER_PERSONALITIES_DIRNAME or p.name in UNLISTED_PROFILES:
-                    continue
-                if p.is_dir() and (p / "instructions.txt").exists():
-                    names.append(p.name)
-        udir = config.user_personalities_root()
-        if udir.exists():
-            for p in sorted(udir.iterdir()):
-                if p.is_dir() and (p / "instructions.txt").exists():
-                    names.append(f"{USER_PERSONALITIES_DIRNAME}/{p.name}")
-    except Exception:
-        pass
+def list_personalities() -> list[str]:
+    """List available visible personality profile names."""
+    names = [DEFAULT_PROFILE_NAME]
+    names.extend(
+        profile_name
+        for profile_name in _visible_profile_names(config.PROFILES_DIRECTORY)
+        if profile_name != DEFAULT_PROFILE_NAME
+    )
+    user_root = config.user_personalities_root()
+    if user_root != config.PROFILES_DIRECTORY:
+        names.extend(_visible_profile_names(user_root, f"{USER_PERSONALITIES_DIRNAME}/"))
     return names
 
 
-def resolve_profile_dir(selection: str) -> Path:
-    """Resolve the directory path for the given profile selection."""
-    return config.resolve_profile_dir(selection)
+def available_tool_catalog() -> list[AvailableTool]:
+    """List configurable tools and their source."""
+    catalog: dict[str, AvailableTool] = {}
+    excluded_modules = {"__init__", "core_tools", "background_tool_manager", "tool_constants"}
+    excluded_modules.update(tool.value for tool in SystemTool)
+    for tool_name in list_tool_module_names(Path(__file__).parent / "tools"):
+        if tool_name in excluded_modules:
+            continue
+        catalog[tool_name] = {
+            "id": tool_name,
+            "kind": "shared",
+            "source": "Built-in",
+            "description": "",
+        }
 
+    for tool_name in list_tool_module_names(config.TOOLS_DIRECTORY):
+        catalog[tool_name] = {
+            "id": tool_name,
+            "kind": "external",
+            "source": "External",
+            "description": "",
+        }
 
-def read_instructions_for(name: str) -> str:
-    """Read the instructions.txt content for the given profile name."""
     try:
-        if name == DEFAULT_OPTION:
-            target = DEFAULT_PROFILES_DIRECTORY / "default" / "instructions.txt"
-            return target.read_text(encoding="utf-8").strip() if target.exists() else ""
-        target = resolve_profile_dir(name) / "instructions.txt"
-        return target.read_text(encoding="utf-8").strip() if target.exists() else ""
-    except Exception as e:
-        return f"Could not load instructions: {e}"
-
-
-def read_tools_for(name: str) -> str:
-    """Read the tools.txt content for the given profile name."""
-    try:
-        profile_name = "default" if name == DEFAULT_OPTION else name
-        target = resolve_profile_dir(profile_name) / "tools.txt"
-        return target.read_text(encoding="utf-8") if target.exists() else ""
-    except Exception:
-        return ""
-
-
-def read_greeting_for(name: str) -> str:
-    """Read the greeting.txt content for the given profile name."""
-    try:
-        profile_name = "default" if name == DEFAULT_OPTION else name
-        target = resolve_profile_dir(profile_name) / "greeting.txt"
-        if target.exists():
-            greeting = target.read_text(encoding="utf-8").strip()
-            if greeting:
-                return greeting
-        return ""
-    except Exception:
-        return ""
-
-
-def available_tools_for(selected: str) -> List[str]:
-    """List available tool modules for the given profile selection."""
-    shared: List[str] = []
-    try:
-        for py in _tools_dir().glob("*.py"):
-            if py.stem in {"__init__", "core_tools", "background_tool_manager", "tool_constants"} or py.stem in {
-                t.value for t in SystemTool
-            }:
-                continue
-            shared.append(py.stem)
-    except Exception:
-        pass
-    local: List[str] = []
-    try:
-        if selected != DEFAULT_OPTION:
-            for py in resolve_profile_dir(selected).glob("*.py"):
-                local.append(py.stem)
-    except Exception:
-        pass
-    return sorted(set(shared + local))
+        for space in read_installed_tool_spaces(config.INSTANCE_PATH).spaces:
+            for tool in space.tools:
+                catalog[tool.local_name] = {
+                    "id": tool.local_name,
+                    "kind": "tool_space",
+                    "source": space.slug,
+                    "description": tool.description,
+                }
+    except (RuntimeError, ValueError) as exc:
+        logger.warning("Failed to list installed Tool Space tools: %s", exc)
+    return [catalog[tool_id] for tool_id in sorted(catalog)]
 
 
 def delete_personality(name: str) -> bool:
-    """Delete a user-created personality directory; return whether it existed.
-
-    Refuses anything outside the user personalities root, so built-in profiles
-    can never be removed through the UI.
-    """
-    import shutil
-
-    target = resolve_profile_dir(name).resolve()
+    """Delete a user-created personality without touching bundled profiles."""
+    target = config.resolve_profile_dir(name).resolve()
     user_root = config.user_personalities_root().resolve()
     if user_root not in target.parents:
         return False
-    if target.is_dir():
-        shutil.rmtree(target)
-        return True
-    return False
+    if not target.is_dir():
+        return False
+    shutil.rmtree(target)
+    try:
+        clear_profile_tool_override(name, config.INSTANCE_PATH)
+    except (OSError, RuntimeError) as exc:
+        logger.warning("Deleted personality %r but could not remove its tool override: %s", name, exc)
+    return True
 
 
-def _write_profile(
-    sanitized_name: str,
+def save_user_personality(
+    name: str,
     instructions: str,
-    tools_text: str,
     voice: str | None = None,
     greeting: str | None = None,
-) -> None:
-    default_voice = get_default_voice()
-    target_dir = config.user_personalities_root() / sanitized_name
-    target_dir.mkdir(parents=True, exist_ok=True)
-    (target_dir / "instructions.txt").write_text(instructions.strip() + "\n", encoding="utf-8")
-    (target_dir / "tools.txt").write_text((tools_text or "").strip() + "\n", encoding="utf-8")
-    (target_dir / "voice.txt").write_text((voice or default_voice).strip() + "\n", encoding="utf-8")
-    if greeting is not None:
-        greeting_file = target_dir / "greeting.txt"
-        greeting_text = greeting.strip()
-        if greeting_text:
-            greeting_file.write_text(greeting_text + "\n", encoding="utf-8")
-        elif greeting_file.exists():
-            greeting_file.unlink()
+    *,
+    overwrite: bool = False,
+    default_tools: Iterable[str] | None = None,
+) -> str:
+    """Save a custom personality with optional authored tool defaults."""
+    profile_name = name.strip()
+    if re.fullmatch(r"[a-zA-Z0-9_-]+", profile_name) is None:
+        raise ValueError("Profile names may contain only letters, numbers, dashes, and underscores.")
+    if not instructions.strip():
+        raise ValueError(f"Profile {profile_name!r} must have non-empty instructions.")
+
+    profile_directory = config.user_personalities_root() / profile_name
+    selection = f"{USER_PERSONALITIES_DIRNAME}/{profile_name}"
+    selected_voice = voice or get_default_voice()
+    authored_tools = tuple(default_tools) if default_tools is not None else None
+    with profile_toolsets_transaction():
+        if profile_directory.exists() and not overwrite:
+            raise FileExistsError(f"Personality {profile_name!r} already exists.")
+        try:
+            previous_profile = read_profile_from_directory(profile_name, profile_directory)
+            profile_tools = previous_profile.default_tools
+            hidden = previous_profile.hidden
+        except FileNotFoundError:
+            profile_tools = read_packaged_default_profile().default_tools
+            hidden = False
+        if authored_tools is not None:
+            profile_tools = authored_tools
+
+        toolsets_path = get_profile_toolsets_path(config.INSTANCE_PATH)
+        toolsets_existed = toolsets_path.is_file()
+        previous_toolsets = read_profile_toolsets(config.INSTANCE_PATH) if authored_tools is not None else None
+
+        if authored_tools is not None:
+            clear_profile_tool_override(selection, config.INSTANCE_PATH)
+
+        try:
+            write_profile(
+                profile_name,
+                profile_directory,
+                instructions,
+                profile_tools,
+                voice=selected_voice,
+                greeting=greeting,
+                hidden=hidden,
+                overwrite=overwrite,
+            )
+        except OSError:
+            try:
+                if toolsets_existed and previous_toolsets is not None:
+                    write_profile_toolsets(config.INSTANCE_PATH, previous_toolsets)
+                elif authored_tools is not None:
+                    toolsets_path.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning("Failed to restore profile toolsets after saving profile %r: %s", profile_name, exc)
+            raise
+    return selection

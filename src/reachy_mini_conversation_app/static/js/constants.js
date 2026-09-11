@@ -1,7 +1,5 @@
 /** Shared constants for the modern web UI. */
 
-export const BUILT_IN_DEFAULT_OPTION = "(built-in default)";
-
 export const AVATAR_BY_PROFILE = Object.freeze({
   bored_teenager: "bored-teenager.svg",
   captain_circuit: "captain-circuit.svg",
@@ -42,6 +40,7 @@ export const ROUTES = Object.freeze({
   TALK: "#/",
   PERSONALITIES: "#/personalities",
   SETTINGS: "#/settings",
+  TOOLS: "#/tools",
 });
 
 export function avatarFor(profileName) {

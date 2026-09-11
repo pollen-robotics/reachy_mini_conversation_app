@@ -1,5 +1,4 @@
-from __future__ import annotations
-from shutil import copytree
+from shutil import copy2
 from pathlib import Path
 
 from setuptools import setup
@@ -20,7 +19,10 @@ class BuildPyWithProfiles(build_py):
         super().run()
 
         target_root = Path(self.build_lib) / TARGET_PACKAGE / TARGET_SUBDIR
-        copytree(SOURCE_PROFILES_DIR, target_root, dirs_exist_ok=True)
+        for profile_document in SOURCE_PROFILES_DIR.glob("*/profile.md"):
+            target_directory = target_root / profile_document.parent.name
+            target_directory.mkdir(parents=True, exist_ok=True)
+            copy2(profile_document, target_directory / profile_document.name)
 
 
 setup(

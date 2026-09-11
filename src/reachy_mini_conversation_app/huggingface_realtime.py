@@ -5,13 +5,14 @@ import base64
 import random
 import asyncio
 import logging
-from typing import Any, Final, Tuple, Optional
+from typing import TYPE_CHECKING, Any, Final, Tuple, Optional
 
 import httpx
 import numpy as np
 from openai import AsyncOpenAI
 from pydantic import Field, BaseModel
 from numpy.typing import NDArray
+from huggingface_hub import get_token
 from typing_extensions import Literal, TypedDict
 from openai.types.realtime import (
     AudioTranscriptionParam,
@@ -23,7 +24,6 @@ from openai.types.realtime import (
     RealtimeSessionCreateRequestParam,
 )
 from websockets.exceptions import ConnectionClosedError
-from openai.resources.realtime.realtime import AsyncRealtimeConnection
 from openai.types.realtime.realtime_audio_input_turn_detection_param import ServerVad
 
 from reachy_mini_conversation_app.tools import core_tools
@@ -31,6 +31,7 @@ from reachy_mini_conversation_app.config import (
     HF_LOCAL_CONNECTION_MODE,
     config,
     get_default_voice,
+    set_custom_profile,
     get_available_voices,
     get_hf_direct_ws_url,
     parse_hf_realtime_url,
@@ -53,6 +54,10 @@ from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolNotification,
     BackgroundToolManager,
 )
+
+
+if TYPE_CHECKING:
+    from openai.resources.realtime.realtime import AsyncRealtimeConnection
 
 
 logger = logging.getLogger(__name__)
@@ -126,7 +131,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self.deps = deps
 
         self.client: AsyncOpenAI
-        self.connection: AsyncRealtimeConnection | None = None
+        self.connection: "AsyncRealtimeConnection | None" = None
         self.output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]" = asyncio.Queue()
 
         self.instance_path = instance_path
@@ -287,68 +292,47 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         return self._resolve_backend_voice(voice, source="session voice", fallback=default_voice) or default_voice
 
     async def apply_personality(self, profile: str | None) -> str:
-        """Apply a new personality (profile) at runtime if possible.
-
-        - Updates the global config's selected profile for subsequent calls.
-        - If a realtime connection is active, sends a session.update with the
-          freshly resolved instructions so the change takes effect immediately.
-
-        Returns a short status message for UI feedback.
-        """
+        """Apply a personality to the active or next realtime connection."""
+        previous_profile = config.REACHY_MINI_CUSTOM_PROFILE
+        set_custom_profile(profile)
         try:
-            # Update the in-process config value and env
-            from reachy_mini_conversation_app.config import config as _config
-            from reachy_mini_conversation_app.config import set_custom_profile
-
-            set_custom_profile(profile)
-            logger.info(
-                "Set custom profile to %r (config=%r)", profile, getattr(_config, "REACHY_MINI_CUSTOM_PROFILE", None)
-            )
-
-            try:
-                instructions = get_session_instructions(self.instance_path)
-                voice = self.get_current_voice()
-            except Exception as e:
-                logger.error("Failed to resolve personality content: %s", e)
-                return f"Failed to apply personality: {e}"
-
-            # Rebuild the tool registry
+            instructions = get_session_instructions(self.instance_path)
+            voice = self.get_current_voice()
             core_tools.initialize_tools(force=True)
+        except Exception as exc:
+            set_custom_profile(previous_profile)
+            logger.error("Failed to resolve personality %r: %s", profile, exc)
+            return f"Failed to apply personality: {exc}"
 
-            # Attempt a live update first, then force a full restart to ensure it sticks
-            if self.connection is not None:
-                try:
-                    await self.connection.session.update(
-                        session=RealtimeSessionCreateRequestParam(
-                            type="realtime",
-                            instructions=instructions,
-                            audio=RealtimeAudioConfigParam(
-                                output=RealtimeAudioConfigOutputParam(
-                                    voice=voice,
-                                ),
+        if self.connection is not None:
+            try:
+                await self.connection.session.update(
+                    session=RealtimeSessionCreateRequestParam(
+                        type="realtime",
+                        instructions=instructions,
+                        audio=RealtimeAudioConfigParam(
+                            output=RealtimeAudioConfigOutputParam(
+                                voice=voice,
                             ),
                         ),
-                    )
-                    logger.info("Applied personality via live update: %s", profile or "built-in default")
-                except Exception as e:
-                    logger.warning("Live update failed; will restart session: %s", e)
-
-                # Force a real restart to guarantee the new instructions/voice
-                try:
-                    await self._restart_session()
-                    return "Applied personality and restarted realtime session."
-                except Exception as e:
-                    logger.warning("Failed to restart session after apply: %s", e)
-                    return "Applied personality. Will take effect on next connection."
-            else:
-                logger.info(
-                    "Applied personality recorded: %s (no live connection; will apply on next session)",
-                    profile or "built-in default",
+                    ),
                 )
+                logger.info("Applied personality via live update: %s", profile or "default")
+            except Exception as exc:
+                logger.warning("Live update failed; will restart session: %s", exc)
+
+            try:
+                await self._restart_session()
+                return "Applied personality and restarted realtime session."
+            except Exception as exc:
+                logger.warning("Failed to restart session after apply: %s", exc)
                 return "Applied personality. Will take effect on next connection."
-        except Exception as e:
-            logger.error("Error applying personality '%s': %s", profile, e)
-            return f"Failed to apply personality: {e}"
+
+        logger.info(
+            "Applied personality recorded: %s (no live connection; will apply on next session)",
+            profile or "default",
+        )
+        return "Applied personality. Will take effect on next connection."
 
     async def _emit_debounced_partial(self, transcript: str, item_id: str, sequence_counter: int) -> None:
         """Emit partial transcript after debounce delay."""
@@ -444,6 +428,28 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         This method never blocks the caller.
         """
         await self._pending_responses.put(kwargs)
+
+    async def say(self, text: str) -> None:
+        """Inject ``text`` as a turn and have the model voice it now.
+
+        Mirrors the startup-greeting path: create a user message item, then
+        queue a ``response.create`` through the serial sender. Not verbatim TTS
+        (speech-to-speech may rephrase). Raises if the session is closed.
+        """
+        text = (text or "").strip()
+        if not text:
+            raise ValueError("say: empty text")
+        if not self.connection:
+            raise RuntimeError("say: no active session")
+        await self.connection.conversation.item.create(
+            item={
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": text}],
+            },
+        )
+        self._mark_activity("say")
+        await self._safe_response_create()
 
     async def _send_startup_greeting_prompt(self) -> None:
         """Prompt the model to open the conversation once the session is ready."""
@@ -674,7 +680,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             if isinstance(completed_tool.id, str):
                 self._in_flight_tool_calls.discard(completed_tool.id)
 
-            tool = core_tools.ALL_TOOLS.get(completed_tool.tool_name)
+            tool = core_tools.get_tools().get(completed_tool.tool_name)
             # Always surface errors, skip the spoken follow-up for tools that opt out.
             if model_result_submitted and (completed_tool.error is not None or tool is None or tool.needs_response):
                 self._tool_batch_needs_response = True
@@ -820,6 +826,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         self._tool_batch_needs_response = False
 
                         await self.output_queue.put(AdditionalOutputs({"role": "user", "content": transcript}))
+                        self._emit_transcript("user", transcript, True)
 
                     # Handle assistant transcription
                     if event.type == "response.output_audio_transcript.done":
@@ -828,6 +835,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         await self.output_queue.put(
                             AdditionalOutputs({"role": "assistant", "content": event.transcript})
                         )
+                        self._emit_transcript("assistant", event.transcript or "", True)
 
                     # Handle audio delta
                     if event.type == "response.output_audio.delta":
@@ -1006,7 +1014,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
     async def _build_realtime_client(self) -> AsyncOpenAI:
         """Build the Hugging Face OpenAI-compatible realtime client."""
-        bearer_token = (config.HF_TOKEN or "").strip()
+        configured_bearer_token = (config.HF_TOKEN or "").strip()
         connection_selection = get_hf_connection_selection()
         direct_realtime_url = get_hf_direct_ws_url()
         if connection_selection.mode == HF_LOCAL_CONNECTION_MODE:
@@ -1014,7 +1022,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 raise RuntimeError("HF_REALTIME_WS_URL must be set when HF_REALTIME_CONNECTION_MODE=local")
             client, connect_query = _build_openai_compatible_client_from_realtime_url(
                 direct_realtime_url,
-                bearer_token,
+                configured_bearer_token,
             )
             self._realtime_connect_query = connect_query
             logger.info("Using direct Hugging Face realtime endpoint %s", direct_realtime_url)
@@ -1026,9 +1034,21 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         if direct_realtime_url:
             logger.info("HF_REALTIME_CONNECTION_MODE=deployed; ignoring HF_REALTIME_WS_URL.")
 
-        allocator_headers = {"Authorization": f"Bearer {bearer_token}"} if bearer_token else None
+        bearer_token = configured_bearer_token or (get_token() or "").strip()
+        allocator_headers = {"User-Agent": "reachy-mini-conversation-app"}
+        if bearer_token:
+            allocator_headers["X-Reachy-Mini-Authorization"] = f"Bearer {bearer_token}"
+        allocator_payload: dict[str, str] = {}
+        try:
+            hardware_id = self.deps.reachy_mini.client.get_status(wait=False).hardware_id
+        except (AssertionError, ConnectionError, TimeoutError) as e:
+            logger.warning("Daemon status unavailable for realtime session allocation: %s", e)
+        else:
+            if hardware_id:
+                allocator_payload["hardware_id"] = hardware_id
+
         async with httpx.AsyncClient(timeout=10.0) as http_client:
-            response = await http_client.post(session_url, headers=allocator_headers)
+            response = await http_client.post(session_url, headers=allocator_headers, json=allocator_payload)
             response.raise_for_status()
             payload = response.json()
 

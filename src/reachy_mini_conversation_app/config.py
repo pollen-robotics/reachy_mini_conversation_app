@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import logging
 from pathlib import Path
@@ -43,8 +44,8 @@ def _resolve_default_profiles_directory() -> Path:
 
 DEFAULT_PROFILES_DIRECTORY = _resolve_default_profiles_directory()
 
-# UI-created profiles live under a writable instance dir
 USER_PERSONALITIES_DIRNAME = "user_personalities"
+TERMINAL_USER_PERSONALITIES_DIRECTORY = Path("external_content") / USER_PERSONALITIES_DIRNAME
 
 # Qwen3-TTS CustomVoice speaker catalog from the deployed Hugging Face backend.
 HF_AVAILABLE_VOICES: list[str] = [
@@ -230,18 +231,30 @@ def build_hf_direct_ws_url(host: str, port: int) -> str:
 
 
 def _collect_profile_names(profiles_root: Path) -> set[str]:
-    """Return profile folder names from a profiles root directory."""
+    """Return declarative profile names from a profiles root directory."""
     if not profiles_root.exists() or not profiles_root.is_dir():
         return set()
-    return {p.name for p in profiles_root.iterdir() if p.is_dir()}
+    return {path.name for path in profiles_root.iterdir() if path.is_dir() and (path / "profile.md").is_file()}
 
 
-def _collect_tool_module_names(tools_root: Path) -> set[str]:
-    """Return tool module names from a tools directory."""
-    if not tools_root.exists() or not tools_root.is_dir():
-        return set()
+def list_tool_module_names(tools_root: Path | None) -> list[str]:
+    """Return valid importable tool module names from a directory."""
+    if tools_root is None or not tools_root.is_dir():
+        return []
+
     ignored = {"__init__", "core_tools"}
-    return {p.stem for p in tools_root.glob("*.py") if p.is_file() and p.stem not in ignored}
+    tool_names: list[str] = []
+    try:
+        for tool_file in tools_root.glob("*.py"):
+            if not tool_file.is_file() or tool_file.stem in ignored or tool_file.name.startswith("_"):
+                continue
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tool_file.stem) is None:
+                logger.warning("Skipping tool module with invalid name: %s", tool_file)
+                continue
+            tool_names.append(tool_file.stem)
+    except OSError as exc:
+        logger.warning("Failed to list tool modules in %s: %s", tools_root, exc)
+    return sorted(tool_names)
 
 
 def _raise_on_name_collisions(
@@ -268,12 +281,12 @@ def _raise_on_name_collisions(
 if LOCKED_PROFILE is not None:
     _profiles_dir = DEFAULT_PROFILES_DIRECTORY
     _profile_path = _profiles_dir / LOCKED_PROFILE
-    _instructions_file = _profile_path / "instructions.txt"
+    _profile_file = _profile_path / "profile.md"
     if not _profile_path.is_dir():
         logger.critical("LOCKED_PROFILE %r does not exist in %s", LOCKED_PROFILE, _profiles_dir)
         sys.exit(1)
-    if not _instructions_file.is_file():
-        logger.critical("LOCKED_PROFILE %r has no instructions.txt", LOCKED_PROFILE)
+    if not _profile_file.is_file():
+        logger.critical("LOCKED_PROFILE %r has no profile definition", LOCKED_PROFILE)
         sys.exit(1)
 
 _skip_dotenv = _env_flag("REACHY_MINI_SKIP_DOTENV", default=False)
@@ -326,9 +339,13 @@ class Config:
 
     def __init__(self) -> None:
         """Initialize the configuration."""
-        if self.REACHY_MINI_CUSTOM_PROFILE and self.PROFILES_DIRECTORY != DEFAULT_PROFILES_DIRECTORY:
+        if (
+            self.REACHY_MINI_CUSTOM_PROFILE
+            and self.REACHY_MINI_CUSTOM_PROFILE != "default"
+            and self.PROFILES_DIRECTORY != DEFAULT_PROFILES_DIRECTORY
+        ):
             selected_profile_path = self.PROFILES_DIRECTORY / self.REACHY_MINI_CUSTOM_PROFILE
-            if not selected_profile_path.is_dir():
+            if not (selected_profile_path / "profile.md").is_file():
                 available_profiles = sorted(_collect_profile_names(self.PROFILES_DIRECTORY))
                 raise RuntimeError(
                     "Config.__init__(): Selected profile "
@@ -352,8 +369,8 @@ class Config:
 
         if self.TOOLS_DIRECTORY is not None:
             builtin_tools_root = Path(__file__).parent / "tools"
-            external_tools = _collect_tool_module_names(self.TOOLS_DIRECTORY)
-            internal_tools = _collect_tool_module_names(builtin_tools_root)
+            external_tools = set(list_tool_module_names(self.TOOLS_DIRECTORY))
+            internal_tools = set(list_tool_module_names(builtin_tools_root))
             _raise_on_name_collisions(
                 label="tool",
                 external_root=self.TOOLS_DIRECTORY,
@@ -365,7 +382,7 @@ class Config:
         if self.PROFILES_DIRECTORY != DEFAULT_PROFILES_DIRECTORY:
             logger.warning(
                 "Environment variable 'REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY' is set. "
-                "Profiles (instructions.txt, ...) will be loaded from %s.",
+                "Profiles will be loaded from %s.",
                 self.PROFILES_DIRECTORY,
             )
         else:
@@ -384,9 +401,10 @@ class Config:
             logger.info("'REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY' is not set. Using built-in shared tools only.")
 
     def user_personalities_root(self) -> Path:
-        """Writable root for UI-created profiles."""
-        base = self.INSTANCE_PATH if self.INSTANCE_PATH is not None else DEFAULT_PROFILES_DIRECTORY
-        return Path(base) / USER_PERSONALITIES_DIRNAME
+        """Return the writable root for user-created profiles."""
+        if self.INSTANCE_PATH is None:
+            return TERMINAL_USER_PERSONALITIES_DIRECTORY
+        return self.INSTANCE_PATH / USER_PERSONALITIES_DIRNAME
 
     def resolve_profile_dir(self, profile: str) -> Path:
         """On-disk directory for a profile selection."""
@@ -466,22 +484,11 @@ def set_instance_path(instance_path: str | Path | None) -> None:
 
 
 def set_custom_profile(profile: str | None) -> None:
-    """Update the selected custom profile at runtime and expose it via env.
-
-    This ensures modules that read `config` and code that inspects the
-    environment see a consistent value.
-    """
+    """Update the selected profile in runtime config and the environment."""
     if LOCKED_PROFILE is not None:
         return
-    try:
-        config.REACHY_MINI_CUSTOM_PROFILE = profile
-    except Exception as e:
-        logger.warning("Failed to update config profile: %s", e)
-    try:
-        if profile:
-            os.environ["REACHY_MINI_CUSTOM_PROFILE"] = profile
-        else:
-            # Remove to reflect default
-            os.environ.pop("REACHY_MINI_CUSTOM_PROFILE", None)
-    except Exception as e:
-        logger.warning("Failed to sync profile to environment: %s", e)
+    if profile:
+        os.environ["REACHY_MINI_CUSTOM_PROFILE"] = profile
+    else:
+        os.environ.pop("REACHY_MINI_CUSTOM_PROFILE", None)
+    config.REACHY_MINI_CUSTOM_PROFILE = profile

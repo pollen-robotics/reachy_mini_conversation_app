@@ -126,7 +126,7 @@ def run(
     )
 
     from reachy_mini_conversation_app.console import LocalStream
-    from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, initialize_tools
+    from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
     from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 
     if robot is None:
@@ -278,7 +278,7 @@ def run(
         logger.info("Web UI available at http://localhost:7860")
 
     try:
-        initialize_tools(instance_path=instance_path)
+        app_lifecycle.initialize_tools_with_default_fallback(instance_path, logger)
     except Exception as e:
         logger.error("Failed to initialize tools: %s", e)
         sys.exit(1)
@@ -295,12 +295,19 @@ def run(
         _start_inactivity_timeout_thread(timeout_minutes, stream_manager, logger, app_stop_event, run_go_to_sleep_tool)
 
     def poll_stop_event() -> None:
-        """Poll the stop event to allow graceful shutdown."""
+        """Poll the stop event to allow graceful shutdown.
+
+        Deliberately does NOT put the robot to sleep: an external stop
+        (mobile app, dashboard, app switch) means "stop this app", not
+        "power the robot down" — the daemon returns it to the neutral
+        pose afterwards, awake and ready for the next app. Sleeping is
+        reserved for the explicit paths (the voice go_to_sleep tool and
+        the inactivity timeout).
+        """
         if app_stop_event is not None:
             app_stop_event.wait()
 
         logger.info("App stop event detected, shutting down...")
-        run_go_to_sleep_tool()
         try:
             stream_manager.close()
         except Exception as e:
@@ -317,9 +324,11 @@ def run(
         if own_ui_server is not None:
             own_ui_server.should_exit = True
 
-        sleep_result = run_go_to_sleep_tool()
-        if "error" in sleep_result:
-            movement_manager.stop(reset_to_neutral=False)
+        # Stop the motion writes without changing the robot's posture. If
+        # the shutdown came from the voice go_to_sleep tool the robot is
+        # already in the sleep pose; on a plain stop it stays awake and
+        # the daemon returns it to neutral once the process exits.
+        movement_manager.stop(reset_to_neutral=False)
         try:
             robot.disable_wobbling()
         except Exception as e:

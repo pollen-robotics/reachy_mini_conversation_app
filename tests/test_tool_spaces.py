@@ -1,9 +1,11 @@
-from __future__ import annotations
 import sys
 import json
+import threading
 from types import SimpleNamespace
 from pathlib import Path
 from argparse import Namespace
+from unittest.mock import MagicMock
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 import pytest
@@ -11,11 +13,20 @@ from huggingface_hub.errors import RepositoryNotFoundError
 
 import reachy_mini_conversation_app.config as config_mod
 from reachy_mini_conversation_app.main import main
-from reachy_mini_conversation_app.mcp_client import RemoteToolSpec
+from reachy_mini_conversation_app.mcp_client import RemoteToolSpec, RemoteMcpToolClient
 from reachy_mini_conversation_app.tool_spaces import (
+    ToolSpaceProfileUpdateError,
+    remove_tool_space,
+    install_tool_space,
     resolve_tool_space_sync,
     handle_tool_spaces_command,
     read_installed_tool_spaces,
+)
+from reachy_mini_conversation_app.profile_store import write_profile
+from reachy_mini_conversation_app.profile_toolsets import (
+    read_profile_tool_names,
+    read_profile_tool_override,
+    write_profile_tool_override,
 )
 
 
@@ -46,12 +57,13 @@ def _mock_private_space_info(slug: str) -> SimpleNamespace:
     return info
 
 
-async def _mock_list_tool_specs(self: object) -> list[RemoteToolSpec]:
+async def _mock_list_tool_specs(self: RemoteMcpToolClient) -> list[RemoteToolSpec]:
+    alias = self.server.alias
     return [
         RemoteToolSpec(
-            server_alias=SEARCH_ALIAS,
+            server_alias=alias,
             remote_name=SEARCH_REMOTE_NAME,
-            namespaced_name=SEARCH_CLIENT_TOOL_ID,
+            namespaced_name=f"{alias}__{SEARCH_REMOTE_NAME}",
             description="Search the web",
             parameters_schema={
                 "type": "object",
@@ -123,7 +135,10 @@ def test_tool_spaces_add_list_remove_round_trip(
         ],
     }
 
+    resolve_tool_space = MagicMock(side_effect=AssertionError("list must use cached metadata"))
+    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.resolve_tool_space_sync", resolve_tool_space)
     assert _run_cli(monkeypatch, ["reachy-mini-conversation-app", "tool-spaces", "list"]) == 0
+    resolve_tool_space.assert_not_called()
 
     assert _run_cli(monkeypatch, ["reachy-mini-conversation-app", "tool-spaces", "remove", SEARCH_SPACE_SLUG]) == 0
     assert SEARCH_SPACE_SLUG not in [space.slug for space in read_installed_tool_spaces(None).spaces]
@@ -149,55 +164,43 @@ def test_tool_spaces_add_installs_private_space_with_token(
     assert PRIVATE_SPACE_SLUG in [space.slug for space in read_installed_tool_spaces(None).spaces]
 
 
-def test_resolve_tool_space_attaches_auth_header_for_private_space(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A private Space's MCP client must carry the HF bearer token from the hf-login fallback."""
+@pytest.mark.parametrize(
+    ("private", "configured_token", "login_token", "expected_authorization"),
+    [
+        (True, None, "hf_test_token", "Bearer hf_test_token"),
+        (True, "hf_env_token", None, "Bearer hf_env_token"),
+        (False, None, "hf_test_token", None),
+    ],
+)
+def test_resolve_tool_space_sends_auth_only_to_private_spaces(
+    monkeypatch: pytest.MonkeyPatch,
+    private: bool,
+    configured_token: str | None,
+    login_token: str | None,
+    expected_authorization: str | None,
+) -> None:
+    """Private Spaces use the configured/login token while public Spaces receive no credentials."""
     monkeypatch.setattr(
         "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
-        lambda self, slug, **kwargs: _mock_private_space_info(slug),
+        lambda self, slug, **kwargs: _mock_private_space_info(slug) if private else _mock_public_space_info(slug),
     )
-    monkeypatch.setattr(config_mod.config, "HF_TOKEN", None)
-    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.get_token", lambda: "hf_test_token")
+    monkeypatch.setattr(config_mod.config, "HF_TOKEN", configured_token)
+    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.get_token", lambda: login_token)
+    authorization: str | None = None
+
+    async def _capture_authorization(self: RemoteMcpToolClient) -> list[RemoteToolSpec]:
+        nonlocal authorization
+        authorization = self.server.headers.get("Authorization")
+        return await _mock_list_tool_specs(self)
+
     monkeypatch.setattr(
         "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
-        _mock_list_tool_specs,
+        _capture_authorization,
     )
 
-    resolved = resolve_tool_space_sync(PRIVATE_SPACE_SLUG)
-    assert resolved.client.server.headers["Authorization"] == "Bearer hf_test_token"
+    resolve_tool_space_sync(PRIVATE_SPACE_SLUG if private else SEARCH_SPACE_SLUG)
 
-
-def test_resolve_tool_space_prefers_app_config_hf_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The token must come from the app config (loaded from .env), not only from get_token()."""
-    monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
-        lambda self, slug, **kwargs: _mock_private_space_info(slug),
-    )
-    monkeypatch.setattr(config_mod.config, "HF_TOKEN", "hf_env_token")
-    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.get_token", lambda: None)
-    monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
-        _mock_list_tool_specs,
-    )
-
-    resolved = resolve_tool_space_sync(PRIVATE_SPACE_SLUG)
-    assert resolved.client.server.headers["Authorization"] == "Bearer hf_env_token"
-
-
-def test_resolve_tool_space_omits_auth_header_for_public_space(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A public Space must never receive the HF token, even when one is set."""
-    monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
-        lambda self, slug, **kwargs: _mock_public_space_info(slug),
-    )
-    monkeypatch.setattr(config_mod.config, "HF_TOKEN", None)
-    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.get_token", lambda: "hf_test_token")
-    monkeypatch.setattr(
-        "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
-        _mock_list_tool_specs,
-    )
-
-    resolved = resolve_tool_space_sync(SEARCH_SPACE_SLUG)
-    assert "Authorization" not in resolved.client.server.headers
+    assert authorization == expected_authorization
 
 
 def test_tool_spaces_add_private_space_without_token_hints_at_auth(
@@ -263,6 +266,37 @@ def test_read_installed_tool_spaces_raises_on_alias_collision_in_manifest(tmp_pa
         read_installed_tool_spaces(tmp_path)
 
 
+def test_read_installed_tool_spaces_rejects_legacy_manifest(tmp_path: Path) -> None:
+    """Only the current strict manifest schema should be accepted for the 1.0 data model."""
+    (tmp_path / "installed_tool_spaces.json").write_text(
+        json.dumps({"version": 1, "spaces": []}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="expected 2"):
+        read_installed_tool_spaces(tmp_path)
+
+
+def test_read_installed_tool_spaces_rejects_non_hugging_face_endpoint(tmp_path: Path) -> None:
+    """A persisted private Space must not be able to redirect the HF token to another host."""
+    payload = {
+        "version": 2,
+        "spaces": [
+            {
+                "slug": PRIVATE_SPACE_SLUG,
+                "alias": "example_private_space",
+                "mcp_url": "https://attacker.example/gradio_api/mcp/",
+                "private": True,
+                "tools": [],
+            }
+        ],
+    }
+    (tmp_path / "installed_tool_spaces.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Invalid Hugging Face Space MCP URL"):
+        read_installed_tool_spaces(tmp_path)
+
+
 def test_tool_spaces_add_rejects_alias_collision(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -296,17 +330,15 @@ def test_tool_spaces_add_rejects_alias_collision(
     )
 
 
-def _setup_profile(tmp_path: Path, profile: str, existing_tools: list[str] | None = None) -> Path:
-    """Create a profile directory with an optional tools.txt."""
+def _setup_profile(tmp_path: Path, profile: str, default_tools: list[str] | None = None) -> Path:
+    """Create a strict profile document with authored tool defaults."""
     profile_dir = tmp_path / profile
-    profile_dir.mkdir(parents=True)
-    tools_txt = profile_dir / "tools.txt"
-    tools_txt.write_text("\n".join(existing_tools or []) + "\n" if existing_tools else "", encoding="utf-8")
-    return tools_txt
+    return write_profile(profile, profile_dir, "Test profile instructions.", default_tools or [])
 
 
 def _mock_add(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("reachy_mini_conversation_app.profile_store.DEFAULT_PROFILES_DIRECTORY", tmp_path)
     monkeypatch.setattr(
         "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
         lambda self, slug, **kwargs: _mock_public_space_info(slug),
@@ -323,13 +355,16 @@ def test_tool_spaces_add_enables_in_active_profile_by_default(
 ) -> None:
     """Add without flags should enable tools in the active profile."""
     _mock_add(monkeypatch, tmp_path)
-    tools_txt = _setup_profile(tmp_path, "default")
+    profile_path = _setup_profile(tmp_path, "default", ["dance"])
+    original_profile = profile_path.read_text(encoding="utf-8")
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", tmp_path)
     monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", None)
 
     assert _run_cli(monkeypatch, ["app", "tool-spaces", "add", SEARCH_SPACE_SLUG]) == 0
 
-    assert SEARCH_TOOL_ID in tools_txt.read_text(encoding="utf-8")
+    assert read_profile_tool_override("default", None) == ["dance", SEARCH_TOOL_ID]
+    assert read_profile_tool_names("default", None) == ["dance", SEARCH_TOOL_ID]
+    assert profile_path.read_text(encoding="utf-8") == original_profile
 
 
 def test_tool_spaces_remove_disables_tools_in_profile(
@@ -338,30 +373,36 @@ def test_tool_spaces_remove_disables_tools_in_profile(
 ) -> None:
     """Removing a Space strips its tool IDs from the profile they were enabled in."""
     _mock_add(monkeypatch, tmp_path)
-    tools_txt = _setup_profile(tmp_path, "default")
+    profile_path = _setup_profile(tmp_path, "default", ["dance"])
+    original_profile = profile_path.read_text(encoding="utf-8")
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", tmp_path)
     monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", None)
 
     assert _run_cli(monkeypatch, ["app", "tool-spaces", "add", SEARCH_SPACE_SLUG]) == 0
-    assert SEARCH_TOOL_ID in tools_txt.read_text(encoding="utf-8")
+    assert read_profile_tool_names("default", None) == ["dance", SEARCH_TOOL_ID]
 
     assert _run_cli(monkeypatch, ["app", "tool-spaces", "remove", SEARCH_SPACE_SLUG]) == 0
-    assert SEARCH_TOOL_ID not in tools_txt.read_text(encoding="utf-8")
+    assert read_profile_tool_override("default", None) == ["dance"]
+    assert read_profile_tool_names("default", None) == ["dance"]
+    assert profile_path.read_text(encoding="utf-8") == original_profile
     assert SEARCH_SPACE_SLUG not in [space.slug for space in read_installed_tool_spaces(None).spaces]
 
 
-def test_tool_spaces_add_install_only_skips_tools_txt(
+def test_tool_spaces_add_install_only_skips_profile_toolset(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """--install-only should not modify any profile's tools.txt."""
+    """--install-only should not create a profile tool override."""
     _mock_add(monkeypatch, tmp_path)
-    tools_txt = _setup_profile(tmp_path, "default")
+    profile_path = _setup_profile(tmp_path, "default", ["dance"])
+    original_profile = profile_path.read_text(encoding="utf-8")
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", tmp_path)
 
     assert _run_cli(monkeypatch, ["app", "tool-spaces", "add", SEARCH_SPACE_SLUG, "--install-only"]) == 0
 
-    assert tools_txt.read_text(encoding="utf-8") == ""
+    assert read_profile_tool_override("default", None) is None
+    assert read_profile_tool_names("default", None) == ["dance"]
+    assert profile_path.read_text(encoding="utf-8") == original_profile
 
 
 def test_tool_spaces_add_profile_flag_enables_in_specified_profile(
@@ -370,15 +411,151 @@ def test_tool_spaces_add_profile_flag_enables_in_specified_profile(
 ) -> None:
     """--profile should enable tools in the named profile, not the active one."""
     _mock_add(monkeypatch, tmp_path)
-    default_tools_txt = _setup_profile(tmp_path, "default")
-    canary_tools_txt = _setup_profile(tmp_path, "canary")
+    default_profile_path = _setup_profile(tmp_path, "default", ["dance"])
+    canary_profile_path = _setup_profile(tmp_path, "canary", ["move_head"])
+    original_default_profile = default_profile_path.read_text(encoding="utf-8")
+    original_canary_profile = canary_profile_path.read_text(encoding="utf-8")
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", tmp_path)
     monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "default")
 
     assert _run_cli(monkeypatch, ["app", "tool-spaces", "add", SEARCH_SPACE_SLUG, "--profile", "canary"]) == 0
 
-    assert SEARCH_TOOL_ID in canary_tools_txt.read_text(encoding="utf-8")
-    assert default_tools_txt.read_text(encoding="utf-8") == ""
+    assert read_profile_tool_override("canary", None) == ["move_head", SEARCH_TOOL_ID]
+    assert read_profile_tool_names("canary", None) == ["move_head", SEARCH_TOOL_ID]
+    assert read_profile_tool_override("default", None) is None
+    assert read_profile_tool_names("default", None) == ["dance"]
+    assert default_profile_path.read_text(encoding="utf-8") == original_default_profile
+    assert canary_profile_path.read_text(encoding="utf-8") == original_canary_profile
+
+
+def test_tool_space_install_profile_failure_leaves_manifest_unchanged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed profile update must not install a Space globally."""
+    _mock_add(monkeypatch, tmp_path)
+    _setup_profile(tmp_path, "guide", ["dance"])
+    instance_path = tmp_path / "instance"
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", tmp_path)
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.enable_profile_tools",
+        MagicMock(side_effect=OSError("profile store unavailable")),
+    )
+
+    with pytest.raises(ToolSpaceProfileUpdateError, match="profile store unavailable"):
+        install_tool_space(SEARCH_SPACE_SLUG, instance_path, profile="guide")
+
+    assert read_profile_tool_override("guide", instance_path) is None
+    assert SEARCH_SPACE_SLUG not in [space.slug for space in read_installed_tool_spaces(instance_path).spaces]
+
+
+def test_tool_space_install_manifest_failure_rolls_back_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed manifest commit must restore the profile tool selection."""
+    _mock_add(monkeypatch, tmp_path)
+    _setup_profile(tmp_path, "guide", ["dance"])
+    instance_path = tmp_path / "instance"
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", tmp_path)
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.write_installed_tool_spaces",
+        MagicMock(side_effect=OSError("manifest store unavailable")),
+    )
+
+    with pytest.raises(RuntimeError, match="manifest store unavailable"):
+        install_tool_space(SEARCH_SPACE_SLUG, instance_path, profile="guide")
+
+    assert read_profile_tool_override("guide", instance_path) is None
+    assert not (instance_path / "installed_tool_spaces.json").exists()
+
+
+def test_tool_space_install_rollback_does_not_overwrite_concurrent_profile_save(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A profile save that waits on a failed install should be applied after rollback."""
+    _mock_add(monkeypatch, tmp_path)
+    _setup_profile(tmp_path, "guide", ["dance"])
+    instance_path = tmp_path / "instance"
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", tmp_path)
+    manifest_write_started = threading.Event()
+    release_manifest_write = threading.Event()
+    profile_save_started = threading.Event()
+
+    def fail_manifest_write(_instance_path: object, _manifest: object) -> None:
+        manifest_write_started.set()
+        if not release_manifest_write.wait(timeout=1.0):
+            raise TimeoutError("Timed out waiting to fail manifest write")
+        raise OSError("manifest store unavailable")
+
+    def save_profile_tools() -> None:
+        profile_save_started.set()
+        write_profile_tool_override("guide", ["camera"], instance_path)
+
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.write_installed_tool_spaces",
+        fail_manifest_write,
+    )
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        install_future = executor.submit(install_tool_space, SEARCH_SPACE_SLUG, instance_path, profile="guide")
+        assert manifest_write_started.wait(timeout=1.0)
+        profile_save_future = executor.submit(save_profile_tools)
+        try:
+            assert profile_save_started.wait(timeout=1.0)
+            with pytest.raises(TimeoutError):
+                profile_save_future.result(timeout=0.1)
+        finally:
+            release_manifest_write.set()
+        with pytest.raises(RuntimeError, match="manifest store unavailable"):
+            install_future.result(timeout=1.0)
+        profile_save_future.result(timeout=1.0)
+
+    assert read_profile_tool_override("guide", instance_path) == ["camera"]
+
+
+def test_tool_space_remove_manifest_failure_rolls_back_profiles(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed removal commit must restore every affected profile selection."""
+    _mock_add(monkeypatch, tmp_path)
+    _setup_profile(tmp_path, "default", ["dance"])
+    _setup_profile(tmp_path, "guide", ["dance"])
+    instance_path = tmp_path / "instance"
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", tmp_path)
+    install_tool_space(SEARCH_SPACE_SLUG, instance_path, profile="guide")
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.write_installed_tool_spaces",
+        MagicMock(side_effect=OSError("manifest store unavailable")),
+    )
+
+    with pytest.raises(RuntimeError, match="manifest store unavailable"):
+        remove_tool_space(SEARCH_SPACE_SLUG, instance_path)
+
+    assert read_profile_tool_override("guide", instance_path) == ["dance", SEARCH_TOOL_ID]
+    assert SEARCH_SPACE_SLUG in [space.slug for space in read_installed_tool_spaces(instance_path).spaces]
+
+
+def test_tool_space_remove_cleans_default_and_orphaned_profile_overrides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Removal should clean persisted access even when profiles are outside or absent from the active root."""
+    _mock_add(monkeypatch, tmp_path)
+    external_profiles_root = tmp_path / "external_profiles"
+    _setup_profile(external_profiles_root, "guide", ["camera"])
+    instance_path = tmp_path / "instance"
+    monkeypatch.setattr(config_mod.config, "INSTANCE_PATH", instance_path)
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", external_profiles_root)
+    install_tool_space(SEARCH_SPACE_SLUG, instance_path, install_only=True)
+    write_profile_tool_override("default", ["dance", SEARCH_TOOL_ID], instance_path)
+    write_profile_tool_override("deleted_profile", [SEARCH_TOOL_ID], instance_path)
+
+    remove_tool_space(SEARCH_SPACE_SLUG, instance_path)
+
+    assert read_profile_tool_override("default", instance_path) == ["dance"]
+    assert read_profile_tool_override("deleted_profile", instance_path) == []
 
 
 def test_read_installed_tool_spaces_seeds_bundled_pollen_spaces(
@@ -398,3 +575,40 @@ def test_read_installed_tool_spaces_seeds_bundled_pollen_spaces(
     assert search_tool.local_name == "pollen_robotics_reachy_mini_search_tool__search_web"
     assert search_tool.remote_name == "reachy_mini_search_tool_search_web"
     assert spaces[0].private is False
+
+
+def test_install_tool_space_refreshes_cached_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-adding an installed Space should replace its cached tool metadata."""
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        lambda self, slug, **kwargs: _mock_public_space_info(slug),
+    )
+    descriptions = ["First description", "Refreshed description"]
+
+    async def _list_tool_specs(self: object) -> list[RemoteToolSpec]:
+        return [
+            RemoteToolSpec(
+                server_alias=SEARCH_ALIAS,
+                remote_name=SEARCH_REMOTE_NAME,
+                namespaced_name=SEARCH_CLIENT_TOOL_ID,
+                description=descriptions.pop(0),
+                parameters_schema={"type": "object", "properties": {}},
+            )
+        ]
+
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
+        _list_tool_specs,
+    )
+
+    first_result = install_tool_space(SEARCH_SPACE_SLUG, tmp_path, install_only=True)
+    refreshed_result = install_tool_space(SEARCH_SPACE_SLUG, tmp_path, install_only=True)
+
+    assert first_result.refreshed is False
+    assert refreshed_result.refreshed is True
+    matching_spaces = [space for space in refreshed_result.manifest.spaces if space.slug == SEARCH_SPACE_SLUG]
+    assert len(matching_spaces) == 1
+    assert matching_spaces[0].tools[0].description == "Refreshed description"

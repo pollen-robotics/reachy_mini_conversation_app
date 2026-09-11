@@ -3,13 +3,13 @@ from pathlib import Path
 import pytest
 
 import reachy_mini_conversation_app.config as config_mod
+from reachy_mini_conversation_app.profile_store import write_profile
 
 
 def test_config_raises_on_external_profile_name_collision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Config should fail fast when external/built-in profile names collide."""
     external_profiles = tmp_path / "external_profiles"
-    external_profiles.mkdir(parents=True)
-    (external_profiles / "default").mkdir()
+    write_profile("default", external_profiles / "default", "External default.", [])
 
     monkeypatch.setattr(config_mod.Config, "PROFILES_DIRECTORY", external_profiles)
     monkeypatch.setattr(config_mod.Config, "TOOLS_DIRECTORY", None)
@@ -23,8 +23,12 @@ def test_config_raises_on_external_profile_name_collision_with_builtin_alias(
 ) -> None:
     """Config should treat compact built-in profile names as reserved."""
     external_profiles = tmp_path / "external_profiles"
-    external_profiles.mkdir(parents=True)
-    (external_profiles / "mad_scientist_assistant").mkdir()
+    write_profile(
+        "mad_scientist_assistant",
+        external_profiles / "mad_scientist_assistant",
+        "External scientist.",
+        [],
+    )
 
     monkeypatch.setattr(config_mod.Config, "PROFILES_DIRECTORY", external_profiles)
     monkeypatch.setattr(config_mod.Config, "TOOLS_DIRECTORY", None)
@@ -59,6 +63,24 @@ def test_config_raises_when_selected_external_profile_is_missing(
 
     with pytest.raises(RuntimeError, match="Selected profile 'missing_profile' was not found"):
         config_mod.Config()
+
+
+def test_config_allows_packaged_default_with_external_profiles(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The canonical default should not require an external profile copy."""
+    external_profiles = tmp_path / "external_profiles"
+    external_profiles.mkdir()
+
+    monkeypatch.setattr(config_mod.Config, "REACHY_MINI_CUSTOM_PROFILE", "default")
+    monkeypatch.setattr(config_mod.Config, "PROFILES_DIRECTORY", external_profiles)
+    monkeypatch.setattr(config_mod.Config, "TOOLS_DIRECTORY", None)
+
+    configured = config_mod.Config()
+
+    assert configured.REACHY_MINI_CUSTOM_PROFILE == "default"
+    assert not (external_profiles / "default").exists()
 
 
 def test_obsolete_backend_env_is_ignored_with_warning(

@@ -1,4 +1,3 @@
-from __future__ import annotations
 import sys
 import json
 import importlib
@@ -17,6 +16,7 @@ from reachy_mini_conversation_app.tool_spaces import (
     InstalledToolSpacesManifest,
     write_installed_tool_spaces,
 )
+from reachy_mini_conversation_app.profile_store import write_profile
 
 
 SEARCH_SPACE_SLUG = "example/search-tool"
@@ -66,9 +66,7 @@ async def test_initialize_tools_loads_enabled_installed_remote_tools_and_dispatc
     monkeypatch.chdir(tmp_path)
     external_profiles_root = tmp_path / "external_profiles"
     profile_dir = external_profiles_root / "mcp_profile"
-    profile_dir.mkdir(parents=True)
-    (profile_dir / "instructions.txt").write_text("hello\n", encoding="utf-8")
-    (profile_dir / "tools.txt").write_text(f"{SEARCH_TOOL_ID}\n", encoding="utf-8")
+    write_profile("mcp_profile", profile_dir, "hello", [SEARCH_TOOL_ID])
 
     monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "mcp_profile")
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", external_profiles_root)
@@ -138,9 +136,7 @@ def test_initialize_tools_warns_when_enabled_tool_missing_from_manifest(
     monkeypatch.chdir(tmp_path)
     external_profiles_root = tmp_path / "external_profiles"
     profile_dir = external_profiles_root / "remote_profile"
-    profile_dir.mkdir(parents=True)
-    (profile_dir / "instructions.txt").write_text("hello\n", encoding="utf-8")
-    (profile_dir / "tools.txt").write_text(f"{SEARCH_TOOL_ID}\n", encoding="utf-8")
+    write_profile("remote_profile", profile_dir, "hello", [SEARCH_TOOL_ID])
 
     monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "remote_profile")
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", external_profiles_root)
@@ -169,15 +165,15 @@ def test_initialize_tools_warns_when_enabled_tool_missing_from_manifest(
     assert SEARCH_TOOL_ID not in core_tools_mod.ALL_TOOLS
 
 
-def test_initialize_tools_inherits_default_tools_txt_for_profile_without_local_tool_list(
+def test_initialize_tools_respects_empty_profile_tool_defaults(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Profiles without a local tools.txt should inherit the built-in default tool set."""
+    """A strict profile with no authored tools should not inherit another profile's tools."""
+    monkeypatch.chdir(tmp_path)
     external_profiles_root = tmp_path / "external_profiles"
     profile_dir = external_profiles_root / "inherit_default"
-    profile_dir.mkdir(parents=True)
-    (profile_dir / "instructions.txt").write_text("hello\n", encoding="utf-8")
+    write_profile("inherit_default", profile_dir, "hello", [])
 
     monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "inherit_default")
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", external_profiles_root)
@@ -187,15 +183,13 @@ def test_initialize_tools_inherits_default_tools_txt_for_profile_without_local_t
     core_tools_mod = _reload_core_tools()
     core_tools_mod.initialize_tools()
 
-    assert "dance" in core_tools_mod.ALL_TOOLS
+    assert "dance" not in core_tools_mod.ALL_TOOLS
 
 
 def _mcp_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     external_profiles_root = tmp_path / "external_profiles"
     profile_dir = external_profiles_root / "mcp_profile"
-    profile_dir.mkdir(parents=True)
-    (profile_dir / "instructions.txt").write_text("hello\n", encoding="utf-8")
-    (profile_dir / "tools.txt").write_text(f"{SEARCH_TOOL_ID}\n", encoding="utf-8")
+    write_profile("mcp_profile", profile_dir, "hello", [SEARCH_TOOL_ID])
     monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "mcp_profile")
     monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", external_profiles_root)
     monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)

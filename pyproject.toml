@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reachy_mini_conversation_app"
-version = "0.10.0"
+version = "1.0.1"
 authors = [{ name = "Pollen Robotics", email = "contact@pollen-robotics.com" }]
 description = ""
 readme = "README.md"
@@ -21,9 +21,8 @@ dependencies = [
 
     #Reachy mini
     "reachy_mini_dances_library",
-    "reachy_mini_toolbox",
-    "reachy-mini>=1.9.0",
-    "mcp>=1.27.1",
+    "reachy-mini>=1.10.0rc5",
+    "mcp>=1.27.1,<2",
 ]
 
 [dependency-groups]
@@ -46,7 +45,6 @@ exclude-newer = "7 days"
 [tool.uv.exclude-newer-package]
 "reachy-mini" = false
 "reachy-mini-dances-library" = false
-"reachy-mini-toolbox" = false
 
 [project.entry-points."reachy_mini_apps"]
 reachy_mini_conversation_app = "reachy_mini_conversation_app.main:ReachyMiniConversationApp"
@@ -64,8 +62,7 @@ reachy_mini_conversation_app = [
   ".env.example",
 ]
 reachy_talk_data = [
-  "profiles/**/*.txt",
-  "profiles/**/*.py",
+  "profiles/**/*.md",
 ]
 
 [tool.ruff]
@@ -93,7 +90,7 @@ length-sort = true
 lines-after-imports = 2
 no-lines-before = ["standard-library", "local-folder"]
 known-local-folder = ["reachy_mini_conversation_app"]
-known-first-party = ["reachy_mini", "reachy_mini_dances_library", "reachy_mini_toolbox"]
+known-first-party = ["reachy_mini", "reachy_mini_dances_library"]
 split-on-trailing-comma = true
 
 [tool.ruff.format]
