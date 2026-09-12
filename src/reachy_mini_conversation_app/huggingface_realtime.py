@@ -353,9 +353,12 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         item_id: str,
         delta: str,
     ) -> None:
-        """Record a Hugging Face partial transcript snapshot."""
-        input_transcript.item_id = item_id
-        input_transcript.deltas = [delta]
+        """Append an incremental partial transcript fragment for one item."""
+        if input_transcript.item_id != item_id:
+            input_transcript.item_id = item_id
+            input_transcript.deltas = [delta]
+            return
+        input_transcript.deltas.append(delta)
 
     async def start_up(self) -> None:
         """Start the handler with minimal retries on unexpected websocket closure."""
