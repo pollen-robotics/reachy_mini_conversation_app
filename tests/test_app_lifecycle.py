@@ -88,6 +88,44 @@ def test_request_stop_current_app_returns_false_on_urlerror(monkeypatch) -> None
     assert not app_lifecycle.request_stop_current_app(robot, MagicMock())
 
 
+def test_request_stop_current_app_treats_already_stopping_as_success(monkeypatch) -> None:
+    """HTTP 400/409 from an already-stopping app is idempotent success."""
+
+    def fake_urlopen(request, timeout):
+        raise app_lifecycle.urllib.error.HTTPError(
+            request.full_url,
+            409,
+            "Conflict",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=None,
+        )
+
+    monkeypatch.setattr(app_lifecycle.urllib.request, "urlopen", fake_urlopen)
+    robot = SimpleNamespace(client=SimpleNamespace(host="192.168.1.42", port=8000))
+    logger = MagicMock()
+
+    assert app_lifecycle.request_stop_current_app(robot, logger)
+    logger.error.assert_not_called()
+
+
+def test_request_stop_current_app_returns_false_on_other_httperror(monkeypatch) -> None:
+    """Unexpected HTTP failures remain errors."""
+
+    def fake_urlopen(request, timeout):
+        raise app_lifecycle.urllib.error.HTTPError(
+            request.full_url,
+            500,
+            "Server Error",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=None,
+        )
+
+    monkeypatch.setattr(app_lifecycle.urllib.request, "urlopen", fake_urlopen)
+    robot = SimpleNamespace(client=SimpleNamespace(host="192.168.1.42", port=8000))
+
+    assert not app_lifecycle.request_stop_current_app(robot, MagicMock())
+
+
 def test_wake_up_if_sleeping_handles_pose_read_failure() -> None:
     """A robot that cannot report its pose skips the wake-up movement."""
     robot = MagicMock()
