@@ -259,3 +259,58 @@ async def test_remote_tool_does_not_retry_timeout(
 
     assert "error" in result
     assert client.call_tool.await_count == 1
+
+
+def test_initialize_tools_survives_a_corrupt_installed_spaces_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A damaged manifest should cost the Space tools, not the whole tool registry.
+
+    `read_installed_tool_spaces` raises RuntimeError for a malformed payload and
+    ValueError straight out of `validate_space_slug` / `validate_space_mcp_url`
+    for a bad entry (see the reader's own tests). Either one used to propagate
+    out of tool initialization, so a single bad character in the manifest left
+    the app with no tools at all instead of just no Space tools.
+    """
+    monkeypatch.chdir(tmp_path)
+    external_profiles_root = tmp_path / "external_profiles"
+    profile_dir = external_profiles_root / "remote_profile"
+    write_profile("remote_profile", profile_dir, "hello", [SEARCH_TOOL_ID])
+
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "remote_profile")
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", external_profiles_root)
+    monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
+    monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
+
+    # A well-formed envelope whose entry trips the URL validator (ValueError),
+    # which is the path that no exception handler covered.
+    manifest_path = tmp_path / "external_content" / "installed_tool_spaces.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "spaces": [
+                    {
+                        "slug": SEARCH_SPACE_SLUG,
+                        "alias": SEARCH_ALIAS,
+                        "mcp_url": "https://attacker.example/gradio_api/mcp/",
+                        "private": True,
+                        "tools": [],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    core_tools_mod = _reload_core_tools()
+    with caplog.at_level("ERROR"):
+        core_tools_mod.initialize_tools()
+
+    assert any("Skipping installed tool Spaces" in record.message for record in caplog.records)
+    assert SEARCH_TOOL_ID not in core_tools_mod.ALL_TOOLS
+    # The registry still came up: built-in tools are unaffected by a bad manifest.
+    assert core_tools_mod.ALL_TOOLS
