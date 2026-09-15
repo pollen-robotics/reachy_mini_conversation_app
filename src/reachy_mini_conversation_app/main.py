@@ -129,6 +129,7 @@ def run(
         resolve_app_timeout_minutes,
         refresh_runtime_config_from_env,
     )
+    from reachy_mini_conversation_app.settings_store import load_settings_into_runtime
     from reachy_mini_conversation_app.startup_settings import (
         StartupSettings,
         load_startup_settings_into_runtime,
@@ -155,6 +156,9 @@ def run(
             startup_settings = load_startup_settings_into_runtime(instance_path)
         except Exception as e:
             logger.warning("Failed to load startup settings: %s", e)
+
+    # After the .env: what the user changed through the UI wins over it.
+    load_settings_into_runtime(instance_path)
 
     logger.info(
         "Configured Hugging Face realtime backend, connection mode: %s",

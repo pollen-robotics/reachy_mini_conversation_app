@@ -143,7 +143,7 @@ def resolve_app_timeout_minutes() -> float | None:
     return timeout_minutes if timeout_minutes > 0 else None
 
 
-def _normalize_hf_connection_mode(value: str | None) -> str | None:
+def normalize_hf_connection_mode(value: str | None) -> str | None:
     """Normalize the Hugging Face connection mode, if explicitly configured."""
     candidate = (value or "").strip().lower()
     if not candidate:
@@ -159,7 +159,7 @@ def _normalize_hf_connection_mode(value: str | None) -> str | None:
     return candidate
 
 
-def _normalize_transcription_language(value: str | None) -> str:
+def normalize_transcription_language(value: str | None) -> str:
     """Return the configured realtime transcription language."""
     candidate = (value or "").strip()
     return candidate or "en"
@@ -316,12 +316,12 @@ class Config:
     """Configuration class for the conversation app."""
 
     HF_REALTIME_CONNECTION_MODE = (
-        _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode
+        normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode
     )
     # Deliberately ignore HF_REALTIME_SESSION_URL from the environment; the app-managed proxy is HF_DEFAULTS.session_url.
     HF_REALTIME_SESSION_URL = HF_DEFAULTS.session_url
     HF_REALTIME_WS_URL = os.getenv(HF_REALTIME_WS_URL_ENV)
-    REALTIME_TRANSCRIPTION_LANGUAGE = _normalize_transcription_language(os.getenv(REALTIME_TRANSCRIPTION_LANGUAGE_ENV))
+    REALTIME_TRANSCRIPTION_LANGUAGE = normalize_transcription_language(os.getenv(REALTIME_TRANSCRIPTION_LANGUAGE_ENV))
     MEMORY_ENABLED = _env_flag(MEMORY_ENABLED_ENV, default=True)
     CAMERA_ENABLED = _env_flag(CAMERA_ENABLED_ENV, default=True)
     HF_TOKEN = os.getenv("HF_TOKEN")  # Optional, falls back to hf auth login if not set
@@ -428,12 +428,12 @@ def refresh_runtime_config_from_env() -> None:
     """Refresh mutable runtime config fields from the current environment."""
     _warn_on_obsolete_backend_env()
     config.HF_REALTIME_CONNECTION_MODE = (
-        _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode
+        normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode
     )
     # Deliberately ignore HF_REALTIME_SESSION_URL from the environment; the app-managed proxy is HF_DEFAULTS.session_url.
     config.HF_REALTIME_SESSION_URL = HF_DEFAULTS.session_url
     config.HF_REALTIME_WS_URL = os.getenv(HF_REALTIME_WS_URL_ENV)
-    config.REALTIME_TRANSCRIPTION_LANGUAGE = _normalize_transcription_language(
+    config.REALTIME_TRANSCRIPTION_LANGUAGE = normalize_transcription_language(
         os.getenv(REALTIME_TRANSCRIPTION_LANGUAGE_ENV)
     )
     config.HF_TOKEN = os.getenv("HF_TOKEN")
@@ -515,7 +515,7 @@ def get_hf_connection_selection() -> HFConnectionSelection:
     """Resolve the selected Hugging Face connection mode and whether it is usable."""
     session_url = get_hf_session_url()
     direct_ws_url = get_hf_direct_ws_url()
-    mode = _normalize_hf_connection_mode(getattr(config, "HF_REALTIME_CONNECTION_MODE", None))
+    mode = normalize_hf_connection_mode(getattr(config, "HF_REALTIME_CONNECTION_MODE", None))
     if mode is None:
         raise RuntimeError(f"{HF_REALTIME_CONNECTION_MODE_ENV} must be set to local or deployed.")
 

@@ -18,6 +18,7 @@ import reachy_mini_conversation_app.console as console_mod
 from reachy_mini_conversation_app.config import HF_AVAILABLE_VOICES, config
 from reachy_mini_conversation_app.console import LocalStream
 from reachy_mini_conversation_app.streaming import AdditionalOutputs
+from reachy_mini_conversation_app.settings_store import read_settings
 from reachy_mini_conversation_app.startup_settings import (
     StartupSettings,
     load_startup_settings_into_runtime,
@@ -240,9 +241,9 @@ def test_backend_config_persists_local_hf_selection_and_status(
     assert data["hf_direct_host"] == "localhost"
     assert data["hf_direct_port"] == 8765
 
-    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
-    assert "HF_REALTIME_CONNECTION_MODE=local" in env_text
-    assert "HF_REALTIME_WS_URL=ws://localhost:8765/v1/realtime" in env_text
+    stored = read_settings(tmp_path)
+    assert stored.hf_connection_mode == "local"
+    assert stored.hf_ws_url == "ws://localhost:8765/v1/realtime"
 
 
 def test_backend_config_persists_deployed_mode_without_clearing_local_hf_ws_url(
@@ -276,8 +277,8 @@ def test_backend_config_persists_deployed_mode_without_clearing_local_hf_ws_url(
     assert data["has_hf_ws_url"] is True
     assert data["hf_connection_mode"] == "deployed"
 
+    assert read_settings(tmp_path).hf_connection_mode == "deployed"
     env_text = env_path.read_text(encoding="utf-8")
-    assert "HF_REALTIME_CONNECTION_MODE=deployed" in env_text
     assert "HF_REALTIME_SESSION_URL=" not in env_text
     assert "HF_REALTIME_WS_URL=ws://localhost:8765/v1/realtime" in env_text
 
@@ -775,21 +776,6 @@ def _bare_stream() -> LocalStream:
     """Return a LocalStream with a no-audio robot, enough for helper-method tests."""
     robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
     return LocalStream(MagicMock(), robot)
-
-
-def test_read_env_lines_prefers_existing_file(tmp_path: Path) -> None:
-    """An existing .env is read verbatim, ignoring the template."""
-    env_path = tmp_path / ".env"
-    env_path.write_text("A=1\nB=2\n", encoding="utf-8")
-
-    assert _bare_stream()._read_env_lines(env_path) == ["A=1", "B=2"]
-
-
-def test_read_env_lines_falls_back_to_example_template(tmp_path: Path) -> None:
-    """When no .env exists, the sibling .env.example is used as the template."""
-    (tmp_path / ".env.example").write_text("OPENAI_API_KEY=\n", encoding="utf-8")
-
-    assert _bare_stream()._read_env_lines(tmp_path / ".env") == ["OPENAI_API_KEY="]
 
 
 def test_seconds_since_activity_reads_handler() -> None:

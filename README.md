@@ -111,6 +111,10 @@ Copy `.env.example` to `.env` when you want to point Hugging Face at your own lo
 | `REACHY_MINI_MEMORY_ENABLED` | Long-term memory. When `false`, remembered facts stay on disk but are not injected into the prompt, and the `remember` / `forget` tools decline. Defaults to `true`. |
 | `REACHY_MINI_CAMERA_ENABLED` | Camera tool. `--no-camera` forces it off regardless. Defaults to `true`. |
 
+These variables are the starting value. What you change through the settings UI
+(or from the mobile app) is written to `settings.json` in the instance directory
+and wins over them, so a toggle always does what it says.
+
 ### Hugging Face Connection Modes
 
 Use the built-in Hugging Face server through the app-managed Space proxy. This is the default for a new install; set it explicitly only when you want to switch back from a saved local endpoint:
