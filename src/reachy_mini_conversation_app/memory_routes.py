@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import Any
 from pathlib import Path
-from collections.abc import Callable
+from collections.abc import Callable, Awaitable
 
 from reachy_mini.io.jsonrpc import JsonRpcError
 from reachy_mini.apps.jsonrpc_server import JsonRpcServer
@@ -29,6 +29,7 @@ def register_memory_methods(
     *,
     instance_path: str | Path | None,
     set_enabled: Callable[[bool], str],
+    refresh_instructions: Callable[[], Awaitable[bool]],
 ) -> None:
     """Register memory.* methods for clients that manage stored facts."""
 
@@ -67,7 +68,15 @@ def register_memory_methods(
         except OSError as exc:
             logger.exception("Failed to clear memory facts")
             raise JsonRpcError(str(exc), reason="memory_unavailable") from exc
-        return {"ok": True}
+        # The facts are in the prompt, so the model only forgets once its
+        # instructions are replaced. Best-effort: the store is already empty,
+        # and the next session rebuilds them regardless.
+        applied = False
+        try:
+            applied = await refresh_instructions()
+        except Exception:
+            logger.exception("Cleared memory but could not refresh the live session")
+        return {"ok": True, "applied_live": applied}
 
     async def _set_enabled(params: dict[str, Any]) -> dict[str, object]:
         enabled = params.get("enabled")

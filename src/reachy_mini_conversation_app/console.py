@@ -369,6 +369,10 @@ class LocalStream:
         self._mark_restart_requested(reason)
         return "Saved. Reconnecting the conversation to apply it."
 
+    async def _refresh_instructions(self) -> bool:
+        """Push rebuilt instructions to the live session (see memory.clear)."""
+        return await self.handler.refresh_instructions()
+
     def _set_memory_enabled(self, enabled: bool) -> str:
         """Turn long-term memory on or off, for this run and the next ones."""
         return self._apply_setting_with_restart(AppSettings(memory_enabled=enabled), "memory_toggled")
@@ -646,6 +650,7 @@ class LocalStream:
                 rpc,
                 instance_path=self._instance_path,
                 set_enabled=self._set_memory_enabled,
+                refresh_instructions=self._refresh_instructions,
             )
         except Exception:
             logger.exception("Failed to register memory methods; memory settings will be unavailable")

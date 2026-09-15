@@ -20,7 +20,12 @@ def _rpc_call(client: TestClient, method: str, params: dict[str, object] | None 
         return response
 
 
-def _client(instance_path: Path, enabled_calls: list[bool] | None = None) -> TestClient:
+def _client(
+    instance_path: Path,
+    enabled_calls: list[bool] | None = None,
+    refreshed: list[bool] | None = None,
+    live: bool = True,
+) -> TestClient:
     app = FastAPI()
     rpc = JsonRpcServer()
 
@@ -30,7 +35,17 @@ def _client(instance_path: Path, enabled_calls: list[bool] | None = None) -> Tes
         config.MEMORY_ENABLED = enabled
         return "Saved."
 
-    register_memory_methods(rpc, instance_path=instance_path, set_enabled=_set_enabled)
+    async def _refresh_instructions() -> bool:
+        if refreshed is not None:
+            refreshed.append(True)
+        return live
+
+    register_memory_methods(
+        rpc,
+        instance_path=instance_path,
+        set_enabled=_set_enabled,
+        refresh_instructions=_refresh_instructions,
+    )
     rpc.mount(app)
     return TestClient(app)
 
@@ -79,11 +94,25 @@ def test_forget_without_target_is_invalid(tmp_path: Path) -> None:
     assert error["data"]["reason"] == "invalid_params"
 
 
-def test_clear_empties_the_store(tmp_path: Path) -> None:
-    """Clearing is what the phone's 'Clear memory' button calls."""
+def test_clear_empties_the_store_and_the_live_prompt(tmp_path: Path) -> None:
+    """Facts live in the prompt, so clearing must also refresh the session."""
+    add_memory_fact(tmp_path, "Has a dog named Mochi")
+    refreshed: list[bool] = []
+
+    result = _rpc_call(_client(tmp_path, refreshed=refreshed), "memory.clear")["result"]
+
+    assert result == {"ok": True, "applied_live": True}
+    assert list_memory_facts(tmp_path) == []
+    assert refreshed == [True]
+
+
+def test_clear_reports_when_no_session_was_live(tmp_path: Path) -> None:
+    """With no connection the store is still emptied; the next session rebuilds."""
     add_memory_fact(tmp_path, "Has a dog named Mochi")
 
-    assert _rpc_call(_client(tmp_path), "memory.clear")["result"] == {"ok": True}
+    result = _rpc_call(_client(tmp_path, live=False), "memory.clear")["result"]
+
+    assert result == {"ok": True, "applied_live": False}
     assert list_memory_facts(tmp_path) == []
 
 

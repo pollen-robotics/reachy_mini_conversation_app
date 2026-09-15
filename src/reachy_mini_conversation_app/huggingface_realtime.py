@@ -291,6 +291,19 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         voice = self._voice_override or get_session_voice(default=default_voice)
         return self._resolve_backend_voice(voice, source="session voice", fallback=default_voice) or default_voice
 
+    async def refresh_instructions(self) -> bool:
+        """Push freshly built instructions to the live session, if there is one."""
+        if self.connection is None:
+            return False
+        await self.connection.session.update(
+            session=RealtimeSessionCreateRequestParam(
+                type="realtime",
+                instructions=get_session_instructions(self.instance_path),
+            ),
+        )
+        logger.info("Refreshed session instructions")
+        return True
+
     async def apply_personality(self, profile: str | None) -> str:
         """Apply a personality to the active or next realtime connection."""
         previous_profile = config.REACHY_MINI_CUSTOM_PROFILE
