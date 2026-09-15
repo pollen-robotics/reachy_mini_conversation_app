@@ -14,7 +14,7 @@ import logging
 import threading
 from typing import Any
 from pathlib import Path
-from dataclasses import fields, replace, dataclass
+from dataclasses import asdict, replace, dataclass
 
 from reachy_mini_conversation_app.config import (
     config,
@@ -42,11 +42,9 @@ class AppSettings:
     camera_enabled: bool | None = None
 
 
-def settings_path_for_instance(instance_path: str | Path | None) -> Path | None:
+def _settings_path(instance_path: str | Path | None) -> Path | None:
     """Return the settings file for an instance directory, if there is one."""
-    if instance_path is None:
-        return None
-    return Path(instance_path) / SETTINGS_FILENAME
+    return None if instance_path is None else Path(instance_path) / SETTINGS_FILENAME
 
 
 def _text(payload: dict[str, Any], name: str) -> str | None:
@@ -87,32 +85,21 @@ def _read_unlocked(path: Path | None) -> AppSettings:
 def read_settings(instance_path: str | Path | None) -> AppSettings:
     """Read the instance settings, ignoring anything unreadable or malformed."""
     with _STORE_LOCK:
-        return _read_unlocked(settings_path_for_instance(instance_path))
+        return _read_unlocked(_settings_path(instance_path))
 
 
 def update_settings(instance_path: str | Path | None, changes: AppSettings) -> AppSettings:
     """Merge non-None fields of ``changes`` into the stored settings."""
-    path = settings_path_for_instance(instance_path)
+    path = _settings_path(instance_path)
     if path is None:
         return changes
 
     with _STORE_LOCK:
-        current = _read_unlocked(path)
-        updates = {
-            field.name: getattr(changes, field.name)
-            for field in fields(AppSettings)
-            if getattr(changes, field.name) is not None
-        }
-        merged = replace(current, **updates)
+        updates = {name: value for name, value in asdict(changes).items() if value is not None}
+        merged = replace(_read_unlocked(path), **updates)
 
         payload: dict[str, Any] = {"version": SETTINGS_VERSION}
-        payload.update(
-            {
-                field.name: getattr(merged, field.name)
-                for field in fields(AppSettings)
-                if getattr(merged, field.name) is not None
-            }
-        )
+        payload.update({name: value for name, value in asdict(merged).items() if value is not None})
         temporary = path.with_suffix(f"{path.suffix}.tmp")
         temporary.write_text(f"{json.dumps(payload, indent=2, sort_keys=True)}\n", encoding="utf-8")
         temporary.replace(path)
