@@ -107,6 +107,9 @@ Copy `.env.example` to `.env` when you want to point Hugging Face at your own lo
 | `HF_REALTIME_WS_URL` | Direct websocket endpoint for your own Hugging Face backend. Accepts either a base URL like `ws://127.0.0.1:8765/v1` or the full websocket URL `ws://127.0.0.1:8765/v1/realtime`. Used when `HF_REALTIME_CONNECTION_MODE=local`. |
 | `HF_TOKEN` | Optional token for Hugging Face access. Local endpoints receive only this explicitly configured token. |
 | `REACHY_MINI_APP_TIMEOUT_MINUTES` | Minutes of inactivity before Reachy goes to sleep and the app stops. Defaults to `1440` (one day); set to `0` to disable. |
+| `REACHY_MINI_INSTANCE_PATH` | Directory for this instance's data: long-term memory, user personalities and settings. Defaults to `conversation_app` beside the daemon's own config (`~/.config/reachy_mini` on Linux). Data written by an older version inside the installed package is copied over once. |
+| `REACHY_MINI_MEMORY_ENABLED` | Long-term memory. When `false`, remembered facts stay on disk but are not injected into the prompt, and the `remember` / `forget` tools decline. Defaults to `true`. |
+| `REACHY_MINI_CAMERA_ENABLED` | Camera tool. `--no-camera` forces it off regardless. Defaults to `true`. |
 
 ### Hugging Face Connection Modes
 

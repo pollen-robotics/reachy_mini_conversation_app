@@ -10,6 +10,8 @@ from pathlib import Path
 from dataclasses import dataclass
 from collections.abc import Mapping
 
+from reachy_mini_conversation_app.config import config
+
 
 logger = logging.getLogger(__name__)
 
@@ -170,17 +172,21 @@ def forget_memory_fact(
     instance_path: str | Path | None,
     *,
     query: str | None = None,
+    fact_id: str | None = None,
 ) -> ForgetMemoryResult:
-    """Remove a fact by case-insensitive substring query."""
+    """Remove a fact by id, or by case-insensitive substring query."""
     path = memory_path_for_instance(instance_path)
     with _STORE_LOCK:
         facts = _read_memory_file(path)
 
-        normalized_query = normalize_memory_text(query or "").lower()
-        if not normalized_query:
-            return ForgetMemoryResult(removed=None, candidates=())
+        if fact_id:
+            candidates = tuple(fact for fact in facts if fact.id == fact_id)
+        else:
+            normalized_query = normalize_memory_text(query or "").lower()
+            if not normalized_query:
+                return ForgetMemoryResult(removed=None, candidates=())
+            candidates = tuple(fact for fact in facts if normalized_query in fact.text.lower())
 
-        candidates = tuple(fact for fact in facts if normalized_query in fact.text.lower())
         if not candidates:
             return ForgetMemoryResult(removed=None, candidates=())
 
@@ -198,6 +204,9 @@ def clear_memory_facts(instance_path: str | Path | None = None) -> None:
 
 def format_memory_for_prompt(instance_path: str | Path | None = None) -> str:
     """Return the prompt fragment injected before the session instructions."""
+    if not config.MEMORY_ENABLED:
+        return ""
+
     facts = list_memory_facts(instance_path)
     if not facts:
         return ""

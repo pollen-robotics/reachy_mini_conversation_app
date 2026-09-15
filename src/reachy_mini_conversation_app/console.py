@@ -21,10 +21,13 @@ from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.config import (
     HF_BACKEND,
     LOCKED_PROFILE,
+    CAMERA_ENABLED_ENV,
+    MEMORY_ENABLED_ENV,
     HF_REALTIME_WS_URL_ENV,
     HF_LOCAL_CONNECTION_MODE,
     HF_DEPLOYED_CONNECTION_MODE,
     HF_REALTIME_CONNECTION_MODE_ENV,
+    REALTIME_TRANSCRIPTION_LANGUAGE_ENV,
     config,
     get_default_voice,
     get_hf_session_url,
@@ -39,8 +42,11 @@ from reachy_mini_conversation_app.config import (
 )
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_float32
+from reachy_mini_conversation_app.memory_routes import register_memory_methods
+from reachy_mini_conversation_app.vision_routes import register_vision_methods
+from reachy_mini_conversation_app.language_routes import register_language_methods
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
-from reachy_mini_conversation_app.tools.core_tools import initialize_tools
+from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, initialize_tools
 from reachy_mini_conversation_app.tool_space_routes import register_tool_space_methods
 from reachy_mini_conversation_app.personality_routes import (
     build_personality_ops,
@@ -110,12 +116,14 @@ class LocalStream:
         instance_path: Optional[str] = None,
         handler_factory: HandlerFactory | None = None,
         startup_voice: Optional[str] = None,
+        tool_deps: ToolDependencies | None = None,
     ):
         """Initialize the stream with a realtime handler and pipelines.
 
         - ``settings_app``: the Reachy Mini Apps FastAPI to attach settings endpoints.
         - ``instance_path``: directory where per-instance ``.env`` should be stored.
         - ``handler_factory``: builds a fresh handler for the currently selected backend.
+        - ``tool_deps``: live tool dependencies, so vision.* can toggle the camera.
         """
         self._robot = robot
         self._stop_event = asyncio.Event()
@@ -125,6 +133,7 @@ class LocalStream:
         self._voice_override = startup_voice
         self._settings_app: Optional[FastAPI] = settings_app
         self._instance_path: Optional[str] = instance_path
+        self._tool_deps = tool_deps
         self._settings_initialized = False
         self._asyncio_loop = None
         self._mic_muted = False  # mic starts live; the UI toggles it via the settings API
@@ -421,6 +430,34 @@ class LocalStream:
         self._persist_env_values({HF_REALTIME_CONNECTION_MODE_ENV: HF_DEPLOYED_CONNECTION_MODE})
         self._remove_persisted_env_values(("HF_REALTIME_SESSION_URL",))
 
+    def _apply_setting_with_restart(self, env_name: str, value: str, reason: str) -> str:
+        """Persist one setting and reconnect the backend so it takes effect."""
+        self._persist_env_values({env_name: value})
+        if not self._can_rebuild_handler():
+            return "Saved. Restart Reachy Mini Conversation to apply it."
+        self._mark_restart_requested(reason)
+        return "Saved. Reconnecting the conversation to apply it."
+
+    def _set_memory_enabled(self, enabled: bool) -> str:
+        """Turn long-term memory on or off, for this run and the next ones."""
+        return self._apply_setting_with_restart(
+            MEMORY_ENABLED_ENV,
+            "true" if enabled else "false",
+            "memory_toggled",
+        )
+
+    def _set_transcription_language(self, language: str) -> str:
+        """Change the speech transcription language, for this run and the next ones."""
+        return self._apply_setting_with_restart(
+            REALTIME_TRANSCRIPTION_LANGUAGE_ENV,
+            language,
+            "language_changed",
+        )
+
+    def _persist_camera_enabled(self, enabled: bool) -> None:
+        """Remember the camera switch across restarts."""
+        self._persist_env_values({CAMERA_ENABLED_ENV: "true" if enabled else "false"})
+
     def _persist_personality(self, profile: Optional[str], voice_override: Optional[str] = None) -> None:
         """Persist startup profile and voice in instance-local UI settings."""
         if LOCKED_PROFILE is not None:
@@ -550,6 +587,12 @@ class LocalStream:
                 "can_proceed": has_hf_connection,
                 "can_proceed_with_hf": has_hf_connection,
                 "requires_restart": not self._can_rebuild_handler(),
+                # What the mobile client would otherwise need four more calls for.
+                "personality": config.REACHY_MINI_CUSTOM_PROFILE,
+                "voice": self.get_current_voice(),
+                "language": config.REALTIME_TRANSCRIPTION_LANGUAGE,
+                "memory_enabled": config.MEMORY_ENABLED,
+                "vision_enabled": bool(self._tool_deps and self._tool_deps.camera_enabled),
                 **backend_connection,
             }
 
@@ -672,6 +715,28 @@ class LocalStream:
             )
         except Exception:
             logger.exception("Failed to register profile tool methods; personality tool settings will be unavailable")
+
+        try:
+            # memory.* / language.* / vision.* — the settings a remote client
+            # (the mobile app) shows next to the personality controls.
+            register_memory_methods(
+                rpc,
+                instance_path=self._instance_path,
+                set_enabled=self._set_memory_enabled,
+            )
+        except Exception:
+            logger.exception("Failed to register memory methods; memory settings will be unavailable")
+
+        try:
+            register_language_methods(rpc, set_language=self._set_transcription_language)
+        except Exception:
+            logger.exception("Failed to register language methods; the language setting will be unavailable")
+
+        if self._tool_deps is not None:
+            try:
+                register_vision_methods(rpc, self._tool_deps, self._persist_camera_enabled)
+            except Exception:
+                logger.exception("Failed to register vision methods; the camera switch will be unavailable")
 
         self._settings_initialized = True
 
