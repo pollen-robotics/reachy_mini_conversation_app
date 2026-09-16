@@ -20,6 +20,7 @@ from reachy_mini_conversation_app.utils import (
     setup_logger,
     log_connection_troubleshooting,
 )
+from reachy_mini_conversation_app.config import resolve_instance_path
 
 
 if TYPE_CHECKING:
@@ -122,11 +123,13 @@ def run(
     from reachy_mini_conversation_app.moves import MovementManager
     from reachy_mini_conversation_app.config import (
         HF_LOCAL_CONNECTION_MODE,
+        config,
         set_instance_path,
         get_hf_connection_selection,
         resolve_app_timeout_minutes,
         refresh_runtime_config_from_env,
     )
+    from reachy_mini_conversation_app.settings_store import load_settings_into_runtime
     from reachy_mini_conversation_app.startup_settings import (
         StartupSettings,
         load_startup_settings_into_runtime,
@@ -153,6 +156,9 @@ def run(
             startup_settings = load_startup_settings_into_runtime(instance_path)
         except Exception as e:
             logger.warning("Failed to load startup settings: %s", e)
+
+    # After the .env: what the user changed through the UI wins over it.
+    load_settings_into_runtime(instance_path)
 
     logger.info(
         "Configured Hugging Face realtime backend, connection mode: %s",
@@ -195,7 +201,8 @@ def run(
         reachy_mini=robot,
         movement_manager=movement_manager,
         instance_path=instance_path,
-        camera_enabled=not args.no_camera,
+        # --no-camera is a hard off; otherwise the persisted vision.* switch decides.
+        camera_enabled=not args.no_camera and config.CAMERA_ENABLED,
     )
 
     def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
@@ -238,6 +245,7 @@ def run(
         instance_path=instance_path,
         handler_factory=build_handler,
         startup_voice=startup_settings.voice,
+        tool_deps=deps,
     )
 
     # The page is served immediately, so the API must be live before the slow startup work below.
@@ -397,7 +405,7 @@ class ReachyMiniConversationApp(ReachyMiniApp):  # type: ignore[misc]
 
         args, _ = parse_args()
 
-        instance_path = self._get_instance_path().parent
+        instance_path = str(resolve_instance_path(self._get_instance_path().parent))
         run(
             args,
             robot=reachy_mini,

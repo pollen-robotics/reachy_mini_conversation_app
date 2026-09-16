@@ -1,6 +1,7 @@
 import logging
 from typing import Any
 
+from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.memory import forget_memory_fact
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
@@ -31,6 +32,9 @@ class Forget(Tool):
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> dict[str, Any]:
         """Forget one memory fact by query."""
+        if not config.MEMORY_ENABLED:
+            return {"error": "Memory is disabled"}
+
         query = kwargs.get("query")
         if not isinstance(query, str) or not query.strip():
             logger.warning("forget: empty query")

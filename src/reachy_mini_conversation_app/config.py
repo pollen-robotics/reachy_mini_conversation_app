@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import shutil
 import logging
 from pathlib import Path
 from dataclasses import dataclass
@@ -8,6 +9,7 @@ from urllib.parse import urlsplit, parse_qsl, urlunsplit
 from importlib.resources import files
 
 from dotenv import find_dotenv, load_dotenv
+from platformdirs import user_config_dir
 
 
 # Locked profile: set to a profile name (e.g., "astronomer") to lock the app
@@ -64,6 +66,9 @@ HF_BACKEND = "huggingface"
 HF_REALTIME_CONNECTION_MODE_ENV = "HF_REALTIME_CONNECTION_MODE"
 HF_REALTIME_WS_URL_ENV = "HF_REALTIME_WS_URL"
 REALTIME_TRANSCRIPTION_LANGUAGE_ENV = "REALTIME_TRANSCRIPTION_LANGUAGE"
+MEMORY_ENABLED_ENV = "REACHY_MINI_MEMORY_ENABLED"
+CAMERA_ENABLED_ENV = "REACHY_MINI_CAMERA_ENABLED"
+INSTANCE_PATH_ENV = "REACHY_MINI_INSTANCE_PATH"
 HF_LOCAL_CONNECTION_MODE = "local"
 HF_DEPLOYED_CONNECTION_MODE = "deployed"
 HF_REALTIME_SESSION_PROXY_URL = "https://pollen-robotics-reachy-mini-realtime-url.hf.space/session"
@@ -138,7 +143,7 @@ def resolve_app_timeout_minutes() -> float | None:
     return timeout_minutes if timeout_minutes > 0 else None
 
 
-def _normalize_hf_connection_mode(value: str | None) -> str | None:
+def normalize_hf_connection_mode(value: str | None) -> str | None:
     """Normalize the Hugging Face connection mode, if explicitly configured."""
     candidate = (value or "").strip().lower()
     if not candidate:
@@ -154,7 +159,7 @@ def _normalize_hf_connection_mode(value: str | None) -> str | None:
     return candidate
 
 
-def _normalize_transcription_language(value: str | None) -> str:
+def normalize_transcription_language(value: str | None) -> str:
     """Return the configured realtime transcription language."""
     candidate = (value or "").strip()
     return candidate or "en"
@@ -311,12 +316,14 @@ class Config:
     """Configuration class for the conversation app."""
 
     HF_REALTIME_CONNECTION_MODE = (
-        _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode
+        normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode
     )
     # Deliberately ignore HF_REALTIME_SESSION_URL from the environment; the app-managed proxy is HF_DEFAULTS.session_url.
     HF_REALTIME_SESSION_URL = HF_DEFAULTS.session_url
     HF_REALTIME_WS_URL = os.getenv(HF_REALTIME_WS_URL_ENV)
-    REALTIME_TRANSCRIPTION_LANGUAGE = _normalize_transcription_language(os.getenv(REALTIME_TRANSCRIPTION_LANGUAGE_ENV))
+    REALTIME_TRANSCRIPTION_LANGUAGE = normalize_transcription_language(os.getenv(REALTIME_TRANSCRIPTION_LANGUAGE_ENV))
+    MEMORY_ENABLED = _env_flag(MEMORY_ENABLED_ENV, default=True)
+    CAMERA_ENABLED = _env_flag(CAMERA_ENABLED_ENV, default=True)
     HF_TOKEN = os.getenv("HF_TOKEN")  # Optional, falls back to hf auth login if not set
 
     logger.debug(
@@ -421,16 +428,65 @@ def refresh_runtime_config_from_env() -> None:
     """Refresh mutable runtime config fields from the current environment."""
     _warn_on_obsolete_backend_env()
     config.HF_REALTIME_CONNECTION_MODE = (
-        _normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode
+        normalize_hf_connection_mode(os.getenv(HF_REALTIME_CONNECTION_MODE_ENV)) or HF_DEFAULTS.connection_mode
     )
     # Deliberately ignore HF_REALTIME_SESSION_URL from the environment; the app-managed proxy is HF_DEFAULTS.session_url.
     config.HF_REALTIME_SESSION_URL = HF_DEFAULTS.session_url
     config.HF_REALTIME_WS_URL = os.getenv(HF_REALTIME_WS_URL_ENV)
-    config.REALTIME_TRANSCRIPTION_LANGUAGE = _normalize_transcription_language(
+    config.REALTIME_TRANSCRIPTION_LANGUAGE = normalize_transcription_language(
         os.getenv(REALTIME_TRANSCRIPTION_LANGUAGE_ENV)
     )
     config.HF_TOKEN = os.getenv("HF_TOKEN")
     config.REACHY_MINI_CUSTOM_PROFILE = LOCKED_PROFILE or os.getenv("REACHY_MINI_CUSTOM_PROFILE")
+    config.MEMORY_ENABLED = _env_flag(MEMORY_ENABLED_ENV, default=True)
+    config.CAMERA_ENABLED = _env_flag(CAMERA_ENABLED_ENV, default=True)
+
+
+# Files the app writes into its instance directory, migrated once when the
+# default moves out of the installed package (see `resolve_instance_path`).
+_INSTANCE_DATA_NAMES = (
+    "memory.v1.json",
+    ".env",
+    "startup_settings.json",
+    "profile_toolsets.json",
+    "user_personalities",
+)
+
+
+def _migrate_instance_data(legacy: Path, target: Path) -> None:
+    """Copy the app's data out of a legacy instance directory, once."""
+    if any((target / name).exists() for name in _INSTANCE_DATA_NAMES):
+        return
+    for name in _INSTANCE_DATA_NAMES:
+        source = legacy / name
+        if not source.exists():
+            continue
+        destination = target / name
+        if source.is_dir():
+            shutil.copytree(source, destination)
+        else:
+            shutil.copy2(source, destination)
+        logger.info("Migrated %s to %s", source, destination)
+
+
+def resolve_instance_path(legacy: Path) -> Path:
+    """Return the writable directory holding memory, profiles and settings.
+
+    ``legacy`` is the installed package directory the app used to write into,
+    where the data is invisible to users and dies with the venv. The default is
+    now a sibling of the daemon's own config (``~/.config/reachy_mini``), with
+    ``REACHY_MINI_INSTANCE_PATH`` as an override. An unusable value warns and
+    falls back: a bad path must not stop the robot from talking.
+    """
+    override = os.getenv(INSTANCE_PATH_ENV)
+    target = Path(override).expanduser() if override else Path(user_config_dir("reachy_mini")) / "conversation_app"
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        _migrate_instance_data(legacy, target)
+    except OSError as exc:
+        logger.warning("Instance path %s is unusable (%s); falling back to %s", target, exc, legacy)
+        return legacy
+    return target
 
 
 def get_available_voices() -> list[str]:
@@ -459,7 +515,7 @@ def get_hf_connection_selection() -> HFConnectionSelection:
     """Resolve the selected Hugging Face connection mode and whether it is usable."""
     session_url = get_hf_session_url()
     direct_ws_url = get_hf_direct_ws_url()
-    mode = _normalize_hf_connection_mode(getattr(config, "HF_REALTIME_CONNECTION_MODE", None))
+    mode = normalize_hf_connection_mode(getattr(config, "HF_REALTIME_CONNECTION_MODE", None))
     if mode is None:
         raise RuntimeError(f"{HF_REALTIME_CONNECTION_MODE_ENV} must be set to local or deployed.")
 

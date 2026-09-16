@@ -133,6 +133,15 @@ class ConversationHandler(AsyncStreamHandler, ABC):
         """Apply a personality profile."""
         ...
 
+    async def refresh_instructions(self) -> bool:
+        """Rebuild the session instructions and push them to a live session.
+
+        Long-term memory is part of the prompt, so erasing it only reaches the
+        model once its instructions are replaced. Returns whether a live
+        session was updated; False means the next session picks it up anyway.
+        """
+        return False
+
     @abstractmethod
     async def get_available_voices(self) -> list[str]:
         """Return voices available for the active backend."""

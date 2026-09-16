@@ -4,7 +4,6 @@ If the selected backend is missing its required API key, a settings page is
 served via the Reachy Mini Apps settings server so users can configure it.
 """
 
-import os
 import time
 import asyncio
 import logging
@@ -24,7 +23,6 @@ from reachy_mini_conversation_app.config import (
     HF_REALTIME_WS_URL_ENV,
     HF_LOCAL_CONNECTION_MODE,
     HF_DEPLOYED_CONNECTION_MODE,
-    HF_REALTIME_CONNECTION_MODE_ENV,
     config,
     get_default_voice,
     get_hf_session_url,
@@ -39,8 +37,17 @@ from reachy_mini_conversation_app.config import (
 )
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_float32
+from reachy_mini_conversation_app.memory_routes import register_memory_methods
+from reachy_mini_conversation_app.vision_routes import register_vision_methods
+from reachy_mini_conversation_app.settings_store import (
+    AppSettings,
+    update_settings,
+    apply_settings_to_runtime,
+    load_settings_into_runtime,
+)
+from reachy_mini_conversation_app.language_routes import register_language_methods
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
-from reachy_mini_conversation_app.tools.core_tools import initialize_tools
+from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, initialize_tools
 from reachy_mini_conversation_app.tool_space_routes import register_tool_space_methods
 from reachy_mini_conversation_app.personality_routes import (
     build_personality_ops,
@@ -110,12 +117,14 @@ class LocalStream:
         instance_path: Optional[str] = None,
         handler_factory: HandlerFactory | None = None,
         startup_voice: Optional[str] = None,
+        tool_deps: ToolDependencies | None = None,
     ):
         """Initialize the stream with a realtime handler and pipelines.
 
         - ``settings_app``: the Reachy Mini Apps FastAPI to attach settings endpoints.
         - ``instance_path``: directory where per-instance ``.env`` should be stored.
         - ``handler_factory``: builds a fresh handler for the currently selected backend.
+        - ``tool_deps``: live tool dependencies, so vision.* can toggle the camera.
         """
         self._robot = robot
         self._stop_event = asyncio.Event()
@@ -125,6 +134,7 @@ class LocalStream:
         self._voice_override = startup_voice
         self._settings_app: Optional[FastAPI] = settings_app
         self._instance_path: Optional[str] = instance_path
+        self._tool_deps = tool_deps
         self._settings_initialized = False
         self._asyncio_loop = None
         self._mic_muted = False  # mic starts live; the UI toggles it via the settings API
@@ -220,40 +230,6 @@ class LocalStream:
         """Seconds since the live handler last saw conversation activity."""
         return time.monotonic() - self.handler.last_activity_time
 
-    def _read_env_lines(self, env_path: Path) -> list[str]:
-        """Load env file contents or a template as a list of lines."""
-        inst = env_path.parent
-        try:
-            if env_path.exists():
-                try:
-                    return env_path.read_text(encoding="utf-8").splitlines()
-                except Exception:
-                    return []
-            template_text = None
-            ex = inst / ".env.example"
-            if ex.exists():
-                try:
-                    template_text = ex.read_text(encoding="utf-8")
-                except Exception:
-                    template_text = None
-            if template_text is None:
-                try:
-                    cwd_example = Path.cwd() / ".env.example"
-                    if cwd_example.exists():
-                        template_text = cwd_example.read_text(encoding="utf-8")
-                except Exception:
-                    template_text = None
-            if template_text is None:
-                packaged = Path(__file__).parent / ".env.example"
-                if packaged.exists():
-                    try:
-                        template_text = packaged.read_text(encoding="utf-8")
-                    except Exception:
-                        template_text = None
-            return template_text.splitlines() if template_text else []
-        except Exception:
-            return []
-
     def _backend_connected(self) -> bool:
         """Return whether the active handler currently has a realtime connection."""
         try:
@@ -336,49 +312,6 @@ class LocalStream:
             "backend_error": None if connected else self._backend_error,
         }
 
-    def _persist_env_values(self, updates: dict[str, str]) -> None:
-        """Persist non-empty environment values in memory and in the instance `.env`."""
-        normalized_updates = {name: (value or "").strip() for name, value in updates.items()}
-        normalized_updates = {name: value for name, value in normalized_updates.items() if value}
-        if not normalized_updates:
-            return
-
-        for env_name, value in normalized_updates.items():
-            try:
-                os.environ[env_name] = value
-            except Exception:
-                pass
-        refresh_runtime_config_from_env()
-
-        if not self._instance_path:
-            return
-        try:
-            inst = Path(self._instance_path)
-            env_path = inst / ".env"
-            lines = self._read_env_lines(env_path)
-            for env_name, value in normalized_updates.items():
-                replaced = False
-                for i, ln in enumerate(lines):
-                    if ln.strip().startswith(f"{env_name}="):
-                        lines[i] = f"{env_name}={value}"
-                        replaced = True
-                        break
-                if not replaced:
-                    lines.append(f"{env_name}={value}")
-            final_text = "\n".join(lines) + "\n"
-            env_path.write_text(final_text, encoding="utf-8")
-            logger.info("Persisted %s to %s", ", ".join(sorted(normalized_updates)), env_path)
-
-            try:
-                from dotenv import load_dotenv
-
-                load_dotenv(dotenv_path=str(env_path))
-            except Exception:
-                pass
-            refresh_runtime_config_from_env()
-        except Exception as e:
-            logger.warning("Failed to persist %s: %s", ", ".join(sorted(normalized_updates)), e)
-
     def _remove_persisted_env_values(self, env_names: tuple[str, ...]) -> None:
         """Remove keys from the instance `.env` without mutating the current runtime."""
         normalized_names = tuple(sorted({name.strip() for name in env_names if name and name.strip()}))
@@ -407,19 +340,50 @@ class LocalStream:
         except Exception as e:
             logger.warning("Failed to remove %s: %s", ", ".join(normalized_names), e)
 
+    def _save_settings(self, changes: AppSettings) -> None:
+        """Persist settings chosen through the UI and apply them right away."""
+        update_settings(self._instance_path, changes)
+        apply_settings_to_runtime(changes)
+
     def _persist_hf_direct_connection(self, host: str, port: int) -> None:
         """Persist a direct Hugging Face websocket target."""
-        self._persist_env_values(
-            {
-                HF_REALTIME_CONNECTION_MODE_ENV: HF_LOCAL_CONNECTION_MODE,
-                HF_REALTIME_WS_URL_ENV: build_hf_direct_ws_url(host, port),
-            }
+        self._save_settings(
+            AppSettings(
+                hf_connection_mode=HF_LOCAL_CONNECTION_MODE,
+                hf_ws_url=build_hf_direct_ws_url(host, port),
+            )
         )
 
     def _persist_hf_allocator_connection(self) -> None:
         """Persist the deployed Hugging Face allocator mode."""
-        self._persist_env_values({HF_REALTIME_CONNECTION_MODE_ENV: HF_DEPLOYED_CONNECTION_MODE})
+        self._save_settings(AppSettings(hf_connection_mode=HF_DEPLOYED_CONNECTION_MODE))
+        # Older installs kept an allocator URL in the instance .env; drop it so
+        # the stored mode is what decides.
         self._remove_persisted_env_values(("HF_REALTIME_SESSION_URL",))
+
+    def _apply_setting_with_restart(self, changes: AppSettings, reason: str) -> str:
+        """Persist one setting and reconnect the backend so it takes effect."""
+        self._save_settings(changes)
+        if not self._can_rebuild_handler():
+            return "Saved. Restart Reachy Mini Conversation to apply it."
+        self._mark_restart_requested(reason)
+        return "Saved. Reconnecting the conversation to apply it."
+
+    async def _refresh_instructions(self) -> bool:
+        """Push rebuilt instructions to the live session (see memory.clear)."""
+        return await self.handler.refresh_instructions()
+
+    def _set_memory_enabled(self, enabled: bool) -> str:
+        """Turn long-term memory on or off, for this run and the next ones."""
+        return self._apply_setting_with_restart(AppSettings(memory_enabled=enabled), "memory_toggled")
+
+    def _set_transcription_language(self, language: str) -> str:
+        """Change the speech transcription language, for this run and the next ones."""
+        return self._apply_setting_with_restart(AppSettings(language=language), "language_changed")
+
+    def _persist_camera_enabled(self, enabled: bool) -> None:
+        """Remember the camera switch across restarts."""
+        self._save_settings(AppSettings(camera_enabled=enabled))
 
     def _persist_personality(self, profile: Optional[str], voice_override: Optional[str] = None) -> None:
         """Persist startup profile and voice in instance-local UI settings."""
@@ -550,6 +514,12 @@ class LocalStream:
                 "can_proceed": has_hf_connection,
                 "can_proceed_with_hf": has_hf_connection,
                 "requires_restart": not self._can_rebuild_handler(),
+                # What the mobile client would otherwise need four more calls for.
+                "personality": config.REACHY_MINI_CUSTOM_PROFILE,
+                "voice": self.get_current_voice(),
+                "language": config.REALTIME_TRANSCRIPTION_LANGUAGE,
+                "memory_enabled": config.MEMORY_ENABLED,
+                "vision_enabled": bool(self._tool_deps and self._tool_deps.camera_enabled),
                 **backend_connection,
             }
 
@@ -673,6 +643,29 @@ class LocalStream:
         except Exception:
             logger.exception("Failed to register profile tool methods; personality tool settings will be unavailable")
 
+        try:
+            # memory.* / language.* / vision.* — the settings a remote client
+            # (the mobile app) shows next to the personality controls.
+            register_memory_methods(
+                rpc,
+                instance_path=self._instance_path,
+                set_enabled=self._set_memory_enabled,
+                refresh_instructions=self._refresh_instructions,
+            )
+        except Exception:
+            logger.exception("Failed to register memory methods; memory settings will be unavailable")
+
+        try:
+            register_language_methods(rpc, set_language=self._set_transcription_language)
+        except Exception:
+            logger.exception("Failed to register language methods; the language setting will be unavailable")
+
+        if self._tool_deps is not None:
+            try:
+                register_vision_methods(rpc, self._tool_deps, self._persist_camera_enabled)
+            except Exception:
+                logger.exception("Failed to register vision methods; the camera switch will be unavailable")
+
         self._settings_initialized = True
 
     async def _run_handler_startup_loop(self) -> None:
@@ -753,6 +746,7 @@ class LocalStream:
                     refresh_runtime_config_from_env()
             except Exception:
                 pass  # Instance .env loading is optional; continue with defaults
+            load_settings_into_runtime(self._instance_path)
 
         # Always expose settings UI if a settings app is available
         # (do this AFTER loading the instance .env so status endpoint sees the right value)

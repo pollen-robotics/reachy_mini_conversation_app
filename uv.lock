@@ -13,7 +13,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer = "2026-09-08T07:54:54.274022536Z"
 exclude-newer-span = "P7D"
 
 [options.exclude-newer-package]
@@ -2564,6 +2564,7 @@ dependencies = [
     { name = "huggingface-hub" },
     { name = "mcp" },
     { name = "openai" },
+    { name = "platformdirs" },
     { name = "python-dotenv" },
     { name = "reachy-mini" },
     { name = "reachy-mini-dances-library" },
@@ -2586,6 +2587,7 @@ requires-dist = [
     { name = "huggingface-hub", specifier = ">=1.17.0" },
     { name = "mcp", specifier = ">=1.27.1,<2" },
     { name = "openai", specifier = "==2.28.0" },
+    { name = "platformdirs" },
     { name = "python-dotenv" },
     { name = "reachy-mini", specifier = ">=1.10.0rc5" },
     { name = "reachy-mini-dances-library" },
