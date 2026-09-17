@@ -1,19 +1,16 @@
 from __future__ import annotations
 import asyncio
-from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
 import pytest
 import uvicorn
 import pytest_asyncio
-from starlette.routing import Mount
 from starlette.responses import PlainTextResponse
-from starlette.applications import Starlette
 
 
-pytest.importorskip("mcp.server.fastmcp")
+pytest.importorskip("mcp.server")
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
 from reachy_mini_conversation_app.mcp_client import (
     RemoteToolSpec,
@@ -41,7 +38,7 @@ class _BearerAuthMiddleware:
 
 
 def _build_local_mcp_app(required_token: str) -> object:
-    mcp_server = FastMCP("Reachy Test MCP", stateless_http=True, json_response=True)
+    mcp_server = MCPServer("Reachy Test MCP")
 
     @mcp_server.tool()
     def echo_text(message: str) -> dict[str, str]:
@@ -54,14 +51,7 @@ def _build_local_mcp_app(required_token: str) -> object:
         await asyncio.sleep(delay_s)
         return {"echo": message}
 
-    mcp_app = mcp_server.streamable_http_app()
-
-    @asynccontextmanager
-    async def lifespan(_: Starlette) -> AsyncIterator[None]:
-        async with mcp_server.session_manager.run():
-            yield
-
-    app = Starlette(routes=[Mount("/", app=mcp_app)], lifespan=lifespan)
+    app = mcp_server.streamable_http_app(json_response=True, stateless_http=True)
     return _BearerAuthMiddleware(app, required_token)
 
 
