@@ -121,6 +121,50 @@ PREINSTALLED_TOOL_SPACE_SPECS = {
             },
         ),
     ),
+    "pollen-robotics/reachy-mini-knowledge-tool": (
+        RemoteToolSpec(
+            server_alias="pollen_robotics_reachy_mini_knowledge_tool",
+            remote_name="reachy_mini_knowledge_tool_get_info",
+            namespaced_name=build_namespaced_tool_name(
+                "pollen_robotics_reachy_mini_knowledge_tool", "reachy_mini_knowledge_tool_get_info"
+            ),
+            description=(
+                "Get up-to-date information about a Pollen Robotics product or the company itself: what it is, "
+                "what it can do, versions and prices. Call this directly whenever the user asks what Reachy Mini, "
+                "MicroDuck or Pollen Robotics is, or about buying one. Topics: microduck, pollen_robotics, reachy_mini."
+            ),
+            parameters_schema={
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "One of 'microduck', 'pollen_robotics', 'reachy_mini'.",
+                    },
+                },
+                "required": ["topic"],
+            },
+        ),
+        RemoteToolSpec(
+            server_alias="pollen_robotics_reachy_mini_knowledge_tool",
+            remote_name="reachy_mini_knowledge_tool_search_docs",
+            namespaced_name=build_namespaced_tool_name(
+                "pollen_robotics_reachy_mini_knowledge_tool", "reachy_mini_knowledge_tool_search_docs"
+            ),
+            description=(
+                "Search the Reachy Mini FAQ and troubleshooting docs plus the MicroDuck and Pollen Robotics pages. "
+                "Call this directly whenever the user has a problem with their robot (won't boot, motors, Wi-Fi, "
+                "assembly, updates...) or asks a specific question about the products or the company. "
+                "Do not just say you'll look it up."
+            ),
+            parameters_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "What to look up in the docs."},
+                },
+                "required": ["query"],
+            },
+        ),
+    ),
 }
 _SLUG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
 

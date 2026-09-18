@@ -562,7 +562,7 @@ def test_read_installed_tool_spaces_seeds_bundled_pollen_spaces(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With no manifest, the three bundled Pollen Spaces are seeded with their tools cached offline."""
+    """With no manifest, the bundled Pollen Spaces are seeded with their tools cached offline."""
     monkeypatch.chdir(tmp_path)
 
     spaces = read_installed_tool_spaces(None).spaces
@@ -570,6 +570,7 @@ def test_read_installed_tool_spaces_seeds_bundled_pollen_spaces(
         "pollen-robotics/reachy-mini-search-tool",
         "pollen-robotics/reachy-mini-time-tool",
         "pollen-robotics/reachy-mini-weather-tool",
+        "pollen-robotics/reachy-mini-knowledge-tool",
     ]
     search_tool = spaces[0].tools[0]
     assert search_tool.local_name == "pollen_robotics_reachy_mini_search_tool__search_web"
