@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, call
 
 import numpy as np
+import pytest
 
 from reachy_mini.reachy_mini import SLEEP_HEAD_POSE
 from reachy_mini_conversation_app import daemon_api, app_lifecycle
@@ -81,6 +82,45 @@ def test_request_stop_current_app_returns_false_on_urlerror(monkeypatch) -> None
 
     def fake_urlopen(request, timeout):
         raise daemon_api.urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(daemon_api.urllib.request, "urlopen", fake_urlopen)
+    robot = SimpleNamespace(client=SimpleNamespace(host="192.168.1.42", port=8000))
+
+    assert not app_lifecycle.request_stop_current_app(robot, MagicMock())
+
+
+@pytest.mark.parametrize("status_code", [400, 409])
+def test_request_stop_current_app_treats_already_stopping_as_success(monkeypatch, status_code: int) -> None:
+    """HTTP 400/409 from an already-stopping app is idempotent success."""
+
+    def fake_urlopen(request, timeout):
+        raise daemon_api.urllib.error.HTTPError(
+            request.full_url,
+            status_code,
+            "Already stopping",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=None,
+        )
+
+    monkeypatch.setattr(daemon_api.urllib.request, "urlopen", fake_urlopen)
+    robot = SimpleNamespace(client=SimpleNamespace(host="192.168.1.42", port=8000))
+    logger = MagicMock()
+
+    assert app_lifecycle.request_stop_current_app(robot, logger)
+    logger.error.assert_not_called()
+
+
+def test_request_stop_current_app_returns_false_on_other_httperror(monkeypatch) -> None:
+    """Unexpected HTTP failures remain errors."""
+
+    def fake_urlopen(request, timeout):
+        raise daemon_api.urllib.error.HTTPError(
+            request.full_url,
+            500,
+            "Server Error",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=None,
+        )
 
     monkeypatch.setattr(daemon_api.urllib.request, "urlopen", fake_urlopen)
     robot = SimpleNamespace(client=SimpleNamespace(host="192.168.1.42", port=8000))
