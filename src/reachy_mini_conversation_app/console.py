@@ -339,6 +339,13 @@ class LocalStream:
     def _persist_env_values(self, updates: dict[str, str]) -> None:
         """Persist non-empty environment values in memory and in the instance `.env`."""
         normalized_updates = {name: (value or "").strip() for name, value in updates.items()}
+        # Check before writing anything: a line break would add a second
+        # assignment, and python-dotenv expands ${...} with no way to escape it.
+        unsafe_names = sorted(
+            name for name, value in normalized_updates.items() if "\n" in value or "\r" in value or "${" in value
+        )
+        if unsafe_names:
+            raise ValueError(f"Values must not contain line breaks or '${{': {', '.join(unsafe_names)}.")
         normalized_updates = {name: value for name, value in normalized_updates.items() if value}
         if not normalized_updates:
             return
@@ -610,7 +617,7 @@ class LocalStream:
                 host = str(params.get("hf_host") or "").strip() or existing_host or ""
                 if not host:
                     raise JsonRpcError("Hugging Face host required", reason="empty_hf_host", code=-32602)
-                if "://" in host or "/" in host or "?" in host or "#" in host:
+                if any(char.isspace() for char in host) or "://" in host or "/" in host or "?" in host or "#" in host:
                     raise JsonRpcError("invalid Hugging Face host", reason="invalid_hf_host", code=-32602)
                 raw_port = params.get("hf_port")
                 port = int(raw_port) if isinstance(raw_port, (int, float, str)) else (existing_port or 8765)
