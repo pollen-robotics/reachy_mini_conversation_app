@@ -6,6 +6,7 @@ import random
 import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Final, Tuple, Optional
+from pathlib import Path
 
 import httpx
 import numpy as np
@@ -48,6 +49,7 @@ from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_tool_specs,
 )
+from reachy_mini_conversation_app.audio.diagnostics import AudioDiagnostics
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolCallRoutine,
@@ -163,6 +165,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self._startup_greeting_sent = False
         self._in_flight_tool_calls: set[str] = set()
         self._tool_batch_needs_response = False
+        self._audio_diagnostics: AudioDiagnostics | None = None
+        self._audio_diagnostics_started = False
 
     @staticmethod
     def _sanitize_tool_result_for_model(tool_name: str, tool_result: dict[str, Any]) -> dict[str, Any]:
@@ -728,6 +732,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
             # Manage events received from the realtime server.
             self.connection = conn
+            if self._audio_diagnostics is not None:
+                self._audio_diagnostics.record_event("connection.ready")
             try:
                 self._connected_event.set()
             except Exception:
@@ -744,6 +750,15 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
                 async for event in self.connection:
                     logger.debug("Realtime event: %s", event.type)
+                    if self._audio_diagnostics is not None and event.type in {
+                        "input_audio_buffer.speech_started",
+                        "input_audio_buffer.speech_stopped",
+                        "input_audio_buffer.committed",
+                        "conversation.item.input_audio_transcription.completed",
+                        "conversation.item.input_audio_transcription.failed",
+                        "error",
+                    }:
+                        self._audio_diagnostics.record_event(event.type, {"event": event.model_dump()})
                     if event.type == "input_audio_buffer.speech_started":
                         self._mark_activity("user_speech_started")
                         self._turn_user_done_at = None
@@ -935,6 +950,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                                 AdditionalOutputs({"role": "assistant", "content": f"[error] {msg}"})
                             )
             finally:
+                if self._audio_diagnostics is not None:
+                    self._audio_diagnostics.record_event("connection.closed")
                 # Stop the response sender worker.
                 if response_sender_task is not None:
                     response_sender_task.cancel()
@@ -946,46 +963,59 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 # Stop background tool manager tasks (listener + cleanup) in all paths.
                 await self.tool_manager.shutdown()
 
-    # Microphone receive
-    async def receive(self, frame: Tuple[int, NDArray[np.int16]]) -> None:
-        """Receive audio frame from the microphone and send it to the realtime server.
-
-        Handles both mono and stereo audio formats, converting to the expected
-        mono format for the realtime API.
-
-        Args:
-            frame: A tuple containing (sample_rate, audio_data).
-
-        """
-        if not self.connection:
-            return
-
-        _, audio_frame = frame
+    async def receive(self, frame: tuple[int, NDArray[np.int16]]) -> None:
+        """Forward the first microphone channel as PCM16, optionally saving diagnostic audio."""
+        sample_rate, audio_frame = frame
         if audio_frame.size == 0:
             return
 
-        # Reshape if needed
+        if not self._audio_diagnostics_started:
+            self._audio_diagnostics_started = True
+            if config.AUDIO_DEBUG_DIR:
+                try:
+                    self._audio_diagnostics = AudioDiagnostics(Path(config.AUDIO_DEBUG_DIR))
+                    self._audio_diagnostics.record_event(
+                        "capture.started",
+                        {"backend_sample_rate": self.SAMPLE_RATE, "selected_channel": 0},
+                    )
+                except OSError:
+                    logger.warning("Could not start audio diagnostics", exc_info=True)
+
         if audio_frame.ndim == 2:
-            # channels-last convention
             if audio_frame.shape[1] > audio_frame.shape[0]:
                 audio_frame = audio_frame.T
-            # Multiple channels -> Mono channel
+        if self._audio_diagnostics is not None and not self._audio_diagnostics.closed:
+            channels = audio_frame.shape[1] if audio_frame.ndim == 2 else 1
+            self._audio_diagnostics.record_audio(
+                "received", sample_rate, audio_to_int16(audio_frame).astype("<i2").tobytes(), channels
+            )
+        if not self.connection:
+            if self._audio_diagnostics is not None:
+                self._audio_diagnostics.record_event("audio.dropped", {"reason": "not_connected"})
+            return
+        if audio_frame.ndim == 2:
             if audio_frame.shape[1] > 1:
                 audio_frame = audio_frame[:, 0]
 
-        # Cast if needed
         audio_frame = audio_to_int16(audio_frame)
 
         # Send to the realtime input buffer (guard against races during reconnect).
         try:
-            audio_message = base64.b64encode(audio_frame.tobytes()).decode("utf-8")
+            pcm = audio_frame.tobytes()
+            audio_message = base64.b64encode(pcm).decode("utf-8")
             await self.connection.input_audio_buffer.append(audio=audio_message)
         except Exception as e:
             logger.debug("Dropping audio frame: connection not ready (%s)", e)
+            if self._audio_diagnostics is not None:
+                self._audio_diagnostics.record_event("audio.dropped", {"reason": str(e)})
             return
+        if self._audio_diagnostics is not None:
+            self._audio_diagnostics.record_audio("sent", sample_rate, pcm)
 
     async def shutdown(self) -> None:
         """Shutdown the handler."""
+        if self._audio_diagnostics is not None:
+            self._audio_diagnostics.close()
         # Unblock the response sender worker so it can exit
         self._response_done_event.set()
 
