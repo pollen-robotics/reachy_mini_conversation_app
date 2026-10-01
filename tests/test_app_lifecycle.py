@@ -12,6 +12,17 @@ from reachy_mini_conversation_app import daemon_api, app_lifecycle
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 
 
+def test_initialize_tools_migrates_bundled_spaces_before_loading(monkeypatch) -> None:
+    """Startup should migrate bundled tools before resolving the active registry."""
+    calls: list[str] = []
+    monkeypatch.setattr(app_lifecycle, "migrate_legacy_profiles", lambda _path: calls.append("profiles"))
+    monkeypatch.setattr(app_lifecycle, "migrate_bundled_tool_spaces", lambda _path: calls.append("spaces"))
+    monkeypatch.setattr(app_lifecycle, "initialize_tools", lambda **_kwargs: calls.append("tools"))
+
+    assert app_lifecycle.initialize_tools_with_default_fallback(None, MagicMock()) is None
+    assert calls == ["profiles", "spaces", "tools"]
+
+
 def test_request_stop_current_app_posts_to_daemon(monkeypatch) -> None:
     """The app stop request should call the connected Reachy daemon endpoint."""
 

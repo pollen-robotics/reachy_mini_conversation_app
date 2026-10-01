@@ -21,6 +21,7 @@ from reachy_mini_conversation_app.tool_spaces import (
     resolve_tool_space_sync,
     handle_tool_spaces_command,
     read_installed_tool_spaces,
+    migrate_bundled_tool_spaces,
 )
 from reachy_mini_conversation_app.profile_store import write_profile
 from reachy_mini_conversation_app.profile_toolsets import (
@@ -113,7 +114,7 @@ def test_tool_spaces_add_list_remove_round_trip(
     manifest_path = tmp_path / "external_content" / "installed_tool_spaces.json"
     assert manifest_path.is_file()
     written = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert written["version"] == 2
+    assert written["version"] == 3
     added_entry = next(space for space in written["spaces"] if space["slug"] == SEARCH_SPACE_SLUG)
     assert added_entry == {
         "slug": SEARCH_SPACE_SLUG,
@@ -273,7 +274,7 @@ def test_read_installed_tool_spaces_rejects_legacy_manifest(tmp_path: Path) -> N
         encoding="utf-8",
     )
 
-    with pytest.raises(RuntimeError, match="expected 2"):
+    with pytest.raises(RuntimeError, match="expected 3"):
         read_installed_tool_spaces(tmp_path)
 
 
@@ -576,6 +577,63 @@ def test_read_installed_tool_spaces_seeds_bundled_pollen_spaces(
     assert search_tool.local_name == "pollen_robotics_reachy_mini_search_tool__search_web"
     assert search_tool.remote_name == "reachy_mini_search_tool_search_web"
     assert spaces[0].private is False
+    knowledge_tools = spaces[-1].tools
+    assert [(tool.local_name, tool.remote_name) for tool in knowledge_tools] == [
+        (
+            "pollen_robotics_reachy_mini_knowledge_tool__get_info",
+            "reachy_mini_knowledge_tool_get_info",
+        ),
+        (
+            "pollen_robotics_reachy_mini_knowledge_tool__search_docs",
+            "reachy_mini_knowledge_tool_search_docs",
+        ),
+    ]
+
+
+def test_read_installed_tool_spaces_adds_new_bundled_space_to_v2_manifest(tmp_path: Path) -> None:
+    """Upgrading should add new defaults without restoring previously removed defaults."""
+    (tmp_path / "installed_tool_spaces.json").write_text(
+        json.dumps({"version": 2, "spaces": []}),
+        encoding="utf-8",
+    )
+
+    manifest = read_installed_tool_spaces(tmp_path)
+
+    assert manifest.version == 3
+    assert [space.slug for space in manifest.spaces] == ["pollen-robotics/reachy-mini-knowledge-tool"]
+    assert manifest.bundled_space_slugs == [
+        "pollen-robotics/reachy-mini-search-tool",
+        "pollen-robotics/reachy-mini-time-tool",
+        "pollen-robotics/reachy-mini-weather-tool",
+        "pollen-robotics/reachy-mini-knowledge-tool",
+    ]
+    assert manifest.new_bundled_space_slugs == ["pollen-robotics/reachy-mini-knowledge-tool"]
+
+
+def test_migrate_bundled_tool_spaces_enables_only_new_default_tools(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Migration should add new bundled defaults without restoring disabled tools."""
+    knowledge_tool_ids = [
+        "pollen_robotics_reachy_mini_knowledge_tool__get_info",
+        "pollen_robotics_reachy_mini_knowledge_tool__search_docs",
+    ]
+    profiles_root = tmp_path / "profiles"
+    _setup_profile(profiles_root, "default", ["dance", "camera", *knowledge_tool_ids])
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", profiles_root)
+    monkeypatch.setattr("reachy_mini_conversation_app.profile_store.DEFAULT_PROFILES_DIRECTORY", profiles_root)
+    write_profile_tool_override("default", ["dance"], tmp_path)
+    (tmp_path / "installed_tool_spaces.json").write_text(
+        json.dumps({"version": 2, "spaces": []}),
+        encoding="utf-8",
+    )
+
+    assert migrate_bundled_tool_spaces(tmp_path) == knowledge_tool_ids
+    assert read_profile_tool_names("default", tmp_path) == ["dance", *knowledge_tool_ids]
+    assert "camera" not in read_profile_tool_names("default", tmp_path)
+    assert json.loads((tmp_path / "installed_tool_spaces.json").read_text(encoding="utf-8"))["version"] == 3
+    assert migrate_bundled_tool_spaces(tmp_path) == []
 
 
 def test_install_tool_space_refreshes_cached_metadata(

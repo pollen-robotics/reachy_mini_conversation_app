@@ -36,13 +36,14 @@ from reachy_mini_conversation_app.profile_toolsets import (
     get_profile_toolsets_path,
     profile_toolsets_transaction,
     disable_profile_tools_by_prefix,
+    read_profile_default_tool_names,
 )
 
 
 logger = logging.getLogger(__name__)
 
 INSTALLED_TOOL_SPACES_FILENAME = "installed_tool_spaces.json"
-INSTALLED_TOOL_SPACES_VERSION = 2
+INSTALLED_TOOL_SPACES_VERSION = 3
 TERMINAL_EXTERNAL_CONTENT_DIRECTORY = Path("external_content")
 _MANIFEST_LOCK = threading.RLock()
 # Bundled Pollen Spaces seeded when no manifest exists, so startup needs no Hugging Face discovery.
@@ -55,9 +56,11 @@ PREINSTALLED_TOOL_SPACE_SPECS = {
                 "pollen_robotics_reachy_mini_search_tool", "reachy_mini_search_tool_search_web"
             ),
             description=(
-                "Search the web for current information and return a short list of results (title, snippet, url). "
+                "Search the public web for current or general information and return a short list of results "
+                "(title, snippet, url). "
                 "Call this directly whenever the user asks to search, check the web, look something up, "
-                "find today's events, or learn what is happening now. Do not just say you'll look it up."
+                "find today's events, or learn what is happening now. Use the knowledge tools instead for "
+                "official Pollen Robotics product facts and troubleshooting. Do not just say you'll look it up."
             ),
             parameters_schema={
                 "type": "object",
@@ -129,16 +132,17 @@ PREINSTALLED_TOOL_SPACE_SPECS = {
                 "pollen_robotics_reachy_mini_knowledge_tool", "reachy_mini_knowledge_tool_get_info"
             ),
             description=(
-                "Get up-to-date information about a Pollen Robotics product or the company itself: what it is, "
-                "what it can do, versions and prices. Call this directly whenever the user asks what Reachy Mini, "
-                "MicroDuck or Pollen Robotics is, or about buying one. Topics: microduck, pollen_robotics, reachy_mini."
+                "Read the official Pollen Robotics product or company page for an overview, capabilities, versions, "
+                "and prices. Use this when the user asks what Reachy Mini, MicroDuck, or Pollen Robotics is, or about "
+                "buying one. Use search_docs for setup or troubleshooting and search_web for current news."
             ),
             parameters_schema={
                 "type": "object",
                 "properties": {
                     "topic": {
                         "type": "string",
-                        "description": "One of 'microduck', 'pollen_robotics', 'reachy_mini'.",
+                        "enum": ["microduck", "pollen_robotics", "reachy_mini"],
+                        "description": "Product or company page to read.",
                     },
                 },
                 "required": ["topic"],
@@ -151,10 +155,9 @@ PREINSTALLED_TOOL_SPACE_SPECS = {
                 "pollen_robotics_reachy_mini_knowledge_tool", "reachy_mini_knowledge_tool_search_docs"
             ),
             description=(
-                "Search the Reachy Mini FAQ and troubleshooting docs plus the MicroDuck and Pollen Robotics pages. "
-                "Call this directly whenever the user has a problem with their robot (won't boot, motors, Wi-Fi, "
-                "assembly, updates...) or asks a specific question about the products or the company. "
-                "Do not just say you'll look it up."
+                "Search the official Reachy Mini FAQ and troubleshooting documentation. Call this directly for setup, "
+                "assembly, updates, Wi-Fi, boot, motor, or other technical support questions. Use get_info instead for "
+                "basic product or company overviews, versions, and prices. Do not just say you'll look it up."
             ),
             parameters_schema={
                 "type": "object",
@@ -166,6 +169,11 @@ PREINSTALLED_TOOL_SPACE_SPECS = {
         ),
     ),
 }
+_V2_BUNDLED_SPACE_SLUGS = (
+    "pollen-robotics/reachy-mini-search-tool",
+    "pollen-robotics/reachy-mini-time-tool",
+    "pollen-robotics/reachy-mini-weather-tool",
+)
 _SLUG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
@@ -197,6 +205,8 @@ class InstalledToolSpacesManifest:
 
     version: int = INSTALLED_TOOL_SPACES_VERSION
     spaces: list[InstalledToolSpace] = field(default_factory=list)
+    bundled_space_slugs: list[str] = field(default_factory=lambda: list(PREINSTALLED_TOOL_SPACE_SPECS))
+    new_bundled_space_slugs: list[str] = field(default_factory=list, compare=False, repr=False)
 
 
 class ToolSpaceAliasConflictError(RuntimeError):
@@ -271,7 +281,13 @@ def read_installed_tool_spaces(instance_path: str | Path | None) -> InstalledToo
     if not isinstance(payload, dict):
         raise RuntimeError(f"Invalid installed tool spaces payload in {manifest_path}: expected a JSON object.")
 
-    expected_manifest_fields = {"version", "spaces"}
+    version = payload.get("version")
+    if not isinstance(version, int) or isinstance(version, bool) or version not in {2, INSTALLED_TOOL_SPACES_VERSION}:
+        raise RuntimeError(
+            f"Unsupported installed tool spaces version in {manifest_path}: expected {INSTALLED_TOOL_SPACES_VERSION}."
+        )
+
+    expected_manifest_fields = {"version", "spaces"} if version == 2 else {"version", "spaces", "bundled_space_slugs"}
     if set(payload) != expected_manifest_fields:
         invalid_fields = sorted(set(payload) ^ expected_manifest_fields)
         raise RuntimeError(
@@ -279,11 +295,22 @@ def read_installed_tool_spaces(instance_path: str | Path | None) -> InstalledToo
             f"{', '.join(invalid_fields)}."
         )
 
-    version = payload["version"]
-    if not isinstance(version, int) or isinstance(version, bool) or version != INSTALLED_TOOL_SPACES_VERSION:
-        raise RuntimeError(
-            f"Unsupported installed tool spaces version in {manifest_path}: expected {INSTALLED_TOOL_SPACES_VERSION}."
-        )
+    if version == 2:
+        bundled_space_slugs = list(_V2_BUNDLED_SPACE_SLUGS)
+    else:
+        raw_bundled_space_slugs = payload["bundled_space_slugs"]
+        if not isinstance(raw_bundled_space_slugs, list) or not all(
+            isinstance(slug, str) for slug in raw_bundled_space_slugs
+        ):
+            raise RuntimeError(
+                f"Invalid installed tool spaces payload in {manifest_path}: 'bundled_space_slugs' must be a list "
+                "of strings."
+            )
+        bundled_space_slugs = [validate_space_slug(slug) for slug in raw_bundled_space_slugs]
+        if len(bundled_space_slugs) != len(set(bundled_space_slugs)):
+            raise RuntimeError(
+                f"Invalid installed tool spaces payload in {manifest_path}: 'bundled_space_slugs' contains duplicates."
+            )
 
     raw_spaces = payload["spaces"]
     if not isinstance(raw_spaces, list):
@@ -397,7 +424,19 @@ def read_installed_tool_spaces(instance_path: str | Path | None) -> InstalledToo
                 tools=cached_tools,
             )
         )
-    return InstalledToolSpacesManifest(version=version, spaces=spaces)
+    known_bundled_slugs = set(bundled_space_slugs)
+    new_bundled_space_slugs: list[str] = []
+    for bundled_space in _preinstalled_installed_spaces():
+        if bundled_space.slug not in known_bundled_slugs:
+            new_bundled_space_slugs.append(bundled_space.slug)
+            if bundled_space.slug not in seen_slugs:
+                spaces.append(bundled_space)
+
+    return InstalledToolSpacesManifest(
+        spaces=spaces,
+        bundled_space_slugs=list(dict.fromkeys([*bundled_space_slugs, *PREINSTALLED_TOOL_SPACE_SPECS])),
+        new_bundled_space_slugs=new_bundled_space_slugs,
+    )
 
 
 def write_installed_tool_spaces(
@@ -411,6 +450,7 @@ def write_installed_tool_spaces(
         payload = {
             "version": manifest.version,
             "spaces": [asdict(space) for space in manifest.spaces],
+            "bundled_space_slugs": manifest.bundled_space_slugs,
         }
         temporary_path = manifest_path.with_name(f".{manifest_path.name}.{os.getpid()}.tmp")
         try:
@@ -422,6 +462,31 @@ def write_installed_tool_spaces(
             except OSError as exc:
                 logger.warning("Failed to remove temporary Tool Space manifest %s: %s", temporary_path, exc)
         return manifest_path
+
+
+def migrate_bundled_tool_spaces(instance_path: str | Path | None) -> list[str]:
+    """Persist newly bundled Spaces and enable their authored default tools."""
+    manifest_path = get_installed_tool_spaces_path(instance_path)
+    if not manifest_path.exists():
+        return []
+
+    with _MANIFEST_LOCK, profile_toolsets_transaction():
+        manifest = read_installed_tool_spaces(instance_path)
+        if not manifest.new_bundled_space_slugs:
+            return []
+
+        new_bundled_slugs = set(manifest.new_bundled_space_slugs)
+        default_tool_names = set(read_profile_default_tool_names(DEFAULT_PROFILE_NAME))
+        new_default_tool_names = [
+            tool.local_name
+            for space in manifest.spaces
+            if space.slug in new_bundled_slugs
+            for tool in space.tools
+            if tool.local_name in default_tool_names
+        ]
+        enabled_tool_names = enable_profile_tools(DEFAULT_PROFILE_NAME, new_default_tool_names, instance_path)
+        write_installed_tool_spaces(instance_path, manifest)
+        return enabled_tool_names
 
 
 def _restore_profile_toolsets(
@@ -664,6 +729,7 @@ def install_tool_space(
                 [space for space in manifest.spaces if space.slug != resolved_space.slug] + [resolved_space],
                 key=lambda space: space.slug,
             ),
+            bundled_space_slugs=manifest.bundled_space_slugs,
         )
         enabled_profile: str | None = None
         added_tool_ids: list[str] = []
@@ -719,6 +785,7 @@ def remove_tool_space(
         updated_manifest = InstalledToolSpacesManifest(
             version=INSTALLED_TOOL_SPACES_VERSION,
             spaces=[space for space in manifest.spaces if space.slug != validated_slug],
+            bundled_space_slugs=manifest.bundled_space_slugs,
         )
         profile_toolsets = read_profile_toolsets(instance_path)
         profile_settings_existed = get_profile_toolsets_path(instance_path).exists()
