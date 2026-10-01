@@ -28,10 +28,20 @@ def register_memory_methods(
     rpc: JsonRpcServer,
     *,
     instance_path: str | Path | None,
-    set_enabled: Callable[[bool], str],
+    set_enabled: Callable[[bool], None],
     refresh_instructions: Callable[[], Awaitable[bool]],
 ) -> None:
     """Register memory.* methods for clients that manage stored facts."""
+
+    async def _refresh() -> bool:
+        # Facts live in the prompt, so the model only sees a change once its
+        # instructions are replaced. Best-effort: the store is already written,
+        # and the next session rebuilds them regardless.
+        try:
+            return await refresh_instructions()
+        except Exception:
+            logger.exception("Memory changed but the live session could not be refreshed")
+            return False
 
     async def _list(_params: dict[str, Any]) -> dict[str, object]:
         try:
@@ -60,7 +70,12 @@ def register_memory_methods(
         except OSError as exc:
             logger.exception("Failed to forget a memory fact")
             raise JsonRpcError(str(exc), reason="memory_unavailable") from exc
-        return {"ok": True, "removed": result.removed.to_json() if result.removed else None}
+        applied = await _refresh() if result.removed else False
+        return {
+            "ok": True,
+            "removed": result.removed.to_json() if result.removed else None,
+            "applied_live": applied,
+        }
 
     async def _clear(_params: dict[str, Any]) -> dict[str, object]:
         try:
@@ -68,22 +83,14 @@ def register_memory_methods(
         except OSError as exc:
             logger.exception("Failed to clear memory facts")
             raise JsonRpcError(str(exc), reason="memory_unavailable") from exc
-        # The facts are in the prompt, so the model only forgets once its
-        # instructions are replaced. Best-effort: the store is already empty,
-        # and the next session rebuilds them regardless.
-        applied = False
-        try:
-            applied = await refresh_instructions()
-        except Exception:
-            logger.exception("Cleared memory but could not refresh the live session")
-        return {"ok": True, "applied_live": applied}
+        return {"ok": True, "applied_live": await _refresh()}
 
     async def _set_enabled(params: dict[str, Any]) -> dict[str, object]:
         enabled = params.get("enabled")
         if not isinstance(enabled, bool):
             raise JsonRpcError("enabled must be a boolean", reason="invalid_params", code=-32602)
-        message = set_enabled(enabled)
-        return {"enabled": config.MEMORY_ENABLED, "message": message}
+        set_enabled(enabled)
+        return {"enabled": config.MEMORY_ENABLED, "applied_live": await _refresh()}
 
     rpc.register("memory.list", _list)
     rpc.register("memory.forget", _forget)

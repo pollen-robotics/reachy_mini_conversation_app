@@ -373,9 +373,13 @@ class LocalStream:
         """Push rebuilt instructions to the live session (see memory.clear)."""
         return await self.handler.refresh_instructions()
 
-    def _set_memory_enabled(self, enabled: bool) -> str:
-        """Turn long-term memory on or off, for this run and the next ones."""
-        return self._apply_setting_with_restart(AppSettings(memory_enabled=enabled), "memory_toggled")
+    def _set_memory_enabled(self, enabled: bool) -> None:
+        """Turn long-term memory on or off, for this run and the next ones.
+
+        The prompt builder and the memory tools read the flag live, so the
+        caller only has to refresh the session instructions, not reconnect.
+        """
+        self._save_settings(AppSettings(memory_enabled=enabled))
 
     def _set_transcription_language(self, language: str) -> str:
         """Change the speech transcription language, for this run and the next ones."""

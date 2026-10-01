@@ -29,11 +29,10 @@ def _client(
     app = FastAPI()
     rpc = JsonRpcServer()
 
-    def _set_enabled(enabled: bool) -> str:
+    def _set_enabled(enabled: bool) -> None:
         if enabled_calls is not None:
             enabled_calls.append(enabled)
         config.MEMORY_ENABLED = enabled
-        return "Saved."
 
     async def _refresh_instructions() -> bool:
         if refreshed is not None:
@@ -71,10 +70,24 @@ def test_forget_by_id(tmp_path: Path) -> None:
     doomed = add_memory_fact(tmp_path, "Prefers replies in French")
     assert kept is not None and doomed is not None
 
-    result = _rpc_call(_client(tmp_path), "memory.forget", {"id": doomed.id})["result"]
+    refreshed: list[bool] = []
+    result = _rpc_call(_client(tmp_path, refreshed=refreshed), "memory.forget", {"id": doomed.id})["result"]
 
     assert result["removed"]["id"] == doomed.id
     assert [fact.id for fact in list_memory_facts(tmp_path)] == [kept.id]
+    # The fact is in the live prompt too, so forgetting must refresh it.
+    assert result["applied_live"] is True
+    assert refreshed == [True]
+
+
+def test_forget_of_nothing_leaves_the_session_alone(tmp_path: Path) -> None:
+    """No fact removed means no prompt change worth pushing."""
+    refreshed: list[bool] = []
+
+    result = _rpc_call(_client(tmp_path, refreshed=refreshed), "memory.forget", {"id": "m_missing"})["result"]
+
+    assert result == {"ok": True, "removed": None, "applied_live": False}
+    assert refreshed == []
 
 
 def test_forget_by_query_still_works(tmp_path: Path) -> None:
@@ -123,10 +136,13 @@ def test_set_enabled_stops_prompt_injection(tmp_path: Path, monkeypatch: pytest.
     assert "Mochi" in format_memory_for_prompt(tmp_path)
 
     calls: list[bool] = []
-    result = _rpc_call(_client(tmp_path, calls), "memory.set_enabled", {"enabled": False})["result"]
+    refreshed: list[bool] = []
+    result = _rpc_call(_client(tmp_path, calls, refreshed), "memory.set_enabled", {"enabled": False})["result"]
 
     assert calls == [False]
-    assert result["enabled"] is False
+    # Read live, so a prompt refresh applies it without a reconnect.
+    assert result == {"enabled": False, "applied_live": True}
+    assert refreshed == [True]
     assert format_memory_for_prompt(tmp_path) == ""
     assert len(list_memory_facts(tmp_path)) == 1
 
