@@ -16,25 +16,30 @@ def register_vision_methods(
     rpc: JsonRpcServer,
     deps: ToolDependencies,
     persist: Callable[[bool], None],
+    *,
+    forced_off: bool = False,
 ) -> None:
     """Register vision.* methods toggling the camera tool at runtime.
 
     Tools read ``deps.camera_enabled`` on every call, so a change takes effect on
     the next one. The camera stays in the model's tool schema and answers
     ``{"error": ...}`` while disabled; removing it entirely is profile_tools.save.
+    ``forced_off`` (``--no-camera``) wins: ``vision.set`` refuses to turn it on.
     """
 
     def _get(_params: dict[str, Any]) -> dict[str, object]:
-        return {"enabled": deps.camera_enabled}
+        return {"enabled": deps.camera_enabled, "forced_off": forced_off}
 
     def _set(params: dict[str, Any]) -> dict[str, object]:
         enabled = params.get("enabled")
         if not isinstance(enabled, bool):
             raise JsonRpcError("enabled must be a boolean", reason="invalid_params", code=-32602)
-        deps.camera_enabled = enabled
+        if enabled and forced_off:
+            raise JsonRpcError("the camera was disabled with --no-camera", reason="camera_forced_off")
         persist(enabled)
+        deps.camera_enabled = enabled
         logger.info("Camera tool %s over /rpc", "enabled" if enabled else "disabled")
-        return {"enabled": deps.camera_enabled}
+        return {"enabled": deps.camera_enabled, "forced_off": forced_off}
 
     rpc.register("vision.get", _get)
     rpc.register("vision.set", _set)

@@ -35,10 +35,10 @@ def _language_client(applied: list[str]) -> TestClient:
     return TestClient(app)
 
 
-def _vision_client(deps: ToolDependencies, persisted: list[bool]) -> TestClient:
+def _vision_client(deps: ToolDependencies, persisted: list[bool], forced_off: bool = False) -> TestClient:
     app = FastAPI()
     rpc = JsonRpcServer()
-    register_vision_methods(rpc, deps, persisted.append)
+    register_vision_methods(rpc, deps, persisted.append, forced_off=forced_off)
     rpc.mount(app)
     return TestClient(app)
 
@@ -50,9 +50,9 @@ def test_language_get_reports_the_active_language(monkeypatch: pytest.MonkeyPatc
     assert _rpc_call(_language_client([]), "language.get")["result"] == {"language": "en"}
 
 
-@pytest.mark.parametrize("language", ["fr", "pt-BR"])
+@pytest.mark.parametrize("language", ["fr", "EN"])
 def test_language_set_accepts_client_codes(language: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The ids the clients send are accepted and normalised."""
+    """Two-letter codes, the form transcription takes, are accepted and normalised."""
     monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", "en")
     applied: list[str] = []
 
@@ -62,7 +62,7 @@ def test_language_set_accepts_client_codes(language: str, monkeypatch: pytest.Mo
     assert result["language"] == language.lower()
 
 
-@pytest.mark.parametrize("language", ["", "english", "e", 42])
+@pytest.mark.parametrize("language", ["", "english", "e", 42, "pt-BR"])
 def test_language_set_rejects_junk(language: object, monkeypatch: pytest.MonkeyPatch) -> None:
     """A bad code must not reach the transcription config."""
     monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", "en")
@@ -80,10 +80,40 @@ def test_vision_toggle_is_live_and_persisted() -> None:
     persisted: list[bool] = []
     client = _vision_client(deps, persisted)
 
-    assert _rpc_call(client, "vision.get")["result"] == {"enabled": True}
-    assert _rpc_call(client, "vision.set", {"enabled": False})["result"] == {"enabled": False}
+    assert _rpc_call(client, "vision.get")["result"] == {"enabled": True, "forced_off": False}
+    assert _rpc_call(client, "vision.set", {"enabled": False})["result"] == {"enabled": False, "forced_off": False}
     assert deps.camera_enabled is False
     assert persisted == [False]
+
+
+def test_no_camera_flag_cannot_be_overridden() -> None:
+    """--no-camera is a hard off, as the README promises."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock(), camera_enabled=False)
+    persisted: list[bool] = []
+    client = _vision_client(deps, persisted, forced_off=True)
+
+    assert _rpc_call(client, "vision.get")["result"] == {"enabled": False, "forced_off": True}
+    error = _rpc_call(client, "vision.set", {"enabled": True})["error"]
+
+    assert error["data"]["reason"] == "camera_forced_off"
+    assert deps.camera_enabled is False
+    assert persisted == []
+
+
+def test_vision_set_leaves_the_camera_alone_when_saving_fails() -> None:
+    """An error reply must mean nothing changed."""
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock(), camera_enabled=True)
+    app = FastAPI()
+    rpc = JsonRpcServer()
+
+    def _fail(_enabled: bool) -> None:
+        raise OSError("read-only file system")
+
+    register_vision_methods(rpc, deps, _fail)
+    rpc.mount(app)
+
+    assert "error" in _rpc_call(TestClient(app), "vision.set", {"enabled": False})
+    assert deps.camera_enabled is True
 
 
 def test_vision_set_rejects_non_boolean() -> None:

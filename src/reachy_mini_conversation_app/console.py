@@ -118,6 +118,7 @@ class LocalStream:
         handler_factory: HandlerFactory | None = None,
         startup_voice: Optional[str] = None,
         tool_deps: ToolDependencies | None = None,
+        camera_forced_off: bool = False,
     ):
         """Initialize the stream with a realtime handler and pipelines.
 
@@ -135,6 +136,7 @@ class LocalStream:
         self._settings_app: Optional[FastAPI] = settings_app
         self._instance_path: Optional[str] = instance_path
         self._tool_deps = tool_deps
+        self._camera_forced_off = camera_forced_off
         self._settings_initialized = False
         self._asyncio_loop = None
         self._mic_muted = False  # mic starts live; the UI toggles it via the settings API
@@ -666,7 +668,12 @@ class LocalStream:
 
         if self._tool_deps is not None:
             try:
-                register_vision_methods(rpc, self._tool_deps, self._persist_camera_enabled)
+                register_vision_methods(
+                    rpc,
+                    self._tool_deps,
+                    self._persist_camera_enabled,
+                    forced_off=self._camera_forced_off,
+                )
             except Exception:
                 logger.exception("Failed to register vision methods; the camera switch will be unavailable")
 

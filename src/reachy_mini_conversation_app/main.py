@@ -246,6 +246,7 @@ def run(
         handler_factory=build_handler,
         startup_voice=startup_settings.voice,
         tool_deps=deps,
+        camera_forced_off=args.no_camera,
     )
 
     # The page is served immediately, so the API must be live before the slow startup work below.
