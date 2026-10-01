@@ -173,8 +173,8 @@ def _messages(items: list[Any]) -> list[dict[str, Any]]:
 
 
 @pytest.mark.asyncio
-async def test_partial_transcription_uses_latest_snapshot(monkeypatch: Any) -> None:
-    """Partial transcription snapshots should replace older snapshots for the same item."""
+async def test_partial_transcription_appends_incremental_deltas(monkeypatch: Any) -> None:
+    """Partial transcription deltas for one item should accumulate in arrival order."""
     monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "Aiden")
     monkeypatch.setattr(hf_mod, "get_tool_specs", lambda: [])
@@ -182,10 +182,8 @@ async def test_partial_transcription_uses_latest_snapshot(monkeypatch: Any) -> N
     handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
     handler.client = _make_fake_realtime_client(
         events=(
-            _FakeEvent("conversation.item.input_audio_transcription.delta", item_id="item-1", delta="Hey"),
-            _FakeEvent(
-                "conversation.item.input_audio_transcription.delta", item_id="item-1", delta="Hey, how are you?"
-            ),
+            _FakeEvent("conversation.item.input_audio_transcription.delta", item_id="item-1", delta="Hey how are"),
+            _FakeEvent("conversation.item.input_audio_transcription.delta", item_id="item-1", delta=" you"),
         )
     )
     monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
@@ -194,7 +192,32 @@ async def test_partial_transcription_uses_latest_snapshot(monkeypatch: Any) -> N
     await handler._run_realtime_session()
 
     assert handler.input_transcript_chunks_by_item.item_id == "item-1"
-    assert handler.input_transcript_chunks_by_item.deltas == ["Hey, how are you?"]
+    assert handler.input_transcript_chunks_by_item.deltas == ["Hey how are", " you"]
+    assert "".join(handler.input_transcript_chunks_by_item.deltas) == "Hey how are you"
+
+
+@pytest.mark.asyncio
+async def test_partial_transcription_resets_on_new_item_id(monkeypatch: Any) -> None:
+    """A new item_id should drop fragments from the previous item."""
+    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: "Aiden")
+    monkeypatch.setattr(hf_mod, "get_tool_specs", lambda: [])
+
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.client = _make_fake_realtime_client(
+        events=(
+            _FakeEvent("conversation.item.input_audio_transcription.delta", item_id="item-1", delta="old"),
+            _FakeEvent("conversation.item.input_audio_transcription.delta", item_id="item-2", delta="new"),
+            _FakeEvent("conversation.item.input_audio_transcription.delta", item_id="item-2", delta=" fragment"),
+        )
+    )
+    monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
+    monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
+
+    await handler._run_realtime_session()
+
+    assert handler.input_transcript_chunks_by_item.item_id == "item-2"
+    assert handler.input_transcript_chunks_by_item.deltas == ["new", " fragment"]
 
 
 @pytest.mark.asyncio
@@ -729,7 +752,7 @@ async def test_wait_for_response_done_times_out(monkeypatch: Any) -> None:
 
 @pytest.mark.asyncio
 async def test_emit_debounced_partial_emits_current_snapshot() -> None:
-    """A partial transcript is emitted when it is still the latest snapshot."""
+    """A partial transcript is emitted when it is still the latest fragment sequence."""
     handler = _plain_handler()
     handler.partial_debounce_delay = 0
     handler.input_transcript_chunks_by_item.item_id = "item-1"

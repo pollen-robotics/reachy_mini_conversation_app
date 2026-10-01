@@ -3,12 +3,14 @@ from __future__ import annotations
 import pytest
 
 
-pytest.importorskip("mcp.types")
+pytest.importorskip("mcp_types")
 
-from mcp.types import Tool, TextContent, CallToolResult
+from mcp_types import Tool, TextContent, CallToolResult, ListToolsResult
 
 from reachy_mini_conversation_app.mcp_client import (
     RemoteToolSpec,
+    RemoteMcpToolClient,
+    RemoteMcpServerConfig,
     RemoteToolCallResponse,
     validate_http_mcp_url,
     build_namespaced_tool_name,
@@ -37,7 +39,7 @@ def test_remote_tool_spec_translates_to_function_spec() -> None:
     tool = Tool(
         name="search-docs",
         description="Search the docs",
-        inputSchema={
+        input_schema={
             "type": "object",
             "properties": {"query": {"type": "string"}},
             "required": ["query"],
@@ -64,8 +66,8 @@ def test_remote_tool_error_result_maps_to_app_payload() -> None:
     """Remote tool errors should remain visible after response mapping."""
     result = CallToolResult(
         content=[TextContent(type="text", text="Search backend unavailable")],
-        structuredContent=None,
-        isError=True,
+        structured_content=None,
+        is_error=True,
     )
 
     payload = RemoteToolCallResponse.from_call_tool_result(
@@ -77,3 +79,74 @@ def test_remote_tool_error_result_maps_to_app_payload() -> None:
     assert payload["status"] == "error"
     assert payload["namespaced_tool_name"] == "gradio_docs__search_docs"
     assert payload["text"] == "Search backend unavailable"
+
+
+def test_remote_tool_spec_reads_fields_the_sdk_actually_exposes() -> None:
+    """Pins the v1→v2 rename: the wire names are pydantic *aliases*, not attributes.
+
+    Reading `tool.inputSchema` returns nothing on v2, which silently degrades every
+    remote tool to an empty parameters schema instead of raising anywhere.
+    """
+    tool = Tool(
+        name="search-docs",
+        description="Search the docs",
+        input_schema={"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+    )
+    assert not hasattr(tool, "inputSchema")
+
+    spec = RemoteToolSpec.from_mcp_tool("gradio_docs", tool)
+    assert spec.parameters_schema["properties"] == {"query": {"type": "string"}}
+    assert spec.parameters_schema["required"] == ["query"]
+
+
+def test_remote_tool_call_response_reads_fields_the_sdk_actually_exposes() -> None:
+    """Same rename on results: `isError`/`structuredContent` are aliases, so an error would read as success."""
+    result = CallToolResult(
+        content=[TextContent(type="text", text="done")],
+        structured_content={"rows": 2},
+        is_error=True,
+    )
+    assert not hasattr(result, "isError")
+    assert not hasattr(result, "structuredContent")
+
+    response = RemoteToolCallResponse.from_call_tool_result(
+        server_alias="gradio_docs",
+        remote_tool_name="search-docs",
+        result=result,
+    )
+    assert response.status == "error"
+    assert response.structured_content == {"rows": 2}
+
+
+@pytest.mark.asyncio
+async def test_list_all_tools_follows_the_pagination_cursor() -> None:
+    """Pins the v1→v2 rename on the *paging* field, which fails silently.
+
+    `nextCursor` is a pydantic alias on v2, so a client still reading it gets
+    None on a page that genuinely has a successor: discovery stops after page
+    one and every tool beyond it simply never exists, with no error raised
+    anywhere. Servers with a small tool count hide this, which is why it
+    survives casual testing.
+    """
+    first = ListToolsResult(
+        tools=[Tool(name="alpha", description="first page", input_schema={"type": "object"})],
+        nextCursor="page-2",
+    )
+    last = ListToolsResult(
+        tools=[Tool(name="omega", description="second page", input_schema={"type": "object"})],
+    )
+    assert not hasattr(first, "nextCursor")
+
+    pages = [first, last]
+    seen_cursors: list[str | None] = []
+
+    class _PagingClient:
+        async def list_tools(self, *, cursor: str | None = None) -> ListToolsResult:
+            seen_cursors.append(cursor)
+            return pages[len(seen_cursors) - 1]
+
+    client = RemoteMcpToolClient(RemoteMcpServerConfig(alias="gradio_docs", url="https://example.invalid/mcp"))
+    tools = await client._list_all_tools(_PagingClient())
+
+    assert [tool.name for tool in tools] == ["alpha", "omega"]
+    assert seen_cursors == [None, "page-2"]

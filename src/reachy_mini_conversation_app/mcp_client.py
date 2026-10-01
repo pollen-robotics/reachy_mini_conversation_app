@@ -8,16 +8,15 @@ downloading third-party Python code.
 from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any, Mapping, Sequence, AsyncIterator
-from datetime import timedelta
 from contextlib import asynccontextmanager
 from dataclasses import field, dataclass
 from urllib.parse import urlparse
 
 
 if TYPE_CHECKING:
-    from mcp import ClientSession
-    from mcp.types import Tool as McpTool
-    from mcp.types import CallToolResult as McpCallToolResult
+    from mcp import Client
+    from mcp_types import Tool as McpTool
+    from mcp_types import CallToolResult as McpCallToolResult
 
 
 _NAME_SEGMENT_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -110,9 +109,21 @@ def _join_text_content(content_blocks: list[dict[str, Any]]) -> str | None:
     return "\n\n".join(text_parts)
 
 
+def _is_timeout_mcp_error(exc: BaseException) -> bool:
+    """Whether this is the SDK's request-timeout error (JSON-RPC -32001)."""
+    try:
+        from mcp import MCPError
+        from mcp_types import REQUEST_TIMEOUT
+    except ImportError:
+        return False
+    return isinstance(exc, MCPError) and getattr(exc, "code", None) == REQUEST_TIMEOUT
+
+
 def _exception_contains_timeout(exc: BaseException) -> bool:
     timeout_exception = _httpx_timeout_exception_type()
     if isinstance(exc, timeout_exception):
+        return True
+    if _is_timeout_mcp_error(exc):
         return True
 
     if "timed out" in str(exc).lower() or "deadline exceeded" in str(exc).lower():
@@ -130,30 +141,30 @@ def _exception_contains_timeout(exc: BaseException) -> bool:
     return any(_exception_contains_timeout(item) for item in nested)
 
 
-def _load_mcp_sdk() -> tuple[type["ClientSession"], Any]:
+def _load_mcp_sdk() -> tuple[type["Client"], Any]:
     try:
-        from mcp import ClientSession
+        from mcp import Client
         from mcp.client.streamable_http import streamable_http_client
     except ImportError as exc:
         raise McpDependencyError(
             "Remote MCP tools require the app's MCP client dependencies. Reinstall or update the app environment."
         ) from exc
-    return ClientSession, streamable_http_client
+    return Client, streamable_http_client
 
 
-def _load_httpx() -> Any:
+def _load_httpx2() -> Any:
     try:
-        import httpx
+        import httpx2
     except ImportError as exc:
         raise McpDependencyError(
             "Remote MCP tools require the app's HTTP client dependencies. Reinstall or update the app environment."
         ) from exc
-    return httpx
+    return httpx2
 
 
 def _httpx_timeout_exception_type() -> tuple[type[BaseException], ...]:
     try:
-        timeout_exception = _load_httpx().TimeoutException
+        timeout_exception = _load_httpx2().TimeoutException
     except McpDependencyError:
         return (TimeoutError,)
     return (TimeoutError, timeout_exception)
@@ -194,7 +205,7 @@ class RemoteToolSpec:
     def from_mcp_tool(cls, server_alias: str, tool: "McpTool") -> "RemoteToolSpec":
         """Build an app-facing spec from an MCP SDK tool descriptor."""
         description = (getattr(tool, "description", None) or "").strip()
-        parameters_schema = getattr(tool, "inputSchema", None)
+        parameters_schema = getattr(tool, "input_schema", None)
         if not isinstance(parameters_schema, dict):
             parameters_schema = {"type": "object", "properties": {}, "required": []}
 
@@ -246,10 +257,10 @@ class RemoteToolCallResponse:
             server_alias=server_alias,
             remote_tool_name=remote_tool_name,
             namespaced_tool_name=build_namespaced_tool_name(server_alias, remote_tool_name),
-            status="error" if bool(getattr(result, "isError", False)) else "ok",
+            status="error" if bool(getattr(result, "is_error", False)) else "ok",
             content_blocks=content_blocks,
             text=_join_text_content(content_blocks),
-            structured_content=getattr(result, "structuredContent", None),
+            structured_content=getattr(result, "structured_content", None),
         )
 
     def to_tool_result(self) -> dict[str, Any]:
@@ -279,8 +290,8 @@ class RemoteMcpToolClient:
     async def list_tool_specs(self) -> list[RemoteToolSpec]:
         """Discover remote tools and translate them into app-facing specs."""
         try:
-            async with self._session() as session:
-                discovered = await self._list_all_tools(session)
+            async with self._connected_client() as client:
+                discovered = await self._list_all_tools(client)
         except McpDependencyError:
             raise
         except Exception as exc:
@@ -302,11 +313,11 @@ class RemoteMcpToolClient:
         timeout_exception = _httpx_timeout_exception_type()
 
         try:
-            async with self._session() as session:
-                result = await session.call_tool(
+            async with self._connected_client() as client:
+                result = await client.call_tool(
                     spec.remote_name,
                     arguments=dict(arguments or {}),
-                    read_timeout_seconds=timedelta(seconds=self.server.tool_timeout_s),
+                    read_timeout_seconds=self.server.tool_timeout_s,
                 )
         except McpDependencyError:
             raise
@@ -340,32 +351,32 @@ class RemoteMcpToolClient:
             raise ValueError(f"Unknown remote MCP tool '{namespaced_tool_name}' for server '{self.server.alias}'.")
         return spec
 
-    async def _list_all_tools(self, session: "ClientSession") -> list["McpTool"]:
+    async def _list_all_tools(self, client: "Client") -> list["McpTool"]:
         tools: list[McpTool] = []
         cursor: str | None = None
         while True:
-            page = await session.list_tools(cursor=cursor)
+            page = await client.list_tools(cursor=cursor)
             tools.extend(page.tools)
-            cursor = getattr(page, "nextCursor", None)
+            cursor = getattr(page, "next_cursor", None)
             if cursor is None:
                 return tools
 
     @asynccontextmanager
-    async def _session(self) -> AsyncIterator["ClientSession"]:
-        client_session_cls, streamable_http_client = _load_mcp_sdk()
-        httpx = _load_httpx()
+    async def _connected_client(self) -> AsyncIterator["Client"]:
+        client_cls, streamable_http_client = _load_mcp_sdk()
+        httpx2 = _load_httpx2()
         client_timeout = max(self.server.request_timeout_s, self.server.tool_timeout_s)
 
-        async with httpx.AsyncClient(
+        async with httpx2.AsyncClient(
             headers=self.server.headers,
             follow_redirects=False,
             timeout=client_timeout,
         ) as http_client:
-            async with streamable_http_client(self.server.url, http_client=http_client) as transport:
-                read_stream, write_stream, _ = transport
-                async with client_session_cls(read_stream, write_stream) as session:
-                    await session.initialize()
-                    yield session
+            transport = streamable_http_client(self.server.url, http_client=http_client)
+            # The default mode='auto' probes `server/discover` and falls back to the
+            # `initialize` handshake, so one client speaks every protocol revision.
+            async with client_cls(transport) as client:
+                yield client
 
 
 def _index_remote_tools(specs: list[RemoteToolSpec]) -> dict[str, RemoteToolSpec]:

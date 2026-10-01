@@ -1,10 +1,14 @@
+import urllib.request
+from io import BytesIO
 from types import SimpleNamespace
+from http.client import HTTPMessage, HTTPResponse
 from unittest.mock import MagicMock, call
 
 import numpy as np
+import pytest
 
 from reachy_mini.reachy_mini import SLEEP_HEAD_POSE
-from reachy_mini_conversation_app import app_lifecycle
+from reachy_mini_conversation_app import daemon_api, app_lifecycle
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 
 
@@ -27,7 +31,7 @@ def test_request_stop_current_app_posts_to_daemon(monkeypatch) -> None:
         assert timeout == 2.0
         return FakeResponse()
 
-    monkeypatch.setattr(app_lifecycle.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(daemon_api.urllib.request, "urlopen", fake_urlopen)
     robot = SimpleNamespace(client=SimpleNamespace(host="192.168.1.42", port=8000))
 
     assert app_lifecycle.request_stop_current_app(robot, MagicMock())
@@ -80,12 +84,89 @@ def test_request_stop_current_app_returns_false_on_urlerror(monkeypatch) -> None
     """A daemon that is unreachable is reported as a failed stop, not an exception."""
 
     def fake_urlopen(request, timeout):
-        raise app_lifecycle.urllib.error.URLError("connection refused")
+        raise daemon_api.urllib.error.URLError("connection refused")
 
-    monkeypatch.setattr(app_lifecycle.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(daemon_api.urllib.request, "urlopen", fake_urlopen)
     robot = SimpleNamespace(client=SimpleNamespace(host="192.168.1.42", port=8000))
 
     assert not app_lifecycle.request_stop_current_app(robot, MagicMock())
+
+
+def test_request_stop_current_app_treats_already_stopping_as_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The daemon's stopped-or-stopping response is idempotent success."""
+
+    def fake_urlopen(request: urllib.request.Request, timeout: float) -> None:
+        raise daemon_api.urllib.error.HTTPError(
+            request.full_url,
+            400,
+            "Bad Request",
+            hdrs=HTTPMessage(),
+            fp=BytesIO(b'{"detail":"No app is currently running"}'),
+        )
+
+    monkeypatch.setattr(daemon_api.urllib.request, "urlopen", fake_urlopen)
+    robot = SimpleNamespace(client=SimpleNamespace(host="192.168.1.42", port=8000))
+    logger = MagicMock()
+
+    assert app_lifecycle.request_stop_current_app(robot, logger)
+    logger.error.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("status_code", "body"),
+    [
+        (400, b'{"detail":"Stop cleanup failed"}'),
+        (400, b""),
+        (400, b"<html>Bad Request</html>"),
+        (400, b'{"detail":["No app is currently running"]}'),
+        (409, b'{"detail":"No app is currently running"}'),
+        (500, b'{"detail":"No app is currently running"}'),
+    ],
+)
+def test_request_stop_current_app_returns_false_on_other_httperror(
+    monkeypatch: pytest.MonkeyPatch, status_code: int, body: bytes
+) -> None:
+    """Only the verified daemon response is accepted without an error log."""
+
+    def fake_urlopen(request: urllib.request.Request, timeout: float) -> None:
+        raise daemon_api.urllib.error.HTTPError(
+            request.full_url,
+            status_code,
+            "Request failed",
+            hdrs=HTTPMessage(),
+            fp=BytesIO(body),
+        )
+
+    monkeypatch.setattr(daemon_api.urllib.request, "urlopen", fake_urlopen)
+    robot = SimpleNamespace(client=SimpleNamespace(host="192.168.1.42", port=8000))
+    logger = MagicMock()
+
+    assert not app_lifecycle.request_stop_current_app(robot, logger)
+    logger.error.assert_called_once()
+
+
+def test_request_stop_current_app_returns_false_on_truncated_error_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A truncated error body remains a logged failure so local shutdown can continue."""
+
+    def fake_urlopen(request: urllib.request.Request, timeout: float) -> None:
+        connection = MagicMock()
+        connection.makefile.return_value = BytesIO(
+            b'HTTP/1.1 400 Bad Request\r\nContent-Length: 100\r\n\r\n{"detail":'
+        )
+        response = HTTPResponse(connection)
+        response.begin()
+        raise daemon_api.urllib.error.HTTPError(request.full_url, 400, "Bad Request", HTTPMessage(), response)
+
+    monkeypatch.setattr(daemon_api.urllib.request, "urlopen", fake_urlopen)
+    robot = SimpleNamespace(client=SimpleNamespace(host="192.168.1.42", port=8000))
+    logger = MagicMock()
+
+    assert not app_lifecycle.request_stop_current_app(robot, logger)
+    logger.error.assert_called_once()
+    error = logger.error.call_args.args[1]
+    assert isinstance(error, daemon_api.DaemonApiError)
+    assert error.status_code == 400
+    assert error.detail is None
 
 
 def test_wake_up_if_sleeping_handles_pose_read_failure() -> None:

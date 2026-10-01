@@ -9,7 +9,10 @@ from reachy_mini_conversation_app.dance_emotion_moves import GotoQueueMove
 
 def _deps() -> ToolDependencies:
     reachy_mini = MagicMock()
-    reachy_mini.get_current_joint_positions.return_value = (0.0, (0.1, 0.2))
+    # get_current_joint_positions() -> (head_joints[7], antenna_joints[2]); body_yaw is
+    # head_joints[0]. Distinct values below (0.05 vs 0.1/0.2) so a test can tell which
+    # tuple start_body_yaw actually came from.
+    reachy_mini.get_current_joint_positions.return_value = ([0.05, 0, 0, 0, 0, 0, 0], (0.1, 0.2))
     return ToolDependencies(reachy_mini=reachy_mini, movement_manager=MagicMock())
 
 
@@ -29,6 +32,15 @@ async def test_move_head_queues_goto_move() -> None:
     queued_move = deps.movement_manager.queue_move.call_args.args[0]
     assert isinstance(queued_move, GotoQueueMove)
     deps.movement_manager.set_moving_state.assert_called_once_with(deps.motion_duration_s)
+
+
+@pytest.mark.asyncio
+async def test_move_head_reads_body_yaw_from_head_joints() -> None:
+    """start_body_yaw comes from the head-joints tuple, not the antenna-joints tuple."""
+    deps = _deps()
+    await MoveHead()(deps, direction="left")
+    queued_move = deps.movement_manager.queue_move.call_args.args[0]
+    assert queued_move.start_body_yaw == 0.05
 
 
 @pytest.mark.asyncio

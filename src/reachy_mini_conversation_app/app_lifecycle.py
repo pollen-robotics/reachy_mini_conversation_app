@@ -2,8 +2,6 @@
 
 import asyncio
 import logging
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +11,7 @@ from reachy_mini import ReachyMini
 from reachy_mini.reachy_mini import SLEEP_HEAD_POSE
 from reachy_mini.utils.interpolation import distance_between_poses
 from reachy_mini_conversation_app.config import config, set_custom_profile
+from reachy_mini_conversation_app.daemon_api import DaemonApiError, daemon_request
 from reachy_mini_conversation_app.profile_store import DEFAULT_PROFILE_NAME, migrate_legacy_profiles
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, initialize_tools
 from reachy_mini_conversation_app.tools.go_to_sleep import GoToSleep
@@ -72,16 +71,26 @@ def initialize_tools_with_default_fallback(
 
 def request_stop_current_app(robot: ReachyMini, logger: logging.Logger) -> bool:
     """Request the Reachy Mini daemon to stop the current app."""
-    stop_current_app_url = f"http://{robot.client.host}:{robot.client.port}{_STOP_CURRENT_APP_PATH}"
-    request = urllib.request.Request(stop_current_app_url, method="POST")
     try:
-        with urllib.request.urlopen(request, timeout=_STOP_CURRENT_APP_TIMEOUT_S) as response:
-            response.read()
-    except urllib.error.URLError as e:
-        logger.error("Failed to request current app stop via %s: %s", stop_current_app_url, e)
+        daemon_request(
+            robot,
+            _STOP_CURRENT_APP_PATH,
+            method="POST",
+            timeout_s=_STOP_CURRENT_APP_TIMEOUT_S,
+        )
+    except DaemonApiError as e:
+        # The daemon uses this detail for STOPPING, DONE, and no current app.
+        if e.status_code == 400 and e.detail == "No app is currently running":
+            logger.info(
+                "Current app via %s is already stopped or stopping (HTTP %s)",
+                _STOP_CURRENT_APP_PATH,
+                e.status_code,
+            )
+            return True
+        logger.error("Failed to request current app stop: %s", e)
         return False
 
-    logger.info("Requested current app stop via %s", stop_current_app_url)
+    logger.info("Requested current app stop via %s", _STOP_CURRENT_APP_PATH)
     return True
 
 
