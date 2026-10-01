@@ -462,10 +462,16 @@ def _migrate_instance_data(legacy: Path, target: Path) -> None:
         if not source.exists():
             continue
         destination = target / name
+        # Copy under a name the guard above ignores, then rename: an
+        # interrupted copy is retried on the next start instead of skipped.
+        staging = target / f".{name}.migrating"
+        if staging.is_dir():
+            shutil.rmtree(staging)
         if source.is_dir():
-            shutil.copytree(source, destination)
+            shutil.copytree(source, staging)
         else:
-            shutil.copy2(source, destination)
+            shutil.copy2(source, staging)
+        staging.rename(destination)
         logger.info("Migrated %s to %s", source, destination)
 
 

@@ -1,5 +1,6 @@
 """Tests for the instance directory resolution and its one-time migration."""
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -45,10 +46,35 @@ def test_migrates_legacy_data_once(tmp_path: Path) -> None:
     assert (resolved / "memory.v1.json").read_text() == '{"version": 1, "facts": []}'
     assert (resolved / "user_personalities" / "guide" / "profile.md").exists()
 
+    assert not list(resolved.glob(".*.migrating"))
+
     # A second run must not overwrite live data with the stale legacy copy.
     (resolved / "memory.v1.json").write_text('{"version": 1, "facts": ["kept"]}')
     resolve_instance_path(legacy)
     assert "kept" in (resolved / "memory.v1.json").read_text()
+
+
+def test_an_interrupted_migration_is_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A copy that dies halfway must not pass for a finished migration."""
+    legacy = tmp_path / "site-packages"
+    (legacy / "user_personalities" / "guide").mkdir(parents=True)
+    (legacy / "user_personalities" / "guide" / "profile.md").write_text("+++\n+++\nBe a guide.")
+    target = tmp_path / "instance"
+    monkeypatch.setenv(INSTANCE_PATH_ENV, str(target))
+
+    real_copytree = shutil.copytree
+
+    def _dies_halfway(src: Path, dst: Path, **kwargs: object) -> None:
+        Path(dst).mkdir(parents=True)
+        raise OSError("disk full")
+
+    monkeypatch.setattr(shutil, "copytree", _dies_halfway)
+    resolve_instance_path(legacy)
+    assert not (target / "user_personalities").exists()
+
+    monkeypatch.setattr(shutil, "copytree", real_copytree)
+    resolve_instance_path(legacy)
+    assert (target / "user_personalities" / "guide" / "profile.md").exists()
 
 
 def test_unusable_path_falls_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
