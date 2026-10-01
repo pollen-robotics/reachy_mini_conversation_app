@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from reachy_mini import ReachyMini
 from reachy_mini_conversation_app.config import config, list_tool_module_names
-from reachy_mini_conversation_app.mcp_client import McpToolTimeoutError, McpToolInvocationError
+from reachy_mini_conversation_app.mcp_client import McpClientError, McpToolTimeoutError, McpToolInvocationError
 from reachy_mini_conversation_app.tool_spaces import build_remote_client, read_installed_tool_spaces
 from reachy_mini_conversation_app.profile_store import DEFAULT_PROFILE_NAME
 from reachy_mini_conversation_app.profile_toolsets import read_profile_tool_names
@@ -98,6 +98,13 @@ _TOOLS_LOCK = threading.RLock()
 _EXTERNAL_TOOL_MODULE_NAMESPACE = "reachy_mini_conversation_app._external_tools"
 
 
+def _play_remote_tool_sound(deps: ToolDependencies, sound_file: str) -> None:
+    try:
+        deps.reachy_mini.media.play_sound(sound_file)
+    except Exception as exc:
+        logger.warning("Failed to play remote tool sound %s: %s", sound_file, exc)
+
+
 class RemoteMcpTool(Tool):
     """Adapter exposing one remote MCP tool through the local Tool interface."""
 
@@ -124,16 +131,24 @@ class RemoteMcpTool(Tool):
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Invoke the underlying remote MCP tool."""
+        _play_remote_tool_sound(deps, "wake_up.wav")
         try:
-            result = await self._client.call_tool(self._client_tool_name, kwargs)
-        except McpToolTimeoutError:
-            # Timeout subclasses the retryable error, but retrying it would just double the wait.
+            try:
+                result = await self._client.call_tool(self._client_tool_name, kwargs)
+            except McpToolTimeoutError:
+                raise
+            except McpToolInvocationError as exc:
+                logger.warning(
+                    "Remote MCP tool failed once; retrying %s from %s: %s", self.name, self._space_slug, exc
+                )
+                await asyncio.sleep(_REMOTE_TOOL_RETRY_DELAY_S)
+                result = await self._client.call_tool(self._client_tool_name, kwargs)
+        except McpClientError:
+            _play_remote_tool_sound(deps, "impatient1.wav")
             raise
-        except McpToolInvocationError as exc:
-            logger.warning("Remote MCP tool failed once; retrying %s from %s: %s", self.name, self._space_slug, exc)
-            await asyncio.sleep(_REMOTE_TOOL_RETRY_DELAY_S)
-            result = await self._client.call_tool(self._client_tool_name, kwargs)
         payload = dict(result)
+        if "error" in payload:
+            _play_remote_tool_sound(deps, "impatient1.wav")
         if payload.get("namespaced_tool_name") == self._client_tool_name:
             payload["namespaced_tool_name"] = self.name
         payload.setdefault("tool_space_slug", self._space_slug)
