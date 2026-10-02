@@ -124,7 +124,6 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self,
         deps: ToolDependencies,
         instance_path: Optional[str] = None,
-        startup_voice: Optional[str] = None,
     ):
         """Initialize the handler."""
         super().__init__()
@@ -136,7 +135,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self.output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]" = asyncio.Queue()
 
         self.instance_path = instance_path
-        self._voice_override: str | None = self._normalize_startup_voice(startup_voice)
+        self._voice_override: str | None = None
         self._realtime_connect_query: dict[str, str] = {}
 
         # Debouncing for partial transcripts
@@ -196,10 +195,6 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             sanitized["image_attached"] = True
             return sanitized
         return tool_result
-
-    def _normalize_startup_voice(self, voice: str | None) -> str | None:
-        """Return a valid persisted startup voice, or None."""
-        return self._resolve_backend_voice(voice, source="persisted startup voice")
 
     async def _wait_for_response_done_before_tool_result(self) -> bool:
         """Return whether the function-call response finished before sending tool output."""
@@ -319,9 +314,9 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         previous_profile = config.REACHY_MINI_CUSTOM_PROFILE
         previous_voice_override = self._voice_override
         set_custom_profile(profile)
-        # A voice picked from Settings applies to the personality it was picked
-        # for, not to every personality that follows: each one speaks with its
-        # own voice again as soon as it is applied.
+        # A voice picked from Settings is stored against the personality it was
+        # picked for, so dropping the in-session override here is what lets the
+        # incoming personality speak with its own.
         self._voice_override = None
         try:
             instructions = get_session_instructions(self.instance_path)

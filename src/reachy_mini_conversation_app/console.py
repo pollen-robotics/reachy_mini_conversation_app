@@ -41,6 +41,7 @@ from reachy_mini_conversation_app.prompts import get_session_voice, get_session_
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_float32
 from reachy_mini_conversation_app.rfid_routes import RfidController, register_rfid_methods
 from reachy_mini_conversation_app.profile_store import canonical_profile_name
+from reachy_mini_conversation_app.profile_voices import write_profile_voice_override
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
 from reachy_mini_conversation_app.tools.core_tools import initialize_tools
 from reachy_mini_conversation_app.nfc_daemon_client import NO_BOARD_ERROR
@@ -96,7 +97,7 @@ LOCAL_PLAYER_BACKEND = (
     or getattr(MediaBackend, "DEFAULT", None)
 )
 
-HandlerFactory = Callable[[Optional[str]], ConversationHandler]
+HandlerFactory = Callable[[], ConversationHandler]
 
 LEGACY_STARTUP_ENV_NAMES = (
     "REACHY_MINI_CUSTOM_PROFILE",
@@ -116,7 +117,6 @@ class LocalStream:
         settings_app: Optional[FastAPI] = None,
         instance_path: Optional[str] = None,
         handler_factory: HandlerFactory | None = None,
-        startup_voice: Optional[str] = None,
         startup_accessory_personality: Optional[str] = None,
     ):
         """Initialize the stream with a realtime handler and pipelines.
@@ -132,7 +132,6 @@ class LocalStream:
         self._restart_requested = asyncio.Event()
         self._tasks: List[asyncio.Task[None]] = []
         self._handler_factory = handler_factory
-        self._voice_override = startup_voice
         self._settings_app: Optional[FastAPI] = settings_app
         self._instance_path: Optional[str] = instance_path
         self._settings_initialized = False
@@ -300,7 +299,7 @@ class LocalStream:
         """Create and install a fresh handler for the current runtime backend config."""
         if self._handler_factory is None:
             return self.handler
-        handler = self._handler_factory(self._voice_override)
+        handler = self._handler_factory()
         self._install_handler(handler)
         return handler
 
@@ -451,22 +450,17 @@ class LocalStream:
         self._persist_env_values({HF_REALTIME_CONNECTION_MODE_ENV: HF_DEPLOYED_CONNECTION_MODE})
         self._remove_persisted_env_values(("HF_REALTIME_SESSION_URL",))
 
-    def _persist_personality(self, profile: Optional[str], voice_override: Optional[str] = None) -> None:
-        """Persist startup profile and voice in instance-local UI settings."""
+    def _persist_personality(self, profile: Optional[str]) -> None:
+        """Persist the startup personality in instance-local UI settings."""
         if LOCKED_PROFILE is not None:
             return
         selection = (profile or "").strip() or None
-        normalized_voice_override = (voice_override or "").strip() or None
         set_custom_profile(selection)
 
         if not self._instance_path:
             return
         try:
-            write_startup_settings(
-                self._instance_path,
-                profile=selection,
-                voice=normalized_voice_override,
-            )
+            write_startup_settings(self._instance_path, profile=selection)
             self._remove_persisted_env_values(LEGACY_STARTUP_ENV_NAMES)
             logger.info("Persisted startup personality settings to %s", Path(self._instance_path))
         except Exception as e:
@@ -479,21 +473,15 @@ class LocalStream:
     async def apply_personality(self, profile: Optional[str]) -> str:
         """Apply a personality by updating config and restarting the active backend."""
         previous_profile = config.REACHY_MINI_CUSTOM_PROFILE
-        previous_voice_override = self._voice_override
         set_custom_profile(profile)
-        # Drop the ad-hoc voice so the rebuilt handler starts from the new
-        # personality's own voice rather than inheriting the previous pick.
-        self._voice_override = None
         try:
             get_session_instructions()
             get_session_voice(default=get_default_voice())
             initialize_tools(force=True)
         except Exception:
             set_custom_profile(previous_profile)
-            self._voice_override = previous_voice_override
             raise
 
-        self._clear_persisted_voice_override()
         self.notify_personality(profile)
         await self.request_backend_restart("personality_changed")
         return "Applied personality and restarting backend."
@@ -515,31 +503,13 @@ class LocalStream:
             "nfc_error": None if error == NO_BOARD_ERROR else error,
         }
 
-    def _clear_persisted_voice_override(self) -> None:
-        """Forget the persisted startup voice so the startup profile's own voice wins."""
-        if not self._instance_path:
-            return
-        try:
-            existing = read_startup_settings(self._instance_path)
-            if existing.voice is None:
-                return
-            write_startup_settings(self._instance_path, profile=existing.profile, voice=None)
-        except Exception as e:
-            logger.warning("Failed to clear the persisted startup voice: %s", e)
-
     async def get_available_voices(self) -> list[str]:
         """Return the voices available for the Hugging Face backend."""
         return get_available_voices()
 
     def get_current_voice(self) -> str:
-        """Return the currently selected voice override or profile voice."""
-        if self._voice_override:
-            return self._voice_override
-        try:
-            return get_session_voice(default=get_default_voice())
-        except Exception as exc:
-            logger.warning("Failed to resolve the current profile voice: %s", exc)
-            return get_default_voice()
+        """Return the active personality's voice, read from the live handler."""
+        return self.handler.get_current_voice()
 
     async def change_voice(self, voice: str) -> str:
         """Change the voice through the active handler without rebuilding the backend."""
@@ -551,25 +521,17 @@ class LocalStream:
             logger.error("Error changing voice to %r: %s", voice, e)
             return f"Failed to change voice: {e}"
 
+        # The pick belongs to the personality it was made for, so it survives
+        # a swap to an accessory and back, and the next launch.
         try:
-            current_voice = self.handler.get_current_voice()
-            if isinstance(current_voice, str) and current_voice.strip():
-                self._voice_override = current_voice
-        except Exception as e:
-            logger.debug("Could not sync LocalStream voice override after voice change: %s", e)
-        if self._voice_override:
-            self._persist_voice_override(self._voice_override)
+            write_profile_voice_override(
+                config.REACHY_MINI_CUSTOM_PROFILE,
+                self.handler.get_current_voice(),
+                config.INSTANCE_PATH,
+            )
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.warning("Failed to persist the voice of the active personality: %s", e)
         return status
-
-    def _persist_voice_override(self, voice: str) -> None:
-        """Persist the chosen voice as the startup voice, keeping the startup profile."""
-        if not self._instance_path:
-            return
-        try:
-            existing = read_startup_settings(self._instance_path)
-            write_startup_settings(self._instance_path, profile=existing.profile, voice=voice)
-        except Exception as e:
-            logger.warning("Failed to persist startup voice: %s", e)
 
     def _init_rfid_controller(self, rpc: JsonRpcServer) -> None:
         """Start the NFC accessory reader and expose its rfid.* JSON-RPC methods.
@@ -742,7 +704,6 @@ class LocalStream:
                 apply_personality=self.apply_personality,
                 get_voices=self.get_available_voices,
                 get_current_voice=self.get_current_voice,
-                get_voice_override=lambda: self._voice_override,
                 change_voice=self.change_voice,
             )
             # personalities.* / voices.* over JSON-RPC — the local UI and remote

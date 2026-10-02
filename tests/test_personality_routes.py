@@ -251,7 +251,6 @@ def test_applying_default_persists_runtime_none(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
     app = FastAPI()
     handler = MagicMock()
-    handler.get_current_voice.return_value = "Aiden"
     persist_personality = MagicMock()
     rpc = JsonRpcServer()
     ops = build_personality_ops(
@@ -265,7 +264,7 @@ def test_applying_default_persists_runtime_none(monkeypatch: pytest.MonkeyPatch)
     response = _rpc_call(TestClient(app), "personalities.apply", {"name": "default", "persist": True})
 
     assert response["result"]["startup"] == "default"
-    persist_personality.assert_called_once_with(None, "Aiden")
+    persist_personality.assert_called_once_with(None)
 
 
 def test_force_reloads_active_personality(monkeypatch: pytest.MonkeyPatch) -> None:

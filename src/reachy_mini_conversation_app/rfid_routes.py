@@ -1,7 +1,8 @@
 """NFC accessory reader: background polling and its JSON-RPC control surface.
 
 Each accessory carries a personality token (see :mod:`personality_tag`); placing
-one on the reader applies that personality, removing it reverts to the default.
+one on the reader applies that personality, removing it reverts to the one this
+instance starts as — the personality set as default, or the built-in one.
 A blank accessory starts the "give it a personality" conversation, at the end of
 which :mod:`tools.create_accessory_personality` writes the new token onto it.
 
@@ -123,6 +124,10 @@ class RfidController:
         initial_personality: str | None = None,
     ) -> None:
         """Build a controller; call :meth:`start` to begin polling.
+
+        ``get_default_personality`` reports the personality this instance falls
+        back to when no accessory is on the reader — the one chosen with "Set as
+        default", not necessarily the built-in one.
 
         ``initial_personality`` is the one the app already started as, read off
         an accessory that was on the reader before the app came up. The
@@ -460,6 +465,9 @@ class RfidController:
 
         profile = self._default_personality()
         if profile == self._current_personality:
+            # The accessory carried the personality this robot runs anyway:
+            # taking it off changes nothing, and restarting the backend to
+            # arrive at what is already running would only cost a silence.
             logger.info("[RFID] >>> NO_TAG received — already on the default personality")
             self._current_personality = None
             return None

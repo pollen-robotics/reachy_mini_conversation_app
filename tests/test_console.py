@@ -18,6 +18,7 @@ import reachy_mini_conversation_app.console as console_mod
 from reachy_mini_conversation_app.config import HF_AVAILABLE_VOICES, config
 from reachy_mini_conversation_app.console import LocalStream
 from reachy_mini_conversation_app.streaming import AdditionalOutputs
+from reachy_mini_conversation_app.profile_voices import read_profile_voice_override
 from reachy_mini_conversation_app.startup_settings import (
     StartupSettings,
     load_startup_settings_into_runtime,
@@ -167,7 +168,7 @@ async def test_activity_from_rebuilt_handler_reaches_rpc_clients() -> None:
     rebuilt = FakeHandler()
     app = FastAPI()
     robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
-    stream = LocalStream(FakeHandler(), robot, settings_app=app, handler_factory=lambda voice: rebuilt)
+    stream = LocalStream(FakeHandler(), robot, settings_app=app, handler_factory=lambda: rebuilt)
     stream._init_settings_ui_if_needed()
     stream._build_handler_for_current_backend()  # rebuild re-wires the observer
 
@@ -198,7 +199,7 @@ def test_backend_config_requests_in_process_restart_with_handler_factory(
         robot,
         settings_app=app,
         instance_path=str(tmp_path),
-        handler_factory=lambda _voice: handler,
+        handler_factory=lambda: handler,
     )
     stream._init_settings_ui_if_needed()
 
@@ -505,13 +506,13 @@ async def test_startup_loop_rebuilds_handler_on_restart_request(monkeypatch: pyt
 
     handlers: list[FakeHandler] = []
 
-    def handler_factory(_voice: str | None) -> FakeHandler:
+    def handler_factory() -> FakeHandler:
         handler = FakeHandler()
         handlers.append(handler)
         return handler
 
     robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
-    initial_handler = handler_factory(None)
+    initial_handler = handler_factory()
     stream = LocalStream(initial_handler, robot, handler_factory=handler_factory)
     stream._backend_retry_delay = 0.01
 
@@ -575,11 +576,10 @@ async def test_personality_ops_apply_voice() -> None:
 
 
 @pytest.mark.asyncio
-async def test_personality_ops_persist_startup_with_voice_override() -> None:
-    """Applying with persist=True saves the active manual voice override."""
+async def test_personality_ops_persist_startup_personality() -> None:
+    """Applying with persist=True saves the personality to start as."""
     handler = MagicMock()
     handler.apply_personality = AsyncMock(return_value="Applied personality and restarted realtime session.")
-    handler.get_current_voice = MagicMock(return_value="shimmer")
     persist_personality = MagicMock()
     ops = build_personality_ops(handler, lambda: asyncio.get_running_loop(), persist_personality=persist_personality)
 
@@ -587,7 +587,7 @@ async def test_personality_ops_persist_startup_with_voice_override() -> None:
 
     assert result["ok"] is True
     handler.apply_personality.assert_awaited_once_with("sorry_bro")
-    persist_personality.assert_called_once_with("sorry_bro", "shimmer")
+    persist_personality.assert_called_once_with("sorry_bro")
 
 
 @pytest.mark.asyncio
@@ -686,30 +686,53 @@ async def test_apply_personality_restores_profile_when_tool_initialization_fails
 
 
 @pytest.mark.asyncio
-async def test_local_stream_change_voice_delegates_without_backend_restart() -> None:
-    """LocalStream voice changes should update the active handler without rebuilding it."""
+async def test_local_stream_change_voice_gives_it_to_the_active_personality(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A voice picked from Settings belongs to the personality that is speaking."""
+    monkeypatch.setattr(config, "INSTANCE_PATH", tmp_path)
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "hype_bot")
     handler = MagicMock()
     handler.change_voice = AsyncMock(return_value="Voice changed to Serena.")
     handler.get_current_voice = MagicMock(return_value="Serena")
-    stream = LocalStream(handler, MagicMock())
+    stream = LocalStream(handler, MagicMock(), instance_path=str(tmp_path))
 
     status = await stream.change_voice("Serena")
 
     assert status == "Voice changed to Serena."
     handler.change_voice.assert_awaited_once_with("Serena")
-    assert stream._voice_override == "Serena"
+    assert read_profile_voice_override("hype_bot", tmp_path) == "Serena"
     assert not stream._restart_requested.is_set()
 
 
-def test_local_stream_persist_personality_stores_voice_override(tmp_path) -> None:
-    """Persisting startup settings should write both profile and voice override."""
+@pytest.mark.asyncio
+async def test_local_stream_change_voice_gives_it_to_the_default_personality(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no personality selected, the pick becomes the built-in default's voice."""
+    monkeypatch.setattr(config, "INSTANCE_PATH", tmp_path)
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
+    handler = MagicMock()
+    handler.change_voice = AsyncMock(return_value="Voice changed to Serena.")
+    handler.get_current_voice = MagicMock(return_value="Serena")
+    stream = LocalStream(handler, MagicMock(), instance_path=str(tmp_path))
+
+    await stream.change_voice("Serena")
+
+    assert read_profile_voice_override(None, tmp_path) == "Serena"
+
+
+def test_local_stream_persist_personality_stores_the_startup_profile(tmp_path) -> None:
+    """Persisting startup settings should write the personality to start as."""
     stream = LocalStream(MagicMock(), MagicMock(), instance_path=str(tmp_path))
 
-    stream._persist_personality("sorry_bro", "shimmer")
+    stream._persist_personality("sorry_bro")
 
     settings_path = tmp_path / "startup_settings.json"
     assert settings_path.exists()
-    assert settings_path.read_text(encoding="utf-8") == '{\n  "profile": "sorry_bro",\n  "voice": "shimmer"\n}\n'
+    assert settings_path.read_text(encoding="utf-8") == '{\n  "profile": "sorry_bro"\n}\n'
     assert stream._read_persisted_personality() == "sorry_bro"
 
 
@@ -724,7 +747,7 @@ def test_local_stream_persist_personality_clears_legacy_startup_env_overrides(tm
     )
     stream = LocalStream(MagicMock(), MagicMock(), instance_path=str(tmp_path))
 
-    stream._persist_personality(None, "Aiden")
+    stream._persist_personality(None)
 
     env_text = env_path.read_text(encoding="utf-8")
     assert "HF_TOKEN=test-token" in env_text
@@ -740,7 +763,7 @@ def test_local_stream_persist_personality_clears_legacy_startup_env_overrides(tm
 
     settings = load_startup_settings_into_runtime(tmp_path)
 
-    assert settings == StartupSettings(voice="Aiden")
+    assert settings == StartupSettings()
     assert applied_profiles == [None]
 
 
@@ -800,10 +823,10 @@ def test_seconds_since_activity_reads_handler() -> None:
     assert stream.seconds_since_activity() >= 5.0
 
 
-def test_get_current_voice_prefers_override() -> None:
-    """A manual voice override wins over the profile voice."""
+def test_get_current_voice_reads_the_live_handler() -> None:
+    """The voice always comes from the handler that is speaking, rebuilt or not."""
     stream = _bare_stream()
-    stream._voice_override = "Serena"
+    stream.handler.get_current_voice = MagicMock(return_value="Serena")
 
     assert stream.get_current_voice() == "Serena"
 

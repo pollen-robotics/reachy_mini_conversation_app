@@ -129,15 +129,11 @@ def run(
         resolve_app_timeout_minutes,
         refresh_runtime_config_from_env,
     )
-    from reachy_mini_conversation_app.startup_settings import (
-        StartupSettings,
-        load_startup_settings_into_runtime,
-    )
+    from reachy_mini_conversation_app.startup_settings import load_startup_settings_into_runtime
 
     logger = setup_logger(args.debug)
     logger.info("Starting Reachy Mini Conversation App")
     set_instance_path(instance_path)
-    startup_settings = StartupSettings()
 
     if instance_path is not None:
         try:
@@ -152,7 +148,7 @@ def run(
             logger.warning("Failed to load instance configuration: %s", e)
 
         try:
-            startup_settings = load_startup_settings_into_runtime(instance_path)
+            load_startup_settings_into_runtime(instance_path)
         except Exception as e:
             logger.warning("Failed to load startup settings: %s", e)
 
@@ -201,7 +197,7 @@ def run(
         camera_enabled=not args.no_camera,
     )
 
-    def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
+    def build_handler() -> ConversationHandler:
         """Build a Hugging Face realtime handler for the current runtime config."""
         from reachy_mini_conversation_app.huggingface_realtime import HuggingFaceRealtimeHandler
 
@@ -212,11 +208,7 @@ def run(
             else "Hugging Face session proxy"
         )
         logger.info("Using Hugging Face realtime handler (%s)", transport_label)
-        return HuggingFaceRealtimeHandler(
-            deps,
-            instance_path=instance_path,
-            startup_voice=startup_voice,
-        )
+        return HuggingFaceRealtimeHandler(deps, instance_path=instance_path)
 
     # An accessory already on the head at launch names the personality to start
     # as. Read here, before the first handler is built, so the app comes up as
@@ -232,11 +224,8 @@ def run(
             accessory_personality = None
         else:
             logger.info("Accessory on the reader selects personality %r", accessory_personality)
-            # The saved voice was picked for the saved personality; the one the
-            # accessory names speaks with its own, as it would on any swap.
-            startup_settings = StartupSettings(profile=accessory_personality, voice=None)
 
-    handler = build_handler(startup_settings.voice)
+    handler = build_handler()
 
     stream_manager: LocalStream | None = None
     own_ui_server = None
@@ -258,7 +247,6 @@ def run(
         settings_app=effective_settings_app,
         instance_path=instance_path,
         handler_factory=build_handler,
-        startup_voice=startup_settings.voice,
         startup_accessory_personality=accessory_personality,
     )
 
