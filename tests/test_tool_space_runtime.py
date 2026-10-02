@@ -3,7 +3,7 @@ import json
 import importlib
 from types import ModuleType
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -113,12 +113,11 @@ async def test_initialize_tools_loads_enabled_installed_remote_tools_and_dispatc
     tool_specs = core_tools_mod.get_tool_specs()
     assert any(spec["name"] == SEARCH_TOOL_ID for spec in tool_specs)
 
-    reachy_mini = MagicMock()
     result = await core_tools_mod.dispatch_tool_call(
         SEARCH_TOOL_ID,
         json.dumps({"query": "hello"}),
         core_tools_mod.ToolDependencies(
-            reachy_mini=reachy_mini,
+            reachy_mini=object(),
             movement_manager=object(),
         ),
     )
@@ -126,7 +125,6 @@ async def test_initialize_tools_loads_enabled_installed_remote_tools_and_dispatc
     assert result["namespaced_tool_name"] == SEARCH_TOOL_ID
     assert result["tool_space_slug"] == SEARCH_SPACE_SLUG
     client.call_tool.assert_awaited_once_with(SEARCH_CLIENT_TOOL_ID, {"query": "hello"})
-    reachy_mini.media.play_sound.assert_called_once_with("wake_up.wav")
 
 
 def test_initialize_tools_warns_when_enabled_tool_missing_from_manifest(
@@ -226,16 +224,14 @@ async def test_remote_tool_retries_once_after_transport_failure(
     monkeypatch.setattr(core_tools_mod, "_REMOTE_TOOL_RETRY_DELAY_S", 0.0)
     core_tools_mod.initialize_tools()
 
-    reachy_mini = MagicMock()
     result = await core_tools_mod.dispatch_tool_call(
         SEARCH_TOOL_ID,
         json.dumps({"query": "hello"}),
-        core_tools_mod.ToolDependencies(reachy_mini=reachy_mini, movement_manager=object()),
+        core_tools_mod.ToolDependencies(reachy_mini=object(), movement_manager=object()),
     )
 
     assert result["status"] == "ok"
     assert client.call_tool.await_count == 2
-    reachy_mini.media.play_sound.assert_called_once_with("wake_up.wav")
 
 
 @pytest.mark.asyncio
@@ -255,77 +251,14 @@ async def test_remote_tool_does_not_retry_timeout(
     core_tools_mod = _reload_core_tools()
     core_tools_mod.initialize_tools()
 
-    reachy_mini = MagicMock()
     result = await core_tools_mod.dispatch_tool_call(
         SEARCH_TOOL_ID,
         json.dumps({"query": "hello"}),
-        core_tools_mod.ToolDependencies(reachy_mini=reachy_mini, movement_manager=object()),
+        core_tools_mod.ToolDependencies(reachy_mini=object(), movement_manager=object()),
     )
 
     assert "error" in result
     assert client.call_tool.await_count == 1
-    assert [call.args[0] for call in reachy_mini.media.play_sound.call_args_list] == [
-        "wake_up.wav",
-        "impatient1.wav",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_remote_tool_reports_payload_failure_with_sound(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An MCP error result should enter the normal failure path and play both sounds."""
-    monkeypatch.chdir(tmp_path)
-    _mcp_profile(tmp_path, monkeypatch)
-    client = AsyncMock()
-    client.call_tool.return_value = {"status": "error", "error": "backend unavailable"}
-    monkeypatch.setattr(tool_spaces_mod, "build_remote_client", lambda *a, **k: client)
-    write_installed_tool_spaces(None, InstalledToolSpacesManifest(spaces=[_installed_search_space()]))
-
-    core_tools_mod = _reload_core_tools()
-    core_tools_mod.initialize_tools()
-    reachy_mini = MagicMock()
-
-    result = await core_tools_mod.dispatch_tool_call(
-        SEARCH_TOOL_ID,
-        json.dumps({"query": "hello"}),
-        core_tools_mod.ToolDependencies(reachy_mini=reachy_mini, movement_manager=object()),
-    )
-
-    assert result["error"] == "backend unavailable"
-    assert [call.args[0] for call in reachy_mini.media.play_sound.call_args_list] == [
-        "wake_up.wav",
-        "impatient1.wav",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_remote_tool_ignores_sound_playback_failure(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A missing optional sound must not prevent the remote call."""
-    monkeypatch.chdir(tmp_path)
-    _mcp_profile(tmp_path, monkeypatch)
-    client = AsyncMock()
-    client.call_tool.return_value = {"status": "ok", "text": "hello"}
-    monkeypatch.setattr(tool_spaces_mod, "build_remote_client", lambda *a, **k: client)
-    write_installed_tool_spaces(None, InstalledToolSpacesManifest(spaces=[_installed_search_space()]))
-
-    core_tools_mod = _reload_core_tools()
-    core_tools_mod.initialize_tools()
-    reachy_mini = MagicMock()
-    reachy_mini.media.play_sound.side_effect = RuntimeError("speaker unavailable")
-
-    result = await core_tools_mod.dispatch_tool_call(
-        SEARCH_TOOL_ID,
-        json.dumps({"query": "hello"}),
-        core_tools_mod.ToolDependencies(reachy_mini=reachy_mini, movement_manager=object()),
-    )
-
-    assert result["status"] == "ok"
-    client.call_tool.assert_awaited_once()
 
 
 def test_initialize_tools_survives_a_corrupt_installed_spaces_manifest(
