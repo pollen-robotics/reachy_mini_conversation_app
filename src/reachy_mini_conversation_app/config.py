@@ -157,7 +157,7 @@ def _normalize_hf_connection_mode(value: str | None) -> str | None:
 def _normalize_transcription_language(value: str | None) -> str:
     """Return the configured realtime transcription language."""
     candidate = (value or "").strip()
-    return candidate or "en"
+    return candidate or "auto"
 
 
 @dataclass(frozen=True)
