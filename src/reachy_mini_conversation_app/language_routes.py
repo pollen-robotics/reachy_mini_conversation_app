@@ -12,8 +12,8 @@ from reachy_mini_conversation_app.config import config
 
 logger = logging.getLogger(__name__)
 
-# Transcription takes ISO-639-1 codes ("en", "fr"); a region suffix is not one.
-_LANGUAGE_RE = re.compile(r"^[a-zA-Z]{2}$")
+# Transcription takes ISO-639-1 codes ("en", "fr") or "auto"; a region suffix is not one.
+_LANGUAGE_RE = re.compile(r"^(?:[a-z]{2}|auto)$", re.IGNORECASE)
 
 
 def register_language_methods(
@@ -30,7 +30,7 @@ def register_language_methods(
         language = params.get("language")
         if not isinstance(language, str) or not _LANGUAGE_RE.match(language.strip()):
             raise JsonRpcError(
-                "language must be a two-letter code like 'en' or 'fr'",
+                "language must be 'auto' or a two-letter code like 'en' or 'fr'",
                 reason="invalid_language",
                 code=-32602,
             )

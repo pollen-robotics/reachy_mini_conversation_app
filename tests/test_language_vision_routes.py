@@ -50,9 +50,9 @@ def test_language_get_reports_the_active_language(monkeypatch: pytest.MonkeyPatc
     assert _rpc_call(_language_client([]), "language.get")["result"] == {"language": "en"}
 
 
-@pytest.mark.parametrize("language", ["fr", "EN"])
+@pytest.mark.parametrize("language", ["fr", "EN", "auto", "Auto"])
 def test_language_set_accepts_client_codes(language: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Two-letter codes, the form transcription takes, are accepted and normalised."""
+    """Two-letter codes and "auto", the forms transcription takes, are accepted and normalised."""
     monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", "en")
     applied: list[str] = []
 
@@ -62,7 +62,7 @@ def test_language_set_accepts_client_codes(language: str, monkeypatch: pytest.Mo
     assert result["language"] == language.lower()
 
 
-@pytest.mark.parametrize("language", ["", "english", "e", 42, "pt-BR"])
+@pytest.mark.parametrize("language", ["", "english", "e", 42, "pt-BR", "autodetect"])
 def test_language_set_rejects_junk(language: object, monkeypatch: pytest.MonkeyPatch) -> None:
     """A bad code must not reach the transcription config."""
     monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", "en")
