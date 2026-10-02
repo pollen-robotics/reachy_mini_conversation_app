@@ -20,12 +20,18 @@ def controller(monkeypatch):
     )
 
 
-def fake_reader(monkeypatch, *, connected, tag=None, error=None):
-    """Answer the daemon's status and tag endpoints without a reader."""
+def fake_reader(monkeypatch, *, connected, tag=None, error=None, enabled=None):
+    """Answer the daemon's status and tag endpoints without a reader.
+
+    ``enabled`` left as None leaves the field out, as daemons without the
+    switch do.
+    """
+    switch = {} if enabled is None else {"enabled": enabled}
     monkeypatch.setattr(
         NfcDaemonClient,
         "get_status",
         lambda self: {
+            **switch,
             "connected": connected,
             "chip_detected": connected,
             "driver_available": True,
@@ -69,6 +75,15 @@ def test_the_daemon_reason_for_a_down_link_reaches_the_panel(controller, monkeyp
     fake_reader(monkeypatch, connected=False, error="no NFC reader board found")
     assert controller.connection_status()["error"] == "no NFC reader board found"
     assert controller.last_status()["error"] == "no NFC reader board found"
+
+
+@pytest.mark.parametrize("enabled, expected", [(False, False), (True, True), (None, True)])
+def test_a_reader_switched_off_is_told_apart_from_a_missing_one(controller, monkeypatch, enabled, expected):
+    """Off, the daemon stops looking for the board: the panel must not offer to buy one."""
+    fake_reader(monkeypatch, connected=False, enabled=enabled)
+    snapshot = controller.snapshot()
+    assert snapshot["enabled"] is expected
+    assert snapshot["accessory"]["state"] == "unavailable"
 
 
 @pytest.fixture

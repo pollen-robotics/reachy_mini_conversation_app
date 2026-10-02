@@ -494,13 +494,16 @@ class LocalStream:
         """
         controller = self._rfid_controller
         if controller is None:
-            return {"nfc_supported": False, "nfc_connected": False, "nfc_error": None}
+            return {"nfc_supported": False, "nfc_connected": False, "nfc_enabled": True, "nfc_error": None}
         status = controller.last_status()
+        enabled = status.get("enabled") is not False
         error = status.get("error")
         return {
             "nfc_supported": bool(status.get("driver_available")),
             "nfc_connected": bool(status.get("connected")),
-            "nfc_error": None if error == NO_BOARD_ERROR else error,
+            "nfc_enabled": enabled,
+            # Switched off, the daemon's error only restates that: not a fault.
+            "nfc_error": None if error == NO_BOARD_ERROR or not enabled else error,
         }
 
     async def get_available_voices(self) -> list[str]:

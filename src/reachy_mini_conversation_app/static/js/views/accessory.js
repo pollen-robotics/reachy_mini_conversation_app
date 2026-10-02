@@ -91,6 +91,17 @@ export async function mountAccessoryView({ outlet, signal }) {
     addOnButton,
     addOnAddress,
   ];
+  // Shown instead when the reader was switched off: the add-on is most likely
+  // fitted already, so the store link would only be noise.
+  const turnedOffPanel = [
+    h("h2", { class: "settings-section-title" }, "NFC reader turned off"),
+    h(
+      "p",
+      { class: "settings-hint" },
+      "The NFC reader is switched off, so Reachy Mini cannot read accessories. "
+        + "Turn it back on in the NFC Reader settings of the Reachy Mini Control app."
+    ),
+  ];
   const readerSection = h("section", { class: "settings-section" }, readerTitle, readerStatus, accessoryCard);
   const personalitySelect = h("select", {
     class: "settings-select",
@@ -217,6 +228,8 @@ export async function mountAccessoryView({ outlet, signal }) {
       readerSection.replaceChildren(readerTitle, readerStatus, accessoryCard);
       readerStatus.textContent = payload.port ? `Reader connected on ${payload.port}.` : "Reader connected.";
       renderAccessory(accessory);
+    } else if (payload?.enabled === false) {
+      readerSection.replaceChildren(...turnedOffPanel);
     } else {
       readerSection.replaceChildren(...requirementPanel);
     }

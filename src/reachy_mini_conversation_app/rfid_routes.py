@@ -214,6 +214,12 @@ class RfidController:
         set_accessory_personality_tool_available(bool(status.get("driver_available", False)))
         summary = {
             "connected": status.get("connected", False),
+            # Switched off from the control app's settings (or the daemon was
+            # started with --no-nfc). The daemon then releases the port and
+            # stops looking for the board, so "not connected" says nothing
+            # about whether the add-on is fitted. Daemons without the switch
+            # leave it out: they are always on.
+            "enabled": status.get("enabled") is not False,
             "port": status.get("port"),
             "chip_detected": status.get("chip_detected", False),
             "driver_available": status.get("driver_available", False),
