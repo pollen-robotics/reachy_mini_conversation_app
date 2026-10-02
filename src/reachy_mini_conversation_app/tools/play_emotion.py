@@ -231,6 +231,20 @@ def random_curated_emotion(available_emotions: list[str]) -> str:
     return random.choice(available_emotions)
 
 
+def _library() -> "RecordedMoves":
+    """Return the emotion library, cached on PlayEmotion; downloads it on first use, never at import."""
+    if PlayEmotion._library is None:
+        PlayEmotion._library = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
+    return PlayEmotion._library
+
+
+def thinking_move() -> "EmotionQueueMove":
+    """Build a random 'thinking' move (blocking: may download the library)."""
+    library = _library()
+    available = library.list_moves()
+    return EmotionQueueMove(random.choice([n for n in _INTENT_TO_MOVES["thinking"] if n in available]), library)
+
+
 class PlayEmotion(Tool):
     """Play a pre-recorded emotion."""
 
@@ -264,10 +278,7 @@ class PlayEmotion(Tool):
         logger.info("Tool call: play_emotion emotion=%s", requested_emotion)
 
         try:
-            if self._library is None:
-                # Constructing this downloads the dataset, so it must not run at import.
-                self._library = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
-            library = self._library
+            library = self._library or _library()
             emotion_names = library.list_moves()
             if not emotion_names:
                 return {"error": "No emotions currently available"}

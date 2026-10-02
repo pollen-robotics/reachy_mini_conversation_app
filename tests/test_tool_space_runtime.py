@@ -3,7 +3,7 @@ import json
 import importlib
 from types import ModuleType
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -259,6 +259,44 @@ async def test_remote_tool_does_not_retry_timeout(
 
     assert "error" in result
     assert client.call_tool.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fails", [False, True])
+async def test_remote_tool_plays_thinking_move_until_answer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fails: bool,
+) -> None:
+    """A thinking move runs during the remote call and is cancelled when it returns, even on failure."""
+    monkeypatch.chdir(tmp_path)
+    _mcp_profile(tmp_path, monkeypatch)
+
+    client = AsyncMock()
+    if fails:
+        client.call_tool.side_effect = McpToolTimeoutError("slow tool")
+    else:
+        client.call_tool.return_value = {"status": "ok", "text": "hello"}
+    monkeypatch.setattr(tool_spaces_mod, "build_remote_client", lambda *a, **k: client)
+    write_installed_tool_spaces(None, InstalledToolSpacesManifest(spaces=[_installed_search_space()]))
+
+    core_tools_mod = _reload_core_tools()
+    core_tools_mod.initialize_tools()
+    move = object()
+    monkeypatch.setattr(
+        importlib.import_module("reachy_mini_conversation_app.tools.play_emotion"), "thinking_move", lambda: move
+    )
+    movement_manager = MagicMock()
+
+    result = await core_tools_mod.dispatch_tool_call(
+        SEARCH_TOOL_ID,
+        json.dumps({"query": "hello"}),
+        core_tools_mod.ToolDependencies(reachy_mini=object(), movement_manager=movement_manager),
+    )
+
+    assert ("error" in result) is fails
+    movement_manager.queue_move.assert_called_once_with(move)
+    movement_manager.cancel_move.assert_called_once_with(move)
 
 
 def test_initialize_tools_survives_a_corrupt_installed_spaces_manifest(

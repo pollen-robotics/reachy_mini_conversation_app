@@ -252,6 +252,13 @@ class MovementManager:
         """
         self._command_queue.put(("clear_queue", None))
 
+    def cancel_move(self, move: Move) -> None:
+        """Stop ``move`` if it is playing, or drop it if still queued; other moves are kept.
+
+        Thread-safe: executed by the worker thread via the command queue.
+        """
+        self._command_queue.put(("cancel_move", move))
+
     def set_moving_state(self, duration: float) -> None:
         """Mark the robot as actively moving for the provided duration.
 
@@ -335,6 +342,13 @@ class MovementManager:
             self.state.move_start_time = None
             self._breathing_active = False
             logger.info("Cleared move queue and stopped current move")
+        elif command == "cancel_move":
+            # Idle breathing then blends back from the pose the move left.
+            if self.state.current_move is payload:
+                self.state.current_move = None
+                self.state.move_start_time = None
+            elif payload in self.move_queue:
+                self.move_queue.remove(payload)
         elif command == "set_moving_state":
             try:
                 duration = float(payload)
