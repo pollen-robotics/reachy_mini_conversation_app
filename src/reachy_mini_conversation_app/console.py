@@ -150,7 +150,6 @@ class LocalStream:
         # NFC accessory reader, started with the JSON-RPC surface. Set before
         # _install_handler so the first install can inject it like any later one.
         self._rfid_controller: Optional[RfidController] = None
-        self._rfid_serial: Any | None = None
         self._startup_accessory_personality = startup_accessory_personality
         self._install_handler(handler)
 
@@ -164,8 +163,8 @@ class LocalStream:
     def _inject_rfid_into_handler(self) -> None:
         """Hand the NFC reader to the active handler's tool dependencies."""
         deps = getattr(self.handler, "deps", None)
-        if self._rfid_serial is not None and deps is not None:
-            deps.rfid_serial = self._rfid_serial
+        if self._rfid_controller is not None and deps is not None:
+            deps.nfc_client = self._rfid_controller.client
 
     def _attach_observers_to_handler(self) -> None:
         """Wire the handler's activity + transcript observers to JSON-RPC pushes."""
@@ -570,8 +569,6 @@ class LocalStream:
         )
         register_rfid_methods(rpc, controller)
         self._rfid_controller = controller
-        # Instance attr so _install_handler() can re-inject on backend restart.
-        self._rfid_serial = controller.client
         self._inject_rfid_into_handler()
         # No driver means no reader on this robot, now or later: the rfid.* methods
         # stay registered so the UI can say so, but nothing is polled.

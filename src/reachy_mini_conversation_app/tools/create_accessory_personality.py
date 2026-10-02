@@ -10,9 +10,8 @@ from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
 logger = logging.getLogger(__name__)
 
-# Authored tool defaults for a personality the robot creates for itself. This tool
-# is deliberately absent: core_tools offers it to every profile while a reader is
-# attached, so listing it here would only pin a stale copy into the profile document.
+# Tools of a personality created from an accessory. This tool is left out on purpose:
+# core_tools offers it to every profile while a reader is attached.
 _DEFAULT_TOOLS = (
     "camera",
     "dance",
@@ -95,47 +94,27 @@ class CreateAccessoryPersonality(Tool):
             logger.error("create_accessory_personality: failed to write profile: %s", exc)
             return {"error": f"Failed to write profile: {exc}"}
 
-        # The tag carries the personality itself, so there is nothing to
-        # allocate or remember: the same personality always yields the same
-        # token, and the tag means the same thing on any robot.
         code = to_tag_token(personality)
         if code is None:
-            logger.error("create_accessory_personality: no tag token for personality %r", personality)
             return {"error": f"Cannot write personality {personality!r} to a tag"}
-        logger.info("create_accessory_personality: tag token %r for %r", code, personality)
 
-        # Check whether a blank tag is currently on the reader
-        rfid_serial = deps.rfid_serial
-        if deps.blank_tag_present:
-            # Accessory is on the reader — send RFID write command.
-            # The write-tag-6 movement is triggered later on WRITE_OK so it starts
-            # simultaneously with the "I feel the new personality" speech.
+        if deps.blank_tag_present and deps.nfc_client is not None:
+            # The write-tag move and the welcome speech follow on WRITE_OK (see rfid_routes).
             deps.pending_nfc_write = None
             deps.recently_written_codes.add(code)
-            if rfid_serial is not None and rfid_serial.is_connected():
-                write_status = rfid_serial.write_tag(code)
-                logger.info("create_accessory_personality: write_tag(%r) → %s", code, write_status)
-            else:
-                write_status = "RFID reader not connected"
-                logger.warning("create_accessory_personality: %s", write_status)
-            return {
-                "status": "writing",
-                "personality": personality,
-                "code": code,
-                "write_status": write_status,
-            }
-        else:
-            # No blank tag on reader — store pending write so console.py writes on next detection
-            deps.pending_nfc_write = {"code": code, "personality": personality}
-            logger.info(
-                "create_accessory_personality: no blank tag present — stored pending write for %r", personality
-            )
-            return {
-                "status": "waiting_for_tag",
-                "personality": personality,
-                "code": code,
-                "message": (
-                    "No accessory on the head right now. "
-                    "Ask the user to place the accessory back on the head to program it."
-                ),
-            }
+            deps.nfc_client.write_tag_in_background(code)
+            logger.info("create_accessory_personality: writing %r to the accessory", code)
+            return {"status": "writing", "personality": personality, "code": code}
+
+        # No blank accessory on the reader: rfid_routes writes it on the next detection.
+        deps.pending_nfc_write = {"code": code, "personality": personality}
+        logger.info("create_accessory_personality: no blank tag present — stored pending write for %r", personality)
+        return {
+            "status": "waiting_for_tag",
+            "personality": personality,
+            "code": code,
+            "message": (
+                "No accessory on the head right now. "
+                "Ask the user to place the accessory back on the head to program it."
+            ),
+        }

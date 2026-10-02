@@ -39,7 +39,7 @@ def fake_reader(monkeypatch, *, connected, tag=None, error=None, enabled=None):
             "error": error,
         },
     )
-    absent = NfcTagSnapshot(present=False, uid=None, content=None, blank=False)
+    absent = NfcTagSnapshot(present=False, content=None, blank=False)
     monkeypatch.setattr(NfcDaemonClient, "get_tag", lambda self: tag or absent)
 
 
@@ -59,9 +59,9 @@ def test_a_connected_reader_with_nothing_on_it_is_empty(controller, monkeypatch)
 @pytest.mark.parametrize(
     "tag, state",
     [
-        (NfcTagSnapshot(present=True, uid="04", content=None, blank=True), "blank"),
-        (NfcTagSnapshot(present=True, uid="04", content="written-elsewhere", blank=False), "unknown"),
-        (NfcTagSnapshot(present=True, uid="04", content=to_tag_token("default"), blank=False), "known"),
+        (NfcTagSnapshot(present=True, content=None, blank=True), "blank"),
+        (NfcTagSnapshot(present=True, content="written-elsewhere", blank=False), "unknown"),
+        (NfcTagSnapshot(present=True, content=to_tag_token("default"), blank=False), "known"),
     ],
 )
 def test_a_tag_on_a_connected_reader_is_described_by_what_it_carries(controller, monkeypatch, tag, state):
@@ -121,7 +121,7 @@ def test_an_accessory_left_on_the_head_names_the_personality_to_start_as(monkeyp
     fake_reader(
         monkeypatch,
         connected=True,
-        tag=NfcTagSnapshot(present=True, uid="04", content=to_tag_token("default"), blank=False),
+        tag=NfcTagSnapshot(present=True, content=to_tag_token("default"), blank=False),
     )
     assert rfid_routes.accessory_personality_on_reader() == "default"
 
@@ -130,9 +130,9 @@ def test_an_accessory_left_on_the_head_names_the_personality_to_start_as(monkeyp
     "tag",
     [
         None,
-        NfcTagSnapshot(present=True, uid="04", content=None, blank=True),
-        NfcTagSnapshot(present=True, uid="04", content="written-elsewhere", blank=False),
-        NfcTagSnapshot(present=True, uid="04", content=to_tag_token("gone_from_this_robot"), blank=False),
+        NfcTagSnapshot(present=True, content=None, blank=True),
+        NfcTagSnapshot(present=True, content="written-elsewhere", blank=False),
+        NfcTagSnapshot(present=True, content=to_tag_token("gone_from_this_robot"), blank=False),
     ],
     ids=["no accessory", "blank", "written elsewhere", "personality this robot lacks"],
 )
@@ -167,73 +167,74 @@ class _StubHandler:
 
 
 def removal_controller(monkeypatch, *, initial_personality=None, default_personality=None):
-    """Build a controller whose revert is observable without a handler or a loop."""
+    """Build a controller whose revert is observable without a handler or a loop.
+
+    Returns the controller and the list of personalities it announced.
+    """
     monkeypatch.setattr(rfid_routes, "_load_move_dataset", lambda repo_id: None)
+    announced = []
     controller = rfid_routes.RfidController(
         get_handler=lambda: pytest.fail("the handler is passed in, not fetched"),
         get_loop=lambda: None,
         robot=None,
+        on_personality_applied=announced.append,
         get_default_personality=lambda: default_personality,
         initial_personality=initial_personality,
     )
-    applied_to = []
     monkeypatch.setattr(controller, "_queue_move", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        controller,
-        "_run_on_loop",
-        lambda coro, description, **kw: bool(applied_to.append(description)) or True,
-    )
-    return controller, applied_to
+    monkeypatch.setattr(controller, "_run_on_loop", lambda coro, description, **kw: True)
+    return controller, announced
 
 
 def test_taking_off_the_accessory_the_app_started_with_reverts_to_the_default(monkeypatch):
     """The controller applied nothing itself, so it has to be told what it started as."""
-    controller, applied_to = removal_controller(monkeypatch, initial_personality="pirate")
+    controller, announced = removal_controller(monkeypatch, initial_personality="pirate")
 
-    applied = controller._on_tag_removed(_StubHandler())
+    controller._on_tag_removed(_StubHandler())
 
-    assert applied == {"code": None, "personality": rfid_routes.DEFAULT_SELECTION}
-    assert "default revert" in applied_to
+    assert announced == [None]
 
 
 def test_taking_off_an_accessory_goes_back_to_the_personality_set_as_default(monkeypatch):
     """The fallback is whatever this instance was told to start as, not the built-in one."""
-    controller, applied_to = removal_controller(
+    controller, announced = removal_controller(
         monkeypatch, initial_personality="pirate", default_personality="king_reachy_maximus"
     )
     monkeypatch.setattr(rfid_routes, "list_personalities", lambda: ["default", "king_reachy_maximus", "pirate"])
 
-    applied = controller._on_tag_removed(_StubHandler())
+    controller._on_tag_removed(_StubHandler())
 
-    assert applied == {"code": None, "personality": "king_reachy_maximus"}
-    assert "default revert" in applied_to
+    assert announced == ["king_reachy_maximus"]
 
 
 def test_a_default_personality_since_deleted_falls_back_to_the_built_in_one(monkeypatch):
     """Reverting to a personality this robot no longer has would fail and strand the accessory's."""
-    controller, applied_to = removal_controller(
+    controller, announced = removal_controller(
         monkeypatch, initial_personality="pirate", default_personality="deleted_since"
     )
     monkeypatch.setattr(rfid_routes, "list_personalities", lambda: ["default", "pirate"])
 
-    assert controller._on_tag_removed(_StubHandler()) == {"code": None, "personality": rfid_routes.DEFAULT_SELECTION}
-    assert "default revert" in applied_to
+    controller._on_tag_removed(_StubHandler())
+
+    assert announced == [None]
 
 
 def test_an_accessory_carrying_the_default_personality_changes_nothing_when_removed(monkeypatch):
     """Restarting the backend to arrive at what is already running only costs a silence."""
-    controller, applied_to = removal_controller(
+    controller, announced = removal_controller(
         monkeypatch, initial_personality="king_reachy_maximus", default_personality="king_reachy_maximus"
     )
     monkeypatch.setattr(rfid_routes, "list_personalities", lambda: ["default", "king_reachy_maximus"])
 
-    assert controller._on_tag_removed(_StubHandler()) is None
-    assert "default revert" not in applied_to
+    controller._on_tag_removed(_StubHandler())
+
+    assert announced == []
 
 
 def test_a_controller_that_started_at_the_default_has_nothing_to_revert(monkeypatch):
     """No accessory at launch: taking nothing off must not restart the backend."""
-    controller, applied_to = removal_controller(monkeypatch)
+    controller, announced = removal_controller(monkeypatch)
 
-    assert controller._on_tag_removed(_StubHandler()) is None
-    assert "default revert" not in applied_to
+    controller._on_tag_removed(_StubHandler())
+
+    assert announced == []

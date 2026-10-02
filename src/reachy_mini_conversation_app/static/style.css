@@ -1744,7 +1744,6 @@ button {
   font-size: 0.86rem;
 }
 
-
 /* Accessory badge in the app shell: same shape as the personality badge, with an
    icon instead of an avatar. */
 .app-shell__accessory-icon {
@@ -1801,10 +1800,6 @@ button {
 
 .app-shell__accessory[data-state="unavailable"] .app-shell__personality-name {
   color: var(--text-muted);
-}
-
-.app-shell__accessory[hidden] {
-  display: none;
 }
 
 /* Sits under the paragraph explaining what the accessory feature needs. */

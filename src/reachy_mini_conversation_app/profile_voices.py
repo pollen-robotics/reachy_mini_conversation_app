@@ -12,9 +12,7 @@ import json
 import logging
 import threading
 from pathlib import Path
-from contextlib import contextmanager
 from dataclasses import field, dataclass
-from collections.abc import Iterator
 
 from reachy_mini_conversation_app.profile_store import read_profile, canonical_profile_name
 
@@ -32,13 +30,6 @@ class ProfileVoices:
     """Instance-local voice overrides keyed by canonical profile name."""
 
     profiles: dict[str, str] = field(default_factory=dict)
-
-
-@contextmanager
-def profile_voices_transaction() -> Iterator[None]:
-    """Serialize related profile and voice persistence operations."""
-    with _STORE_LOCK:
-        yield
 
 
 def get_profile_voices_path(instance_path: str | Path | None) -> Path:
@@ -115,20 +106,12 @@ def read_profile_voice_override(
     return read_profile_voices(instance_path).profiles.get(canonical_profile_name(profile))
 
 
-def read_profile_default_voice(profile: str | None) -> str | None:
-    """Read a profile's authored voice without applying an override."""
-    return read_profile(profile).voice
-
-
 def read_profile_voice(
     profile: str | None,
     instance_path: str | Path | None,
 ) -> str | None:
     """Return the effective voice for a profile, or None to use the backend default."""
-    override = read_profile_voice_override(profile, instance_path)
-    if override is not None:
-        return override
-    return read_profile_default_voice(profile)
+    return read_profile_voice_override(profile, instance_path) or read_profile(profile).voice
 
 
 def write_profile_voice_override(

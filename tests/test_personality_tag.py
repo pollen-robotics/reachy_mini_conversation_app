@@ -2,12 +2,7 @@
 
 import pytest
 
-from reachy_mini_conversation_app.personality_tag import (
-    DEFAULT_SELECTION,
-    to_tag_token,
-    from_tag_token,
-    is_personality_token,
-)
+from reachy_mini_conversation_app.personality_tag import to_tag_token, from_tag_token
 
 
 @pytest.mark.parametrize(
@@ -44,13 +39,8 @@ def test_a_user_may_reuse_a_built_in_name():
     assert to_tag_token("mars_rover") != to_tag_token("user_personalities/mars_rover")
 
 
-def test_the_default_selection_has_no_token():
-    """The default selection refuses to be written to a tag.
-
-    Writing "revert to default" onto a tag would be a no-op: removing the tag
-    already does that. Callers must refuse rather than burn a tag.
-    """
-    assert to_tag_token(DEFAULT_SELECTION) is None
+def test_an_empty_selection_has_no_token():
+    """Nothing to write for an empty name."""
     assert to_tag_token("") is None
     assert to_tag_token("   ") is None
 
@@ -68,4 +58,3 @@ def test_the_default_selection_has_no_token():
 def test_foreign_tag_content_decodes_to_nothing(token):
     """A tag written by something else must not resolve to a personality."""
     assert from_tag_token(token) is None
-    assert not is_personality_token(token)

@@ -210,11 +210,8 @@ def run(
         logger.info("Using Hugging Face realtime handler (%s)", transport_label)
         return HuggingFaceRealtimeHandler(deps, instance_path=instance_path)
 
-    # An accessory already on the head at launch names the personality to start
-    # as. Read here, before the first handler is built, so the app comes up as
-    # that personality: leaving it to the reader's poll loop would apply it as a
-    # change instead — transition move, backend restart — seconds after a robot
-    # that has only just finished starting.
+    # An accessory already on the head at launch names the personality to start as,
+    # read before the first handler is built so it is not applied as a change later.
     accessory_personality = accessory_personality_on_reader()
     if accessory_personality is not None:
         set_custom_profile(accessory_personality)

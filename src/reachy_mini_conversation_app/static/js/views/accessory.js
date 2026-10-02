@@ -52,11 +52,8 @@ export async function mountAccessoryView({ outlet, signal }) {
     "Get the NFC add-on"
   );
   const addOnAddress = h("p", { class: "settings-hint accessory-requirement__address", hidden: "hidden" });
-  // This panel runs in the control app's webview, which drops target="_blank"
-  // and window.open, so the app opens the store on the machine it runs on —
-  // the same one as the control app on a Lite, or when both sit on a desk. A
-  // robot with no screen of its own has no browser to raise, and the address
-  // goes on screen so it stays reachable from any other device.
+  // The control app's webview ignores window.open, so the app opens the store
+  // itself; with no browser on its host, the address is shown instead.
   addOnButton.addEventListener("click", async () => {
     let store = null;
     let failure = null;
@@ -68,8 +65,6 @@ export async function mountAccessoryView({ outlet, signal }) {
     }
     if (store?.opened) return;
     if (store?.url && window.open(store.url, "_blank", "noopener")) return;
-    // Saying why matters here: an app still running the code it started with
-    // answers "method not found", which points straight at the restart it needs.
     addOnAddress.replaceChildren(
       store?.url
         ? "Open this address in a browser: "
@@ -109,8 +104,7 @@ export async function mountAccessoryView({ outlet, signal }) {
     disabled: "disabled",
   });
   const linkButton = h("button", { type: "button", class: "btn btn--primary", disabled: "disabled" }, LINK_LABEL);
-  // Erasing belongs next to what it erases, so this button is rendered into the
-  // card describing the tag rather than alongside the one that writes to it.
+  // Rendered inside the tag card, next to what it erases.
   const eraseButton = h("button", { type: "button", class: "btn btn--ghost", disabled: "disabled" }, ERASE_LABEL);
   const status = h("p", { class: "settings-status", role: "status", "aria-live": "polite" });
 
@@ -161,8 +155,6 @@ export async function mountAccessoryView({ outlet, signal }) {
     linkButton.disabled = nextBusy || !canLink();
     eraseButton.disabled = nextBusy || !canErase();
     personalitySelect.disabled = nextBusy || !personalitySelect.options.length;
-    // The two buttons now sit in different sections, so only the one at work
-    // says so.
     linkButton.textContent = (nextBusy && labels.link) || LINK_LABEL;
     eraseButton.textContent = (nextBusy && labels.erase) || ERASE_LABEL;
   }

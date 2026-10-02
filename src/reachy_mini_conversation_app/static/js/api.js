@@ -155,7 +155,6 @@ export const getProfileTools = (profile) =>
 export const saveProfileTools = (profile, enabledTools) =>
   rpcCall("profile_tools.save", { profile, enabled_tools: enabledTools });
 export const getRfidStatus = () => rpcCall("rfid.status");
-export const getRfidTokens = () => rpcCall("rfid.tokens");
 export const linkRfidTag = (personality) =>
   rpcCall("rfid.link_tag", { personality }, { timeoutMs: TOOL_SPACE_TIMEOUT_MS });
 export const eraseRfidTag = (full = false) =>

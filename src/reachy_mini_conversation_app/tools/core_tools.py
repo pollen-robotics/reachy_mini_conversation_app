@@ -44,8 +44,8 @@ class ToolDependencies:
     camera_enabled: bool = False
     motion_duration_s: float = 1.0
     go_to_sleep: Callable[[], dict[str, Any]] | None = None
-    # NFC / RFID accessory reader (injected at runtime by console.py)
-    rfid_serial: Any | None = None  # NfcDaemonClient
+    # NFC accessory reader (injected at runtime by console.py)
+    nfc_client: Any | None = None  # NfcDaemonClient
     blank_tag_present: bool = False  # True while a blank NFC tag is on the reader
     pending_nfc_write: "dict[str, str] | None" = None  # {"code", "personality"} waiting for a blank tag
     recently_written_codes: "set[str]" = field(default_factory=set)  # written but not yet welcomed
@@ -102,11 +102,8 @@ _REMOTE_TOOL_RETRY_DELAY_S = 0.25
 _TOOLS_LOCK = threading.RLock()
 _EXTERNAL_TOOL_MODULE_NAMESPACE = "reachy_mini_conversation_app._external_tools"
 
-# Writing a personality onto an accessory needs a reader, so the tool is offered only
-# while one is attached; rfid_routes flips this as the NFC daemon comes and goes. It
-# takes part in the registry signature, so the next initialize_tools() rebuilds
-# accordingly. Availability only: a profile that explicitly excludes the tool keeps
-# it excluded.
+# The accessory tool is offered only while an NFC reader is attached; rfid_routes flips
+# this flag, which is part of the registry signature so initialize_tools() rebuilds.
 ACCESSORY_PERSONALITY_TOOL_NAME = "create_accessory_personality"
 _ACCESSORY_PERSONALITY_TOOL_AVAILABLE = False
 
@@ -335,10 +332,8 @@ def _read_profile_tool_names(instance_path: str | Path | None) -> list[str]:
 
     tool_names.extend(tool.value for tool in SystemTool if tool.value not in tool_names)
 
-    # Offered by default to any profile while a reader is attached, so the flow works
-    # out of the box without listing the tool in thirteen shipped profile documents.
-    # A profile whose tools were set explicitly keeps exactly what was set: unticking
-    # the tool in the Tool access panel has to mean something.
+    # Offered by default to every profile while a reader is attached, unless the
+    # profile's tools were set explicitly in the Tool access panel.
     if _ACCESSORY_PERSONALITY_TOOL_AVAILABLE:
         has_explicit_toolset = read_profile_tool_override(profile, instance_path) is not None
         if not has_explicit_toolset and ACCESSORY_PERSONALITY_TOOL_NAME not in tool_names:

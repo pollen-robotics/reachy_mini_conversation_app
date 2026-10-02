@@ -28,11 +28,8 @@ from reachy_mini.apps.jsonrpc_server import JsonRpcServer
 from reachy_mini.motion.recorded_move import RecordedMoves
 from reachy_mini_conversation_app.config import LOCKED_PROFILE
 from reachy_mini_conversation_app.personality import list_personalities
-from reachy_mini_conversation_app.personality_tag import (
-    DEFAULT_SELECTION,
-    to_tag_token,
-    from_tag_token,
-)
+from reachy_mini_conversation_app.profile_store import DEFAULT_PROFILE_NAME
+from reachy_mini_conversation_app.personality_tag import to_tag_token, from_tag_token
 from reachy_mini_conversation_app.tools.core_tools import set_accessory_personality_tool_available
 from reachy_mini_conversation_app.nfc_daemon_client import (
     NfcTagSnapshot,
@@ -73,32 +70,27 @@ DefaultPersonalityGetter = Callable[[], str | None]
 
 
 def accessory_personality_on_reader(timeout: float = 2.0) -> str | None:
-    """Return the personality named by an accessory already on the reader.
+    """Return the personality named by an accessory already on the reader, or None.
 
-    None when there is none. Read once before the handler is built, so an
-    accessory left on the head between two runs starts its personality
-    outright. Going through :meth:`RfidController._on_tag_read` instead would
-    apply it as a change — the transition move, a backend restart — on top of a
-    robot that has only just finished starting.
-
-    No driver, no daemon answering, no accessory, and an accessory naming a
-    personality this robot does not have all read the same way here: nothing to
-    start from. The daemon client reports its own failures as an absent tag, so
-    a reader that is down cannot hold up the launch.
+    Read once before the first handler is built, so the app starts as that
+    personality instead of applying it as a change right after launch. Daemon
+    failures read as an absent tag, so a reader that is down cannot hold up the launch.
     """
     client = NfcDaemonClient(timeout=timeout)
     try:
         if not client.get_status().get("driver_available"):
             return None
-        tag = client.get_tag()
-        if not tag.present or tag.blank or not tag.content:
-            return None
-        personality = from_tag_token(tag.content)
-        if personality is None or personality not in list_personalities():
-            return None
-        return personality
+        return _tag_personality(client.get_tag())
     finally:
         client.close()
+
+
+def _tag_personality(tag: NfcTagSnapshot) -> str | None:
+    """Return the personality a tag names, if this robot has it."""
+    if not tag.present or tag.blank or not tag.content:
+        return None
+    personality = from_tag_token(tag.content)
+    return personality if personality in list_personalities() else None
 
 
 def _load_move_dataset(repo_id: str) -> RecordedMoves | None:
@@ -125,15 +117,10 @@ class RfidController:
     ) -> None:
         """Build a controller; call :meth:`start` to begin polling.
 
-        ``get_default_personality`` reports the personality this instance falls
-        back to when no accessory is on the reader — the one chosen with "Set as
-        default", not necessarily the built-in one.
-
-        ``initial_personality`` is the one the app already started as, read off
-        an accessory that was on the reader before the app came up. The
-        controller needs it to know that taking that accessory off is a change:
-        without it the removal reads as "nothing was applied" and the
-        personality stays on with no accessory to explain it.
+        ``get_default_personality`` returns the personality to fall back to when
+        the accessory is removed (the one set as default). ``initial_personality``
+        is the one the app started as from an accessory already on the reader, so
+        that removing it is seen as a change.
         """
         self._client = NfcDaemonClient()
         self._get_handler = get_handler
@@ -149,8 +136,6 @@ class RfidController:
         self._write_moves = _load_move_dataset(WRITE_MOVE_DATASET)
 
         self._apply_lock = threading.Lock()
-        self._stop_event = threading.Event()
-        self._thread: threading.Thread | None = None
 
         self._current_personality: str | None = initial_personality
         self._blank_tag_active = False
@@ -168,30 +153,13 @@ class RfidController:
         """The underlying NFC daemon client."""
         return self._client
 
-    def set_rpc(self, rpc: JsonRpcServer) -> None:
-        """Attach the JSON-RPC server used to broadcast tag notifications."""
-        self._rpc = rpc
-
     def start(self) -> None:
-        """Start the background polling thread (idempotent)."""
-        if self._thread is not None and self._thread.is_alive():
-            return
-        self._stop_event.clear()
-        self._thread = threading.Thread(target=self._poll_loop, name="rfid-poll", daemon=True)
-        self._thread.start()
+        """Start the background polling thread, which lives as long as the app."""
+        threading.Thread(target=self._poll_loop, name="rfid-poll", daemon=True).start()
         logger.info("[RFID] polling thread started")
 
-    def stop(self) -> None:
-        """Stop the background polling thread."""
-        self._stop_event.set()
-        thread = self._thread
-        if thread is not None:
-            thread.join(timeout=2.0)
-        self._thread = None
-        self._client.close()
-
     def _poll_loop(self) -> None:
-        while not self._stop_event.is_set():
+        while True:
             connected = False
             try:
                 connected = bool(self.poll_once().get("connected"))
@@ -199,33 +167,24 @@ class RfidController:
                 logger.exception("[RFID] polling iteration failed")
             # A failed iteration backs off too: it means the daemon is not
             # answering, which is no more urgent than a missing board.
-            self._stop_event.wait(POLL_INTERVAL_S if connected else DISCONNECTED_POLL_INTERVAL_S)
+            time.sleep(POLL_INTERVAL_S if connected else DISCONNECTED_POLL_INTERVAL_S)
 
     # ── snapshot helpers ─────────────────────────────────────────────────────
 
     def connection_status(self) -> dict[str, Any]:
         """Return the reader's connection state as the UI shows it.
 
-        Also keeps the accessory-personality tool in step with the reader: one
-        plugged in (or unplugged) mid-session changes which tools the next
-        realtime session offers.
+        Also offers or withdraws the accessory-personality tool as the reader comes and goes.
         """
         status = self._client.get_status()
         set_accessory_personality_tool_available(bool(status.get("driver_available", False)))
         summary = {
             "connected": status.get("connected", False),
-            # Switched off from the control app's settings (or the daemon was
-            # started with --no-nfc). The daemon then releases the port and
-            # stops looking for the board, so "not connected" says nothing
-            # about whether the add-on is fitted. Daemons without the switch
-            # leave it out: they are always on.
+            # False when switched off in the control app: "not connected" then says
+            # nothing about whether the add-on is fitted. Older daemons omit it.
             "enabled": status.get("enabled") is not False,
             "port": status.get("port"),
-            "chip_detected": status.get("chip_detected", False),
             "driver_available": status.get("driver_available", False),
-            "chip_version": status.get("chip_version"),
-            # The daemon says why the link is down — no board found, port busy,
-            # driver missing. "Not connected" alone leaves the user guessing.
             "error": status.get("error"),
         }
         self._last_status = summary
@@ -242,23 +201,15 @@ class RfidController:
         return self.connection_status()
 
     def accessory_view(self, tag: NfcTagSnapshot | None) -> dict[str, Any]:
-        """Describe, for the panel, the accessory currently on the reader.
-
-        ``tag`` is None when there is no reader to read from, which the UI has
-        to tell apart from a working reader with nothing on it.
-
-        Resolved server-side on purpose: the token scheme lives in
-        personality_tag, and a second copy of it in JavaScript would be free to
-        drift from this one.
-        """
+        """Describe, for the panel, the accessory on the reader (``tag`` is None without a reader)."""
         if tag is None:
             return {"state": "unavailable", "personality": None, "content": None}
         if not tag.present:
             return {"state": "none", "personality": None, "content": None}
         if tag.blank or not tag.content:
             return {"state": "blank", "personality": None, "content": None}
-        personality = from_tag_token(tag.content)
-        if personality and personality in list_personalities():
+        personality = _tag_personality(tag)
+        if personality is not None:
             return {"state": "known", "personality": personality, "content": tag.content}
         # Carries something, but nothing this robot can act on: an old opaque
         # code, a deleted profile, or a tag written elsewhere.
@@ -268,11 +219,7 @@ class RfidController:
         """Return the full reader + accessory state, without advancing the machine."""
         status = self.connection_status()
         tag = self._client.get_tag() if status["connected"] else None
-        return {
-            **status,
-            "accessory": self.accessory_view(tag),
-            "current_personality": self._current_personality,
-        }
+        return {**status, "accessory": self.accessory_view(tag)}
 
     def _announce_personality(self, profile: str | None) -> None:
         """Tell the app a personality was applied by the reader, not by a client."""
@@ -317,14 +264,14 @@ class RfidController:
         code = to_tag_token(personality)
         if code is None:
             raise JsonRpcError(
-                "The built-in default cannot be written to an accessory.",
+                "This personality cannot be written to an accessory.",
                 reason="not_writable",
             )
         if tag.content == code:
             logger.info("[RFID] Tag already carries %r", personality)
             return {"ok": True, "code": code, "personality": personality, "written": False}
         logger.info("[RFID] Writing %r to tag for personality %r", code, personality)
-        success, detail = self._client.write_tag_sync(code)
+        success, detail = self._client.write_tag(code)
         if not success:
             logger.warning("[RFID] Write failed for %r: %s", code, detail)
             raise JsonRpcError(
@@ -342,7 +289,7 @@ class RfidController:
         payload that is not NDEF. It writes one page at a time, so it takes a
         few seconds on an NTAG215.
         """
-        success, result = self._client.erase_tag_sync(full=full)
+        success, result = self._client.erase_tag(full=full)
         if not success:
             logger.warning("[RFID] Erase failed: %s", result)
             raise JsonRpcError(
@@ -352,24 +299,15 @@ class RfidController:
             )
         return {"ok": True, "message": "Tag erased"}
 
-    def write_tag(self, code: str) -> dict[str, Any]:
-        """Queue a raw write of ``code`` onto the accessory on the reader."""
-        message = self._client.write_tag(code)
-        return {"ok": True, "message": message}
-
-    def personality_tokens(self) -> dict[str, str]:
-        """Map each writable personality to the token an accessory would carry."""
-        return {name: token for name in list_personalities() if (token := to_tag_token(name)) is not None}
-
     # ── state machine ────────────────────────────────────────────────────────
 
     def poll_once(self) -> dict[str, Any]:
-        """Read the reader once and act on every transition since the last read."""
+        """Read the reader once, act on every transition since the last read, and return the snapshot."""
         status = self.connection_status()
         if not status["connected"]:
             self._previous_tag = None
-            payload = {**status, "accessory": self.accessory_view(None), "applied": None}
-            self._broadcast({k: v for k, v in payload.items() if k != "applied"})
+            payload = {**status, "accessory": self.accessory_view(None)}
+            self._broadcast(payload)
             return payload
 
         tag = self._client.get_tag()
@@ -377,25 +315,22 @@ class RfidController:
         self._previous_tag = tag
 
         messages = self._transitions(previous, tag)
-        applied = None
         if messages and self._apply_lock.acquire(blocking=False):
             try:
-                applied = self._process(messages)
+                self._process(messages)
             finally:
                 self._apply_lock.release()
 
-        payload = {**status, "accessory": self.accessory_view(tag), "applied": applied}
-        self._broadcast({k: v for k, v in payload.items() if k != "applied"})
+        payload = {**status, "accessory": self.accessory_view(tag)}
+        self._broadcast(payload)
         return payload
 
     def _transitions(self, previous: NfcTagSnapshot | None, tag: NfcTagSnapshot) -> list[str]:
-        """Synthesise firmware-style event lines from two consecutive snapshots.
+        """Turn two consecutive snapshots, plus finished writes, into events.
 
-        The line protocol ("NO_TAG", "READ:", "READ:<code>", "WRITE_OK",
-        "WRITE_FAIL:…") predates the daemon; keeping it means the state machine
-        below reads the same as when the app spoke to the board directly.
+        Events: "NO_TAG", "READ:" (blank tag), "READ:<code>", "WRITE_OK", "WRITE_FAIL:<code>".
         """
-        messages: list[str] = [result_message for _success, result_message in self._client.drain_write_results()]
+        messages = self._client.drain_write_results()
         if previous is None:
             return messages
         if not tag.present and previous.present:
@@ -409,20 +344,16 @@ class RfidController:
                 messages.append(f"READ:{tag.content}")
         return messages
 
-    def _process(self, messages: list[str]) -> dict[str, Any] | None:
+    def _process(self, messages: list[str]) -> None:
         handler = self._get_handler()
         logger.info("[RFID] events: %r", messages)
-        applied = None
         for message in messages:
-            if message.strip() == "NO_TAG":
-                applied = self._on_tag_removed(handler) or applied
+            if message == "NO_TAG":
+                self._on_tag_removed(handler)
             elif message.startswith("READ:"):
-                applied = self._on_tag_read(handler, message[5:].strip().rstrip("\x00").strip()) or applied
-            elif message.startswith("WRITE_"):
-                self._on_write_result(handler, message)
+                self._on_tag_read(handler, message[5:].strip())
             else:
-                logger.debug("[RFID] >>> unhandled event: %r", message)
-        return applied
+                self._on_write_result(handler, message)
 
     def _queue_move(self, handler: "HuggingFaceRealtimeHandler", moves: RecordedMoves | None, name: str) -> None:
         """Queue a recorded emotion move, doing nothing when its dataset is missing."""
@@ -446,7 +377,7 @@ class RfidController:
             logger.warning("[RFID] >>> %s FAILED: %s", description, exc)
             return False
 
-    def _on_tag_removed(self, handler: "HuggingFaceRealtimeHandler") -> dict[str, Any] | None:
+    def _on_tag_removed(self, handler: "HuggingFaceRealtimeHandler") -> None:
         was_blank = self._blank_tag_active
         self._blank_tag_active = False
         self._blank_tag_cooldown_until = time.monotonic() + BLANK_TAG_COOLDOWN_S
@@ -458,41 +389,34 @@ class RfidController:
                 future.cancel()
                 setattr(self, future_name, None)
 
-        if not self._run_on_loop(handler.abort_nfc_collection(), "abort_nfc_collection", timeout=5.0):
-            handler._nfc_transition = False
-            handler._nfc_speech_done_event.set()
+        self._run_on_loop(handler.abort_nfc_collection(), "abort_nfc_collection", timeout=5.0)
 
         if was_blank:
             logger.info("[RFID] >>> blank tag removed (blank_tag_present cleared)")
             handler.deps.pending_nfc_write = None
 
         if self._current_personality is None:
-            return None
+            return
 
         profile = self._default_personality()
         if profile == self._current_personality:
-            # The accessory carried the personality this robot runs anyway:
-            # taking it off changes nothing, and restarting the backend to
-            # arrive at what is already running would only cost a silence.
+            # The accessory carried the default personality: no restart needed.
             logger.info("[RFID] >>> NO_TAG received — already on the default personality")
             self._current_personality = None
-            return None
+            return
 
-        logger.info("[RFID] >>> NO_TAG received — reverting to %s", profile or DEFAULT_SELECTION)
+        logger.info("[RFID] >>> NO_TAG received — reverting to %s", profile or DEFAULT_PROFILE_NAME)
         self._queue_move(handler, self._transition_moves, TRANSITION_MOVE_NAME)
         if not self._run_on_loop(handler.apply_personality(profile), "default revert"):
-            return None
+            return
         self._current_personality = None
         self._announce_personality(profile)
         logger.info("[RFID] >>> default personality applied OK")
-        return {"code": None, "personality": profile or DEFAULT_SELECTION}
 
     def _default_personality(self) -> str | None:
         """Return the personality to fall back to with no accessory on the reader.
 
-        None means the built-in default. A saved personality that has since been
-        deleted reads the same way: falling back to something this robot no
-        longer has would fail the revert and strand the accessory's personality.
+        None means the built-in default, also used when the saved one has since been deleted.
         """
         if self._get_default_personality is None:
             return None
@@ -505,41 +429,34 @@ class RfidController:
             return None
         return profile
 
-    def _on_tag_read(self, handler: "HuggingFaceRealtimeHandler", code: str) -> dict[str, Any] | None:
+    def _on_tag_read(self, handler: "HuggingFaceRealtimeHandler", code: str) -> None:
         if not code:
             self._on_blank_tag(handler)
-            return None
+            return
 
         handler.deps.blank_tag_present = False
         personality = from_tag_token(code)
-        if personality is not None and personality not in list_personalities():
-            # A token for a personality this robot does not have: say so rather
-            # than silently ignoring a tag the user just presented.
-            logger.warning("[RFID] >>> unknown personality %r on tag", personality)
-            personality = None
-        if personality is None:
-            logger.info("[RFID] >>> code %r not in store, keeping current personality", code)
-            return None
+        if personality is None or personality not in list_personalities():
+            logger.info("[RFID] >>> tag %r names no personality on this robot, keeping current one", code)
+            return
         if personality == self._current_personality:
             logger.debug("[RFID] >>> same personality %r, skipping", personality)
-            return None
+            return
 
         if code in handler.deps.recently_written_codes:
             handler.deps.recently_written_codes.discard(code)
             self._current_personality = personality
             logger.info("[RFID] >>> newly written tag %r — delaying personality switch", code)
             self._schedule_delayed_switch(handler, personality)
-            return None
+            return
 
         logger.info("[RFID] >>> applying personality %r for code %r", personality, code)
         self._queue_move(handler, self._transition_moves, TRANSITION_MOVE_NAME)
-        profile = None if personality == DEFAULT_SELECTION else personality
-        if not self._run_on_loop(handler.apply_personality(profile), "apply"):
-            return None
+        if not self._run_on_loop(handler.apply_personality(personality), "apply"):
+            return
         self._current_personality = personality
-        self._announce_personality(profile)
+        self._announce_personality(personality)
         logger.info("[RFID] >>> personality applied OK")
-        return {"code": code, "personality": personality}
 
     def _on_blank_tag(self, handler: "HuggingFaceRealtimeHandler") -> None:
         handler.deps.blank_tag_present = True
@@ -549,10 +466,10 @@ class RfidController:
             handler.deps.pending_nfc_write = None
             logger.info("[RFID] >>> blank tag with pending write — writing code %r", pending["code"])
             handler.deps.recently_written_codes.add(pending["code"])
-            self._client.write_tag(pending["code"])
+            self._client.write_tag_in_background(pending["code"])
             self._run_on_loop(
-                handler.inject_nfc_writing_started(pending["personality"]),
-                "inject_nfc_writing_started",
+                handler.cancel_nfc_retry(),
+                "cancel_nfc_retry",
             )
             return
         if self._blank_tag_active or time.monotonic() < self._blank_tag_cooldown_until:
@@ -568,7 +485,6 @@ class RfidController:
             return
         if self._delayed_switch_future is not None:
             self._delayed_switch_future.cancel()
-        profile = None if personality == DEFAULT_SELECTION else personality
 
         async def _delayed_switch() -> None:
             try:
@@ -578,8 +494,8 @@ class RfidController:
                     logger.warning("[RFID] >>> NFC speech done event timed out, switching anyway")
                 await self._wait_for_welcome_speech(handler)
                 self._queue_move(handler, self._transition_moves, TRANSITION_MOVE_NAME)
-                await handler.apply_personality(profile)
-                self._announce_personality(profile)
+                await handler.apply_personality(personality)
+                self._announce_personality(personality)
                 logger.info("[RFID] >>> delayed personality switch to %r done", personality)
             except asyncio.CancelledError:
                 logger.info("[RFID] >>> delayed personality switch cancelled (tag removed)")
@@ -601,7 +517,7 @@ class RfidController:
         sample_rate = handler.SAMPLE_RATE
         if start is not None and samples > 0 and sample_rate > 0:
             speech_duration = samples / sample_rate
-            remaining = start + speech_duration + 0.8 - asyncio.get_event_loop().time()
+            remaining = start + speech_duration + 0.8 - asyncio.get_running_loop().time()
             logger.info(
                 "[RFID] >>> welcome speech: %.2fs, waiting %.2fs more before switch",
                 speech_duration,
@@ -628,7 +544,7 @@ class RfidController:
         loop = self._get_loop()
         if loop is None:
             return
-        success = message.upper().startswith("WRITE_OK")
+        success = message == "WRITE_OK"
         if success:
             self._run_on_loop(handler.stop_current_speech(), "stop_current_speech", timeout=6.0)
 
@@ -691,9 +607,6 @@ def register_rfid_methods(rpc: JsonRpcServer, controller: RfidController) -> Non
     async def _status(_params: dict[str, Any]) -> dict[str, Any]:
         return await asyncio.to_thread(controller.snapshot)
 
-    async def _tokens(_params: dict[str, Any]) -> dict[str, Any]:
-        return {"personality_to_code": await asyncio.to_thread(controller.personality_tokens)}
-
     async def _link_tag(params: dict[str, Any]) -> dict[str, Any]:
         if LOCKED_PROFILE is not None:
             raise JsonRpcError("Personality editing is locked.", reason="profile_locked")
@@ -704,12 +617,6 @@ def register_rfid_methods(rpc: JsonRpcServer, controller: RfidController) -> Non
 
     async def _erase(params: dict[str, Any]) -> dict[str, Any]:
         return await asyncio.to_thread(controller.erase_tag, bool(params.get("full", False)))
-
-    async def _write(params: dict[str, Any]) -> dict[str, Any]:
-        code = params.get("code")
-        if not isinstance(code, str) or not code.strip():
-            raise JsonRpcError("A code is required.", reason="invalid_code")
-        return await asyncio.to_thread(controller.write_tag, code)
 
     async def _open_add_on_store(_params: dict[str, Any]) -> dict[str, Any]:
         # The panel runs in the control app's webview, which drops target="_blank"
@@ -724,8 +631,6 @@ def register_rfid_methods(rpc: JsonRpcServer, controller: RfidController) -> Non
         return {"opened": opened, "url": ADD_ON_STORE_URL}
 
     rpc.register("rfid.status", _status)
-    rpc.register("rfid.tokens", _tokens)
     rpc.register("rfid.link_tag", _link_tag)
     rpc.register("rfid.erase", _erase)
-    rpc.register("rfid.write", _write)
     rpc.register("rfid.open_add_on_store", _open_add_on_store)

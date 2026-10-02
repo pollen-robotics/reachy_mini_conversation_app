@@ -166,6 +166,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
         # NFC write retry task: started when the accessory tool returns "waiting_for_tag"
         self._nfc_retry_task: asyncio.Task[None] | None = None
+        self._nfc_watchdog_task: asyncio.Task[None] | None = None
         # NFC transition gate: True from WRITE_OK until apply_personality completes.
         # Blocks new _safe_response_create calls and cancels VAD auto-responses.
         self._nfc_transition: bool = False
@@ -176,9 +177,6 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         # _delayed_switch waits on this before applying the personality.
         self._nfc_speech_done_event: asyncio.Event = asyncio.Event()
         self._nfc_speech_done_event.set()  # starts in "not waiting" state
-        # Counts down response.done events after blank-tag injection.
-        # While > 0, the accessory tool is excluded from session tools.
-        self._nfc_collect_turns: int = 0
         # Tracks the welcome-speech audio so _delayed_switch can wait for playback.
         self._nfc_speech_start_time: float | None = None
         self._nfc_speech_samples: int = 0
@@ -366,11 +364,22 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
     # ── NFC / RFID event injection methods ───────────────────────────────────
 
+    async def _inject_system_event(self, text: str, response: dict[str, Any] | None = None) -> None:
+        """Tell the model about an NFC event and ask it to respond."""
+        if not self.connection:
+            logger.debug("NFC event skipped, no active connection: %s", text)
+            return
+        await self.connection.conversation.item.create(
+            item={
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": text}],
+            },
+        )
+        await self._safe_response_create(response=response or {})
+
     async def inject_blank_nfc_tag(self) -> None:
         """Notify the LLM that a blank NFC tag has been detected."""
-        if not self.connection:
-            logger.debug("inject_blank_nfc_tag: no active connection, skipping")
-            return
         logger.info("inject_blank_nfc_tag: injecting blank NFC tag event")
         event_text = (
             "[System event — follow this exact sequence, do not skip steps:\n"
@@ -386,50 +395,24 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             "AND described the personality in their own words.\n"
             "If user says no at any point: react naturally and drop the topic.]"
         )
-        await self.connection.conversation.item.create(
-            item={
-                "type": "message",
-                "role": "user",
-                "content": [{"type": "input_text", "text": event_text}],
-            },
-        )
-        await self._safe_response_create(
+        await self._inject_system_event(
+            event_text,
             response={
                 "instructions": (
                     "An unfamiliar object is on your head. React with curiosity. "
                     "Ask the user if they'd like to give it a personality. "
                     "One or two sentences, warm and playful. Do NOT call any tool yet."
                 ),
-            }
+            },
         )
 
     async def abort_nfc_collection(self) -> None:
-        """Reset all NFC-flow state when the tag is removed mid-flow (before switch)."""
+        """Reset the NFC transition when the tag is removed mid-flow (before switch)."""
         self._nfc_transition = False
         self._nfc_speech_done_event.set()
-        if self._nfc_collect_turns > 0:
-            self._nfc_collect_turns = 0
-            while not self._pending_responses.empty():
-                try:
-                    self._pending_responses.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
-            if self.connection is not None:
-                try:
-                    await self.connection.response.cancel()
-                except Exception:
-                    pass
-            logger.info("abort_nfc_collection: restoring the accessory tool in session tools")
-            if self.connection is not None:
-                try:
-                    await self.connection.session.update(
-                        session={"type": "realtime", "tools": to_realtime_tools_config(get_tool_specs())}
-                    )
-                except Exception as _te:
-                    logger.warning("abort_nfc_collection: failed to restore tools: %s", _te)
 
-    async def stop_current_speech(self) -> None:
-        """Cancel any in-flight LLM response and wait for buffered audio to finish playing."""
+    async def _cancel_responses(self) -> None:
+        """Cancel the in-flight response and drop the queued ones."""
         if self.connection is not None:
             try:
                 await self.connection.response.cancel()
@@ -440,6 +423,10 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 self._pending_responses.get_nowait()
             except asyncio.QueueEmpty:
                 break
+
+    async def stop_current_speech(self) -> None:
+        """Cancel any in-flight LLM response and wait for buffered audio to finish playing."""
+        await self._cancel_responses()
         try:
             await asyncio.wait_for(self._response_done_event.wait(), timeout=5.0)
         except asyncio.TimeoutError:
@@ -448,7 +435,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         samples = self._last_speech_samples
         sr = self.SAMPLE_RATE
         if start is not None and samples > 0 and sr > 0:
-            remaining = start + samples / sr + 0.3 - asyncio.get_event_loop().time()
+            remaining = start + samples / sr + 0.3 - asyncio.get_running_loop().time()
             logger.info(
                 "stop_current_speech: %.2fs of speech, waiting %.2fs for buffer to drain",
                 samples / sr,
@@ -460,103 +447,46 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             await asyncio.sleep(0.3)
         logger.info("stop_current_speech: audio buffer cleared, movement can start")
 
-    async def inject_nfc_writing_started(self, personality: str) -> None:
-        """Cancel the retry loop when a blank tag is detected for a pending write."""
+    async def cancel_nfc_retry(self) -> None:
+        """Stop nudging the user once the blank tag for a pending write shows up."""
         if self._nfc_retry_task is not None and not self._nfc_retry_task.done():
             self._nfc_retry_task.cancel()
             self._nfc_retry_task = None
-        logger.info("inject_nfc_writing_started: blank tag detected, writing code for %r (silent)", personality)
 
     async def inject_nfc_write_result(self, success: bool, raw_msg: str = "") -> None:
-        """Notify the LLM of the Arduino's NFC tag write confirmation."""
+        """Have the model react to the tag write result; on success, pause dialogue until the switch."""
         if not self.connection:
             logger.debug("inject_nfc_write_result: no active connection, skipping")
             return
         logger.info("inject_nfc_write_result: success=%s raw=%r", success, raw_msg)
 
-        if success:
-            try:
-                await self.connection.response.cancel()
-            except Exception:
-                pass
-            while not self._pending_responses.empty():
-                try:
-                    self._pending_responses.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
-            logger.info("inject_nfc_write_result: drained pending responses before welcome speech")
-
-        if success:
-            event_text = (
-                "[System event: The new personality is now linked to this object. "
-                "Say this new personality it's eager to express itself in one sentence.]"
-            )
-        else:
-            event_text = (
+        if not success:
+            await self._inject_system_event(
                 f"[System event: Something went wrong and the object could not be linked ({raw_msg}). "
                 "Tell the user lightly that something didn't work and they could try again.]"
             )
-        await self.connection.conversation.item.create(
-            item={
-                "type": "message",
-                "role": "user",
-                "content": [{"type": "input_text", "text": event_text}],
-            },
-        )
-        if success:
-            self._nfc_speech_done_event.clear()
-            self._nfc_speech_start_time = None
-            self._nfc_speech_samples = 0
-        await self._safe_response_create(response={})
-        if success:
-            self._nfc_transition = True
-            logger.info("inject_nfc_write_result: NFC transition started — dialogue paused until personality switch")
-
-            async def _nfc_transition_watchdog() -> None:
-                await asyncio.sleep(20.0)
-                if self._nfc_transition:
-                    logger.warning("inject_nfc_write_result: watchdog resetting stuck _nfc_transition after 20 s")
-                    self._nfc_transition = False
-                    self._nfc_speech_done_event.set()
-
-            asyncio.create_task(_nfc_transition_watchdog(), name="nfc-transition-watchdog")
-
-    async def _inject_nfc_ask_again(self) -> None:
-        """Nudge the user to bring the accessory closer while a write is pending."""
-        if not self.connection:
             return
-        logger.info("_inject_nfc_ask_again: still waiting for blank tag")
-        event_text = (
-            "[System event: The object still hasn't appeared. "
-            "Ask the user gently and without pressure to bring it close so the personality can take shape.]"
-        )
-        await self.connection.conversation.item.create(
-            item={
-                "type": "message",
-                "role": "user",
-                "content": [{"type": "input_text", "text": event_text}],
-            },
-        )
-        await self._safe_response_create(response={})
 
-    async def _inject_nfc_write_cancelled(self) -> None:
-        """Tell the LLM the pending write timed out with no tag presented."""
-        if not self.connection:
-            return
-        logger.info("_inject_nfc_write_cancelled: timeout, cancelling")
-        event_text = (
-            "[System event: No object appeared after waiting a while. "
-            "Tell the user lightly and naturally that you'll drop it for now — "
-            "the personality idea is still there, it just isn't tied to any object yet.]"
+        await self._cancel_responses()
+        self._nfc_speech_done_event.clear()
+        self._nfc_speech_start_time = None
+        self._nfc_speech_samples = 0
+        await self._inject_system_event(
+            "[System event: The new personality is now linked to this object. "
+            "Say this new personality it's eager to express itself in one sentence.]"
         )
-        await self.connection.conversation.item.create(
-            item={
-                "type": "message",
-                "role": "user",
-                "content": [{"type": "input_text", "text": event_text}],
-            },
-        )
-        await self._safe_response_create(response={})
+        self._nfc_transition = True
+        logger.info("inject_nfc_write_result: NFC transition started — dialogue paused until personality switch")
+
+        async def _nfc_transition_watchdog() -> None:
+            await asyncio.sleep(20.0)
+            if self._nfc_transition:
+                logger.warning("inject_nfc_write_result: watchdog resetting stuck _nfc_transition after 20 s")
+                self._nfc_transition = False
+                self._nfc_speech_done_event.set()
+
+        # Kept referenced so the task is not garbage-collected while it sleeps.
+        self._nfc_watchdog_task = asyncio.create_task(_nfc_transition_watchdog(), name="nfc-transition-watchdog")
 
     async def _nfc_retry_loop(self) -> None:
         """Wait up to 10 s for a blank tag after the accessory tool returned 'waiting_for_tag'.
@@ -568,12 +498,19 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             await asyncio.sleep(5)
             if self.deps.pending_nfc_write is None:
                 return
-            await self._inject_nfc_ask_again()
+            await self._inject_system_event(
+                "[System event: The object still hasn't appeared. "
+                "Ask the user gently and without pressure to bring it close so the personality can take shape.]"
+            )
             await asyncio.sleep(5)
             if self.deps.pending_nfc_write is None:
                 return
             self.deps.pending_nfc_write = None
-            await self._inject_nfc_write_cancelled()
+            await self._inject_system_event(
+                "[System event: No object appeared after waiting a while. "
+                "Tell the user lightly and naturally that you'll drop it for now — "
+                "the personality idea is still there, it just isn't tied to any object yet.]"
+            )
         except asyncio.CancelledError:
             pass
 
@@ -992,7 +929,6 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             self._nfc_transition = False
             self._explicit_response_pending = False
             self._nfc_speech_done_event.set()  # ensure not blocking if restarted mid-transition
-            self._nfc_collect_turns = 0
 
             # Reset the partial-transcript accumulator for each new session
             self.input_transcript_chunks_by_item = InputTranscriptChunksByItem()
@@ -1127,7 +1063,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         decoded_pcm_bytes = base64.b64decode(event.delta)
                         decoded_pcm = np.frombuffer(decoded_pcm_bytes, dtype=np.int16).reshape(1, -1)
                         self._mark_activity("assistant_audio_delta")
-                        now = asyncio.get_event_loop().time()
+                        now = asyncio.get_running_loop().time()
                         if self._nfc_transition:
                             if self._nfc_speech_start_time is None:
                                 self._nfc_speech_start_time = now
