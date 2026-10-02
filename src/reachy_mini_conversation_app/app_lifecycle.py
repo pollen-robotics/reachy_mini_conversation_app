@@ -12,6 +12,7 @@ from reachy_mini.reachy_mini import SLEEP_HEAD_POSE
 from reachy_mini.utils.interpolation import distance_between_poses
 from reachy_mini_conversation_app.config import config, set_custom_profile
 from reachy_mini_conversation_app.daemon_api import DaemonApiError, daemon_request
+from reachy_mini_conversation_app.tool_spaces import migrate_bundled_tool_spaces
 from reachy_mini_conversation_app.profile_store import DEFAULT_PROFILE_NAME, migrate_legacy_profiles
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, initialize_tools
 from reachy_mini_conversation_app.tools.go_to_sleep import GoToSleep
@@ -37,6 +38,11 @@ def initialize_tools_with_default_fallback(
         migrate_legacy_profiles(config.user_personalities_root())
     except Exception as exc:
         logger.warning("Legacy profile migration failed: %s", exc)
+
+    try:
+        migrate_bundled_tool_spaces(instance_path)
+    except Exception as exc:
+        logger.warning("Bundled Tool Space migration failed: %s", exc)
 
     try:
         initialize_tools(instance_path=instance_path)
