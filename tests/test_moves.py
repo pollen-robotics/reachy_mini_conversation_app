@@ -187,3 +187,23 @@ def test_handle_command_queue_and_clear() -> None:
     manager._handle_command("clear_queue", None, now)
     assert len(manager.move_queue) == 0
     assert manager.state.current_move is None
+
+
+def test_handle_command_cancel_move_only_touches_that_move() -> None:
+    """cancel_move stops the playing move or unqueues a pending one, leaving the rest."""
+    manager = MovementManager(MagicMock())
+    now = manager._now()
+    playing, other, pending = (
+        GotoQueueMove(target_head_pose=create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)) for _ in range(3)
+    )
+    manager.state.current_move = playing
+    manager.state.move_start_time = now
+    manager.move_queue.extend([other, pending])
+
+    manager._handle_command("cancel_move", pending, now)
+    assert list(manager.move_queue) == [other]
+    assert manager.state.current_move is playing
+
+    manager._handle_command("cancel_move", playing, now)
+    assert manager.state.current_move is None
+    assert list(manager.move_queue) == [other]

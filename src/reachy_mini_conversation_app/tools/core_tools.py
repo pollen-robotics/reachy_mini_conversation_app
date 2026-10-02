@@ -98,6 +98,20 @@ _TOOLS_LOCK = threading.RLock()
 _EXTERNAL_TOOL_MODULE_NAMESPACE = "reachy_mini_conversation_app._external_tools"
 
 
+async def _queue_thinking_move(deps: ToolDependencies) -> Any:
+    """Queue a thinking move and return it, or None; feedback must never block the call."""
+    try:
+        queue_move = deps.movement_manager.queue_move
+        from reachy_mini_conversation_app.tools.play_emotion import thinking_move
+
+        move = await asyncio.to_thread(thinking_move)
+        queue_move(move)
+        return move
+    except Exception as exc:
+        logger.warning("Thinking move unavailable: %s", exc)
+        return None
+
+
 class RemoteMcpTool(Tool):
     """Adapter exposing one remote MCP tool through the local Tool interface."""
 
@@ -124,6 +138,8 @@ class RemoteMcpTool(Tool):
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Invoke the underlying remote MCP tool."""
+        # Thinking move while the remote call runs, stopped as soon as the answer is back (#564).
+        thinking = await _queue_thinking_move(deps)
         try:
             result = await self._client.call_tool(self._client_tool_name, kwargs)
         except McpToolTimeoutError:
@@ -133,6 +149,9 @@ class RemoteMcpTool(Tool):
             logger.warning("Remote MCP tool failed once; retrying %s from %s: %s", self.name, self._space_slug, exc)
             await asyncio.sleep(_REMOTE_TOOL_RETRY_DELAY_S)
             result = await self._client.call_tool(self._client_tool_name, kwargs)
+        finally:
+            if thinking is not None:
+                deps.movement_manager.cancel_move(thinking)
         payload = dict(result)
         if payload.get("namespaced_tool_name") == self._client_tool_name:
             payload["namespaced_tool_name"] = self.name
