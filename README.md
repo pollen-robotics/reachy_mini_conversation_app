@@ -188,6 +188,18 @@ reachy-mini-conversation-app --no-camera
 reachy-mini-conversation-app --ui
 ```
 
+### Diagnosing missing speech
+
+Set `REACHY_MINI_AUDIO_DEBUG_DIR=audio_debug` in your `.env`, restart the app, and reproduce the problem in a short conversation. Stop the app normally to finalize the WAV files. The log prints the full capture directory, which is on the computer running the app. Capture stops automatically after two minutes; unset the variable and restart to disable it.
+
+Each capture contains:
+
+- `received.wav`: all microphone channels delivered by the SDK, before the app selects the first channel. This includes robot/SDK audio processing, so it is not raw microphone hardware audio. Muted microphone frames never reach this capture.
+- `sent.wav`: the exact mono PCM16 submitted through the realtime connection after successful append calls. This confirms submission, not which samples the server retains for transcription.
+- `events.jsonl`: frame arrival/submission times and sample offsets, connection drops, and server speech boundaries, final transcripts, and errors. Server event fields such as `audio_start_ms` use the server's audio timeline; `elapsed_s` is local time since capture started. WAVs concatenate frames without filling gaps; use the timeline to identify gaps or dropped frames.
+
+Listen to the start of the same phrase in both WAVs. If it is already missing in `received.wav`, investigate microphone/SDK capture or robot audio processing. If it is present there but missing from `sent.wav`, check channel selection and drop events. If both contain it but the transcript does not, investigate the backend's speech detection or transcription. Files contain conversation audio and transcripts; they stay local and can be deleted after diagnosis. The default `audio_debug/` directory is ignored by Git.
+
 ## LLM tools exposed to the assistant
 
 The default profile exposes these tools. Use Tools → Tool access to customize any profile.
