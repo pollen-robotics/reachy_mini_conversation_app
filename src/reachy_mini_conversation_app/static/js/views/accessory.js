@@ -59,6 +59,14 @@ function askHostToOpen(url) {
   });
 }
 
+const LINK_LABEL = "Link accessory";
+const ERASE_LABEL = "Erase content";
+
+/** States that mean the tag holds something, so there is something to erase. */
+function carriesContent(state) {
+  return state === "known" || state === "unknown";
+}
+
 const ACCESSORY_COPY = Object.freeze({
   none: {
     title: "No accessory",
@@ -138,14 +146,27 @@ export async function mountAccessoryView({ outlet, signal }) {
     addOnButton,
     addOnAddress,
   ];
+  // Shown instead when the reader was switched off: the add-on is most likely
+  // fitted already, so the store link would only be noise.
+  const turnedOffPanel = [
+    h("h2", { class: "settings-section-title" }, "NFC reader turned off"),
+    h(
+      "p",
+      { class: "settings-hint" },
+      "The NFC reader is switched off, so Reachy Mini cannot read accessories. "
+        + "Turn it back on in the NFC Reader settings of the Reachy Mini Control app."
+    ),
+  ];
   const readerSection = h("section", { class: "settings-section" }, readerTitle, readerStatus, accessoryCard);
   const personalitySelect = h("select", {
     class: "settings-select",
     "aria-label": "Personality to link",
     disabled: "disabled",
   });
-  const linkButton = h("button", { type: "button", class: "btn btn--primary", disabled: "disabled" }, "Link accessory");
-  const eraseButton = h("button", { type: "button", class: "btn btn--ghost", disabled: "disabled" }, "Unlink accessory");
+  const linkButton = h("button", { type: "button", class: "btn btn--primary", disabled: "disabled" }, LINK_LABEL);
+  // Erasing belongs next to what it erases, so this button is rendered into the
+  // card describing the tag rather than alongside the one that writes to it.
+  const eraseButton = h("button", { type: "button", class: "btn btn--ghost", disabled: "disabled" }, ERASE_LABEL);
   const status = h("p", { class: "settings-status", role: "status", "aria-live": "polite" });
 
   const linkSection = h(
@@ -156,7 +177,7 @@ export async function mountAccessoryView({ outlet, signal }) {
       "p",
       { class: "settings-hint settings-section-intro" },
       "The accessory carries the personality itself, so it means the same thing on any Reachy Mini. "
-        + "Unlinking leaves it blank, and Reachy Mini stops changing personality for it."
+        + "Linking again replaces whatever it carries."
     ),
     h(
       "label",
@@ -164,7 +185,7 @@ export async function mountAccessoryView({ outlet, signal }) {
       h("span", { class: "settings-label" }, "Personality"),
       personalitySelect
     ),
-    h("div", { class: "settings-actions" }, eraseButton, linkButton),
+    h("div", { class: "settings-actions" }, linkButton),
     status
   );
 
@@ -189,13 +210,16 @@ export async function mountAccessoryView({ outlet, signal }) {
   let latest = null;
   let busy = false;
 
-  function setBusy(nextBusy, label) {
+  function setBusy(nextBusy, labels = {}) {
     busy = nextBusy;
     view.toggleAttribute("aria-busy", nextBusy);
     linkButton.disabled = nextBusy || !canLink();
     eraseButton.disabled = nextBusy || !canErase();
     personalitySelect.disabled = nextBusy || !personalitySelect.options.length;
-    linkButton.textContent = nextBusy && label ? label : "Link accessory";
+    // The two buttons now sit in different sections, so only the one at work
+    // says so.
+    linkButton.textContent = (nextBusy && labels.link) || LINK_LABEL;
+    eraseButton.textContent = (nextBusy && labels.erase) || ERASE_LABEL;
   }
 
   // Only a tag state means a tag is on a reader that answers, so neither action
@@ -206,8 +230,7 @@ export async function mountAccessoryView({ outlet, signal }) {
   }
 
   function canErase() {
-    const state = latest?.accessory?.state;
-    return state === "known" || state === "unknown";
+    return carriesContent(latest?.accessory?.state);
   }
 
   function renderAccessory(accessory) {
@@ -222,19 +245,21 @@ export async function mountAccessoryView({ outlet, signal }) {
           ? h("span", { class: "accessory-card__name" }, prettifyProfileName(accessory.personality))
           : null,
         h("span", { class: "settings-hint" }, copy.hint),
-        tagDetails(accessory)
+        tagDetails(accessory),
+        carriesContent(accessory.state)
+          ? h("div", { class: "accessory-card__actions" }, eraseButton)
+          : null
       )
     );
   }
 
   /** What the tag literally holds. Useful when a tag is not recognized. */
   function tagDetails(accessory) {
-    if (accessory.state !== "known" && accessory.state !== "unknown") return null;
+    if (!carriesContent(accessory.state)) return null;
     return h(
       "dl",
       { class: "accessory-card__details" },
       detailRow("Personality", accessory.personality ? prettifyProfileName(accessory.personality) : "—"),
-      detailRow("Profile", accessory.personality || "—"),
       detailRow("Written on the tag", accessory.content || "—")
     );
   }
@@ -258,6 +283,8 @@ export async function mountAccessoryView({ outlet, signal }) {
       readerSection.replaceChildren(readerTitle, readerStatus, accessoryCard);
       readerStatus.textContent = payload.port ? `Reader connected on ${payload.port}.` : "Reader connected.";
       renderAccessory(accessory);
+    } else if (payload?.enabled === false) {
+      readerSection.replaceChildren(...turnedOffPanel);
     } else {
       readerSection.replaceChildren(...requirementPanel);
     }
@@ -307,7 +334,7 @@ export async function mountAccessoryView({ outlet, signal }) {
     const personality = personalitySelect.value;
     status.classList.remove("is-error");
     status.textContent = "";
-    setBusy(true, "Linking…");
+    setBusy(true, { link: "Linking…" });
     try {
       const result = await linkRfidTag(personality);
       status.textContent = result?.written
@@ -325,19 +352,19 @@ export async function mountAccessoryView({ outlet, signal }) {
   eraseButton.addEventListener("click", async () => {
     if (busy || !canErase()) return;
     const confirmed = await confirmDialog({
-      title: "Unlink this accessory?",
+      title: "Erase this accessory?",
       message: "It will carry nothing afterwards, and Reachy Mini will stop changing personality for it.",
-      confirmLabel: "Unlink",
+      confirmLabel: "Erase",
       danger: true,
       signal,
     });
     if (!confirmed) return;
     status.classList.remove("is-error");
     status.textContent = "";
-    setBusy(true, "Erasing…");
+    setBusy(true, { erase: "Erasing…" });
     try {
       await eraseRfidTag(false);
-      status.textContent = "Accessory unlinked.";
+      status.textContent = "Accessory erased.";
       render(await getRfidStatus());
     } catch (error) {
       status.textContent = describeError(error);

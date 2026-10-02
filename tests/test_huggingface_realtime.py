@@ -4,6 +4,7 @@ import base64
 import asyncio
 from types import SimpleNamespace
 from typing import Any
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
@@ -13,6 +14,7 @@ import reachy_mini_conversation_app.conversation_handler as conv_mod
 import reachy_mini_conversation_app.huggingface_realtime as hf_mod
 from reachy_mini_conversation_app.config import config, get_default_voice
 from reachy_mini_conversation_app.streaming import AdditionalOutputs
+from reachy_mini_conversation_app.profile_voices import write_profile_voice_override
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.huggingface_realtime import HuggingFaceRealtimeHandler
 from reachy_mini_conversation_app.tools.background_tool_manager import ToolState, ToolNotification
@@ -247,16 +249,6 @@ async def test_parallel_tool_calls_trigger_single_response(monkeypatch: Any) -> 
 
     await handler._handle_tool_result(_completed("call_b"))
     assert create.await_count == 1
-
-
-def test_handler_uses_hf_startup_voice_at_startup(monkeypatch: Any) -> None:
-    """Hugging Face startup should restore persisted HF voices."""
-    handler = HuggingFaceRealtimeHandler(
-        ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()),
-        startup_voice="Aiden",
-    )
-
-    assert handler.get_current_voice() == "Aiden"
 
 
 def test_handler_ignores_unsupported_hf_profile_voice(monkeypatch: Any) -> None:
@@ -932,6 +924,25 @@ async def test_applying_a_personality_drops_the_manual_voice(monkeypatch: pytest
     await handler.apply_personality("sorry_bro")
 
     assert handler._voice_override is None
+    assert handler.get_current_voice() == "Serena"
+
+
+@pytest.mark.asyncio
+async def test_swapping_personality_and_back_restores_the_picked_voice(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Taking an accessory off must bring back the voice its personality was given."""
+    monkeypatch.setattr(config, "INSTANCE_PATH", tmp_path)
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "hype_bot")
+    monkeypatch.setattr(hf_mod.core_tools, "initialize_tools", lambda **_kwargs: None)
+    write_profile_voice_override("hype_bot", "Serena", tmp_path)
+    handler = _plain_handler()
+
+    await handler.apply_personality("captain_circuit")
+    assert handler.get_current_voice() == "Dylan"
+
+    await handler.apply_personality("hype_bot")
     assert handler.get_current_voice() == "Serena"
 
 

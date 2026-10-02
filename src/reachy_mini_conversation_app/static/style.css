@@ -184,21 +184,21 @@ button {
   align-items: flex-start;
   justify-content: space-between;
   flex-wrap: nowrap;
-  gap: 8px;
+  gap: 12px;
 }
 
 /* Personality pinned left, Accessory pinned right, never wrapping. */
 .app-shell__badge-group {
   display: inline-flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 10px;
   flex: 0 1 auto;
   min-width: 0;
+  max-width: 320px;
 }
 
 .app-shell__badge-group[data-component="accessory-group"] {
-  align-items: flex-end;
   text-align: right;
 }
 
@@ -214,18 +214,21 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 16px;
-  padding: 8px 12px;
-  margin: -8px -12px;
+  padding: 8px 4px;
+  margin: -8px -4px;
   background: transparent;
   border: 0;
   border-radius: 16px;
   min-width: 0;
-  max-width: min(320px, 100%);
   font: inherit;
   color: inherit;
   cursor: pointer;
   appearance: none;
   transition: background 0.15s ease;
+}
+
+.app-shell__accessory {
+  justify-content: flex-end;
 }
 
 .app-shell__personality:hover {
@@ -293,6 +296,7 @@ button {
 }
 
 .app-shell__default-personality {
+  align-self: flex-start;
   min-height: 36px;
   max-width: 100%;
   padding: 8px 14px;
@@ -309,6 +313,10 @@ button {
   white-space: nowrap;
   transition: background var(--transition-fast), border-color var(--transition-fast),
     color var(--transition-fast), opacity var(--transition-fast);
+}
+
+.app-shell__badge-group[data-component="accessory-group"] .app-shell__default-personality {
+  align-self: flex-end;
 }
 
 .app-shell__default-personality[hidden] {
@@ -1669,10 +1677,12 @@ button {
   background: var(--bg);
 }
 
-/* The left edge carries the state, so it reads at a glance from across a desk. */
+/* The left edge carries the state, so it reads at a glance from across a desk.
+   Same reading as the accessory badge in the app shell: green in agreement,
+   amber for something to notice, a dashed grey edge for an empty accessory. */
 .accessory-card[data-state="known"] {
-  border-left-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+  border-left-color: var(--success);
+  background: color-mix(in srgb, var(--success) 8%, var(--bg));
 }
 
 .accessory-card[data-state="blank"] {
@@ -1681,7 +1691,8 @@ button {
 }
 
 .accessory-card[data-state="unknown"] {
-  border-left-color: color-mix(in srgb, var(--accent) 45%, var(--text-muted));
+  border-left-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 8%, var(--bg));
 }
 
 .accessory-card__copy {
@@ -1694,12 +1705,32 @@ button {
 .accessory-card__name {
   font-size: 1.05rem;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--text);
   overflow-wrap: anywhere;
+}
+
+.accessory-card[data-state="known"] .accessory-card__name {
+  color: color-mix(in srgb, var(--success) 75%, var(--text));
+}
+
+.accessory-card[data-state="unknown"] .accessory-card__name {
+  color: color-mix(in srgb, var(--warn) 80%, var(--text));
 }
 
 .accessory-card .settings-hint {
   margin: 0;
+}
+
+/* Sits under the tag's details, so erasing reads as acting on what is above it. */
+.accessory-card__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.accessory-card__actions .btn {
+  padding: 7px 13px;
+  font-size: 0.86rem;
 }
 
 

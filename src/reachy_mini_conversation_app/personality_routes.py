@@ -63,12 +63,11 @@ class PersonalityOps:
         handler: ConversationHandler,
         get_loop: Callable[[], asyncio.AbstractEventLoop | None],
         *,
-        persist_personality: Callable[[str | None, str | None], None] | None = None,
+        persist_personality: Callable[[str | None], None] | None = None,
         get_persisted_personality: Callable[[], str | None] | None = None,
         apply_personality: Callable[[str | None], Awaitable[str]] | None = None,
         get_voices: Callable[[], Awaitable[list[str]]] | None = None,
         get_current_voice: Callable[[], str] | None = None,
-        get_voice_override: Callable[[], str | None] | None = None,
         change_voice: Callable[[str], Awaitable[str]] | None = None,
     ) -> None:
         """Initialize operations with runtime callbacks."""
@@ -79,7 +78,6 @@ class PersonalityOps:
         self._apply_personality = apply_personality
         self._get_voices = get_voices
         self._get_current_voice = get_current_voice
-        self._get_voice_override = get_voice_override
         self._change_voice = change_voice
         self._startup_choice = self._configured_startup_choice()
 
@@ -109,26 +107,6 @@ class PersonalityOps:
 
     def _current_choice(self) -> str:
         return canonical_profile_name(config.REACHY_MINI_CUSTOM_PROFILE)
-
-    def _voice_override(self) -> str | None:
-        """Return the ad-hoc voice to persist for startup, if one is in effect.
-
-        Deliberately not the *effective* voice: persisting that would pin the
-        personality's own voice as a startup override and freeze later edits
-        to it.
-        """
-        if self._get_voice_override is not None:
-            try:
-                return self._get_voice_override()
-            except Exception as exc:
-                logger.warning("Failed to read the current voice override: %s", exc)
-                return None
-        try:
-            callback = self._get_current_voice or self._handler.get_current_voice
-            return callback()
-        except Exception as exc:
-            logger.warning("Failed to read current voice override: %s", exc)
-            return None
 
     async def _run_on_loop(
         self,
@@ -272,10 +250,7 @@ class PersonalityOps:
             if not persist or self._persist_personality is None:
                 return
             try:
-                self._persist_personality(
-                    None if selected_name == DEFAULT_PROFILE_NAME else selected_name,
-                    self._voice_override(),
-                )
+                self._persist_personality(None if selected_name == DEFAULT_PROFILE_NAME else selected_name)
                 self._set_startup_choice(selected_name)
                 persisted_choice = self._startup_choice_value()
             except Exception as exc:
@@ -349,12 +324,11 @@ def build_personality_ops(
     handler: ConversationHandler,
     get_loop: Callable[[], asyncio.AbstractEventLoop | None],
     *,
-    persist_personality: Callable[[str | None, str | None], None] | None = None,
+    persist_personality: Callable[[str | None], None] | None = None,
     get_persisted_personality: Callable[[], str | None] | None = None,
     apply_personality: Callable[[str | None], Awaitable[str]] | None = None,
     get_voices: Callable[[], Awaitable[list[str]]] | None = None,
     get_current_voice: Callable[[], str] | None = None,
-    get_voice_override: Callable[[], str | None] | None = None,
     change_voice: Callable[[str], Awaitable[str]] | None = None,
 ) -> PersonalityOps:
     """Build personality operations for a control transport."""
@@ -366,7 +340,6 @@ def build_personality_ops(
         apply_personality=apply_personality,
         get_voices=get_voices,
         get_current_voice=get_current_voice,
-        get_voice_override=get_voice_override,
         change_voice=change_voice,
     )
 

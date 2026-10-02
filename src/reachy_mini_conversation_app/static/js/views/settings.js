@@ -328,6 +328,9 @@ function accessoryReaderRows(payload, navigate) {
   const rows = [];
   if (payload.nfc_connected) {
     rows.push(statusRow("Accessory reader", "Connected", "ok"));
+  } else if (payload.nfc_enabled === false) {
+    // Someone switched it off on purpose: nothing to explain or to buy.
+    rows.push(statusRow("Accessory reader", "Turned off"));
   } else {
     const label = payload.nfc_supported ? "Not connected" : "Not installed on this robot";
     rows.push(statusRow("Accessory reader", [label, accessoryHelpButton(navigate)]));

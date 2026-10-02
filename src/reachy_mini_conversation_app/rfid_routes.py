@@ -1,7 +1,8 @@
 """NFC accessory reader: background polling and its JSON-RPC control surface.
 
 Each accessory carries a personality token (see :mod:`personality_tag`); placing
-one on the reader applies that personality, removing it reverts to the default.
+one on the reader applies that personality, removing it reverts to the one this
+instance starts as — the personality set as default, or the built-in one.
 A blank accessory starts the "give it a personality" conversation, at the end of
 which :mod:`tools.create_accessory_personality` writes the new token onto it.
 
@@ -68,6 +69,36 @@ ADD_ON_STORE_URL = "https://store.pollen-robotics.com/collections/reachy-mini"
 HandlerGetter = Callable[[], "HuggingFaceRealtimeHandler"]
 LoopGetter = Callable[[], asyncio.AbstractEventLoop | None]
 PersonalityObserver = Callable[[str | None], None]
+DefaultPersonalityGetter = Callable[[], str | None]
+
+
+def accessory_personality_on_reader(timeout: float = 2.0) -> str | None:
+    """Return the personality named by an accessory already on the reader.
+
+    None when there is none. Read once before the handler is built, so an
+    accessory left on the head between two runs starts its personality
+    outright. Going through :meth:`RfidController._on_tag_read` instead would
+    apply it as a change — the transition move, a backend restart — on top of a
+    robot that has only just finished starting.
+
+    No driver, no daemon answering, no accessory, and an accessory naming a
+    personality this robot does not have all read the same way here: nothing to
+    start from. The daemon client reports its own failures as an absent tag, so
+    a reader that is down cannot hold up the launch.
+    """
+    client = NfcDaemonClient(timeout=timeout)
+    try:
+        if not client.get_status().get("driver_available"):
+            return None
+        tag = client.get_tag()
+        if not tag.present or tag.blank or not tag.content:
+            return None
+        personality = from_tag_token(tag.content)
+        if personality is None or personality not in list_personalities():
+            return None
+        return personality
+    finally:
+        client.close()
 
 
 def _load_move_dataset(repo_id: str) -> RecordedMoves | None:
@@ -89,8 +120,21 @@ class RfidController:
         robot: "ReachyMini",
         rpc: JsonRpcServer | None = None,
         on_personality_applied: PersonalityObserver | None = None,
+        get_default_personality: DefaultPersonalityGetter | None = None,
+        initial_personality: str | None = None,
     ) -> None:
-        """Build a controller; call :meth:`start` to begin polling."""
+        """Build a controller; call :meth:`start` to begin polling.
+
+        ``get_default_personality`` reports the personality this instance falls
+        back to when no accessory is on the reader — the one chosen with "Set as
+        default", not necessarily the built-in one.
+
+        ``initial_personality`` is the one the app already started as, read off
+        an accessory that was on the reader before the app came up. The
+        controller needs it to know that taking that accessory off is a change:
+        without it the removal reads as "nothing was applied" and the
+        personality stays on with no accessory to explain it.
+        """
         self._client = NfcDaemonClient()
         self._get_handler = get_handler
         self._get_loop = get_loop
@@ -99,6 +143,7 @@ class RfidController:
         # An accessory swaps the personality without any client asking, so the
         # badges would otherwise keep showing the one it replaced.
         self._on_personality_applied = on_personality_applied
+        self._get_default_personality = get_default_personality
 
         self._transition_moves = _load_move_dataset(TRANSITION_MOVE_DATASET)
         self._write_moves = _load_move_dataset(WRITE_MOVE_DATASET)
@@ -107,7 +152,7 @@ class RfidController:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
-        self._current_personality: str | None = None
+        self._current_personality: str | None = initial_personality
         self._blank_tag_active = False
         self._blank_tag_cooldown_until = 0.0
         self._delayed_switch_future: Any = None
@@ -169,6 +214,12 @@ class RfidController:
         set_accessory_personality_tool_available(bool(status.get("driver_available", False)))
         summary = {
             "connected": status.get("connected", False),
+            # Switched off from the control app's settings (or the daemon was
+            # started with --no-nfc). The daemon then releases the port and
+            # stops looking for the board, so "not connected" says nothing
+            # about whether the add-on is fitted. Daemons without the switch
+            # leave it out: they are always on.
+            "enabled": status.get("enabled") is not False,
             "port": status.get("port"),
             "chip_detected": status.get("chip_detected", False),
             "driver_available": status.get("driver_available", False),
@@ -418,14 +469,41 @@ class RfidController:
         if self._current_personality is None:
             return None
 
-        logger.info("[RFID] >>> NO_TAG received — reverting to default")
+        profile = self._default_personality()
+        if profile == self._current_personality:
+            # The accessory carried the personality this robot runs anyway:
+            # taking it off changes nothing, and restarting the backend to
+            # arrive at what is already running would only cost a silence.
+            logger.info("[RFID] >>> NO_TAG received — already on the default personality")
+            self._current_personality = None
+            return None
+
+        logger.info("[RFID] >>> NO_TAG received — reverting to %s", profile or DEFAULT_SELECTION)
         self._queue_move(handler, self._transition_moves, TRANSITION_MOVE_NAME)
-        if not self._run_on_loop(handler.apply_personality(None), "default revert"):
+        if not self._run_on_loop(handler.apply_personality(profile), "default revert"):
             return None
         self._current_personality = None
-        self._announce_personality(None)
+        self._announce_personality(profile)
         logger.info("[RFID] >>> default personality applied OK")
-        return {"code": None, "personality": DEFAULT_SELECTION}
+        return {"code": None, "personality": profile or DEFAULT_SELECTION}
+
+    def _default_personality(self) -> str | None:
+        """Return the personality to fall back to with no accessory on the reader.
+
+        None means the built-in default. A saved personality that has since been
+        deleted reads the same way: falling back to something this robot no
+        longer has would fail the revert and strand the accessory's personality.
+        """
+        if self._get_default_personality is None:
+            return None
+        try:
+            profile = self._get_default_personality()
+        except (OSError, ValueError) as exc:
+            logger.warning("[RFID] could not read the default personality: %s", exc)
+            return None
+        if profile is None or profile not in list_personalities():
+            return None
+        return profile
 
     def _on_tag_read(self, handler: "HuggingFaceRealtimeHandler", code: str) -> dict[str, Any] | None:
         if not code:
