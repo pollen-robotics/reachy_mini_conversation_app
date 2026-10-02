@@ -454,14 +454,18 @@ _INSTANCE_DATA_NAMES = (
 
 
 def _migrate_instance_data(legacy: Path, target: Path) -> None:
-    """Copy the app's data out of a legacy instance directory, once."""
-    if any((target / name).exists() for name in _INSTANCE_DATA_NAMES):
+    """Copy legacy data item by item, so a failed run resumes on the next start.
+
+    The marker, written once a run completes, keeps deleted data from coming back.
+    """
+    marker = target / ".migrated"
+    if marker.exists():
         return
     for name in _INSTANCE_DATA_NAMES:
         source = legacy / name
-        if not source.exists():
-            continue
         destination = target / name
+        if not source.exists() or destination.exists():
+            continue
         # Copy under a name the guard above ignores, then rename: an
         # interrupted copy is retried on the next start instead of skipped.
         staging = target / f".{name}.migrating"
@@ -473,6 +477,7 @@ def _migrate_instance_data(legacy: Path, target: Path) -> None:
             shutil.copy2(source, staging)
         staging.rename(destination)
         logger.info("Migrated %s to %s", source, destination)
+    marker.touch()
 
 
 def resolve_instance_path(legacy: Path) -> Path:
