@@ -515,7 +515,21 @@ class LocalStream:
         return self.handler.get_current_voice()
 
     async def change_voice(self, voice: str) -> str:
-        """Change the voice through the active handler without rebuilding the backend."""
+        """Change the voice for this session only, without rebuilding the backend.
+
+        The handler drops the pick on the next personality swap, so the
+        personality speaks with its own voice again the next time it starts.
+        """
+        try:
+            return await self.handler.change_voice(voice)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error("Error changing voice to %r: %s", voice, e)
+            return f"Failed to change voice: {e}"
+
+    async def save_voice(self, voice: str) -> str:
+        """Change the voice and make it the active personality's own voice."""
         try:
             status = await self.handler.change_voice(voice)
         except asyncio.CancelledError:
@@ -534,6 +548,7 @@ class LocalStream:
             )
         except (OSError, RuntimeError, ValueError) as e:
             logger.warning("Failed to persist the voice of the active personality: %s", e)
+            raise RuntimeError(f"Voice changed for this session, but could not be saved: {e}") from e
         return status
 
     def _init_rfid_controller(self, rpc: JsonRpcServer) -> None:
@@ -708,6 +723,7 @@ class LocalStream:
                 get_voices=self.get_available_voices,
                 get_current_voice=self.get_current_voice,
                 change_voice=self.change_voice,
+                save_voice=self.save_voice,
             )
             # personalities.* / voices.* over JSON-RPC — the local UI and remote
             # clients drive personalities the same way, one control surface.

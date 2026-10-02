@@ -576,6 +576,33 @@ async def test_personality_ops_apply_voice() -> None:
 
 
 @pytest.mark.asyncio
+async def test_personality_ops_save_voice() -> None:
+    """save_voice delegates to the save callback, not the session-only change."""
+    handler = MagicMock()
+    handler.change_voice = AsyncMock()
+    save_voice = AsyncMock(return_value="Voice changed to cedar.")
+    ops = build_personality_ops(handler, lambda: asyncio.get_running_loop(), save_voice=save_voice)
+
+    result = await ops.save_voice("cedar")
+
+    assert result == {"ok": True, "status": "Voice changed to cedar."}
+    save_voice.assert_awaited_once_with("cedar")
+    handler.change_voice.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_personality_ops_save_voice_reports_persist_failure() -> None:
+    """A voice that could not be saved is surfaced as a route error."""
+    save_voice = AsyncMock(side_effect=RuntimeError("disk full"))
+    ops = build_personality_ops(MagicMock(), lambda: asyncio.get_running_loop(), save_voice=save_voice)
+
+    with pytest.raises(RouteError) as excinfo:
+        await ops.save_voice("cedar")
+
+    assert excinfo.value.reason == "voice_save_failed"
+
+
+@pytest.mark.asyncio
 async def test_personality_ops_persist_startup_personality() -> None:
     """Applying with persist=True saves the personality to start as."""
     handler = MagicMock()
@@ -686,11 +713,11 @@ async def test_apply_personality_restores_profile_when_tool_initialization_fails
 
 
 @pytest.mark.asyncio
-async def test_local_stream_change_voice_gives_it_to_the_active_personality(
+async def test_local_stream_change_voice_lasts_only_for_the_session(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A voice picked from Settings belongs to the personality that is speaking."""
+    """Applying a voice changes the live session without touching the personality."""
     monkeypatch.setattr(config, "INSTANCE_PATH", tmp_path)
     monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "hype_bot")
     handler = MagicMock()
@@ -702,16 +729,37 @@ async def test_local_stream_change_voice_gives_it_to_the_active_personality(
 
     assert status == "Voice changed to Serena."
     handler.change_voice.assert_awaited_once_with("Serena")
+    assert read_profile_voice_override("hype_bot", tmp_path) is None
+    assert not stream._restart_requested.is_set()
+
+
+@pytest.mark.asyncio
+async def test_local_stream_save_voice_gives_it_to_the_active_personality(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A saved voice belongs to the personality that is speaking."""
+    monkeypatch.setattr(config, "INSTANCE_PATH", tmp_path)
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "hype_bot")
+    handler = MagicMock()
+    handler.change_voice = AsyncMock(return_value="Voice changed to Serena.")
+    handler.get_current_voice = MagicMock(return_value="Serena")
+    stream = LocalStream(handler, MagicMock(), instance_path=str(tmp_path))
+
+    status = await stream.save_voice("Serena")
+
+    assert status == "Voice changed to Serena."
+    handler.change_voice.assert_awaited_once_with("Serena")
     assert read_profile_voice_override("hype_bot", tmp_path) == "Serena"
     assert not stream._restart_requested.is_set()
 
 
 @pytest.mark.asyncio
-async def test_local_stream_change_voice_gives_it_to_the_default_personality(
+async def test_local_stream_save_voice_gives_it_to_the_default_personality(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With no personality selected, the pick becomes the built-in default's voice."""
+    """With no personality selected, the saved voice becomes the built-in default's voice."""
     monkeypatch.setattr(config, "INSTANCE_PATH", tmp_path)
     monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
     handler = MagicMock()
@@ -719,7 +767,7 @@ async def test_local_stream_change_voice_gives_it_to_the_default_personality(
     handler.get_current_voice = MagicMock(return_value="Serena")
     stream = LocalStream(handler, MagicMock(), instance_path=str(tmp_path))
 
-    await stream.change_voice("Serena")
+    await stream.save_voice("Serena")
 
     assert read_profile_voice_override(None, tmp_path) == "Serena"
 

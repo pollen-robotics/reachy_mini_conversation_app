@@ -69,6 +69,7 @@ class PersonalityOps:
         get_voices: Callable[[], Awaitable[list[str]]] | None = None,
         get_current_voice: Callable[[], str] | None = None,
         change_voice: Callable[[str], Awaitable[str]] | None = None,
+        save_voice: Callable[[str], Awaitable[str]] | None = None,
     ) -> None:
         """Initialize operations with runtime callbacks."""
         self._handler = handler
@@ -79,6 +80,7 @@ class PersonalityOps:
         self._get_voices = get_voices
         self._get_current_voice = get_current_voice
         self._change_voice = change_voice
+        self._save_voice = save_voice
         self._startup_choice = self._configured_startup_choice()
 
     def _configured_startup_choice(self) -> str:
@@ -301,7 +303,7 @@ class PersonalityOps:
             return {"voice": get_default_voice()}
 
     async def apply_voice(self, voice: str) -> dict[str, Any]:
-        """Change the current voice without rebuilding the backend."""
+        """Change the voice for this session and personality only."""
         selected_voice = voice.strip()
         if not selected_voice:
             raise RouteError("missing_voice")
@@ -319,6 +321,26 @@ class PersonalityOps:
             raise RouteError("voice_apply_failed", message=str(exc)) from exc
         return {"ok": True, "status": status}
 
+    async def save_voice(self, voice: str) -> dict[str, Any]:
+        """Change the voice and keep it as the active personality's own voice."""
+        selected_voice = voice.strip()
+        if not selected_voice:
+            raise RouteError("missing_voice")
+        save = self._save_voice
+        if save is None:
+            raise RouteError("voice_save_unavailable")
+
+        async def _save() -> str:
+            return await save(selected_voice)
+
+        try:
+            status = await self._run_on_loop(_save())
+        except RouteError:
+            raise
+        except Exception as exc:
+            raise RouteError("voice_save_failed", message=str(exc)) from exc
+        return {"ok": True, "status": status}
+
 
 def build_personality_ops(
     handler: ConversationHandler,
@@ -330,6 +352,7 @@ def build_personality_ops(
     get_voices: Callable[[], Awaitable[list[str]]] | None = None,
     get_current_voice: Callable[[], str] | None = None,
     change_voice: Callable[[str], Awaitable[str]] | None = None,
+    save_voice: Callable[[str], Awaitable[str]] | None = None,
 ) -> PersonalityOps:
     """Build personality operations for a control transport."""
     return PersonalityOps(
@@ -341,6 +364,7 @@ def build_personality_ops(
         get_voices=get_voices,
         get_current_voice=get_current_voice,
         change_voice=change_voice,
+        save_voice=save_voice,
     )
 
 
@@ -383,3 +407,4 @@ def register_personality_methods(rpc: JsonRpcServer, ops: PersonalityOps) -> Non
     rpc.register("voices.list", _wrap(lambda params: ops.voices()))
     rpc.register("voices.current", _wrap(lambda params: ops.current_voice()))
     rpc.register("voices.apply", _wrap(lambda params: ops.apply_voice(str(params.get("voice", "")))))
+    rpc.register("voices.save", _wrap(lambda params: ops.save_voice(str(params.get("voice", "")))))

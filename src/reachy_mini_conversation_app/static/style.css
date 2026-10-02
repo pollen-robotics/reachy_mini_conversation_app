@@ -503,6 +503,17 @@ button {
   background: color-mix(in srgb, var(--accent) 90%, white);
 }
 
+.btn--secondary {
+  background: transparent;
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.btn--secondary:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
 .btn--ghost {
   background: transparent;
   border-color: var(--border);

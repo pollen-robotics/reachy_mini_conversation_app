@@ -140,6 +140,7 @@ export const setMicMuted = (muted) => rpcCall("conversation.mic", { muted });
 export const listVoices = () => rpcCall("voices.list");
 export const getCurrentVoice = () => rpcCall("voices.current");
 export const applyVoice = (voice) => rpcCall("voices.apply", { voice });
+export const saveVoice = (voice) => rpcCall("voices.save", { voice });
 
 export const saveBackendConfig = (payload) => rpcCall("backend.config", payload);
 
@@ -180,6 +181,7 @@ const ERROR_MESSAGES = Object.freeze({
   invalid_tool_selection: "One or more selected tools are no longer available.",
   unknown_profile: "That personality is no longer available.",
   missing_voice: "Choose a voice first.",
+  voice_save_unavailable: "Saving a voice isn't available right now.",
   profile_locked: "Profile switching is locked by the administrator.",
   profile_in_use: "This personality is active or set to load at startup. Switch to another one first.",
   not_deletable: "This personality can't be deleted.",

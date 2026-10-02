@@ -7,6 +7,7 @@ import {
   getStatus,
   listVoices,
   saveBackendConfig,
+  saveVoice,
   untilReady,
 } from "../api.js";
 import { h } from "../ui.js";
@@ -195,16 +196,22 @@ function buildVoiceSection() {
     h("option", { value: "" }, "Loading voices…")
   );
   const status = h("p", { class: "settings-status", role: "status", "aria-live": "polite" });
+  // Apply lasts until the personality changes; Save makes it the personality's own voice.
   const submitButton = h(
     "button",
     { type: "submit", class: "btn btn--primary", disabled: "disabled" },
     "Apply voice"
   );
+  const saveButton = h(
+    "button",
+    { type: "button", class: "btn btn--secondary", disabled: "disabled" },
+    "Save for personality"
+  );
   const form = h(
     "form",
     { class: "settings-form" },
     h("label", { class: "settings-field" }, h("span", { class: "settings-label" }, "Voice"), select),
-    h("div", { class: "settings-actions" }, submitButton),
+    h("div", { class: "settings-actions" }, submitButton, saveButton),
     status
   );
 
@@ -215,25 +222,45 @@ function buildVoiceSection() {
     form
   );
 
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
+  async function runVoiceAction({ action, pending, done, failure }) {
     if (submitButton.disabled || !select.value) return;
     submitButton.disabled = true;
+    saveButton.disabled = true;
     select.disabled = true;
     form.setAttribute("aria-busy", "true");
     status.classList.remove("is-error");
-    status.textContent = "Applying…";
+    status.textContent = pending;
     try {
-      const result = await applyVoice(select.value);
-      status.textContent = result?.status || "Voice applied.";
+      const result = await action(select.value);
+      status.textContent = result?.status || done;
     } catch (error) {
-      status.textContent = `Failed to apply: ${describeError(error)}`;
+      status.textContent = `${failure}: ${describeError(error)}`;
       status.classList.add("is-error");
     } finally {
       submitButton.disabled = !select.value;
+      saveButton.disabled = !select.value;
       select.disabled = !select.value;
       form.removeAttribute("aria-busy");
     }
+  }
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    runVoiceAction({
+      action: applyVoice,
+      pending: "Applying…",
+      done: "Voice applied.",
+      failure: "Failed to apply",
+    });
+  });
+
+  saveButton.addEventListener("click", () => {
+    runVoiceAction({
+      action: saveVoice,
+      pending: "Saving…",
+      done: "Voice saved for this personality.",
+      failure: "Failed to save",
+    });
   });
 
   return {
@@ -244,6 +271,7 @@ function buildVoiceSection() {
         select.appendChild(h("option", { value: "" }, "No voices available"));
         select.disabled = true;
         submitButton.disabled = true;
+        saveButton.disabled = true;
         status.textContent = "Voices are unavailable right now.";
         return;
       }
@@ -254,6 +282,7 @@ function buildVoiceSection() {
       }
       select.disabled = false;
       submitButton.disabled = false;
+      saveButton.disabled = false;
       status.textContent = "";
     },
   };
