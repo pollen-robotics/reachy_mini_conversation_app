@@ -167,7 +167,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         # NFC write retry task: started when the accessory tool returns "waiting_for_tag"
         self._nfc_retry_task: asyncio.Task[None] | None = None
         self._nfc_watchdog_task: asyncio.Task[None] | None = None
-        # NFC transition gate: True from WRITE_OK until apply_personality completes.
+        # NFC transition gate: True from a successful tag write until apply_personality completes.
         # Blocks new _safe_response_create calls and cancels VAD auto-responses.
         self._nfc_transition: bool = False
         # Set to True by _response_sender_loop just before response.create so
@@ -453,16 +453,16 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             self._nfc_retry_task.cancel()
             self._nfc_retry_task = None
 
-    async def inject_nfc_write_result(self, success: bool, raw_msg: str = "") -> None:
+    async def inject_nfc_write_result(self, success: bool, detail: str = "") -> None:
         """Have the model react to the tag write result; on success, pause dialogue until the switch."""
         if not self.connection:
             logger.debug("inject_nfc_write_result: no active connection, skipping")
             return
-        logger.info("inject_nfc_write_result: success=%s raw=%r", success, raw_msg)
+        logger.info("inject_nfc_write_result: success=%s detail=%r", success, detail)
 
         if not success:
             await self._inject_system_event(
-                f"[System event: Something went wrong and the object could not be linked ({raw_msg}). "
+                f"[System event: Something went wrong and the object could not be linked ({detail}). "
                 "Tell the user lightly that something didn't work and they could try again.]"
             )
             return

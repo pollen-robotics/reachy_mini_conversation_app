@@ -57,7 +57,7 @@ class NfcDaemonClient:
         """Build a client for the daemon's NFC endpoints."""
         self.base = base_url.rstrip("/")
         self.timeout = timeout
-        self._write_results: queue.SimpleQueue[str] = queue.SimpleQueue()
+        self._write_results: queue.SimpleQueue[tuple[bool, str]] = queue.SimpleQueue()
         # Pooled connection for the frequent reads only: writes run on their own
         # threads, and requests.Session is not documented as thread-safe.
         self._session = requests.Session()
@@ -117,17 +117,16 @@ class NfcDaemonClient:
         return self._post("write", {"text": code}, "WRITE_OK", timeout)
 
     def write_tag_in_background(self, code: str) -> None:
-        """Start writing ``code``; the result ("WRITE_OK" or "WRITE_FAIL:<code>") comes from drain_write_results()."""
+        """Start writing ``code``; the (success, code) result comes from drain_write_results()."""
 
         def _worker() -> None:
-            success, result = self.write_tag(code)
-            self._write_results.put("WRITE_OK" if success else f"WRITE_FAIL:{result}")
+            self._write_results.put(self.write_tag(code))
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def drain_write_results(self) -> list[str]:
+    def drain_write_results(self) -> list[tuple[bool, str]]:
         """Drain and return all finished background write results (non-blocking)."""
-        results: list[str] = []
+        results: list[tuple[bool, str]] = []
         try:
             while True:
                 results.append(self._write_results.get_nowait())

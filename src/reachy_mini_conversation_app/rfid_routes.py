@@ -314,10 +314,10 @@ class RfidController:
         previous = self._previous_tag
         self._previous_tag = tag
 
-        messages = self._transitions(previous, tag)
-        if messages and self._apply_lock.acquire(blocking=False):
+        write_results = self._client.drain_write_results()
+        if self._apply_lock.acquire(blocking=False):
             try:
-                self._process(messages)
+                self._process(write_results, previous, tag)
             finally:
                 self._apply_lock.release()
 
@@ -325,35 +325,28 @@ class RfidController:
         self._broadcast(payload)
         return payload
 
-    def _transitions(self, previous: NfcTagSnapshot | None, tag: NfcTagSnapshot) -> list[str]:
-        """Turn two consecutive snapshots, plus finished writes, into events.
-
-        Events: "NO_TAG", "READ:" (blank tag), "READ:<code>", "WRITE_OK", "WRITE_FAIL:<code>".
-        """
-        messages = self._client.drain_write_results()
-        if previous is None:
-            return messages
-        if not tag.present and previous.present:
-            messages.append("NO_TAG")
-        elif tag.present and not previous.present:
-            messages.append("READ:" if tag.blank else f"READ:{tag.content or ''}")
-        elif tag.present and previous.present:
-            if tag.blank and not previous.blank:
-                messages.append("READ:")
-            elif not tag.blank and tag.content and tag.content != previous.content:
-                messages.append(f"READ:{tag.content}")
-        return messages
-
-    def _process(self, messages: list[str]) -> None:
+    def _process(
+        self,
+        write_results: list[tuple[bool, str]],
+        previous: NfcTagSnapshot | None,
+        tag: NfcTagSnapshot,
+    ) -> None:
+        """Act on finished writes first, then on what changed on the reader since the last read."""
         handler = self._get_handler()
-        logger.info("[RFID] events: %r", messages)
-        for message in messages:
-            if message == "NO_TAG":
-                self._on_tag_removed(handler)
-            elif message.startswith("READ:"):
-                self._on_tag_read(handler, message[5:].strip())
-            else:
-                self._on_write_result(handler, message)
+        for success, code in write_results:
+            self._on_write_result(handler, success, code)
+        # No previous read (first poll, or the reader just came back): nothing to compare.
+        if previous is None:
+            return
+        if previous.present and not tag.present:
+            self._on_tag_removed(handler)
+        elif tag.present and not previous.present:
+            self._on_tag_read(handler, "" if tag.blank else tag.content or "")
+        elif tag.present:
+            if tag.blank and not previous.blank:
+                self._on_tag_read(handler, "")
+            elif not tag.blank and tag.content and tag.content != previous.content:
+                self._on_tag_read(handler, tag.content)
 
     def _queue_move(self, handler: "HuggingFaceRealtimeHandler", moves: RecordedMoves | None, name: str) -> None:
         """Queue a recorded emotion move, doing nothing when its dataset is missing."""
@@ -430,6 +423,7 @@ class RfidController:
         return profile
 
     def _on_tag_read(self, handler: "HuggingFaceRealtimeHandler", code: str) -> None:
+        """Handle a tag arriving or changing; an empty ``code`` means a blank tag."""
         if not code:
             self._on_blank_tag(handler)
             return
@@ -539,12 +533,11 @@ class RfidController:
             logger.warning("[RFID] >>> audio queue drain timed out")
         await asyncio.sleep(1.0)
 
-    def _on_write_result(self, handler: "HuggingFaceRealtimeHandler", message: str) -> None:
-        logger.info("[RFID] >>> %s", message)
+    def _on_write_result(self, handler: "HuggingFaceRealtimeHandler", success: bool, code: str) -> None:
+        logger.info("[RFID] >>> write result: %s", code)
         loop = self._get_loop()
         if loop is None:
             return
-        success = message == "WRITE_OK"
         if success:
             self._run_on_loop(handler.stop_current_speech(), "stop_current_speech", timeout=6.0)
 
@@ -553,7 +546,8 @@ class RfidController:
             move_duration = self._play_write_move(handler)
 
         if move_duration <= 0.0:
-            self._run_on_loop(handler.inject_nfc_write_result(success, message), "write result inject")
+            detail = "" if success else describe_write_error(code)
+            self._run_on_loop(handler.inject_nfc_write_result(success, detail), "write result inject")
             return
 
         # Arm the speech gate before the move so the welcome speech that follows
@@ -568,7 +562,7 @@ class RfidController:
         async def _inject_after_move() -> None:
             try:
                 await asyncio.sleep(move_duration)
-                await handler.inject_nfc_write_result(success, message)
+                await handler.inject_nfc_write_result(True)
             finally:
                 self._inject_move_future = None
 

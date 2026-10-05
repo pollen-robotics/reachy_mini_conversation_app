@@ -238,3 +238,66 @@ def test_a_controller_that_started_at_the_default_has_nothing_to_revert(monkeypa
     controller._on_tag_removed(_StubHandler())
 
     assert announced == []
+
+
+def _tag(content=None, *, blank=False):
+    return NfcTagSnapshot(present=True, content=content, blank=blank)
+
+
+ABSENT = NfcTagSnapshot(present=False, content=None, blank=False)
+
+
+@pytest.fixture
+def events(controller, monkeypatch):
+    """Record which handler each reader change reaches, in order."""
+    seen = []
+    monkeypatch.setattr(controller, "_get_handler", lambda: None)
+    monkeypatch.setattr(controller, "_on_tag_removed", lambda handler: seen.append(("removed",)))
+    monkeypatch.setattr(controller, "_on_tag_read", lambda handler, code: seen.append(("read", code)))
+    monkeypatch.setattr(
+        controller, "_on_write_result", lambda handler, success, code: seen.append(("write", success, code))
+    )
+    return seen
+
+
+@pytest.mark.parametrize(
+    "previous, tag, expected",
+    [
+        (None, _tag("hf_pirate"), []),
+        (ABSENT, ABSENT, []),
+        (_tag("hf_pirate"), ABSENT, [("removed",)]),
+        (ABSENT, _tag("hf_pirate"), [("read", "hf_pirate")]),
+        (ABSENT, _tag(blank=True), [("read", "")]),
+        (_tag("hf_pirate"), _tag(blank=True), [("read", "")]),
+        (_tag(blank=True), _tag("hf_pirate"), [("read", "hf_pirate")]),
+        (_tag("hf_pirate"), _tag("hf_chef"), [("read", "hf_chef")]),
+        (_tag("hf_pirate"), _tag("hf_pirate"), []),
+        (_tag(blank=True), _tag(blank=True), []),
+    ],
+    ids=[
+        "first read",
+        "still nothing",
+        "removed",
+        "placed",
+        "blank placed",
+        "erased in place",
+        "written in place",
+        "changed in place",
+        "unchanged",
+        "still blank",
+    ],
+)
+def test_each_reader_change_reaches_its_handler(controller, events, previous, tag, expected):
+    """Two consecutive reads map to at most one tag event."""
+    controller._process([], previous, tag)
+    assert events == expected
+
+
+def test_write_results_are_handled_before_the_tag_change(controller, events):
+    """A write and the read of the tag it produced can land in the same poll.
+
+    The write goes first: it arms the speech gate that the delayed personality
+    switch, started by the read, then waits on.
+    """
+    controller._process([(True, "WRITE_OK")], _tag(blank=True), _tag("usr_pirate"))
+    assert events == [("write", True, "WRITE_OK"), ("read", "usr_pirate")]

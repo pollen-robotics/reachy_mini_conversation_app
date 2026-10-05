@@ -99,7 +99,7 @@ class CreateAccessoryPersonality(Tool):
             return {"error": f"Cannot write personality {personality!r} to a tag"}
 
         if deps.blank_tag_present and deps.nfc_client is not None:
-            # The write-tag move and the welcome speech follow on WRITE_OK (see rfid_routes).
+            # The write-tag move and the welcome speech follow a successful write (see rfid_routes).
             deps.pending_nfc_write = None
             deps.recently_written_codes.add(code)
             deps.nfc_client.write_tag_in_background(code)
