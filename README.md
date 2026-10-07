@@ -232,6 +232,8 @@ Restart the app after adding the module. Use Tools → Tool access to enable it 
 
 ### Hugging Face Space tools
 
+Remote tool failures are reported to the assistant for a spoken explanation. While a call is pending, Reachy can play a brief silent thinking move; preparing this optional feedback never delays the lookup. Enabled face tracking pauses while the thinking move plays and resumes afterwards, unless the assistant is still speaking.
+
 To publish a remote tool, create a Gradio Space, expose its API as MCP with `mcp_server=True`, and give each function clear type hints and docstrings. Verify that `https://<space-subdomain>.hf.space/gradio_api/mcp/schema` lists the expected tools before installing the Space.
 
 Use the maintained [weather](https://huggingface.co/spaces/pollen-robotics/reachy-mini-weather-tool), [time](https://huggingface.co/spaces/pollen-robotics/reachy-mini-time-tool), and [search](https://huggingface.co/spaces/pollen-robotics/reachy-mini-search-tool) Spaces as examples. See Gradio's [MCP server guide](https://www.gradio.app/guides/building-mcp-server-with-gradio) for additional publishing guidance and [Installing Hugging Face Space tools](#installing-hugging-face-space-tools) for this app's installation steps.

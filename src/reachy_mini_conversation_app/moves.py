@@ -203,6 +203,7 @@ class MovementManager:
 
         # Move queue (primary moves)
         self.move_queue: deque[Move] = deque()
+        self._tracking_pause_moves: set[Move] = set()
 
         # Configuration
         self.idle_inactivity_delay = 0.3  # seconds
@@ -237,13 +238,10 @@ class MovementManager:
         self._freq_stats = LoopFrequencyStats()
         self._freq_snapshot = LoopFrequencyStats()
 
-    def queue_move(self, move: Move) -> None:
-        """Queue a primary move to run after the currently executing one.
-
-        Thread-safe: the move is enqueued via the worker command queue so the
-        control loop remains the sole mutator of movement state.
-        """
-        self._command_queue.put(("queue_move", move))
+    def queue_move(self, move: Move, *, pause_head_tracking: bool = False) -> None:
+        """Queue primary motion, optionally pausing face tracking while it plays."""
+        command = "queue_move_with_tracking_pause" if pause_head_tracking else "queue_move"
+        self._command_queue.put((command, move))
 
     def clear_move_queue(self) -> None:
         """Stop the active move and discard any queued primary moves.
@@ -251,6 +249,13 @@ class MovementManager:
         Thread-safe: executed by the worker thread via the command queue.
         """
         self._command_queue.put(("clear_queue", None))
+
+    def cancel_move(self, move: Move) -> None:
+        """Stop ``move`` if it is playing, or drop it if still queued; other moves are kept.
+
+        Thread-safe: executed by the worker thread via the command queue.
+        """
+        self._command_queue.put(("cancel_move", move))
 
     def set_moving_state(self, duration: float) -> None:
         """Mark the robot as actively moving for the provided duration.
@@ -310,9 +315,11 @@ class MovementManager:
 
     def _handle_command(self, command: str, payload: Any, current_time: float) -> None:
         """Handle a single cross-thread command."""
-        if command == "queue_move":
+        if command in ("queue_move", "queue_move_with_tracking_pause"):
             if isinstance(payload, Move):
                 self.move_queue.append(payload)
+                if command == "queue_move_with_tracking_pause":
+                    self._tracking_pause_moves.add(payload)
                 self.state.update_activity()
                 duration = getattr(payload, "duration", None)
                 if duration is not None:
@@ -331,10 +338,21 @@ class MovementManager:
                 logger.warning("Ignored queue_move command with invalid payload: %s", payload)
         elif command == "clear_queue":
             self.move_queue.clear()
+            self._tracking_pause_moves.clear()
             self.state.current_move = None
             self.state.move_start_time = None
             self._breathing_active = False
+            self._update_head_tracking()
             logger.info("Cleared move queue and stopped current move")
+        elif command == "cancel_move":
+            # Idle breathing then blends back from the pose the move left.
+            if self.state.current_move is payload:
+                self.state.current_move = None
+                self.state.move_start_time = None
+            elif payload in self.move_queue:
+                self.move_queue.remove(payload)
+            self._tracking_pause_moves.discard(payload)
+            self._update_head_tracking()
         elif command == "set_moving_state":
             try:
                 duration = float(payload)
@@ -382,6 +400,8 @@ class MovementManager:
                     self.current_robot.stop_head_tracking()
             except Exception as e:
                 logger.warning("Head-tracking toggle failed: %s", e)
+            if enabled:
+                self._update_head_tracking()
         elif command == "set_speaking":
             if not self._head_tracking:
                 return
@@ -389,18 +409,27 @@ class MovementManager:
             if self._is_speaking == speaking:
                 return
             self._is_speaking = speaking
-            try:
-                if speaking and self.current_robot.get_tracked_face(wait=False).detected:
-                    # Pause only once a face is locked, else speech blocks acquisition.
-                    self._track_anchor = self.current_robot.get_current_head_pose()
-                    self.current_robot.start_head_tracking(weight=0.0)
-                elif not speaking:
-                    self._track_anchor = None
-                    self.current_robot.start_head_tracking(weight=1.0)
-            except Exception as e:
-                logger.warning("Head-tracking speaking handoff failed: %s", e)
+            self._update_head_tracking()
         else:
             logger.warning("Unknown command received by MovementManager: %s", command)
+
+    def _update_head_tracking(self) -> None:
+        if not self._head_tracking:
+            return
+        feedback_owns_head = self.state.current_move in self._tracking_pause_moves
+        try:
+            if self._is_speaking or feedback_owns_head:
+                if self._track_anchor is None and (
+                    feedback_owns_head or self.current_robot.get_tracked_face(wait=False).detected
+                ):
+                    # Speech waits for face acquisition; queued feedback must always own its pose.
+                    self._track_anchor = self.current_robot.get_current_head_pose()
+                    self.current_robot.start_head_tracking(weight=0.0)
+            elif self._track_anchor is not None:
+                self._track_anchor = None
+                self.current_robot.start_head_tracking(weight=1.0)
+        except Exception as e:
+            logger.warning("Head-tracking motion handoff failed: %s", e)
 
     def _publish_shared_state(self) -> None:
         """Expose idle-related state for external threads."""
@@ -410,10 +439,13 @@ class MovementManager:
 
     def _manage_move_queue(self, current_time: float) -> None:
         """Manage the primary move queue (sequential execution)."""
+        previous_move = self.state.current_move
         if self.state.current_move is None or (
             self.state.move_start_time is not None
             and current_time - self.state.move_start_time >= self.state.current_move.duration
         ):
+            if self.state.current_move is not None:
+                self._tracking_pause_moves.discard(self.state.current_move)
             self.state.current_move = None
             self.state.move_start_time = None
 
@@ -423,6 +455,8 @@ class MovementManager:
                 # Any real move cancels breathing mode flag
                 self._breathing_active = isinstance(self.state.current_move, BreathingMove)
                 logger.debug(f"Starting new move, duration: {self.state.current_move.duration}s")
+        if self.state.current_move is not previous_move:
+            self._update_head_tracking()
 
     def _manage_breathing(self, current_time: float) -> None:
         """Manage automatic breathing when idle."""
@@ -494,7 +528,7 @@ class MovementManager:
             primary_full_body_pose = (neutral_head_pose, (0.0, 0.0), 0.0)
             self.state.last_primary_pose = clone_full_body_pose(primary_full_body_pose)
 
-        # Speaking pauses tracking: hold the look-at anchor, overlay emotions on it, dance from neutral.
+        # Speech and feedback pause tracking: overlay emotions on the captured look-at pose.
         if self._track_anchor is not None:
             head_pose, antennas, body_yaw = primary_full_body_pose
             move = self.state.current_move

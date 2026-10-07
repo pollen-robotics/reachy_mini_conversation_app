@@ -18,6 +18,7 @@ from reachy_mini_conversation_app.mcp_client import McpToolTimeoutError, McpTool
 from reachy_mini_conversation_app.tool_spaces import build_remote_client, read_installed_tool_spaces
 from reachy_mini_conversation_app.profile_store import DEFAULT_PROFILE_NAME
 from reachy_mini_conversation_app.profile_toolsets import read_profile_tool_names
+from reachy_mini_conversation_app.dance_emotion_moves import EmotionQueueMove, thinking_move
 from reachy_mini_conversation_app.tools.tool_constants import SystemTool
 
 
@@ -124,6 +125,21 @@ class RemoteMcpTool(Tool):
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Invoke the underlying remote MCP tool."""
+
+        async def show_thinking() -> None:
+            thinking: EmotionQueueMove | None = None
+            try:
+                queue_move = deps.movement_manager.queue_move
+                thinking = await asyncio.to_thread(thinking_move)
+                queue_move(thinking, pause_head_tracking=True)
+                await asyncio.Future[None]()
+            except Exception as exc:
+                logger.warning("Thinking move unavailable: %s", exc)
+            finally:
+                if thinking is not None:
+                    deps.movement_manager.cancel_move(thinking)
+
+        thinking_task = asyncio.create_task(show_thinking())
         try:
             result = await self._client.call_tool(self._client_tool_name, kwargs)
         except McpToolTimeoutError:
@@ -133,6 +149,12 @@ class RemoteMcpTool(Tool):
             logger.warning("Remote MCP tool failed once; retrying %s from %s: %s", self.name, self._space_slug, exc)
             await asyncio.sleep(_REMOTE_TOOL_RETRY_DELAY_S)
             result = await self._client.call_tool(self._client_tool_name, kwargs)
+        finally:
+            thinking_task.cancel()
+            try:
+                await thinking_task
+            except asyncio.CancelledError:
+                pass
         payload = dict(result)
         if payload.get("namespaced_tool_name") == self._client_tool_name:
             payload["namespaced_tool_name"] = self.name

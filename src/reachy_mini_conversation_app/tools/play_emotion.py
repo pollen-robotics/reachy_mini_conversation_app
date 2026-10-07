@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from reachy_mini.motion.recorded_move import RecordedMoves
-    from reachy_mini_conversation_app.dance_emotion_moves import EmotionQueueMove
+    from reachy_mini_conversation_app.dance_emotion_moves import EmotionQueueMove, emotion_library
 
     EMOTION_AVAILABLE = True
 except Exception as e:
@@ -264,10 +264,7 @@ class PlayEmotion(Tool):
         logger.info("Tool call: play_emotion emotion=%s", requested_emotion)
 
         try:
-            if self._library is None:
-                # Constructing this downloads the dataset, so it must not run at import.
-                self._library = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
-            library = self._library
+            library = self._library or emotion_library()
             emotion_names = library.list_moves()
             if not emotion_names:
                 return {"error": "No emotions currently available"}

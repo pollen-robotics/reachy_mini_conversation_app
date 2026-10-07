@@ -5,8 +5,10 @@ and executed sequentially by the MovementManager.
 """
 
 from __future__ import annotations
+import random
 import logging
 from typing import Tuple
+from functools import lru_cache
 
 import numpy as np
 from numpy.typing import NDArray
@@ -85,6 +87,21 @@ class EmotionQueueMove(Move):  # type: ignore
 
             neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
             return (neutral_head_pose, np.array([0.0, 0.0], dtype=np.float64), 0.0)
+
+
+@lru_cache(maxsize=1)
+def emotion_library() -> RecordedMoves:
+    """Load and cache the recorded emotion library on first use."""
+    return RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
+
+
+def thinking_move() -> EmotionQueueMove:
+    """Build a silent thoughtful move from the recorded emotion library."""
+    library = emotion_library()
+    available = library.list_moves()
+    return EmotionQueueMove(
+        random.choice([name for name in ("thoughtful1", "thoughtful2") if name in available]), library
+    )
 
 
 class GotoQueueMove(Move):  # type: ignore
