@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from reachy_mini.motion.recorded_move import RecordedMoves
-    from reachy_mini_conversation_app.dance_emotion_moves import EmotionQueueMove
+    from reachy_mini_conversation_app.dance_emotion_moves import EmotionQueueMove, emotion_library
 
     EMOTION_AVAILABLE = True
 except Exception as e:
@@ -231,20 +231,6 @@ def random_curated_emotion(available_emotions: list[str]) -> str:
     return random.choice(available_emotions)
 
 
-def _library() -> "RecordedMoves":
-    """Return the emotion library, cached on PlayEmotion; downloads it on first use, never at import."""
-    if PlayEmotion._library is None:
-        PlayEmotion._library = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
-    return PlayEmotion._library
-
-
-def thinking_move() -> "EmotionQueueMove":
-    """Build a random 'thinking' move (blocking: may download the library)."""
-    library = _library()
-    available = library.list_moves()
-    return EmotionQueueMove(random.choice([n for n in _INTENT_TO_MOVES["thinking"] if n in available]), library)
-
-
 class PlayEmotion(Tool):
     """Play a pre-recorded emotion."""
 
@@ -278,7 +264,7 @@ class PlayEmotion(Tool):
         logger.info("Tool call: play_emotion emotion=%s", requested_emotion)
 
         try:
-            library = self._library or _library()
+            library = self._library or emotion_library()
             emotion_names = library.list_moves()
             if not emotion_names:
                 return {"error": "No emotions currently available"}

@@ -1,6 +1,8 @@
 import sys
 import json
+import asyncio
 import importlib
+import threading
 from types import ModuleType
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -272,21 +274,25 @@ async def test_remote_tool_plays_thinking_move_until_answer(
     monkeypatch.chdir(tmp_path)
     _mcp_profile(tmp_path, monkeypatch)
 
+    queued = asyncio.Event()
+
+    async def call_tool(*args: object) -> dict[str, str]:
+        await asyncio.wait_for(queued.wait(), timeout=1.0)
+        if fails:
+            raise McpToolTimeoutError("slow tool")
+        return {"status": "ok", "text": "hello"}
+
     client = AsyncMock()
-    if fails:
-        client.call_tool.side_effect = McpToolTimeoutError("slow tool")
-    else:
-        client.call_tool.return_value = {"status": "ok", "text": "hello"}
+    client.call_tool.side_effect = call_tool
     monkeypatch.setattr(tool_spaces_mod, "build_remote_client", lambda *a, **k: client)
     write_installed_tool_spaces(None, InstalledToolSpacesManifest(spaces=[_installed_search_space()]))
 
     core_tools_mod = _reload_core_tools()
     core_tools_mod.initialize_tools()
     move = object()
-    monkeypatch.setattr(
-        importlib.import_module("reachy_mini_conversation_app.tools.play_emotion"), "thinking_move", lambda: move
-    )
+    monkeypatch.setattr(core_tools_mod, "thinking_move", lambda: move)
     movement_manager = MagicMock()
+    movement_manager.queue_move.side_effect = lambda _move: queued.set()
 
     result = await core_tools_mod.dispatch_tool_call(
         SEARCH_TOOL_ID,
@@ -296,6 +302,101 @@ async def test_remote_tool_plays_thinking_move_until_answer(
 
     assert ("error" in result) is fails
     movement_manager.queue_move.assert_called_once_with(move)
+    movement_manager.cancel_move.assert_called_once_with(move)
+
+
+@pytest.mark.asyncio
+async def test_remote_tool_does_not_wait_for_thinking_move_or_queue_it_after_answer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An uncached feedback library cannot delay a lookup or animate after its answer."""
+    monkeypatch.chdir(tmp_path)
+    _mcp_profile(tmp_path, monkeypatch)
+    loading = asyncio.Event()
+    finished_loading = asyncio.Event()
+    release_loader = threading.Event()
+    loop = asyncio.get_running_loop()
+
+    def load_thinking_move() -> object:
+        loop.call_soon_threadsafe(loading.set)
+        try:
+            if not release_loader.wait(timeout=2.0):
+                raise TimeoutError("Thinking loader was not released")
+            return object()
+        finally:
+            loop.call_soon_threadsafe(finished_loading.set)
+
+    async def call_tool(*args: object) -> dict[str, str]:
+        await asyncio.wait_for(loading.wait(), timeout=1.0)
+        return {"status": "ok", "text": "hello"}
+
+    client = AsyncMock()
+    client.call_tool.side_effect = call_tool
+    monkeypatch.setattr(tool_spaces_mod, "build_remote_client", lambda *a, **k: client)
+    write_installed_tool_spaces(None, InstalledToolSpacesManifest(spaces=[_installed_search_space()]))
+    core_tools_mod = _reload_core_tools()
+    core_tools_mod.initialize_tools()
+    monkeypatch.setattr(core_tools_mod, "thinking_move", load_thinking_move)
+    movement_manager = MagicMock()
+
+    try:
+        result = await asyncio.wait_for(
+            core_tools_mod.dispatch_tool_call(
+                SEARCH_TOOL_ID,
+                json.dumps({"query": "hello"}),
+                core_tools_mod.ToolDependencies(reachy_mini=object(), movement_manager=movement_manager),
+            ),
+            timeout=1.0,
+        )
+        assert result["text"] == "hello"
+        assert not release_loader.is_set()
+        client.call_tool.assert_awaited_once()
+    finally:
+        release_loader.set()
+        await asyncio.wait_for(finished_loading.wait(), timeout=1.0)
+
+    movement_manager.queue_move.assert_not_called()
+    movement_manager.cancel_move.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_remote_tool_cancellation_stops_thinking_move(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancelling a pending lookup removes its feedback without waiting for an answer."""
+    monkeypatch.chdir(tmp_path)
+    _mcp_profile(tmp_path, monkeypatch)
+    client = AsyncMock()
+    monkeypatch.setattr(tool_spaces_mod, "build_remote_client", lambda *a, **k: client)
+    write_installed_tool_spaces(None, InstalledToolSpacesManifest(spaces=[_installed_search_space()]))
+    core_tools_mod = _reload_core_tools()
+    core_tools_mod.initialize_tools()
+    move = object()
+    monkeypatch.setattr(core_tools_mod, "thinking_move", lambda: move)
+    queued = asyncio.Event()
+    movement_manager = MagicMock()
+    movement_manager.queue_move.side_effect = lambda _move: queued.set()
+
+    async def call_tool(*args: object) -> None:
+        await asyncio.Future[None]()
+
+    client.call_tool.side_effect = call_tool
+    lookup = asyncio.create_task(
+        core_tools_mod.dispatch_tool_call(
+            SEARCH_TOOL_ID,
+            json.dumps({"query": "hello"}),
+            core_tools_mod.ToolDependencies(reachy_mini=object(), movement_manager=movement_manager),
+        )
+    )
+    try:
+        await asyncio.wait_for(queued.wait(), timeout=1.0)
+    finally:
+        lookup.cancel()
+        result = await asyncio.wait_for(lookup, timeout=1.0)
+
+    assert result == {"error": "Tool cancelled"}
     movement_manager.cancel_move.assert_called_once_with(move)
 
 
