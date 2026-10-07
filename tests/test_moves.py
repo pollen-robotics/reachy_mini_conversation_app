@@ -116,6 +116,124 @@ def test_speaking_anchor_composes_emotions_and_holds_dances_from_neutral() -> No
     assert np.allclose(head, dance_head)
 
 
+@pytest.mark.parametrize("completion", ["cancel", "clear", "finish"])
+def test_feedback_owns_head_until_its_move_stops(completion: str) -> None:
+    """Speech completion cannot release tracking while feedback still owns the head."""
+    robot = MagicMock()
+    robot.get_current_head_pose.return_value = np.eye(4)
+    robot.get_current_joint_positions.return_value = ([0.0] * 6, [0.0, 0.0])
+    recorded_move = _FakeMove(create_head_pose(0, 0, 0, 0, 15, 0, degrees=True))
+    library = MagicMock()
+    library.get.return_value = recorded_move
+    thinking = EmotionQueueMove("thoughtful1", library)
+    manager = MovementManager(robot)
+    manager.start()
+    try:
+        manager.set_head_tracking(True)
+        assert _wait_for(lambda: call(weight=1.0) in robot.start_head_tracking.call_args_list)
+        robot.start_head_tracking.reset_mock()
+
+        manager.queue_move(thinking, pause_head_tracking=True)
+        assert _wait_for(lambda: call(weight=0.0) in robot.start_head_tracking.call_args_list)
+        manager.set_speaking(True)
+        assert _wait_for(lambda: manager._is_speaking)
+        manager.set_speaking(False)
+        assert _wait_for(lambda: not manager._is_speaking)
+        assert call(weight=1.0) not in robot.start_head_tracking.call_args_list
+        assert manager.state.current_move is thinking
+
+        if completion == "cancel":
+            manager.cancel_move(thinking)
+        elif completion == "clear":
+            manager.clear_move_queue()
+        else:
+            recorded_move.duration = 0.0
+
+        assert _wait_for(lambda: call(weight=1.0) in robot.start_head_tracking.call_args_list)
+        assert thinking not in manager._tracking_pause_moves
+    finally:
+        manager.stop(reset_to_neutral=False)
+
+
+def test_pending_feedback_does_not_pause_tracking_or_cancel_other_motion() -> None:
+    """Feedback queued behind a primary move can be cancelled without affecting that move."""
+    robot = MagicMock()
+    robot.get_current_head_pose.return_value = np.eye(4)
+    robot.get_current_joint_positions.return_value = ([0.0] * 6, [0.0, 0.0])
+    manager = MovementManager(robot)
+    other = GotoQueueMove(target_head_pose=np.eye(4), duration=10.0)
+    thinking = GotoQueueMove(target_head_pose=np.eye(4), duration=10.0)
+    manager.start()
+    try:
+        manager.set_head_tracking(True)
+        manager.queue_move(other)
+        assert _wait_for(lambda: manager.state.current_move is other)
+        robot.start_head_tracking.reset_mock()
+
+        manager.queue_move(thinking, pause_head_tracking=True)
+        assert _wait_for(lambda: thinking in manager.move_queue)
+        robot.start_head_tracking.assert_not_called()
+
+        manager.cancel_move(thinking)
+        assert _wait_for(lambda: thinking not in manager.move_queue)
+        assert manager.state.current_move is other
+        robot.start_head_tracking.assert_not_called()
+    finally:
+        manager.stop(reset_to_neutral=False)
+
+
+def test_feedback_preserves_tracking_toggles() -> None:
+    """Feedback respects disabled tracking and cannot re-enable it after a user toggle."""
+    robot = MagicMock()
+    robot.get_current_head_pose.return_value = np.eye(4)
+    robot.get_current_joint_positions.return_value = ([0.0] * 6, [0.0, 0.0])
+    manager = MovementManager(robot)
+    thinking = GotoQueueMove(target_head_pose=np.eye(4), duration=10.0)
+    manager.start()
+    try:
+        manager.queue_move(thinking, pause_head_tracking=True)
+        assert _wait_for(lambda: manager.state.current_move is thinking)
+        robot.start_head_tracking.assert_not_called()
+
+        manager.set_head_tracking(True)
+        assert _wait_for(lambda: call(weight=0.0) in robot.start_head_tracking.call_args_list)
+        manager.set_head_tracking(False)
+        assert _wait_for(lambda: robot.stop_head_tracking.called)
+        robot.start_head_tracking.reset_mock()
+
+        manager.cancel_move(thinking)
+        assert _wait_for(lambda: manager.state.current_move is not thinking)
+        robot.start_head_tracking.assert_not_called()
+    finally:
+        manager.stop(reset_to_neutral=False)
+
+
+def test_feedback_completion_preserves_speaking_handoff() -> None:
+    """Finishing feedback during speech leaves tracking paused until speech also ends."""
+    robot = MagicMock()
+    robot.get_current_head_pose.return_value = np.eye(4)
+    robot.get_current_joint_positions.return_value = ([0.0] * 6, [0.0, 0.0])
+    manager = MovementManager(robot)
+    thinking = GotoQueueMove(target_head_pose=np.eye(4), duration=10.0)
+    manager.start()
+    try:
+        manager.set_head_tracking(True)
+        manager.queue_move(thinking, pause_head_tracking=True)
+        assert _wait_for(lambda: call(weight=0.0) in robot.start_head_tracking.call_args_list)
+        manager.set_speaking(True)
+        assert _wait_for(lambda: manager._is_speaking)
+        robot.start_head_tracking.reset_mock()
+
+        manager.cancel_move(thinking)
+        assert _wait_for(lambda: manager.state.current_move is not thinking)
+        robot.start_head_tracking.assert_not_called()
+
+        manager.set_speaking(False)
+        assert _wait_for(lambda: call(weight=1.0) in robot.start_head_tracking.call_args_list)
+    finally:
+        manager.stop(reset_to_neutral=False)
+
+
 def test_clone_full_body_pose_is_a_deep_copy() -> None:
     """Cloning a pose must not alias the head-pose array of the original."""
     head = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)

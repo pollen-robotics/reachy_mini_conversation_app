@@ -292,7 +292,7 @@ async def test_remote_tool_plays_thinking_move_until_answer(
     move = object()
     monkeypatch.setattr(core_tools_mod, "thinking_move", lambda: move)
     movement_manager = MagicMock()
-    movement_manager.queue_move.side_effect = lambda _move: queued.set()
+    movement_manager.queue_move.side_effect = lambda _move, **kwargs: queued.set()
 
     result = await core_tools_mod.dispatch_tool_call(
         SEARCH_TOOL_ID,
@@ -301,7 +301,7 @@ async def test_remote_tool_plays_thinking_move_until_answer(
     )
 
     assert ("error" in result) is fails
-    movement_manager.queue_move.assert_called_once_with(move)
+    movement_manager.queue_move.assert_called_once_with(move, pause_head_tracking=True)
     movement_manager.cancel_move.assert_called_once_with(move)
 
 
@@ -377,7 +377,7 @@ async def test_remote_tool_cancellation_stops_thinking_move(
     monkeypatch.setattr(core_tools_mod, "thinking_move", lambda: move)
     queued = asyncio.Event()
     movement_manager = MagicMock()
-    movement_manager.queue_move.side_effect = lambda _move: queued.set()
+    movement_manager.queue_move.side_effect = lambda _move, **kwargs: queued.set()
 
     async def call_tool(*args: object) -> None:
         await asyncio.Future[None]()

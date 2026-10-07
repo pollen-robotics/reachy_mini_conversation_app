@@ -232,7 +232,7 @@ Restart the app after adding the module. Use Tools → Tool access to enable it 
 
 ### Hugging Face Space tools
 
-Remote tool failures are reported to the assistant for a spoken explanation. While a call is pending, Reachy can play a brief silent thinking move; preparing this optional feedback never delays the lookup.
+Remote tool failures are reported to the assistant for a spoken explanation. While a call is pending, Reachy can play a brief silent thinking move; preparing this optional feedback never delays the lookup. Enabled face tracking pauses while the thinking move plays and resumes afterwards, unless the assistant is still speaking.
 
 To publish a remote tool, create a Gradio Space, expose its API as MCP with `mcp_server=True`, and give each function clear type hints and docstrings. Verify that `https://<space-subdomain>.hf.space/gradio_api/mcp/schema` lists the expected tools before installing the Space.
 

@@ -2,6 +2,7 @@ import json
 import time
 import base64
 import asyncio
+import threading
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -9,11 +10,13 @@ from unittest.mock import AsyncMock, MagicMock
 import numpy as np
 import pytest
 
+import reachy_mini_conversation_app.moves as moves_mod
 import reachy_mini_conversation_app.conversation_handler as conv_mod
 import reachy_mini_conversation_app.huggingface_realtime as hf_mod
 from reachy_mini_conversation_app.config import config, get_default_voice
 from reachy_mini_conversation_app.streaming import AdditionalOutputs
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.dance_emotion_moves import GotoQueueMove
 from reachy_mini_conversation_app.huggingface_realtime import HuggingFaceRealtimeHandler
 from reachy_mini_conversation_app.tools.background_tool_manager import ToolState, ToolNotification
 
@@ -909,3 +912,36 @@ async def test_run_session_response_lifecycle_toggles_done_event(monkeypatch: An
     assert handler._response_done_event.is_set()
     handler.deps.movement_manager.set_speaking.assert_any_call(True)
     handler.deps.movement_manager.set_speaking.assert_any_call(False)
+
+
+@pytest.mark.asyncio
+async def test_response_done_keeps_pending_remote_feedback_in_control(monkeypatch: Any) -> None:
+    """Finishing a tool-call response cannot hand a playing feedback move back to tracking."""
+    robot = MagicMock()
+    robot.get_current_head_pose.return_value = np.eye(4)
+    robot.get_current_joint_positions.return_value = ([0.0] * 6, [0.0, 0.0])
+    paused = threading.Event()
+    robot.start_head_tracking.side_effect = lambda weight: paused.set() if weight == 0.0 else None
+    manager = moves_mod.MovementManager(robot)
+    thinking = GotoQueueMove(target_head_pose=np.eye(4), duration=10.0)
+    handler = _session_handler(monkeypatch, (_FakeEvent("response.created"), _FakeEvent("response.done")))
+    handler.deps.movement_manager = manager
+    manager.start()
+    try:
+        manager.set_head_tracking(True)
+        manager.queue_move(thinking, pause_head_tracking=True)
+        assert await asyncio.to_thread(paused.wait, 1.0)
+        robot.start_head_tracking.reset_mock()
+
+        await handler._run_realtime_session()
+        commands_processed = threading.Event()
+        robot.set_target.side_effect = lambda **kwargs: (
+            commands_processed.set() if manager._command_queue.empty() else None
+        )
+        assert await asyncio.to_thread(commands_processed.wait, 1.0)
+
+        assert handler._response_done_event.is_set()
+        assert manager.state.current_move is thinking
+        robot.start_head_tracking.assert_not_called()
+    finally:
+        manager.stop(reset_to_neutral=False)

@@ -131,7 +131,7 @@ class RemoteMcpTool(Tool):
             try:
                 queue_move = deps.movement_manager.queue_move
                 thinking = await asyncio.to_thread(thinking_move)
-                queue_move(thinking)
+                queue_move(thinking, pause_head_tracking=True)
                 await asyncio.Future[None]()
             except Exception as exc:
                 logger.warning("Thinking move unavailable: %s", exc)
