@@ -103,6 +103,7 @@ Copy `.env.example` to `.env` when you want to point Hugging Face at your own lo
 | Variable | Description |
 |----------|-------------|
 | `REALTIME_TRANSCRIPTION_LANGUAGE` | Optional input transcription language for the realtime backend. Defaults to `en`; set to a backend-supported code such as `zh` for Chinese. |
+| `LOCAL_VAD_ENABLED` | Local WebRTC speech detection for faster physical listening reactions. Defaults to `true`; set to `false` to use server VAD alone for movement. |
 | `HF_REALTIME_CONNECTION_MODE` | Hugging Face connection selector: `deployed` uses the built-in Hugging Face server; `local` uses `HF_REALTIME_WS_URL`. Defaults to `deployed`. |
 | `HF_REALTIME_WS_URL` | Direct websocket endpoint for your own Hugging Face backend. Accepts either a base URL like `ws://127.0.0.1:8765/v1` or the full websocket URL `ws://127.0.0.1:8765/v1/realtime`. Used when `HF_REALTIME_CONNECTION_MODE=local`. |
 | `HF_TOKEN` | Optional token for Hugging Face access. Local endpoints receive only this explicitly configured token. |
@@ -114,6 +115,10 @@ Copy `.env.example` to `.env` when you want to point Hugging Face at your own lo
 These variables are the starting value. What you change through the settings UI
 (or from the mobile app) is written to `settings.json` in the instance directory
 and wins over them, so a toggle always does what it says.
+
+`LOCAL_VAD_ENABLED` is read from the environment at startup. Local WebRTC VAD and server VAD both control physical listening: either detector freezes the antennas and suppresses idle movement. Movement resumes smoothly once both report silence. Local detection holds through 400 ms of silence and clears after 500 ms without microphone frames. It uses the SDK's 16 kHz microphone audio; conversation turns and audio interruptions continue to use server VAD. If local detection fails, the app logs a warning and uses server VAD alone.
+
+Local detection uses GStreamer's `webrtcdsp` on a copy of the same mono samples sent to the backend, without changing backend audio. Its echo cancellation, noise suppression, gain control and high-pass filter are disabled; the robot audio board already processes the signal. This requires a `webrtcdsp` build with VAD support (`webrtc-audio-processing-1`). Builds using `webrtc-audio-processing-2` have removed that API, so the app detects the missing support and falls back to server VAD. No separate model or dependency is needed.
 
 ### Hugging Face Connection Modes
 
