@@ -6,6 +6,7 @@ import random
 import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Final, Tuple, Optional
+from collections import deque
 
 import httpx
 import numpy as np
@@ -23,7 +24,7 @@ from openai.types.realtime import (
     RealtimeAudioConfigOutputParam,
     RealtimeSessionCreateRequestParam,
 )
-from websockets.exceptions import ConnectionClosedError
+from websockets.exceptions import ConnectionClosed, ConnectionClosedError
 from openai.types.realtime.realtime_audio_input_turn_detection_param import ServerVad
 
 from reachy_mini_conversation_app.tools import core_tools
@@ -171,10 +172,18 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self._movement_listening = False
         self._local_audio_at: float | None = None
         self._local_speech_timeout: asyncio.TimerHandle | None = None
+        self.paced_playback = config.LOCAL_VAD_ENABLED and config.LOCAL_BARGE_IN_ENABLED
+        self._active_response_id: str | None = None
+        self._audio_response_id: str | None = None
+        self._discarded_response_ids: deque[str] = deque(maxlen=32)
+        self._playback_interrupted = False
+        self._local_interrupt_task: asyncio.Task[None] | None = None
 
     def _set_listening(self, *, local: bool | None = None, server: bool | None = None) -> None:
         if local is not None:
             self._local_speech = local
+            if not local:
+                self.playback_gain = 1.0
         if server is not None:
             self._server_speech = server
         listening = self._local_speech or self._server_speech
@@ -183,6 +192,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             self.deps.movement_manager.set_listening(listening)
 
     async def _reset_listening(self) -> None:
+        if self._local_interrupt_task is not None:
+            await self._local_interrupt_task
         async with self._local_vad_lock:
             if self._local_speech_timeout is not None:
                 self._local_speech_timeout.cancel()
@@ -191,6 +202,45 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 self._local_vad.reset()
             self._local_audio_at = None
             self._set_listening(local=False, server=False)
+
+    def _local_interrupt_finished(self, task: asyncio.Task[None]) -> None:
+        self._local_interrupt_task = None
+        if not task.cancelled():
+            exception = task.exception()
+            if exception is not None:
+                logger.error("Local playback interruption failed: %s", exception)
+
+    async def _interrupt_playback(
+        self, *, audio_response_id: str | None = None, cancel_response_id: str | None = None
+    ) -> None:
+        if audio_response_id is not None and audio_response_id != self._audio_response_id:
+            return
+        if self._playback_interrupted:
+            return
+        self._playback_interrupted = True
+        self.playback_gain = 0.0
+        self.deps.movement_manager.set_speaking(False)
+        response_ids = (
+            (audio_response_id, cancel_response_id)
+            if audio_response_id is not None
+            else (self._audio_response_id, self._active_response_id)
+        )
+        for response_id in response_ids:
+            if response_id is not None and response_id not in self._discarded_response_ids:
+                self._discarded_response_ids.append(response_id)
+        try:
+            if (
+                cancel_response_id is not None
+                and cancel_response_id == self._active_response_id
+                and self.connection is not None
+            ):
+                await self.connection.response.cancel(response_id=cancel_response_id)
+        except (ConnectionClosed, httpx.HTTPError, OSError) as exc:
+            logger.warning("Failed to cancel locally interrupted response: %s", exc)
+        finally:
+            if self._clear_queue is not None:
+                await self._clear_queue()
+            self.playback_gain = 1.0
 
     @staticmethod
     def _sanitize_tool_result_for_model(tool_name: str, tool_result: dict[str, Any]) -> dict[str, Any]:
@@ -408,6 +458,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 self._local_vad = await asyncio.to_thread(SileroVAD)
             except Exception as exc:
                 logger.warning("Local VAD unavailable; using server VAD for movement: %s", exc)
+                self.paced_playback = False
         self.client = await self._build_realtime_client()
 
         max_attempts = 3
@@ -774,6 +825,10 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
             # Manage events received from the realtime server.
             self.connection = conn
+            self._active_response_id = None
+            self._audio_response_id = None
+            self._discarded_response_ids.clear()
+            self._playback_interrupted = False
             try:
                 self._connected_event.set()
             except Exception:
@@ -795,8 +850,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         self._turn_user_done_at = None
                         self._turn_response_created_at = None
                         self._turn_first_audio_at = None
-                        if self._clear_queue:
-                            self._clear_queue()
+                        await self._interrupt_playback()
                         self._set_listening(server=True)
                         logger.debug("User speech started")
 
@@ -806,6 +860,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         logger.debug("User speech stopped - server will auto-commit with VAD")
 
                     if event.type == "response.output_audio.done":
+                        if event.response_id in self._discarded_response_ids:
+                            continue
                         self.deps.movement_manager.set_speaking(False)
                         logger.debug("response completed")
 
@@ -816,6 +872,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         logger.debug("response text done: %s", event.text)
 
                     if event.type == "response.created":
+                        self._active_response_id = event.response.id
+                        self._playback_interrupted = False
                         self._mark_activity("response_created")
                         self.deps.movement_manager.set_speaking(True)
                         self._response_done_event.clear()
@@ -827,6 +885,10 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         logger.debug("Response created (active)")
 
                     if event.type == "response.done":
+                        if self._active_response_id is not None and event.response.id != self._active_response_id:
+                            continue
+                        if event.response.id == self._active_response_id:
+                            self._active_response_id = None
                         # Doesn't mean the audio is done playing
                         # Resume tracking for responses that emit no audio (text-only / tool-only).
                         self.deps.movement_manager.set_speaking(False)
@@ -879,6 +941,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
                     # Handle assistant transcription
                     if event.type == "response.output_audio_transcript.done":
+                        if event.response_id in self._discarded_response_ids:
+                            continue
                         self._mark_activity("assistant_transcript_done")
                         logger.debug(f"Assistant transcript: {event.transcript}")
                         await self.output_queue.put(
@@ -888,6 +952,9 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
                     # Handle audio delta
                     if event.type == "response.output_audio.delta":
+                        if event.response_id in self._discarded_response_ids:
+                            continue
+                        self._audio_response_id = event.response_id
                         decoded_pcm_bytes = base64.b64decode(event.delta)
                         decoded_pcm = np.frombuffer(decoded_pcm_bytes, dtype=np.int16).reshape(1, -1)
                         self._mark_activity("assistant_audio_delta")
@@ -895,6 +962,9 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                             self._turn_first_audio_at = time.perf_counter()
                             delta_ms = (self._turn_first_audio_at - self._turn_user_done_at) * 1000
                             logger.info("Turn latency: first audio delta %.0f ms after user transcript", delta_ms)
+                        self.playback_frame_epochs[id(decoded_pcm)] = self.playback_epoch
+                        if self.paced_playback:
+                            self.playback_pending_frames += 1
                         await self.output_queue.put(
                             (
                                 self.SAMPLE_RATE,
@@ -983,6 +1053,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             finally:
                 self.connection = None
                 await self._reset_listening()
+                self._active_response_id = None
+                self._audio_response_id = None
                 # Stop the response sender worker.
                 if response_sender_task is not None:
                     response_sender_task.cancel()
@@ -1021,6 +1093,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         # Cast if needed
         audio_frame = audio_to_int16(audio_frame)
 
+        confirmed_barge_in = False
         async with self._local_vad_lock:
             if self._local_vad is not None:
                 if self._local_speech_timeout is not None:
@@ -1030,8 +1103,16 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 if self._local_audio_at is not None and received_at - self._local_audio_at > 0.5:
                     self._local_vad.reset()
                 self._local_audio_at = received_at
+                detect_barge_in = (
+                    self.paced_playback
+                    and not self._playback_interrupted
+                    and self._audio_response_id is not None
+                    and (self.playback_until > received_at or self.playback_pending_frames > 0)
+                )
                 inference_task = asyncio.create_task(
-                    asyncio.to_thread(self._local_vad.process, audio_frame, sample_rate)
+                    asyncio.to_thread(
+                        self._local_vad.process, audio_frame, sample_rate, detect_barge_in=detect_barge_in
+                    )
                 )
                 try:
                     local_speech = await asyncio.shield(inference_task)
@@ -1045,13 +1126,27 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 except Exception as exc:
                     logger.warning("Local VAD failed; using server VAD for movement: %s", exc)
                     self._local_vad = None
+                    self.paced_playback = False
                     local_speech = False
                 self._set_listening(local=local_speech)
+                if self.paced_playback and self._local_vad is not None and not self._playback_interrupted:
+                    self.playback_gain = 0.25 if detect_barge_in and self._local_vad.barge_in_candidate else 1.0
+                    confirmed_barge_in = detect_barge_in and self._local_vad.barge_in_confirmed
                 if local_speech:
                     # Muting or losing the microphone must not leave a stale local vote.
                     self._local_speech_timeout = asyncio.get_running_loop().call_later(
                         0.5, lambda: self._set_listening(local=False)
                     )
+
+        if confirmed_barge_in:
+            self._mark_activity("local_barge_in")
+            if self._local_interrupt_task is None:
+                self._local_interrupt_task = asyncio.create_task(
+                    self._interrupt_playback(
+                        audio_response_id=self._audio_response_id, cancel_response_id=self._active_response_id
+                    )
+                )
+                self._local_interrupt_task.add_done_callback(self._local_interrupt_finished)
 
         if not self.connection:
             return

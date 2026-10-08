@@ -39,6 +39,14 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     def __init__(self) -> None:
         """Initialize the stream handler and shared idle/activity tracking."""
         super().__init__()
+        self.paced_playback = False
+        self.playback_gain = 1.0
+        self.playback_epoch = 0
+        self.playback_frame_epochs: dict[int, int] = {}
+        self.playback_until = 0.0
+        self.playback_pending_frames = 0
+        self.playback_ready = asyncio.Event()
+        self.playback_ready.set()
         self.last_activity_time = time.monotonic()
         self.last_idle_behavior_time = self.last_activity_time
 

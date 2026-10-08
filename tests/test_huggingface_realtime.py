@@ -37,7 +37,7 @@ async def test_local_and_server_vad_keep_listening_until_both_stop(
     detector = MagicMock()
     detector.process.side_effect = [True, False]
     handler._local_vad = detector
-    handler._clear_queue = MagicMock()
+    handler._clear_queue = AsyncMock()
     connection = MagicMock()
     connection.session.update = AsyncMock()
     connection.input_audio_buffer.append = AsyncMock()
@@ -149,7 +149,7 @@ async def test_cancelled_receiver_finishes_inference_before_shutdown(monkeypatch
     release = threading.Event()
     detector = MagicMock()
 
-    def process(_audio: np.ndarray, _sample_rate: int) -> bool:
+    def process(_audio: np.ndarray, _sample_rate: int, **_kwargs: object) -> bool:
         started.set()
         assert release.wait(timeout=2.0)
         return True
@@ -214,6 +214,10 @@ class _FakeEvent:
     def __init__(self, event_type: str, **fields: Any) -> None:
         """Store the event type and any extra attributes."""
         self.type = event_type
+        if event_type in ("response.created", "response.done"):
+            fields.setdefault("response", SimpleNamespace(id="response-1"))
+        if event_type.startswith("response.output_audio"):
+            fields.setdefault("response_id", "response-1")
         self.__dict__.update(fields)
 
 
@@ -1095,7 +1099,7 @@ async def test_receive_downmixes_stereo_and_forwards() -> None:
 async def test_run_session_speech_started_clears_queue_and_listens(monkeypatch: Any) -> None:
     """User speech start clears the playback queue and enters listening mode."""
     handler = _session_handler(monkeypatch, (_FakeEvent("input_audio_buffer.speech_started"),))
-    clear_queue = MagicMock()
+    clear_queue = AsyncMock()
     handler._clear_queue = clear_queue
 
     await handler._run_realtime_session()
@@ -1117,3 +1121,137 @@ async def test_run_session_response_lifecycle_toggles_done_event(monkeypatch: An
     assert handler._response_done_event.is_set()
     handler.deps.movement_manager.set_speaking.assert_any_call(True)
     handler.deps.movement_manager.set_speaking.assert_any_call(False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("generation_active", [False, True])
+async def test_local_barge_in_ducks_rejects_then_interrupts_without_stopping_microphone(
+    monkeypatch: pytest.MonkeyPatch, generation_active: bool
+) -> None:
+    """Candidates are reversible; confirmation flushes buffered playback and cancels only active generation."""
+    monkeypatch.setattr(config, "LOCAL_BARGE_IN_ENABLED", True)
+    handler = _plain_handler()
+    detector = MagicMock()
+    detector.process.return_value = True
+    detector.barge_in_candidate = True
+    detector.barge_in_confirmed = False
+    handler._local_vad = detector
+    handler._audio_response_id = "old-response"
+    handler._active_response_id = "old-response" if generation_active else None
+    handler.playback_until = time.monotonic() + 10
+    flush_started = asyncio.Event()
+    allow_flush = asyncio.Event()
+
+    async def flush() -> None:
+        flush_started.set()
+        await allow_flush.wait()
+
+    handler._clear_queue = AsyncMock(side_effect=flush)
+    connection = MagicMock()
+    connection.response.cancel = AsyncMock()
+    connection.input_audio_buffer.append = AsyncMock()
+    handler.connection = connection
+    microphone = np.zeros(512, dtype=np.int16)
+    await handler.receive((16000, microphone))
+    assert handler.playback_gain == 0.25
+    connection.response.cancel.assert_not_awaited()
+    handler._clear_queue.assert_not_awaited()
+
+    detector.barge_in_candidate = False
+    await handler.receive((16000, microphone))
+    assert handler.playback_gain == 1.0
+    detector.barge_in_candidate = True
+    detector.barge_in_confirmed = True
+    await handler.receive((16000, microphone))
+    await asyncio.wait_for(flush_started.wait(), timeout=1)
+    await handler.receive((16000, microphone))
+    assert connection.input_audio_buffer.append.await_count == 4
+    assert "old-response" in handler._discarded_response_ids
+    if generation_active:
+        connection.response.cancel.assert_awaited_once_with(response_id="old-response")
+    else:
+        connection.response.cancel.assert_not_awaited()
+    await handler._interrupt_playback()
+    handler._clear_queue.assert_awaited_once()
+    allow_flush.set()
+    await handler.shutdown()
+    assert handler.playback_gain == 1.0
+
+
+@pytest.mark.asyncio
+async def test_server_interrupt_discards_late_audio_but_allows_next_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Audio arriving after interruption cannot restart the old response."""
+    delta = base64.b64encode(np.ones(512, dtype=np.int16).tobytes()).decode()
+    handler = _session_handler(
+        monkeypatch,
+        (
+            _FakeEvent("response.created"),
+            _FakeEvent("response.output_audio.delta", delta=delta),
+            _FakeEvent("input_audio_buffer.speech_started"),
+            _FakeEvent("response.output_audio.delta", delta=delta),
+            _FakeEvent("response.done"),
+            _FakeEvent("response.created", response=SimpleNamespace(id="response-2")),
+            _FakeEvent("response.output_audio.delta", response_id="response-2", delta=delta),
+            _FakeEvent("response.output_audio.delta", response_id="response-1", delta=delta),
+            _FakeEvent("response.output_audio.done", response_id="response-1"),
+            _FakeEvent("response.output_audio_transcript.done", response_id="response-1", transcript="stale"),
+            _FakeEvent("response.done", response=SimpleNamespace(id="response-1")),
+        ),
+    )
+    handler._clear_queue = AsyncMock()
+    await handler._run_realtime_session()
+    outputs = _drain(handler)
+    frames = [item for item in outputs if isinstance(item, tuple)]
+    assert len(frames) == 2
+    assert not _messages(outputs)
+    handler._clear_queue.assert_awaited_once()
+    assert not handler._response_done_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_barge_in_disabled_or_idle_does_not_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The opt-in feature cannot interrupt without assistant audio to play."""
+    monkeypatch.setattr(config, "LOCAL_BARGE_IN_ENABLED", False)
+    handler = _plain_handler()
+    detector = MagicMock()
+    detector.process.return_value = True
+    detector.barge_in_candidate = detector.barge_in_confirmed = True
+    handler._local_vad = detector
+    handler.connection = MagicMock()
+    handler.connection.input_audio_buffer.append = AsyncMock()
+    handler.connection.response.cancel = AsyncMock()
+    handler._clear_queue = AsyncMock()
+    handler._audio_response_id = "already-played"
+    handler.output_queue.put_nowait(AdditionalOutputs({"role": "user", "content": "hello"}))
+    for enabled in (False, True):
+        handler.paced_playback = enabled
+        await handler.receive((16000, np.zeros(512, dtype=np.int16)))
+        assert handler.playback_gain == 1.0
+    handler._clear_queue.assert_not_awaited()
+    handler.connection.response.cancel.assert_not_awaited()
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_local_cancel_failure_still_flushes_and_forwards_audio(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A lost cancellation message cannot prevent the local playback stop."""
+    monkeypatch.setattr(config, "LOCAL_BARGE_IN_ENABLED", True)
+    handler = _plain_handler()
+    detector = MagicMock()
+    detector.process.return_value = True
+    detector.barge_in_candidate = detector.barge_in_confirmed = True
+    handler._local_vad = detector
+    handler._audio_response_id = handler._active_response_id = "response-1"
+    handler.playback_until = time.monotonic() + 10
+    handler._clear_queue = AsyncMock()
+    handler.connection = MagicMock()
+    handler.connection.response.cancel = AsyncMock(side_effect=OSError("disconnected"))
+    handler.connection.input_audio_buffer.append = AsyncMock()
+    await handler.receive((16000, np.zeros(512, dtype=np.int16)))
+    await asyncio.sleep(0)
+    handler._clear_queue.assert_awaited_once()
+    handler.connection.input_audio_buffer.append.assert_awaited_once()
+    assert "Failed to cancel locally interrupted response" in caplog.text
+    await handler.shutdown()

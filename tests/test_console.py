@@ -46,7 +46,8 @@ async def _wait_until(predicate: Any, timeout: float = 1.0) -> None:
     raise AssertionError("Timed out waiting for condition")
 
 
-def test_clear_audio_queue_prefers_clear_player() -> None:
+@pytest.mark.asyncio
+async def test_clear_audio_queue_prefers_clear_player() -> None:
     """clear_player() is the canonical flush and is used whenever available."""
     handler = MagicMock()
     handler.output_queue = asyncio.Queue()
@@ -58,14 +59,15 @@ def test_clear_audio_queue_prefers_clear_player() -> None:
     robot = SimpleNamespace(media=SimpleNamespace(audio=audio))
     stream = LocalStream(handler, robot)
 
-    stream.clear_audio_queue()
+    await stream.clear_audio_queue()
 
     audio.clear_player.assert_called_once()
     audio.clear_output_buffer.assert_not_called()
     assert handler.output_queue.empty()
 
 
-def test_clear_audio_queue_falls_back_to_output_buffer() -> None:
+@pytest.mark.asyncio
+async def test_clear_audio_queue_falls_back_to_output_buffer() -> None:
     """Older SDKs without clear_player() still flush via clear_output_buffer()."""
     handler = MagicMock()
     handler.output_queue = asyncio.Queue()
@@ -73,13 +75,14 @@ def test_clear_audio_queue_falls_back_to_output_buffer() -> None:
     robot = SimpleNamespace(media=SimpleNamespace(audio=audio))
     stream = LocalStream(handler, robot)
 
-    stream.clear_audio_queue()
+    await stream.clear_audio_queue()
 
     audio.clear_output_buffer.assert_called_once()
     assert handler.output_queue.empty()
 
 
-def test_clear_audio_queue_drains_queue_in_place() -> None:
+@pytest.mark.asyncio
+async def test_clear_audio_queue_drains_queue_in_place() -> None:
     """The output queue is drained in place, not replaced with a new object."""
     handler = MagicMock()
     queue: asyncio.Queue[Any] = asyncio.Queue()
@@ -90,7 +93,7 @@ def test_clear_audio_queue_drains_queue_in_place() -> None:
     robot = SimpleNamespace(media=SimpleNamespace(audio=audio))
     stream = LocalStream(handler, robot)
 
-    stream.clear_audio_queue()
+    await stream.clear_audio_queue()
 
     assert handler.output_queue is queue  # same object, not replaced
     assert queue.empty()
@@ -886,6 +889,7 @@ async def test_play_loop_pushes_mono_audio_as_float32() -> None:
     robot = _audio_robot(push_audio_sample=MagicMock())
     handler = MagicMock()
     stream = LocalStream(handler, robot)
+    handler.playback_frame_epochs = {}
     handler.emit = AsyncMock(side_effect=_stop_after(stream, (24000, np.zeros(4, dtype=np.int16))))
 
     await stream.play_loop()
@@ -903,6 +907,7 @@ async def test_play_loop_downmixes_stereo_before_pushing() -> None:
     handler = MagicMock()
     stream = LocalStream(handler, robot)
     stereo = np.zeros((4, 2), dtype=np.int16)
+    handler.playback_frame_epochs = {}
     handler.emit = AsyncMock(side_effect=_stop_after(stream, (24000, stereo)))
 
     await stream.play_loop()
@@ -917,6 +922,7 @@ async def test_play_loop_skips_empty_audio() -> None:
     robot = _audio_robot(push_audio_sample=MagicMock())
     handler = MagicMock()
     stream = LocalStream(handler, robot)
+    handler.playback_frame_epochs = {}
     handler.emit = AsyncMock(side_effect=_stop_after(stream, (24000, np.array([], dtype=np.int16))))
 
     await stream.play_loop()
@@ -940,8 +946,8 @@ def test_close_without_running_loop_stops_media() -> None:
 def test_drain_output_queue_empties_in_place() -> None:
     """The output queue is drained without being replaced."""
     queue: asyncio.Queue[Any] = asyncio.Queue()
-    queue.put_nowait("a")
-    queue.put_nowait("b")
+    queue.put_nowait((16000, np.zeros(512, dtype=np.int16)))
+    queue.put_nowait((16000, np.zeros(512, dtype=np.int16)))
     handler = MagicMock()
     handler.output_queue = queue
     stream = LocalStream(handler, _audio_robot())
@@ -1045,3 +1051,105 @@ def test_rpc_settings_methods() -> None:
     assert isinstance(r2["result"], list)
     assert "spaces" in r3["result"]
     assert "enabled_tools" in r4["result"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("confirm", [False, True])
+async def test_paced_playback_changes_gain_and_preserves_or_discards_remaining_audio(confirm: bool) -> None:
+    """Ducking is reversible; clearing invalidates a partially submitted frame."""
+    handler = MagicMock()
+    handler.paced_playback = True
+    handler.playback_pending_frames = 1
+    handler.playback_epoch = 0
+    handler.playback_frame_epochs = {}
+    handler.playback_gain = 1.0
+    handler.playback_ready = asyncio.Event()
+    handler.playback_ready.set()
+    handler.output_queue = asyncio.Queue()
+    frame = np.full(960, 16384, dtype=np.int16)
+    handler.emit = AsyncMock(return_value=(16000, frame))
+    pushed: list[np.ndarray] = []
+    robot = _audio_robot()
+    robot.media.audio = SimpleNamespace(clear_player=MagicMock())
+    stream = LocalStream(handler, robot)
+
+    def push(chunk: np.ndarray) -> None:
+        pushed.append(chunk.copy())
+        if len(pushed) == 1:
+            handler.playback_gain = 0.25
+        elif len(pushed) == 2:
+            handler.playback_gain = 1.0
+        else:
+            stream._stop_event.set()
+
+    robot.media.push_audio_sample = push
+
+    playback = asyncio.create_task(stream.play_loop())
+    await _wait_until(lambda: len(pushed) >= 2)
+    if confirm:
+        await stream.clear_audio_queue()
+        stream._stop_event.set()
+    await asyncio.wait_for(playback, timeout=1)
+    assert [chunk.size for chunk in pushed] == ([320, 320] if confirm else [320, 320, 320])
+    np.testing.assert_array_equal(pushed[0], 0.5)
+    np.testing.assert_array_equal(pushed[1], 0.125)
+    if not confirm:
+        np.testing.assert_array_equal(pushed[2], 0.5)
+
+
+@pytest.mark.asyncio
+async def test_clear_audio_queue_keeps_transcripts_and_does_not_block_event_loop() -> None:
+    """A slow SDK flush does not erase metadata or stall microphone/event processing."""
+    handler = MagicMock()
+    handler.output_queue = asyncio.Queue()
+    transcript = AdditionalOutputs({"role": "user", "content": "hello"})
+    handler.output_queue.put_nowait(transcript)
+    handler.output_queue.put_nowait((16000, np.zeros(512, dtype=np.int16)))
+    flush_started = threading.Event()
+    release_flush = threading.Event()
+
+    def flush() -> None:
+        flush_started.set()
+        assert release_flush.wait(timeout=2)
+
+    stream = LocalStream(handler, SimpleNamespace(media=SimpleNamespace(audio=SimpleNamespace(clear_player=flush))))
+    clearing = asyncio.create_task(stream.clear_audio_queue())
+    try:
+        await _wait_until(flush_started.is_set)
+        assert not clearing.done()
+        assert handler.output_queue.get_nowait() is transcript
+        assert handler.output_queue.empty()
+    finally:
+        release_flush.set()
+        await clearing
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stale", [False, True])
+async def test_playback_waiting_during_flush_keeps_only_current_frames(stale: bool) -> None:
+    """A flush during emit must reject old audio without dropping the next response's first frame."""
+    handler = MagicMock()
+    handler.paced_playback = False
+    handler.playback_epoch = 0
+    handler.playback_frame_epochs = {}
+    handler.output_queue = asyncio.Queue()
+    frame = np.ones(320, dtype=np.int16)
+    waiting = asyncio.Event()
+    release = asyncio.Event()
+    robot = _audio_robot(push_audio_sample=MagicMock())
+    stream = LocalStream(handler, robot)
+
+    async def emit() -> tuple[int, np.ndarray]:
+        waiting.set()
+        await release.wait()
+        handler.playback_frame_epochs[id(frame)] = 0 if stale else handler.playback_epoch
+        stream._stop_event.set()
+        return 16000, frame
+
+    handler.emit = emit
+    playback = asyncio.create_task(stream.play_loop())
+    await asyncio.wait_for(waiting.wait(), timeout=1)
+    await stream.clear_audio_queue()
+    release.set()
+    await asyncio.wait_for(playback, timeout=1)
+    assert robot.media.push_audio_sample.call_count == (0 if stale else 1)
