@@ -325,6 +325,7 @@ class Config:
     MEMORY_ENABLED = _env_flag(MEMORY_ENABLED_ENV, default=True)
     CAMERA_ENABLED = _env_flag(CAMERA_ENABLED_ENV, default=True)
     HF_TOKEN = os.getenv("HF_TOKEN")  # Optional, falls back to hf auth login if not set
+    AUDIO_DEBUG_DIR = os.getenv("REACHY_MINI_AUDIO_DEBUG_DIR", "").strip()
 
     logger.debug(
         "HF mode: %s, HF session URL set: %s, HF direct URL set: %s",
@@ -437,6 +438,7 @@ def refresh_runtime_config_from_env() -> None:
         os.getenv(REALTIME_TRANSCRIPTION_LANGUAGE_ENV)
     )
     config.HF_TOKEN = os.getenv("HF_TOKEN")
+    config.AUDIO_DEBUG_DIR = os.getenv("REACHY_MINI_AUDIO_DEBUG_DIR", "").strip()
     config.REACHY_MINI_CUSTOM_PROFILE = LOCKED_PROFILE or os.getenv("REACHY_MINI_CUSTOM_PROFILE")
     config.MEMORY_ENABLED = _env_flag(MEMORY_ENABLED_ENV, default=True)
     config.CAMERA_ENABLED = _env_flag(CAMERA_ENABLED_ENV, default=True)

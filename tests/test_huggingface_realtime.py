@@ -1,9 +1,11 @@
 import json
 import time
+import wave
 import base64
 import asyncio
 from types import SimpleNamespace
 from typing import Any
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
@@ -28,6 +30,10 @@ class _FakeEvent:
         """Store the event type and any extra attributes."""
         self.type = event_type
         self.__dict__.update(fields)
+
+    def model_dump(self) -> dict[str, Any]:
+        """Expose the same event serialization interface as the realtime SDK."""
+        return dict(self.__dict__)
 
 
 def _make_fake_realtime_client(
@@ -170,6 +176,102 @@ def _drain(handler: HuggingFaceRealtimeHandler) -> list[Any]:
 
 def _messages(items: list[Any]) -> list[dict[str, Any]]:
     return [item.args[0] for item in items if isinstance(item, AdditionalOutputs)]
+
+
+@pytest.mark.parametrize("channels_first", [False, True])
+@pytest.mark.parametrize("sample_dtype", [np.int16, np.float32])
+@pytest.mark.asyncio
+async def test_audio_capture_preserves_input_channels_sent_bytes_and_drops(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, channels_first: bool, sample_dtype: type
+) -> None:
+    """Record SDK channels and only successfully submitted mono frames, including drop reasons."""
+    monkeypatch.setattr(config, "AUDIO_DEBUG_DIR", str(tmp_path))
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    stereo = np.array([[100, -100], [200, -200], [300, -300]], dtype=np.int16)
+    if sample_dtype == np.float32:
+        stereo = stereo.astype(np.float32) / 32768
+    expected_pcm = hf_mod.audio_to_int16(stereo)
+    frame = stereo.T if channels_first else stereo
+
+    await handler.receive((16000, frame))
+    connection = AsyncMock()
+    handler.connection = connection
+    await handler.receive((16000, frame))
+    sent_pcm = base64.b64decode(connection.input_audio_buffer.append.call_args.kwargs["audio"])
+    connection.input_audio_buffer.append.side_effect = RuntimeError("connection closed")
+    await handler.receive((16000, frame))
+    await handler.shutdown()
+
+    capture_directory = next(tmp_path.iterdir())
+    with wave.open(str(capture_directory / "received.wav"), "rb") as recording:
+        assert recording.getnchannels() == 2
+        assert recording.getframerate() == 16000
+        assert recording.readframes(recording.getnframes()) == expected_pcm.tobytes() * 3
+    with wave.open(str(capture_directory / "sent.wav"), "rb") as recording:
+        assert recording.getnchannels() == 1
+        assert recording.readframes(recording.getnframes()) == sent_pcm == expected_pcm[:, 0].tobytes()
+    events = [json.loads(line) for line in (capture_directory / "events.jsonl").read_text().splitlines()]
+    drops = [event for event in events if event["type"] == "audio.dropped"]
+    assert [event["reason"] for event in drops] == ["not_connected", "connection closed"]
+    assert drops[-1]["received_samples"] == 9
+    assert drops[-1]["sent_samples"] == 3
+
+
+@pytest.mark.asyncio
+async def test_audio_capture_records_server_speech_boundaries_and_transcript(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Captured server events retain speech boundaries and transcripts beside the submitted audio."""
+    monkeypatch.setattr(config, "AUDIO_DEBUG_DIR", str(tmp_path))
+    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(hf_mod, "get_tool_specs", lambda: [])
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.connection = AsyncMock()
+    await handler.receive((16000, np.array([100, 200, 300], dtype=np.int16)))
+    handler.client = _make_fake_realtime_client(
+        events=(
+            _FakeEvent("input_audio_buffer.speech_started", item_id="phrase", audio_start_ms=20),
+            _FakeEvent("input_audio_buffer.speech_stopped", item_id="phrase", audio_end_ms=500),
+            _FakeEvent("conversation.item.input_audio_transcription.completed", item_id="phrase", transcript="Hello"),
+        )
+    )
+    monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
+    monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
+
+    await handler._run_realtime_session()
+    await handler.shutdown()
+
+    capture_directory = next(tmp_path.iterdir())
+    events = [json.loads(line) for line in (capture_directory / "events.jsonl").read_text().splitlines()]
+    server_events = [event for event in events if "event" in event]
+    assert server_events[0]["event"]["audio_start_ms"] == 20
+    assert server_events[1]["event"]["audio_end_ms"] == 500
+    assert server_events[2]["event"]["transcript"] == "Hello"
+    assert all(event["sent_samples"] == 3 for event in server_events)
+    assert all(event["elapsed_s"] >= 0 for event in server_events)
+
+
+@pytest.mark.parametrize("capture_setting", ["disabled", "unwritable"])
+@pytest.mark.asyncio
+async def test_audio_submission_continues_without_diagnostics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_setting: str
+) -> None:
+    """Disabled or unavailable capture storage must not change microphone submission."""
+    unavailable_directory = tmp_path / "file"
+    unavailable_directory.write_text("not a directory")
+    monkeypatch.setattr(
+        config, "AUDIO_DEBUG_DIR", str(unavailable_directory) if capture_setting == "unwritable" else ""
+    )
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.connection = AsyncMock()
+    samples = np.array([100, 200, 300], dtype=np.int16)
+
+    await handler.receive((16000, samples))
+
+    submitted_pcm = base64.b64decode(handler.connection.input_audio_buffer.append.call_args.kwargs["audio"])
+    assert submitted_pcm == samples.tobytes()
+    assert list(tmp_path.iterdir()) == [unavailable_directory]
+    await handler.shutdown()
 
 
 @pytest.mark.asyncio
