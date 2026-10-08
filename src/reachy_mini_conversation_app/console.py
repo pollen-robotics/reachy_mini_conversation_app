@@ -898,7 +898,7 @@ class LocalStream:
         logger.debug(f"Audio recording started at {input_sample_rate} Hz")
 
         while not self._stop_event.is_set():
-            audio_frame = self._robot.media.get_audio_sample()
+            audio_frame = await asyncio.to_thread(self._robot.media.get_audio_sample)
             if audio_frame is not None and not self._mic_muted:
                 await self.handler.receive((input_sample_rate, audio_frame))
                 self._emit_level("user", audio_frame)

@@ -1153,3 +1153,49 @@ async def test_playback_waiting_during_flush_keeps_only_current_frames(stale: bo
     release.set()
     await asyncio.wait_for(playback, timeout=1)
     assert robot.media.push_audio_sample.call_count == (0 if stale else 1)
+
+
+@pytest.mark.asyncio
+async def test_paced_playback_continues_while_microphone_read_blocks() -> None:
+    """Waiting for the next SDK microphone buffer cannot stall scheduled playback chunks."""
+    handler = MagicMock()
+    handler.paced_playback = True
+    handler.playback_pending_frames = 1
+    handler.playback_epoch = 0
+    handler.playback_frame_epochs = {}
+    handler.playback_gain = 1.0
+    handler.playback_ready = asyncio.Event()
+    handler.playback_ready.set()
+    handler.receive = AsyncMock()
+    handler.emit = AsyncMock(return_value=(16000, np.ones(960, dtype=np.int16)))
+    read_started = threading.Event()
+    release_read = threading.Event()
+
+    def read_microphone() -> None:
+        read_started.set()
+        assert release_read.wait(timeout=2)
+
+    pushed: list[np.ndarray] = []
+    robot = _audio_robot(get_input_audio_samplerate=lambda: 16000, get_audio_sample=read_microphone)
+    stream = LocalStream(handler, robot)
+
+    def push(chunk: np.ndarray) -> None:
+        pushed.append(chunk)
+        if len(pushed) == 3:
+            stream._stop_event.set()
+
+    robot.media.push_audio_sample = push
+    recording = asyncio.create_task(stream.record_loop())
+    playback: asyncio.Task[None] | None = None
+    try:
+        await _wait_until(read_started.is_set)
+        playback = asyncio.create_task(stream.play_loop())
+        await asyncio.wait_for(playback, timeout=1)
+        assert not recording.done()
+        assert [chunk.size for chunk in pushed] == [320, 320, 320]
+    finally:
+        release_read.set()
+        stream._stop_event.set()
+        await recording
+        if playback is not None:
+            await playback
