@@ -43,6 +43,7 @@ from reachy_mini_conversation_app.prompts import (
     get_session_greeting_prompt,
 )
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_int16
+from reachy_mini_conversation_app.audio.local_vad import SileroVAD
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolSpec,
     ToolDependencies,
@@ -163,6 +164,33 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self._startup_greeting_sent = False
         self._in_flight_tool_calls: set[str] = set()
         self._tool_batch_needs_response = False
+        self._local_vad: SileroVAD | None = None
+        self._local_vad_lock = asyncio.Lock()
+        self._local_speech = False
+        self._server_speech = False
+        self._movement_listening = False
+        self._local_audio_at: float | None = None
+        self._local_speech_timeout: asyncio.TimerHandle | None = None
+
+    def _set_listening(self, *, local: bool | None = None, server: bool | None = None) -> None:
+        if local is not None:
+            self._local_speech = local
+        if server is not None:
+            self._server_speech = server
+        listening = self._local_speech or self._server_speech
+        if listening != self._movement_listening:
+            self._movement_listening = listening
+            self.deps.movement_manager.set_listening(listening)
+
+    async def _reset_listening(self) -> None:
+        async with self._local_vad_lock:
+            if self._local_speech_timeout is not None:
+                self._local_speech_timeout.cancel()
+                self._local_speech_timeout = None
+            if self._local_vad is not None:
+                self._local_vad.reset()
+            self._local_audio_at = None
+            self._set_listening(local=False, server=False)
 
     @staticmethod
     def _sanitize_tool_result_for_model(tool_name: str, tool_result: dict[str, Any]) -> dict[str, Any]:
@@ -375,6 +403,11 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
     async def start_up(self) -> None:
         """Start the handler with minimal retries on unexpected websocket closure."""
+        if config.LOCAL_VAD_ENABLED:
+            try:
+                self._local_vad = await asyncio.to_thread(SileroVAD)
+            except Exception as exc:
+                logger.warning("Local VAD unavailable; using server VAD for movement: %s", exc)
         self.client = await self._build_realtime_client()
 
         max_attempts = 3
@@ -764,12 +797,12 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         self._turn_first_audio_at = None
                         if self._clear_queue:
                             self._clear_queue()
-                        self.deps.movement_manager.set_listening(True)
+                        self._set_listening(server=True)
                         logger.debug("User speech started")
 
                     if event.type == "input_audio_buffer.speech_stopped":
                         self._mark_activity("user_speech_stopped")
-                        self.deps.movement_manager.set_listening(False)
+                        self._set_listening(server=False)
                         logger.debug("User speech stopped - server will auto-commit with VAD")
 
                     if event.type == "response.output_audio.done":
@@ -827,7 +860,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         raw_transcript = event.transcript or ""
                         transcript = raw_transcript.strip()
                         logger.debug("User transcript: %s", raw_transcript)
-                        self.deps.movement_manager.set_listening(False)
+                        self._set_listening(server=False)
 
                         await self._cancel_partial_transcript_task()
 
@@ -937,7 +970,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                             logger.error("Realtime error [%s]: %s (raw=%s)", code, msg, err)
 
                         if code == "input_audio_buffer_commit_empty":
-                            self.deps.movement_manager.set_listening(False)
+                            self._set_listening(server=False)
 
                         # Only show user-facing errors, not internal state errors.
                         if code not in (
@@ -948,6 +981,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                                 AdditionalOutputs({"role": "assistant", "content": f"[error] {msg}"})
                             )
             finally:
+                self.connection = None
+                await self._reset_listening()
                 # Stop the response sender worker.
                 if response_sender_task is not None:
                     response_sender_task.cancel()
@@ -970,10 +1005,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             frame: A tuple containing (sample_rate, audio_data).
 
         """
-        if not self.connection:
-            return
-
-        _, audio_frame = frame
+        sample_rate, audio_frame = frame
         if audio_frame.size == 0:
             return
 
@@ -989,6 +1021,41 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         # Cast if needed
         audio_frame = audio_to_int16(audio_frame)
 
+        async with self._local_vad_lock:
+            if self._local_vad is not None:
+                if self._local_speech_timeout is not None:
+                    self._local_speech_timeout.cancel()
+                    self._local_speech_timeout = None
+                received_at = time.monotonic()
+                if self._local_audio_at is not None and received_at - self._local_audio_at > 0.5:
+                    self._local_vad.reset()
+                self._local_audio_at = received_at
+                inference_task = asyncio.create_task(
+                    asyncio.to_thread(self._local_vad.process, audio_frame, sample_rate)
+                )
+                try:
+                    local_speech = await asyncio.shield(inference_task)
+                except asyncio.CancelledError:
+                    # A cancelled receiver must finish inference before reset can touch its state.
+                    try:
+                        await inference_task
+                    except Exception as exc:
+                        logger.warning("Local VAD failed during cancellation: %s", exc)
+                    raise
+                except Exception as exc:
+                    logger.warning("Local VAD failed; using server VAD for movement: %s", exc)
+                    self._local_vad = None
+                    local_speech = False
+                self._set_listening(local=local_speech)
+                if local_speech:
+                    # Muting or losing the microphone must not leave a stale local vote.
+                    self._local_speech_timeout = asyncio.get_running_loop().call_later(
+                        0.5, lambda: self._set_listening(local=False)
+                    )
+
+        if not self.connection:
+            return
+
         # Send to the realtime input buffer (guard against races during reconnect).
         try:
             audio_message = base64.b64encode(audio_frame.tobytes()).decode("utf-8")
@@ -999,6 +1066,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
     async def shutdown(self) -> None:
         """Shutdown the handler."""
+        await self._reset_listening()
+        self._local_vad = None
         # Unblock the response sender worker so it can exit
         self._response_done_event.set()
 

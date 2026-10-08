@@ -324,6 +324,7 @@ class Config:
     REALTIME_TRANSCRIPTION_LANGUAGE = normalize_transcription_language(os.getenv(REALTIME_TRANSCRIPTION_LANGUAGE_ENV))
     MEMORY_ENABLED = _env_flag(MEMORY_ENABLED_ENV, default=True)
     CAMERA_ENABLED = _env_flag(CAMERA_ENABLED_ENV, default=True)
+    LOCAL_VAD_ENABLED = _env_flag("LOCAL_VAD_ENABLED", default=True)
     HF_TOKEN = os.getenv("HF_TOKEN")  # Optional, falls back to hf auth login if not set
 
     logger.debug(

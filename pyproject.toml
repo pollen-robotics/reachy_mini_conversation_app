@@ -12,6 +12,7 @@ requires-python = ">=3.11"
 dependencies = [
     "huggingface-hub>=1.17.0",
     "httpx>=0.28.1",
+    "onnxruntime>=1.20.1,<2",
 
     #Environment variables
     "python-dotenv",
