@@ -1,6 +1,6 @@
 import asyncio
 from typing import TypeVar, TypeAlias
-from collections.abc import Mapping, Callable
+from collections.abc import Mapping, Callable, Awaitable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -25,7 +25,7 @@ class AsyncStreamHandler:
 
     def __init__(self) -> None:
         """Initialize shared stream handler state."""
-        self._clear_queue: Callable[[], None] | None = None
+        self._clear_queue: Callable[[], Awaitable[None]] | None = None
 
 
 async def wait_for_item(queue: asyncio.Queue[QueueItem], timeout: float = 0.1) -> QueueItem | None:

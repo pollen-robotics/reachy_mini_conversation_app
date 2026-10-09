@@ -23,11 +23,13 @@ _MODEL_FILES = {
 
 
 class SileroVAD:
-    """Detect speech in streaming 16 kHz mono PCM for physical listening reactions."""
+    """Detect speech in streaming 16 kHz mono PCM for listening reactions and confirmed barge-in."""
 
     SAMPLE_RATE = 16000
     CHUNK_SAMPLES = 512
     SILENCE_SAMPLES = 6400  # 400 ms
+    BARGE_IN_SPEECH_SAMPLES = 6144  # 384 ms
+    BARGE_IN_SILENCE_SAMPLES = 1024  # 64 ms
 
     def __init__(self) -> None:
         """Download or reuse the cached Silero model and load it with a single CPU thread."""
@@ -67,12 +69,22 @@ class SileroVAD:
         self._context = np.zeros((1, 64), dtype=np.float32)
         self._pending = np.empty(0, dtype=np.float32)
         self._speaking = False
+        self.speech_probability = 0.0
         self._silence_samples = 0
+        self.barge_in_candidate = False
+        self.barge_in_confirmed = False
+        self._barge_in_speech_samples = 0
+        self._barge_in_silence_samples = 0
 
-    def process(self, audio: NDArray[np.int16], sample_rate: int) -> bool:
+    def process(self, audio: NDArray[np.int16], sample_rate: int, *, detect_barge_in: bool = False) -> bool:
         """Return whether speech is active, holding through 400 ms of silence."""
         if sample_rate != self.SAMPLE_RATE:
             raise ValueError("Local VAD requires 16 kHz microphone audio")
+        self.barge_in_confirmed = False
+        if not detect_barge_in:
+            self.barge_in_candidate = False
+            self._barge_in_speech_samples = 0
+            self._barge_in_silence_samples = 0
         self._pending = np.concatenate((self._pending, audio.astype(np.float32) / 32768.0))
         offset = 0
         while self._pending.size - offset >= self.CHUNK_SAMPLES:
@@ -85,6 +97,20 @@ class SileroVAD:
             self._state = np.asarray(state, dtype=np.float32)
             self._context = chunk[:, -64:].copy()
             speech_probability = float(np.asarray(probability).item())
+            self.speech_probability = speech_probability
+            if detect_barge_in:
+                if speech_probability >= 0.6 or (self.barge_in_candidate and speech_probability >= 0.45):
+                    self.barge_in_candidate = True
+                    self._barge_in_speech_samples += self.CHUNK_SAMPLES
+                    self._barge_in_silence_samples = 0
+                    if self._barge_in_speech_samples >= self.BARGE_IN_SPEECH_SAMPLES:
+                        self.barge_in_confirmed = True
+                elif self.barge_in_candidate:
+                    self._barge_in_silence_samples += self.CHUNK_SAMPLES
+                    if self._barge_in_silence_samples >= self.BARGE_IN_SILENCE_SAMPLES:
+                        self.barge_in_candidate = False
+                        self._barge_in_speech_samples = 0
+                        self._barge_in_silence_samples = 0
             if speech_probability >= 0.5:
                 self._speaking = True
                 self._silence_samples = 0

@@ -55,7 +55,7 @@ from reachy_mini_conversation_app.personality_routes import (
 )
 from reachy_mini_conversation_app.profile_tool_routes import register_profile_tool_methods
 from reachy_mini_conversation_app.audio.startup_config import apply_audio_startup_config
-from reachy_mini_conversation_app.conversation_handler import ConversationHandler
+from reachy_mini_conversation_app.conversation_handler import VADStatus, ConversationHandler
 
 
 try:
@@ -129,6 +129,7 @@ class LocalStream:
         """
         self._robot = robot
         self._stop_event = asyncio.Event()
+        self._playback_flush_lock = asyncio.Lock()
         self._restart_requested = asyncio.Event()
         self._tasks: List[asyncio.Task[None]] = []
         self._handler_factory = handler_factory
@@ -166,6 +167,12 @@ class LocalStream:
         transcript_setter = getattr(self.handler, "set_transcript_observer", None)
         if callable(transcript_setter):
             transcript_setter(self._dispatch_transcript)
+
+        self.handler.set_vad_observer(self._dispatch_vad)
+
+    def _dispatch_vad(self, status: VADStatus) -> None:
+        if self._rpc is not None:
+            self._rpc.broadcast_threadsafe("conversation.vad", dict(status))
 
     def _dispatch_transcript(self, role: str, text: str, final: bool) -> None:
         """Push a conversation.transcript notification to JSON-RPC clients."""
@@ -557,15 +564,15 @@ class LocalStream:
                 raise JsonRpcError("say requires 'text'", reason="invalid_params", code=-32602)
             if not self.handler._is_connected():
                 raise JsonRpcError("no active session", reason="not_running")
-            self.clear_audio_queue()  # barge in if mid-utterance
+            await self.clear_audio_queue()
             await self.handler.say(text)
             return {"ok": True}
 
         @rpc.method("conversation.interrupt")  # type: ignore[untyped-decorator]
-        def _rpc_interrupt(_params: dict[str, object]) -> dict[str, object]:
+        async def _rpc_interrupt(_params: dict[str, object]) -> dict[str, object]:
             if not self.handler._is_connected():
                 raise JsonRpcError("no active session", reason="not_running")
-            self.clear_audio_queue()
+            await self.clear_audio_queue()
             self._last_turn_state = "listening"
             rpc.broadcast_threadsafe("conversation.turn", {"state": "listening", "reason": "interrupted"})
             return {"ok": True}
@@ -845,36 +852,51 @@ class LocalStream:
             if not task.done():
                 loop.call_soon_threadsafe(task.cancel)
 
-    def clear_audio_queue(self) -> None:
-        """Flush queued playback audio immediately on user barge-in.
-
-        Calls the SDK's ``clear_player()`` — now a first-class flush on both
-        the local GStreamer and WebRTC backends (the WebRTC one also tells the
-        daemon to drop audio already queued for the speaker). Falls back to the
-        deprecated ``clear_output_buffer()`` only for older SDKs.
-        """
-        logger.info("User intervention: flushing player queue")
-        audio = getattr(self._robot.media, "audio", None)
-        if audio is not None:
-            if hasattr(audio, "clear_player") and callable(audio.clear_player):
-                audio.clear_player()
-            elif hasattr(audio, "clear_output_buffer") and callable(audio.clear_output_buffer):
-                # Older SDK without clear_player(); best-effort.
-                audio.clear_output_buffer()
-        # Drain the handler's pending output in place — do NOT replace the
-        # queue object, since emit() may be awaiting it (wait_for_item).
-        self._drain_output_queue()
+    async def clear_audio_queue(self) -> None:
+        """Invalidate pending chunks and flush SDK playback without blocking microphone capture."""
+        async with self._playback_flush_lock:
+            logger.info("User intervention: flushing player queue")
+            handler = self.handler
+            handler.playback_epoch += 1
+            handler.playback_until = 0.0
+            handler.playback_pending_frames = 0
+            handler.playback_ready.clear()
+            self._drain_output_queue()
+            audio = self._robot.media.audio
+            try:
+                if audio is not None:
+                    if hasattr(audio, "clear_player") and callable(audio.clear_player):
+                        flush = audio.clear_player
+                    else:
+                        flush = audio.clear_output_buffer
+                    flush_task = asyncio.create_task(asyncio.to_thread(flush))
+                    try:
+                        await asyncio.shield(flush_task)
+                    except asyncio.CancelledError:
+                        await flush_task
+                        raise
+            except (OSError, RuntimeError) as exc:
+                logger.warning("Failed to clear player queue: %s", exc)
+            finally:
+                handler.playback_ready.set()
 
     def _drain_output_queue(self) -> None:
-        """Empty the handler's output queue in place without replacing it."""
+        """Remove pending audio in place while retaining text and metadata."""
         queue = getattr(self.handler, "output_queue", None)
         if queue is None:
             return
+        retained_outputs: list[AdditionalOutputs] = []
         while not queue.empty():
             try:
-                queue.get_nowait()
+                output = queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
+            if isinstance(output, AdditionalOutputs):
+                retained_outputs.append(output)
+            else:
+                self.handler.playback_frame_epochs.pop(id(output[1]), None)
+        for output in retained_outputs:
+            queue.put_nowait(output)
 
     async def record_loop(self) -> None:
         """Read mic frames from the recorder and forward them to the handler."""
@@ -882,7 +904,7 @@ class LocalStream:
         logger.debug(f"Audio recording started at {input_sample_rate} Hz")
 
         while not self._stop_event.is_set():
-            audio_frame = self._robot.media.get_audio_sample()
+            audio_frame = await asyncio.to_thread(self._robot.media.get_audio_sample)
             if audio_frame is not None and not self._mic_muted:
                 await self.handler.receive((input_sample_rate, audio_frame))
                 self._emit_level("user", audio_frame)
@@ -892,6 +914,7 @@ class LocalStream:
         """Fetch outputs from the handler: log text and play audio frames."""
         while not self._stop_event.is_set():
             handler = self.handler
+            playback_epoch = handler.playback_epoch
             try:
                 handler_output = await asyncio.wait_for(handler.emit(), timeout=0.5)
             except asyncio.TimeoutError:
@@ -908,7 +931,12 @@ class LocalStream:
                         )
 
             elif isinstance(handler_output, tuple):
-                _, audio_data = handler_output
+                sample_rate, audio_data = handler_output
+                playback_epoch = handler.playback_frame_epochs.pop(id(audio_data), playback_epoch)
+                if handler is not self.handler or playback_epoch != handler.playback_epoch:
+                    continue
+                if handler.paced_playback is True:
+                    handler.playback_pending_frames = max(0, handler.playback_pending_frames - 1)
 
                 # Skip empty audio frames
                 if audio_data.size == 0:
@@ -926,8 +954,27 @@ class LocalStream:
                 # Cast if needed
                 audio_frame = audio_to_float32(audio_data)
 
-                self._robot.media.push_audio_sample(audio_frame)
-                self._emit_level("assistant", audio_frame)
+                if handler.paced_playback is True:
+                    chunk_samples = max(1, sample_rate // 50)
+                    next_chunk_at = time.monotonic()
+                    for offset in range(0, audio_frame.size, chunk_samples):
+                        await asyncio.sleep(max(0.0, next_chunk_at - time.monotonic()))
+                        await handler.playback_ready.wait()
+                        if (
+                            self._stop_event.is_set()
+                            or handler is not self.handler
+                            or playback_epoch != handler.playback_epoch
+                        ):
+                            break
+                        chunk = audio_frame[offset : offset + chunk_samples] * handler.playback_gain
+                        self._robot.media.push_audio_sample(chunk)
+                        self._emit_level("assistant", chunk)
+                        next_chunk_at = max(next_chunk_at + chunk.size / sample_rate, time.monotonic())
+                        handler.playback_until = next_chunk_at + 0.1
+                    await asyncio.sleep(max(0.0, next_chunk_at - time.monotonic()))
+                else:
+                    self._robot.media.push_audio_sample(audio_frame)
+                    self._emit_level("assistant", audio_frame)
 
             else:
                 logger.debug("Ignoring output type=%s", type(handler_output).__name__)

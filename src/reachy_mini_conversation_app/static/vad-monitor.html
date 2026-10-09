@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reachy VAD monitor</title>
+  <style>
+    body { font: 16px system-ui, sans-serif; background: #f4f5f7; color: #18212e; margin: 0; padding: 24px; }
+    main { max-width: 720px; margin: auto; }
+    section { background: white; border-radius: 14px; padding: 20px; margin: 16px 0; }
+    h1 { margin-bottom: 8px; } p { color: #596579; }
+    dl { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    dd { margin: 0; font-weight: 600; text-align: right; }
+    progress { width: 100%; height: 24px; accent-color: #377fd2; }
+    pre { white-space: pre-wrap; font: 14px ui-monospace, monospace; max-height: 320px; overflow: auto; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Live VAD monitor</h1>
+  <p>Read-only diagnostics. The app must be running with <code>--debug</code>.</p>
+  <section>
+    <p id="connection">Connecting…</p>
+    <p id="microphone">Checking microphone…</p>
+    <h2>Silero speech probability: <span id="probability">—</span></h2>
+    <progress id="meter" max="1" value="0"></progress>
+    <p>Listening starts at 0.50. Barge-in starts at 0.60 and confirms after 384 ms of active speech.</p>
+    <dl>
+      <dt>Local VAD available</dt><dd id="available">—</dd>
+      <dt>Local speech detected</dt><dd id="local_speech">—</dd>
+      <dt>Server speech detected</dt><dd id="server_speech">—</dd>
+      <dt>Movement listening state</dt><dd id="listening">—</dd>
+      <dt>Possible barge-in</dt><dd id="barge_in_candidate">—</dd>
+      <dt>Barge-in confirmed</dt><dd id="barge_in_confirmed">—</dd>
+      <dt>Playback amplitude</dt><dd id="playback_gain">—</dd>
+    </dl>
+    <p id="last-update">Waiting for VAD events…</p>
+  </section>
+  <section>
+    <h2>Conversation transcript</h2>
+    <p>Completed user and robot turns appear live. Refreshing clears this view.</p>
+    <pre id="transcript">Waiting for speech…</pre>
+  </section>
+  <section><h2>State changes</h2><pre id="events">Waiting…</pre></section>
+</main>
+<script type="module">
+  import { subscribe, rpcCall } from "./js/api.js";
+
+  const fields = ["available", "local_speech", "server_speech", "listening",
+    "barge_in_candidate", "barge_in_confirmed", "playback_gain"];
+  const labels = ["Local VAD available", "Local speech", "Server speech", "Movement listening",
+    "Possible barge-in", "Barge-in confirmed", "Playback amplitude"];
+  const entries = [];
+  let previous = null;
+  let receivedAt = 0;
+  const writeEvent = (text, timestamp) => {
+    entries.unshift(`${new Date(timestamp).toLocaleTimeString()}  ${text}`);
+    document.getElementById("events").textContent = entries.slice(0, 40).join("\n");
+  };
+
+  subscribe("conversation.vad", status => {
+    receivedAt = Date.now();
+    const probability = status.probability;
+    document.getElementById("probability").textContent = probability == null ? "unavailable" : probability.toFixed(3);
+    document.getElementById("meter").value = probability ?? 0;
+    fields.forEach((field, index) => {
+      const value = status[field];
+      const label = field === "playback_gain" ? `${Math.round(value * 100)}%` : value ? "Yes" : "No";
+      document.getElementById(field).textContent = label;
+      if (previous && previous[field] !== value) writeEvent(`${labels[index]}: ${label}`, status.timestamp * 1000);
+    });
+    if (!previous) writeEvent("First local VAD snapshot received", status.timestamp * 1000);
+    previous = status;
+  });
+  subscribe("conversation.activity", status => {
+    if (["user_speech_started", "user_speech_stopped", "local_barge_in"].includes(status.reason))
+      writeEvent(status.reason, Date.now());
+  });
+
+  const transcriptTurns = [];
+  subscribe("conversation.transcript", turn => {
+    if (!turn.final || !turn.text?.trim()) return;
+    const speaker = turn.role === "assistant" ? "Robot" : "User";
+    transcriptTurns.push(`${new Date().toLocaleTimeString()}  ${speaker}\n${turn.text}`);
+    if (transcriptTurns.length > 100) transcriptTurns.shift();
+    const transcript = document.getElementById("transcript");
+    const following = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 40;
+    transcript.textContent = transcriptTurns.join("\n\n");
+    if (following) transcript.scrollTop = transcript.scrollHeight;
+  });
+
+  setInterval(() => {
+    document.getElementById("last-update").textContent = receivedAt
+      ? `Last VAD update: ${Math.floor((Date.now() - receivedAt) / 1000)} seconds ago`
+      : "Waiting for VAD events. Check that debug logging is enabled and the microphone is unmuted.";
+  }, 1000);
+  Promise.all([rpcCall("conversation.status"), rpcCall("conversation.mic")]).then(([status, mic]) => {
+    document.getElementById("connection").textContent = status.backend_connected ? "Conversation connected" : "Conversation disconnected";
+    document.getElementById("microphone").textContent = mic.muted ? "Microphone muted — unmute it in the Talk screen." : "Microphone unmuted";
+  }).catch(error => {
+    document.getElementById("connection").textContent = `Connection failed: ${error.message}`;
+    console.error("VAD monitor connection failed", error);
+  });
+</script>
+</body>
+</html>
