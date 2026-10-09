@@ -2,6 +2,7 @@ import json
 import time
 import base64
 import asyncio
+import logging
 import threading
 from types import SimpleNamespace
 from typing import Any
@@ -15,6 +16,7 @@ import reachy_mini_conversation_app.huggingface_realtime as hf_mod
 from reachy_mini_conversation_app.config import config, get_default_voice, refresh_runtime_config_from_env
 from reachy_mini_conversation_app.streaming import AdditionalOutputs
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.conversation_handler import VADStatus
 from reachy_mini_conversation_app.huggingface_realtime import HuggingFaceRealtimeHandler
 from reachy_mini_conversation_app.tools.background_tool_manager import ToolState, ToolNotification
 
@@ -1255,3 +1257,67 @@ async def test_local_cancel_failure_still_flushes_and_forwards_audio(
     handler.connection.input_audio_buffer.append.assert_awaited_once()
     assert "Failed to cancel locally interrupted response" in caplog.text
     await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_debug_vad_reports_probability_and_barge_in_without_extra_inference(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Debug reports are throttled without delaying state transitions or adding inference."""
+    monkeypatch.setattr(config, "LOCAL_BARGE_IN_ENABLED", True)
+    handler = _plain_handler()
+    detector = MagicMock()
+    detector.process.return_value = True
+    detector.speech_probability = 0.8
+    detector.barge_in_candidate = False
+    detector.barge_in_confirmed = False
+    handler._local_vad = detector
+    handler._audio_response_id = "response"
+    handler.playback_until = 1000.0
+    handler._clear_queue = AsyncMock()
+    statuses: list[VADStatus] = []
+    handler.set_vad_observer(statuses.append)
+    clock = [100.0]
+    monkeypatch.setattr(hf_mod, "time", SimpleNamespace(monotonic=lambda: clock[0], time=lambda: 123.0))
+    caplog.set_level(logging.DEBUG, logger=hf_mod.__name__)
+    previous_activity = handler.last_activity_time
+    frame = (16000, np.zeros(512, dtype=np.int16))
+
+    await handler.receive(frame)
+    assert statuses[-1]["probability"] == 0.8
+    assert statuses[-1]["local_speech"] and statuses[-1]["listening"]
+    assert not statuses[-1]["server_speech"]
+    assert statuses[-1]["timestamp"] == 123.0
+    assert len(statuses) == 1
+    await handler.receive(frame)
+    assert len(statuses) == 1
+    clock[0] += 0.2
+    await handler.receive(frame)
+    assert len(statuses) == 2
+    handler._set_listening(server=True)
+    assert statuses[-1]["server_speech"]
+    assert handler.last_activity_time == previous_activity
+
+    detector.barge_in_candidate = True
+    await handler.receive(frame)
+    assert statuses[-1]["barge_in_candidate"]
+    assert statuses[-1]["playback_gain"] == 0.25
+    detector.barge_in_candidate = False
+    await handler.receive(frame)
+    assert not statuses[-1]["barge_in_candidate"]
+    assert statuses[-1]["playback_gain"] == 1.0
+    detector.barge_in_candidate = True
+    detector.barge_in_confirmed = True
+    await handler.receive(frame)
+    interrupt = handler._local_interrupt_task
+    if interrupt is not None:
+        await interrupt
+    assert statuses[-1]["barge_in_confirmed"]
+    assert statuses[-1]["playback_gain"] == 0.0
+    assert detector.process.call_count == 6
+
+    caplog.set_level(logging.WARNING, logger=hf_mod.__name__)
+    previous_reports = len(statuses)
+    handler._set_listening(server=False)
+    assert len(statuses) == previous_reports
+    await handler._reset_listening()

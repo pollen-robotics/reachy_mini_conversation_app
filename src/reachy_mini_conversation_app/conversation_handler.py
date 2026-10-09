@@ -3,7 +3,7 @@ import time
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias, TypedDict
 from collections.abc import Callable
 
 import numpy as np
@@ -23,6 +23,20 @@ HandlerOutput: TypeAlias = AudioFrame | AdditionalOutputs | None
 QueueItem: TypeAlias = AudioFrame | AdditionalOutputs
 
 
+class VADStatus(TypedDict):
+    """Snapshot of local speech detection and playback interruption state."""
+
+    timestamp: float
+    available: bool
+    probability: float | None
+    local_speech: bool
+    server_speech: bool
+    listening: bool
+    barge_in_candidate: bool
+    barge_in_confirmed: bool
+    playback_gain: float
+
+
 class ConversationHandler(AsyncStreamHandler, ABC):
     """Shared app handler contract and idle behavior for realtime conversation backends."""
 
@@ -35,6 +49,7 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     last_idle_behavior_time: float
     _activity_observer: Callable[[str], None] | None = None
     _transcript_observer: Callable[[str, str, bool], None] | None = None
+    _vad_observer: Callable[[VADStatus], None] | None = None
 
     def __init__(self) -> None:
         """Initialize the stream handler and shared idle/activity tracking."""
@@ -57,6 +72,10 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     def set_transcript_observer(self, observer: Callable[[str, str, bool], None] | None) -> None:
         """Attach/detach a transcript observer, called (role, text, final)."""
         self._transcript_observer = observer
+
+    def set_vad_observer(self, observer: Callable[[VADStatus], None] | None) -> None:
+        """Attach or detach an observer for local VAD diagnostics."""
+        self._vad_observer = observer
 
     def _emit_transcript(self, role: str, text: str, final: bool = True) -> None:
         """Forward one transcript chunk to the observer, if attached."""

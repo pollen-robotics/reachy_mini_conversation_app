@@ -69,6 +69,7 @@ class SileroVAD:
         self._context = np.zeros((1, 64), dtype=np.float32)
         self._pending = np.empty(0, dtype=np.float32)
         self._speaking = False
+        self.speech_probability = 0.0
         self._silence_samples = 0
         self.barge_in_candidate = False
         self.barge_in_confirmed = False
@@ -96,6 +97,7 @@ class SileroVAD:
             self._state = np.asarray(state, dtype=np.float32)
             self._context = chunk[:, -64:].copy()
             speech_probability = float(np.asarray(probability).item())
+            self.speech_probability = speech_probability
             if detect_barge_in:
                 if speech_probability >= 0.6 or (self.barge_in_candidate and speech_probability >= 0.45):
                     self.barge_in_candidate = True

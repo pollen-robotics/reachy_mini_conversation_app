@@ -50,7 +50,7 @@ from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_tool_specs,
 )
-from reachy_mini_conversation_app.conversation_handler import ConversationHandler
+from reachy_mini_conversation_app.conversation_handler import VADStatus, ConversationHandler
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolCallRoutine,
     ToolNotification,
@@ -171,6 +171,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self._server_speech = False
         self._movement_listening = False
         self._local_audio_at: float | None = None
+        self._last_vad_report_at = 0.0
+        self._last_vad_flags: tuple[bool | float, ...] | None = None
         self._local_speech_timeout: asyncio.TimerHandle | None = None
         self.paced_playback = config.LOCAL_VAD_ENABLED and config.LOCAL_BARGE_IN_ENABLED
         self._active_response_id: str | None = None
@@ -190,6 +192,45 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         if listening != self._movement_listening:
             self._movement_listening = listening
             self.deps.movement_manager.set_listening(listening)
+
+        self._report_vad()
+
+    def _report_vad(self) -> None:
+        observer = self._vad_observer
+        if observer is None or not logger.isEnabledFor(logging.DEBUG):
+            return
+        detector = self._local_vad
+        candidate = detector is not None and detector.barge_in_candidate
+        confirmed = detector is not None and detector.barge_in_confirmed
+        flags = (
+            detector is not None,
+            self._local_speech,
+            self._server_speech,
+            self._movement_listening,
+            candidate,
+            confirmed,
+            self.playback_gain,
+        )
+        now = time.monotonic()
+        if flags == self._last_vad_flags and now - self._last_vad_report_at < 0.1:
+            return
+        self._last_vad_flags = flags
+        self._last_vad_report_at = now
+        status: VADStatus = {
+            "timestamp": time.time(),
+            "available": detector is not None,
+            "probability": detector.speech_probability if detector is not None else None,
+            "local_speech": self._local_speech,
+            "server_speech": self._server_speech,
+            "listening": self._movement_listening,
+            "barge_in_candidate": candidate,
+            "barge_in_confirmed": confirmed,
+            "playback_gain": self.playback_gain,
+        }
+        try:
+            observer(status)
+        except Exception as exc:
+            logger.warning("VAD observer failed: %s", exc)
 
     async def _reset_listening(self) -> None:
         if self._local_interrupt_task is not None:
@@ -219,6 +260,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             return
         self._playback_interrupted = True
         self.playback_gain = 0.0
+        self._report_vad()
         self.deps.movement_manager.set_speaking(False)
         response_ids = (
             (audio_response_id, cancel_response_id)
@@ -1132,6 +1174,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 if self.paced_playback and self._local_vad is not None and not self._playback_interrupted:
                     self.playback_gain = 0.25 if detect_barge_in and self._local_vad.barge_in_candidate else 1.0
                     confirmed_barge_in = detect_barge_in and self._local_vad.barge_in_confirmed
+                self._report_vad()
                 if local_speech:
                     # Muting or losing the microphone must not leave a stale local vote.
                     self._local_speech_timeout = asyncio.get_running_loop().call_later(

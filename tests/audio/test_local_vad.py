@@ -58,6 +58,7 @@ def test_streaming_speech_holds_through_pauses_and_resets(
     assert not detector.process(half_chunk, 16000)
     session.run.assert_not_called()
     assert detector.process(half_chunk, 16000)
+    assert detector.speech_probability == pytest.approx(0.8)
     first_inputs = session.run.call_args.args[1]
     np.testing.assert_array_equal(first_inputs["input"][:, :64], 0.0)
     np.testing.assert_array_equal(first_inputs["input"][:, 64:], 0.5)
@@ -73,6 +74,7 @@ def test_streaming_speech_holds_through_pauses_and_resets(
     assert detector.process(half_chunk, 16000)
     detector.process(half_chunk, 16000)
     detector.reset()
+    assert detector.speech_probability == 0.0
     assert not detector.process(half_chunk, 16000)
     assert not detector.process(half_chunk, 16000)
     reset_inputs = session.run.call_args.args[1]

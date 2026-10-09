@@ -55,7 +55,7 @@ from reachy_mini_conversation_app.personality_routes import (
 )
 from reachy_mini_conversation_app.profile_tool_routes import register_profile_tool_methods
 from reachy_mini_conversation_app.audio.startup_config import apply_audio_startup_config
-from reachy_mini_conversation_app.conversation_handler import ConversationHandler
+from reachy_mini_conversation_app.conversation_handler import VADStatus, ConversationHandler
 
 
 try:
@@ -167,6 +167,12 @@ class LocalStream:
         transcript_setter = getattr(self.handler, "set_transcript_observer", None)
         if callable(transcript_setter):
             transcript_setter(self._dispatch_transcript)
+
+        self.handler.set_vad_observer(self._dispatch_vad)
+
+    def _dispatch_vad(self, status: VADStatus) -> None:
+        if self._rpc is not None:
+            self._rpc.broadcast_threadsafe("conversation.vad", dict(status))
 
     def _dispatch_transcript(self, role: str, text: str, final: bool) -> None:
         """Push a conversation.transcript notification to JSON-RPC clients."""

@@ -162,6 +162,8 @@ async def test_activity_from_rebuilt_handler_reaches_rpc_clients() -> None:
     """Activity from a rebuilt handler must still reach /rpc subscribers."""
 
     class FakeHandler:
+        set_vad_observer = MagicMock()
+
         def __init__(self) -> None:
             self.observer: Any = None
 
@@ -484,6 +486,8 @@ async def test_startup_loop_rebuilds_handler_on_restart_request(monkeypatch: pyt
     monkeypatch.setattr(config, "HF_REALTIME_WS_URL", "ws://127.0.0.1:8765/v1/realtime")
 
     class FakeHandler:
+        set_vad_observer = MagicMock()
+
         def __init__(self) -> None:
             self.connection = None
             self.output_queue = asyncio.Queue()
@@ -1199,3 +1203,28 @@ async def test_paced_playback_continues_while_microphone_read_blocks() -> None:
         await recording
         if playback is not None:
             await playback
+
+
+def test_rpc_vad_notification_broadcast() -> None:
+    """Local VAD diagnostics reach browser clients through the handler observer."""
+    handler = MagicMock()
+    app = FastAPI()
+    stream = LocalStream(handler, _rpc_robot(), settings_app=app)
+    stream._init_settings_ui_if_needed()
+    status = {
+        "timestamp": 123.0,
+        "available": True,
+        "probability": 0.8,
+        "local_speech": True,
+        "server_speech": False,
+        "listening": True,
+        "barge_in_candidate": True,
+        "barge_in_confirmed": False,
+        "playback_gain": 0.25,
+    }
+    observer = handler.set_vad_observer.call_args.args[0]
+    with TestClient(app).websocket_connect("/rpc") as ws:
+        observer(status)
+        notification = ws.receive_json()
+    assert notification["method"] == "conversation.vad"
+    assert notification["params"] == status
