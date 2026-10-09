@@ -93,6 +93,28 @@ def _tag_personality(tag: NfcTagSnapshot) -> str | None:
     return personality if personality in list_personalities() else None
 
 
+_NO_TAG = NfcTagSnapshot(present=False, content=None, blank=False)
+
+
+def _settled(tag: NfcTagSnapshot, previous: NfcTagSnapshot | None) -> NfcTagSnapshot:
+    """Return the reading to act on, holding the last one while a tag cannot be read.
+
+    A tag whose content did not come through is neither blank nor known: taken
+    at face value it read as blank, which switched the personality — and could
+    have written a pending code over an accessory that already carried one. The
+    daemon reads it again on its next polls, so the last reading stands until
+    then: the accessory that was there, or none if the UID is a new one.
+    """
+    if not tag.present or tag.readable or tag.blank:
+        return tag
+    if previous is None or not previous.present:
+        return _NO_TAG
+    # Older daemons do not report the UID: then any tag is the same one.
+    if tag.uid is None or previous.uid is None or tag.uid == previous.uid:
+        return previous
+    return _NO_TAG
+
+
 def _load_move_dataset(repo_id: str) -> RecordedMoves | None:
     """Load a recorded-move dataset, or None when it cannot be fetched."""
     try:
@@ -218,7 +240,7 @@ class RfidController:
     def snapshot(self) -> dict[str, Any]:
         """Return the full reader + accessory state, without advancing the machine."""
         status = self.connection_status()
-        tag = self._client.get_tag() if status["connected"] else None
+        tag = _settled(self._client.get_tag(), self._previous_tag) if status["connected"] else None
         return {**status, "accessory": self.accessory_view(tag)}
 
     def _announce_personality(self, profile: str | None) -> None:
@@ -310,8 +332,8 @@ class RfidController:
             self._broadcast(payload)
             return payload
 
-        tag = self._client.get_tag()
         previous = self._previous_tag
+        tag = _settled(self._client.get_tag(), previous)
         self._previous_tag = tag
 
         write_results = self._client.drain_write_results()

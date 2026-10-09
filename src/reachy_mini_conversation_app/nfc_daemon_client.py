@@ -48,6 +48,10 @@ class NfcTagSnapshot:
     present: bool
     content: Optional[str]  # text content; None if blank or no tag
     blank: bool  # tag present but no content written
+    # False while a tag is on the reader but its content could not be read: it
+    # is then neither blank nor known, and says nothing about the accessory.
+    readable: bool = True
+    uid: Optional[str] = None
 
 
 class NfcDaemonClient:
@@ -72,6 +76,9 @@ class NfcDaemonClient:
                 present=bool(d.get("present")),
                 content=d.get("content") or None,
                 blank=bool(d.get("blank")),
+                # Older daemons omit it; an error then means the read failed.
+                readable=bool(d.get("readable", d.get("error") is None)),
+                uid=d.get("uid") or None,
             )
         except Exception as exc:
             logger.debug("NFC get_tag error: %s", exc)

@@ -301,3 +301,77 @@ def test_write_results_are_handled_before_the_tag_change(controller, events):
     """
     controller._process([(True, "WRITE_OK")], _tag(blank=True), _tag("usr_pirate"))
     assert events == [("write", True, "WRITE_OK"), ("read", "usr_pirate")]
+
+
+def _unreadable(uid="04A1"):
+    return NfcTagSnapshot(present=True, content=None, blank=False, readable=False, uid=uid)
+
+
+def _read_in_turn(monkeypatch, controller, readings):
+    """Poll the controller once per reading, the daemon answering each in turn."""
+    pending = list(readings)
+    fake_reader(monkeypatch, connected=True)
+    monkeypatch.setattr(NfcDaemonClient, "get_tag", lambda self: pending.pop(0))
+    return [controller.poll_once()["accessory"]["state"] for _ in readings]
+
+
+def test_an_accessory_that_fails_a_read_stays_linked(controller, events, monkeypatch):
+    """A read that fails under a linked accessory is not a blank one: nothing happens."""
+    pirate = NfcTagSnapshot(present=True, content="hf_pirate", blank=False, uid="04A1")
+    states = _read_in_turn(monkeypatch, controller, [ABSENT, pirate, _unreadable(), _unreadable(), pirate])
+    assert events == [("read", "hf_pirate")]
+    assert "blank" not in states
+
+
+def test_an_accessory_unreadable_on_arrival_waits_for_its_content(controller, events, monkeypatch):
+    """Arriving unreadable, the accessory is acted on once its content comes through, not before."""
+    pirate = NfcTagSnapshot(present=True, content="hf_pirate", blank=False, uid="04A1")
+    states = _read_in_turn(monkeypatch, controller, [ABSENT, _unreadable(), pirate])
+    assert events == [("read", "hf_pirate")]
+    assert states[1] == "none"
+
+
+def test_an_unreadable_tag_never_reaches_the_blank_tag_handling(controller, events, monkeypatch):
+    """Taken as blank, it would start the personality conversation, or receive a pending code."""
+    _read_in_turn(monkeypatch, controller, [ABSENT, _unreadable(), _unreadable()])
+    assert events == []
+
+
+def test_a_different_accessory_unreadable_in_place_of_the_last_is_a_removal(controller, events, monkeypatch):
+    """The accessory that was linked is gone: the one replacing it is acted on once read."""
+    pirate = NfcTagSnapshot(present=True, content="hf_pirate", blank=False, uid="04A1")
+    _read_in_turn(monkeypatch, controller, [ABSENT, pirate, _unreadable(uid="0499")])
+    assert events == [("read", "hf_pirate"), ("removed",)]
+
+
+def test_a_truly_blank_accessory_is_still_blank(controller, events, monkeypatch):
+    """A tag read as blank is still handled as one."""
+    blank = NfcTagSnapshot(present=True, content=None, blank=True, uid="04A1")
+    states = _read_in_turn(monkeypatch, controller, [ABSENT, blank])
+    assert events == [("read", "")]
+    assert states[-1] == "blank"
+
+
+def test_the_client_tells_an_unreadable_tag_apart(monkeypatch):
+    """The daemon's ``readable`` and ``uid`` reach the app; older daemons fall back on ``error``."""
+
+    class Answer:
+        def __init__(self, body):
+            self.body = body
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self.body
+
+    client = NfcDaemonClient()
+    body = {"present": True, "uid": "04A1", "blank": False, "readable": False, "error": "cannot read"}
+    monkeypatch.setattr(client._session, "get", lambda *a, **k: Answer(body))
+    tag = client.get_tag()
+    assert (tag.readable, tag.uid) == (False, "04A1")
+
+    body = {"present": True, "blank": False, "error": "cannot read"}
+    assert not client.get_tag().readable
+    body = {"present": True, "content": "hf_pirate"}
+    assert client.get_tag().readable
