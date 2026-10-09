@@ -36,6 +36,11 @@
     </dl>
     <p id="last-update">Waiting for VAD events…</p>
   </section>
+  <section>
+    <h2>Conversation transcript</h2>
+    <p>Completed user and robot turns appear live. Refreshing clears this view.</p>
+    <pre id="transcript">Waiting for speech…</pre>
+  </section>
   <section><h2>State changes</h2><pre id="events">Waiting…</pre></section>
 </main>
 <script type="module">
@@ -70,6 +75,18 @@
   subscribe("conversation.activity", status => {
     if (["user_speech_started", "user_speech_stopped", "local_barge_in"].includes(status.reason))
       writeEvent(status.reason, Date.now());
+  });
+
+  const transcriptTurns = [];
+  subscribe("conversation.transcript", turn => {
+    if (!turn.final || !turn.text?.trim()) return;
+    const speaker = turn.role === "assistant" ? "Robot" : "User";
+    transcriptTurns.push(`${new Date().toLocaleTimeString()}  ${speaker}\n${turn.text}`);
+    if (transcriptTurns.length > 100) transcriptTurns.shift();
+    const transcript = document.getElementById("transcript");
+    const following = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 40;
+    transcript.textContent = transcriptTurns.join("\n\n");
+    if (following) transcript.scrollTop = transcript.scrollHeight;
   });
 
   setInterval(() => {
