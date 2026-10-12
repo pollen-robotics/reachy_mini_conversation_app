@@ -94,6 +94,7 @@ def test_local_vad_preference_survives_restart_and_overrides_environment(
 ) -> None:
     """Saved speech preferences preserve explicit false and win over environment defaults."""
     monkeypatch.setattr(config, "LOCAL_VAD_ENABLED", not enabled)
+    monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", "auto")
     update_settings(tmp_path, AppSettings(language="fr", local_vad_enabled=enabled))
     load_settings_into_runtime(tmp_path)
     assert config.LOCAL_VAD_ENABLED is enabled
