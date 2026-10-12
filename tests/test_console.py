@@ -1075,6 +1075,7 @@ async def test_paced_playback_changes_gain_and_preserves_or_discards_remaining_a
     frame = np.full(960, 16384, dtype=np.int16)
     handler.emit = AsyncMock(return_value=(16000, frame))
     pushed: list[np.ndarray] = []
+    second_chunk = asyncio.Event()
     robot = _audio_robot()
     robot.media.audio = SimpleNamespace(clear_player=MagicMock())
     stream = LocalStream(handler, robot)
@@ -1085,13 +1086,16 @@ async def test_paced_playback_changes_gain_and_preserves_or_discards_remaining_a
             handler.playback_gain = 0.25
         elif len(pushed) == 2:
             handler.playback_gain = 1.0
+            if confirm:
+                handler.playback_ready.clear()
+            second_chunk.set()
         else:
             stream._stop_event.set()
 
     robot.media.push_audio_sample = push
 
     playback = asyncio.create_task(stream.play_loop())
-    await _wait_until(lambda: len(pushed) >= 2)
+    await asyncio.wait_for(second_chunk.wait(), timeout=1)
     if confirm:
         await stream.clear_audio_queue()
         stream._stop_event.set()
