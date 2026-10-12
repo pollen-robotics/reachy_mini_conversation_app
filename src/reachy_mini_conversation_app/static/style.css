@@ -820,6 +820,11 @@ button {
   gap: 14px;
 }
 
+.settings-toggle { display: flex; align-items: flex-start; gap: 12px; }
+.settings-toggle > span { display: flex; flex-direction: column; gap: 6px; }
+.settings-toggle input { width: 18px; height: 18px; margin-top: 3px; flex-shrink: 0; accent-color: var(--accent); }
+.settings-toggle input:disabled { opacity: 0.65; }
+
 .settings-field {
   display: flex;
   flex-direction: column;

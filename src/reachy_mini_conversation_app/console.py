@@ -525,6 +525,7 @@ class LocalStream:
                 "voice": self.get_current_voice(),
                 "language": config.REALTIME_TRANSCRIPTION_LANGUAGE,
                 "memory_enabled": config.MEMORY_ENABLED,
+                "local_vad_enabled": config.LOCAL_VAD_ENABLED,
                 "vision_enabled": bool(self._tool_deps and self._tool_deps.camera_enabled),
                 **backend_connection,
             }
@@ -609,6 +610,22 @@ class LocalStream:
                 message = "Connection saved. Restart Reachy Mini Conversation from the desktop app to apply it."
             return {"ok": True, "message": message, **_status_payload()}
 
+        def _rpc_speech_config(params: dict[str, object]) -> dict[str, object]:
+            enabled = params.get("local_vad_enabled")
+            if "local_vad_enabled" in params and not isinstance(enabled, bool):
+                raise JsonRpcError("local_vad_enabled must be a boolean", reason="invalid_params", code=-32602)
+            message = ""
+            if isinstance(enabled, bool):
+                message = self._apply_setting_with_restart(
+                    AppSettings(local_vad_enabled=enabled), "speech_settings_changed"
+                )
+            return {
+                "local_vad_enabled": config.LOCAL_VAD_ENABLED,
+                "message": message,
+                "requires_restart": not self._can_rebuild_handler(),
+            }
+
+        rpc.register("speech.config", _rpc_speech_config)
         rpc.mount(settings_app)
         self._rpc = rpc
 

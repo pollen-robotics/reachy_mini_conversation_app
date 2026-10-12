@@ -441,6 +441,7 @@ def refresh_runtime_config_from_env() -> None:
     config.REACHY_MINI_CUSTOM_PROFILE = LOCKED_PROFILE or os.getenv("REACHY_MINI_CUSTOM_PROFILE")
     config.MEMORY_ENABLED = _env_flag(MEMORY_ENABLED_ENV, default=True)
     config.CAMERA_ENABLED = _env_flag(CAMERA_ENABLED_ENV, default=True)
+    config.LOCAL_VAD_ENABLED = _env_flag("LOCAL_VAD_ENABLED", default=True)
 
 
 # Files the app writes into its instance directory, migrated once when the

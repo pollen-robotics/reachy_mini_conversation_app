@@ -1045,3 +1045,43 @@ def test_rpc_settings_methods() -> None:
     assert isinstance(r2["result"], list)
     assert "spaces" in r3["result"]
     assert "enabled_tools" in r4["result"]
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("can_rebuild", [False, True])
+def test_speech_settings_persist_and_request_conversation_reconnect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, enabled: bool, can_rebuild: bool
+) -> None:
+    """Saving the speech switch persists it and applies it through the existing reconnect path."""
+    monkeypatch.setattr(config, "LOCAL_VAD_ENABLED", not enabled)
+    app = FastAPI()
+    stream = LocalStream(
+        MagicMock(),
+        _rpc_robot(),
+        settings_app=app,
+        instance_path=tmp_path,
+        handler_factory=(lambda _voice: MagicMock()) if can_rebuild else None,
+    )
+    stream._init_settings_ui_if_needed()
+    result = _rpc_call(app, "speech.config", {"local_vad_enabled": enabled})["result"]
+    assert result["local_vad_enabled"] is enabled
+    assert result["requires_restart"] is not can_rebuild
+    assert read_settings(tmp_path).local_vad_enabled is enabled
+    assert stream._restart_requested.is_set() is can_rebuild
+    assert _rpc_call(app, "conversation.status")["result"]["local_vad_enabled"] is enabled
+
+
+@pytest.mark.parametrize("invalid", ["false", 0, None, []])
+def test_speech_settings_reject_invalid_boolean_without_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid: object
+) -> None:
+    """Malformed speech preferences cannot alter the live or saved configuration."""
+    monkeypatch.setattr(config, "LOCAL_VAD_ENABLED", True)
+    app = FastAPI()
+    stream = LocalStream(MagicMock(), _rpc_robot(), settings_app=app, instance_path=tmp_path)
+    stream._init_settings_ui_if_needed()
+    error = _rpc_call(app, "speech.config", {"local_vad_enabled": invalid})["error"]
+    assert error["data"]["reason"] == "invalid_params"
+    assert config.LOCAL_VAD_ENABLED is True
+    assert read_settings(tmp_path).local_vad_enabled is None
+    assert not stream._restart_requested.is_set()

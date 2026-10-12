@@ -7,6 +7,7 @@ import {
   getStatus,
   listVoices,
   saveBackendConfig,
+  saveSpeechConfig,
   untilReady,
 } from "../api.js";
 import { h } from "../ui.js";
@@ -28,12 +29,13 @@ export async function mountSettingsView({ outlet, signal }) {
   const connectionSection = buildConnectionSection({
     onSaved: () =>
       Promise.all([
-        refreshStatus({ statusSection, connectionSection, signal }),
+        refreshStatus({ statusSection, connectionSection, speechSection, signal }),
         refreshVoices({ voiceSection, signal }),
       ]),
   });
   const voiceSection = buildVoiceSection();
   const statusSection = buildStatusSection();
+  const speechSection = buildSpeechSection();
 
   const view = h(
     "section",
@@ -42,16 +44,17 @@ export async function mountSettingsView({ outlet, signal }) {
       "header",
       { class: "view-header" },
       h("h1", { class: "view-title" }, "Settings"),
-      h("p", { class: "view-subtitle" }, "Connection, voice, and runtime state for Reachy Mini.")
+      h("p", { class: "view-subtitle" }, "Connection, voice, speech behavior, and runtime state for Reachy Mini.")
     ),
     connectionSection.element,
     voiceSection.element,
+    speechSection.element,
     statusSection.element
   );
   outlet.replaceChildren(view);
 
   await Promise.all([
-    refreshStatus({ statusSection, connectionSection, signal }),
+    refreshStatus({ statusSection, connectionSection, speechSection, signal }),
     refreshVoices({ voiceSection, signal }),
   ]);
 }
@@ -258,6 +261,50 @@ function buildVoiceSection() {
   };
 }
 
+function buildSpeechSection() {
+  const localVad = h("input", { type: "checkbox", name: "local_vad_enabled", disabled: "disabled" });
+  const status = h("p", { class: "settings-status", role: "status", "aria-live": "polite" });
+  const submitButton = h("button", { type: "submit", class: "btn btn--primary", disabled: "disabled" }, "Save speech settings");
+  const form = h("form", { class: "settings-form" },
+    h("label", { class: "settings-toggle" }, localVad,
+      h("span", {}, h("strong", {}, "Local speech detection"),
+        h("span", { class: "settings-hint" }, "Detect speech on the robot to pause antenna and idle movement sooner."))),
+    h("p", { class: "settings-hint" }, "Changes are saved and reconnect the conversation to apply."),
+    h("div", { class: "settings-actions" }, submitButton), status);
+  const element = h("section", { class: "settings-section" },
+    h("h2", { class: "settings-section-title" }, "Speech behavior"), form);
+
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (submitButton.disabled) return;
+    submitButton.disabled = true;
+    localVad.disabled = true;
+    form.setAttribute("aria-busy", "true");
+    status.classList.remove("is-error");
+    status.textContent = "Saving…";
+    try {
+      const result = await saveSpeechConfig({ local_vad_enabled: localVad.checked });
+      localVad.checked = result.local_vad_enabled;
+      status.textContent = result.message || "Saved.";
+    } catch (error) {
+      status.textContent = `Failed to save: ${describeError(error)}`;
+      status.classList.add("is-error");
+    } finally {
+      submitButton.disabled = false;
+      localVad.disabled = false;
+      form.removeAttribute("aria-busy");
+    }
+  });
+  return {
+    element,
+    syncFromStatus(payload) {
+      localVad.checked = payload.local_vad_enabled;
+      localVad.disabled = false;
+      submitButton.disabled = false;
+    },
+  };
+}
+
 function buildStatusSection() {
   const list = h(
     "dl",
@@ -339,12 +386,13 @@ function formatHfTarget(payload) {
   return `${host}:${port || DEFAULT_HF_PORT}`;
 }
 
-async function refreshStatus({ statusSection, connectionSection, signal }) {
+async function refreshStatus({ statusSection, connectionSection, speechSection, signal }) {
   try {
     const payload = await untilReady(getStatus, signal);
     if (signal.aborted) return;
     statusSection.render(payload);
     connectionSection.syncFromStatus(payload);
+    speechSection.syncFromStatus(payload);
   } catch (error) {
     if (signal.aborted) return;
     statusSection.renderUnavailable(error);
