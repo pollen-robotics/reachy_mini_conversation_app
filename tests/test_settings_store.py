@@ -86,3 +86,16 @@ def test_load_leaves_unset_fields_to_the_environment(
     load_settings_into_runtime(tmp_path)
 
     assert config.REALTIME_TRANSCRIPTION_LANGUAGE == expected_language
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_local_vad_preference_survives_restart_and_overrides_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, enabled: bool
+) -> None:
+    """Saved speech preferences preserve explicit false and win over environment defaults."""
+    monkeypatch.setattr(config, "LOCAL_VAD_ENABLED", not enabled)
+    update_settings(tmp_path, AppSettings(language="fr", local_vad_enabled=enabled))
+    load_settings_into_runtime(tmp_path)
+    assert config.LOCAL_VAD_ENABLED is enabled
+    assert read_settings(tmp_path).local_vad_enabled is enabled
+    assert read_settings(tmp_path).language == "fr"

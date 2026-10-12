@@ -532,6 +532,8 @@ class LocalStream:
                 "voice": self.get_current_voice(),
                 "language": config.REALTIME_TRANSCRIPTION_LANGUAGE,
                 "memory_enabled": config.MEMORY_ENABLED,
+                "local_vad_enabled": config.LOCAL_VAD_ENABLED,
+                "local_barge_in_enabled": config.LOCAL_BARGE_IN_ENABLED,
                 "vision_enabled": bool(self._tool_deps and self._tool_deps.camera_enabled),
                 **backend_connection,
             }
@@ -616,6 +618,30 @@ class LocalStream:
                 message = "Connection saved. Restart Reachy Mini Conversation from the desktop app to apply it."
             return {"ok": True, "message": message, **_status_payload()}
 
+        def _rpc_speech_config(params: dict[str, object]) -> dict[str, object]:
+            names = ("local_vad_enabled", "local_barge_in_enabled")
+            for name in names:
+                if name in params and not isinstance(params[name], bool):
+                    raise JsonRpcError(f"{name} must be a boolean", reason="invalid_params", code=-32602)
+            enabled = params.get("local_vad_enabled")
+            barge_in = params.get("local_barge_in_enabled")
+            message = ""
+            if any(name in params for name in names):
+                message = self._apply_setting_with_restart(
+                    AppSettings(
+                        local_vad_enabled=enabled if isinstance(enabled, bool) else None,
+                        local_barge_in_enabled=barge_in if isinstance(barge_in, bool) else None,
+                    ),
+                    "speech_settings_changed",
+                )
+            return {
+                "local_vad_enabled": config.LOCAL_VAD_ENABLED,
+                "local_barge_in_enabled": config.LOCAL_BARGE_IN_ENABLED,
+                "message": message,
+                "requires_restart": not self._can_rebuild_handler(),
+            }
+
+        rpc.register("speech.config", _rpc_speech_config)
         rpc.mount(settings_app)
         self._rpc = rpc
 

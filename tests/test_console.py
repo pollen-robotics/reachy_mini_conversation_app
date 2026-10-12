@@ -23,10 +23,12 @@ from reachy_mini_conversation_app.startup_settings import (
     StartupSettings,
     load_startup_settings_into_runtime,
 )
+from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.personality_routes import (
     RouteError,
     build_personality_ops,
 )
+from reachy_mini_conversation_app.huggingface_realtime import HuggingFaceRealtimeHandler
 
 
 def _rpc_call(app: FastAPI, method: str, params: Any = None) -> dict[str, Any]:
@@ -1228,3 +1230,85 @@ def test_rpc_vad_notification_broadcast() -> None:
         notification = ws.receive_json()
     assert notification["method"] == "conversation.vad"
     assert notification["params"] == status
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("can_rebuild", [False, True])
+def test_speech_settings_persist_and_request_conversation_reconnect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, enabled: bool, can_rebuild: bool
+) -> None:
+    """Saving the speech switch persists it and applies it through the existing reconnect path."""
+    monkeypatch.setattr(config, "LOCAL_VAD_ENABLED", not enabled)
+    app = FastAPI()
+    stream = LocalStream(
+        MagicMock(),
+        _rpc_robot(),
+        settings_app=app,
+        instance_path=tmp_path,
+        handler_factory=(lambda _voice: MagicMock()) if can_rebuild else None,
+    )
+    stream._init_settings_ui_if_needed()
+    result = _rpc_call(app, "speech.config", {"local_vad_enabled": enabled})["result"]
+    assert result["local_vad_enabled"] is enabled
+    assert result["requires_restart"] is not can_rebuild
+    assert read_settings(tmp_path).local_vad_enabled is enabled
+    assert stream._restart_requested.is_set() is can_rebuild
+    assert _rpc_call(app, "conversation.status")["result"]["local_vad_enabled"] is enabled
+
+
+@pytest.mark.parametrize("invalid", ["false", 0, None, []])
+def test_speech_settings_reject_invalid_boolean_without_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid: object
+) -> None:
+    """Malformed speech preferences cannot alter the live or saved configuration."""
+    monkeypatch.setattr(config, "LOCAL_VAD_ENABLED", True)
+    app = FastAPI()
+    stream = LocalStream(MagicMock(), _rpc_robot(), settings_app=app, instance_path=tmp_path)
+    stream._init_settings_ui_if_needed()
+    error = _rpc_call(app, "speech.config", {"local_vad_enabled": invalid})["error"]
+    assert error["data"]["reason"] == "invalid_params"
+    assert config.LOCAL_VAD_ENABLED is True
+    assert read_settings(tmp_path).local_vad_enabled is None
+    assert not stream._restart_requested.is_set()
+
+
+@pytest.mark.parametrize("local_vad", [False, True])
+@pytest.mark.parametrize("barge_in", [False, True])
+def test_saved_speech_switches_control_new_handler(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, local_vad: bool, barge_in: bool
+) -> None:
+    """Both saved switches survive reload and gate local interruptions on the new handler."""
+    monkeypatch.setattr(config, "LOCAL_VAD_ENABLED", True)
+    monkeypatch.setattr(config, "LOCAL_BARGE_IN_ENABLED", True)
+    app = FastAPI()
+    stream = LocalStream(MagicMock(), _rpc_robot(), settings_app=app, instance_path=tmp_path)
+    stream._init_settings_ui_if_needed()
+    result = _rpc_call(app, "speech.config", {"local_vad_enabled": local_vad, "local_barge_in_enabled": barge_in})[
+        "result"
+    ]
+    assert result["local_barge_in_enabled"] is barge_in
+    config.LOCAL_VAD_ENABLED = True
+    config.LOCAL_BARGE_IN_ENABLED = True
+    console_mod.load_settings_into_runtime(tmp_path)
+    assert config.LOCAL_VAD_ENABLED is local_vad
+    assert config.LOCAL_BARGE_IN_ENABLED is barge_in
+    assert read_settings(tmp_path).local_barge_in_enabled is barge_in
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    assert handler.paced_playback is (local_vad and barge_in)
+
+
+@pytest.mark.parametrize("invalid", ["false", 0, None, []])
+def test_invalid_barge_in_switch_cannot_partially_save_local_vad(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid: object
+) -> None:
+    """An invalid second switch leaves both preferences untouched."""
+    monkeypatch.setattr(config, "LOCAL_VAD_ENABLED", True)
+    monkeypatch.setattr(config, "LOCAL_BARGE_IN_ENABLED", True)
+    app = FastAPI()
+    stream = LocalStream(MagicMock(), _rpc_robot(), settings_app=app, instance_path=tmp_path)
+    stream._init_settings_ui_if_needed()
+    error = _rpc_call(app, "speech.config", {"local_vad_enabled": False, "local_barge_in_enabled": invalid})["error"]
+    assert error["data"]["reason"] == "invalid_params"
+    assert config.LOCAL_VAD_ENABLED and config.LOCAL_BARGE_IN_ENABLED
+    assert read_settings(tmp_path).local_vad_enabled is None
+    assert read_settings(tmp_path).local_barge_in_enabled is None
