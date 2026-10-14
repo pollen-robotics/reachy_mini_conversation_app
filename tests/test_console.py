@@ -1027,6 +1027,27 @@ def test_rpc_transcript_notification_broadcast() -> None:
     assert msg["params"] == {"role": "assistant", "text": "hello there", "final": True}
 
 
+def test_rpc_latency_notification_broadcast() -> None:
+    """The handler's latency observer pushes conversation.latency events."""
+    handler = MagicMock()
+    app = FastAPI()
+    stream = LocalStream(handler, _rpc_robot(), settings_app=app)
+    stream._init_settings_ui_if_needed()
+    latency_observer = handler.set_latency_observer.call_args.args[0]
+    latency: dict[str, int | str | None] = {
+        "stt_ms": 210,
+        "llm_ms": 480,
+        "tts_ttfa_ms": 100,
+        "e2e_ms": None,
+        "status": "completed",
+    }
+    with TestClient(app).websocket_connect("/rpc") as ws:
+        latency_observer(latency)
+        msg = ws.receive_json()
+    assert msg["method"] == "conversation.latency"
+    assert msg["params"] == latency
+
+
 def test_rpc_settings_methods() -> None:
     """Personality, voice, and tool settings are reachable over /rpc."""
     app = FastAPI()

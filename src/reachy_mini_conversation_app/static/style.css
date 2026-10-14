@@ -761,11 +761,18 @@ button {
 
 /* 5. Talk view - orb wrapper, caption, back button */
 
-/* flex: 1 claims the outlet's remaining height so justify-content: center
-   parks the orb in the middle regardless of viewport height. */
+/* flex: 1 claims the outlet's remaining height so the orb stays vertically
+   centered regardless of viewport height; the conversation panel sits beside it. */
 .view--talk {
-  display: flex;
+  display: grid;
   flex: 1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 24px;
+}
+
+.talk__stage {
+  display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -784,6 +791,161 @@ button {
   font-size: 1rem;
   text-align: center;
   min-height: 1.4em;
+}
+
+.talk-log {
+  display: flex;
+  flex-direction: column;
+  align-self: start;
+}
+
+.talk-log.is-open {
+  align-self: center;
+  width: 340px;
+  max-height: min(70vh, 640px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-soft);
+}
+
+.talk-log__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.talk-log.is-open .talk-log__header {
+  padding: 8px 8px 8px 16px;
+}
+
+.talk-log__title {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.talk-log__title[hidden] {
+  display: none;
+}
+
+.talk-log__toggle {
+  position: relative;
+}
+
+/* Unread dot while the panel is closed. */
+.talk-log__toggle.has-unread::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.talk-log__list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  margin: 0;
+  padding: 4px 12px 12px;
+  overflow-y: auto;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+
+.talk-log__list[hidden] {
+  display: none;
+}
+
+.talk-log__list:empty::before {
+  content: attr(data-empty);
+  padding: 8px 4px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.talk-log__row {
+  max-width: 88%;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 0.92rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.talk-log__row:first-child {
+  margin-top: 8px;
+}
+
+.talk-log__row--user {
+  align-self: flex-end;
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.talk-log__row--user.is-partial {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.talk-log__row--assistant {
+  align-self: flex-start;
+  background: var(--bg-elev);
+  color: var(--text);
+}
+
+.talk-log__row--timings {
+  align-self: flex-start;
+  max-width: 100%;
+  margin-top: -4px;
+  padding: 0 4px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.talk-log__timings summary {
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.talk-log__timings dl {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 2px 12px;
+  margin: 6px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.talk-log__timings dd {
+  margin: 0;
+  text-align: right;
+}
+
+.talk-log__timings-note {
+  margin: 4px 0 0;
+}
+
+@media (max-width: 820px) {
+  .view--talk {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: center;
+  }
+
+  .talk-log {
+    justify-self: end;
+  }
+
+  .talk-log.is-open {
+    justify-self: stretch;
+    width: auto;
+    max-height: 45vh;
+  }
 }
 
 /* 6. Settings and tools views */

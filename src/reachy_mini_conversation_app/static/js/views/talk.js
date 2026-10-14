@@ -5,6 +5,7 @@
  */
 
 import { applyPersonality, getMicState, listPersonalities, setMicMuted, subscribe } from "../api.js";
+import { createConversationPanel } from "../components/conversation-panel.js";
 import { ORB_STATES } from "../constants.js";
 import { createOrb, mapActivityToState } from "../orb.js";
 import { consumePendingApply } from "../pending-apply.js";
@@ -52,14 +53,15 @@ export async function mountTalkView({ outlet, signal }) {
   orb.root.disabled = true;
   orb.root.addEventListener("click", onMicTap);
   syncMicAria();
+  const conversationPanel = createConversationPanel();
 
   signal.addEventListener("abort", cleanup, { once: true });
 
   const view = h(
     "section",
     { class: "view view--talk" },
-    h("div", { class: "talk__orb-wrap" }, orb.root),
-    caption
+    h("div", { class: "talk__stage" }, h("div", { class: "talk__orb-wrap" }, orb.root), caption),
+    conversationPanel.root
   );
   outlet.replaceChildren(view);
 
@@ -114,6 +116,7 @@ export async function mountTalkView({ outlet, signal }) {
 
   function cleanup() {
     subscription?.close();
+    conversationPanel.dispose();
     orb.dispose();
     if (defaultAction) {
       defaultAction.hidden = true;

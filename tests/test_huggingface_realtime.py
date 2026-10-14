@@ -601,6 +601,57 @@ async def test_run_session_emits_completed_transcript(monkeypatch: Any) -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_session_observes_user_partial_transcript(monkeypatch: Any) -> None:
+    """The debounced user partial reaches the transcript observer as a non-final transcript."""
+    handler = _session_handler(
+        monkeypatch,
+        (
+            _FakeEvent("conversation.item.input_audio_transcription.delta", item_id="item-1", delta="Hey how"),
+            _FakeEvent("conversation.item.input_audio_transcription.delta", item_id="item-1", delta=" are you"),
+        ),
+    )
+    handler.partial_debounce_delay = 0
+    transcripts: list[tuple[str, str, bool]] = []
+    handler.set_transcript_observer(lambda role, text, final: transcripts.append((role, text, final)))
+
+    await handler._run_realtime_session()
+    assert handler.partial_transcript_task is not None
+    await handler.partial_transcript_task
+
+    assert transcripts == [("user", "Hey how are you", False)]
+
+
+@pytest.mark.asyncio
+async def test_run_session_observes_server_turn_latency(monkeypatch: Any) -> None:
+    """response.done turn-latency metadata reaches the latency observer in ms; absent or malformed metadata is skipped."""
+    turn_latency = json.dumps(
+        {"version": 2, "stt_s": 0.2104, "llm_s": 0.48, "tts_ttfa_s": 0.1, "e2e_s": None, "status": "cancelled"}
+    )
+
+    def response_done(metadata: dict[str, str] | None) -> _FakeEvent:
+        return _FakeEvent("response.done", response=SimpleNamespace(metadata=metadata))
+
+    handler = _session_handler(
+        monkeypatch,
+        (
+            response_done({"speech_to_speech.turn_latency": turn_latency}),
+            response_done(None),
+            response_done({"speech_to_speech.turn_latency": "not json"}),
+            response_done({"speech_to_speech.turn_latency": '{"stt_s": NaN, "status": "completed"}'}),
+        ),
+    )
+    latencies: list[dict[str, int | str | None]] = []
+    handler.set_latency_observer(latencies.append)
+
+    await handler._run_realtime_session()
+
+    assert latencies == [
+        {"stt_ms": 210, "llm_ms": 480, "tts_ttfa_ms": 100, "e2e_ms": None, "status": "cancelled"},
+        {"stt_ms": None, "llm_ms": None, "tts_ttfa_ms": None, "e2e_ms": None, "status": "completed"},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_run_session_skips_empty_completed_transcript(monkeypatch: Any) -> None:
     """An empty completed transcript is ignored but still stops listening."""
     handler = _session_handler(
@@ -913,7 +964,7 @@ async def test_run_session_response_lifecycle_toggles_done_event(monkeypatch: An
     """response.created clears the done gate and response.done sets it again."""
     handler = _session_handler(
         monkeypatch,
-        (_FakeEvent("response.created"), _FakeEvent("response.done")),
+        (_FakeEvent("response.created"), _FakeEvent("response.done", response=SimpleNamespace(metadata=None))),
     )
 
     await handler._run_realtime_session()

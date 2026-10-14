@@ -35,6 +35,7 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     last_idle_behavior_time: float
     _activity_observer: Callable[[str], None] | None = None
     _transcript_observer: Callable[[str, str, bool], None] | None = None
+    _latency_observer: Callable[[dict[str, int | str | None]], None] | None = None
 
     def __init__(self) -> None:
         """Initialize the stream handler and shared idle/activity tracking."""
@@ -50,6 +51,10 @@ class ConversationHandler(AsyncStreamHandler, ABC):
         """Attach/detach a transcript observer, called (role, text, final)."""
         self._transcript_observer = observer
 
+    def set_latency_observer(self, observer: Callable[[dict[str, int | str | None]], None] | None) -> None:
+        """Attach/detach a per-response latency observer. Pass None to clear."""
+        self._latency_observer = observer
+
     def _emit_transcript(self, role: str, text: str, final: bool = True) -> None:
         """Forward one transcript chunk to the observer, if attached."""
         observer = self._transcript_observer
@@ -58,6 +63,14 @@ class ConversationHandler(AsyncStreamHandler, ABC):
                 observer(role, text, final)
             except Exception:
                 logger.debug("transcript observer raised (ignored)", exc_info=True)
+
+    def _emit_latency(self, latency: dict[str, int | str | None]) -> None:
+        """Forward one response's latency breakdown to the observer, if attached."""
+        if self._latency_observer is not None:
+            try:
+                self._latency_observer(latency)
+            except Exception:
+                logger.debug("latency observer raised (ignored)", exc_info=True)
 
     def _mark_activity(self, reason: str) -> None:
         """Record non-idle conversation activity for the idle timer."""

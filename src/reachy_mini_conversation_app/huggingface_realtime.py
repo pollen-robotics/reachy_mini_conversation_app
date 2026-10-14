@@ -1,4 +1,5 @@
 import json
+import math
 import time
 import uuid
 import base64
@@ -64,6 +65,8 @@ logger = logging.getLogger(__name__)
 
 _RESPONSE_DONE_TIMEOUT: Final[float] = 30.0
 _RESPONSE_REJECTION_RETRY_DELAY: Final[float] = 0.5
+# Server-measured stage timings the speech-to-speech backend attaches to response.done.
+_TURN_LATENCY_METADATA_KEY: Final[str] = "speech_to_speech.turn_latency"
 
 
 class InputTranscriptChunksByItem(BaseModel):
@@ -355,6 +358,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             input_transcript = self.input_transcript_chunks_by_item
             if input_transcript.item_id == item_id and len(input_transcript.deltas) - 1 == sequence_counter:
                 await self.output_queue.put(AdditionalOutputs({"role": "user_partial", "content": transcript}))
+                self._emit_transcript("user", transcript, False)
                 logger.debug(f"Debounced partial emitted: {transcript}")
         except asyncio.CancelledError:
             logger.debug("Debounced partial cancelled")
@@ -800,6 +804,24 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         self._response_done_event.set()
                         self._response_started_or_rejected_event.set()
                         logger.debug("Response done")
+                        latency_json = (event.response.metadata or {}).get(_TURN_LATENCY_METADATA_KEY)
+                        turn_latency = None
+                        if latency_json is not None:
+                            try:
+                                turn_latency = json.loads(latency_json)
+                            except (TypeError, ValueError) as e:
+                                logger.warning("Ignoring malformed turn latency metadata: %s", e)
+                        if isinstance(turn_latency, dict):
+                            latency: dict[str, int | str | None] = {
+                                f"{stage}_ms": round(seconds * 1000)
+                                if isinstance(seconds := turn_latency.get(f"{stage}_s"), (int, float))
+                                and math.isfinite(seconds)
+                                else None
+                                for stage in ("stt", "llm", "tts_ttfa", "e2e")
+                            }
+                            status = turn_latency.get("status")
+                            latency["status"] = status if isinstance(status, str) else None
+                            self._emit_latency(latency)
 
                     if event.type == "conversation.item.input_audio_transcription.delta":
                         self._mark_activity("user_transcription_delta")

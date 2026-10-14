@@ -144,8 +144,8 @@ class LocalStream:
         self._backend_error: str | None = None
         self._backend_retry_delay = BACKEND_RETRY_DELAY_SECONDS
         # JSON-RPC control surface (mounted at /rpc in _init_settings_ui_if_needed).
-        # Notifications (conversation.turn/phase/transcript/activity) are pushed
-        # here from activity + transcripts. Survives handler rebuilds (mounted once).
+        # Notifications (conversation.turn/phase/transcript/latency/activity) are pushed
+        # here from activity, transcripts and latencies. Survives handler rebuilds (mounted once).
         self._rpc: Optional[JsonRpcServer] = None
         self._last_turn_state: Optional[str] = None
         # Per-role throttle timestamps for conversation.level (orb audio meter).
@@ -159,13 +159,16 @@ class LocalStream:
         self._attach_observers_to_handler()
 
     def _attach_observers_to_handler(self) -> None:
-        """Wire the handler's activity + transcript observers to JSON-RPC pushes."""
+        """Wire the handler's activity, transcript and latency observers to JSON-RPC pushes."""
         setter = getattr(self.handler, "set_activity_observer", None)
         if callable(setter):
             setter(self._dispatch_activity)
         transcript_setter = getattr(self.handler, "set_transcript_observer", None)
         if callable(transcript_setter):
             transcript_setter(self._dispatch_transcript)
+        latency_setter = getattr(self.handler, "set_latency_observer", None)
+        if callable(latency_setter):
+            latency_setter(self._dispatch_latency)
 
     def _dispatch_transcript(self, role: str, text: str, final: bool) -> None:
         """Push a conversation.transcript notification to JSON-RPC clients."""
@@ -174,6 +177,11 @@ class LocalStream:
                 "conversation.transcript",
                 {"role": role, "text": text, "final": final},
             )
+
+    def _dispatch_latency(self, latency: dict[str, int | str | None]) -> None:
+        """Push a conversation.latency notification to JSON-RPC clients."""
+        if self._rpc is not None:
+            self._rpc.broadcast_threadsafe("conversation.latency", latency)
 
     # Audio level meter for the client orb. RMS is scaled into a visible 0..1
     # range and capped to ~15 Hz so it stays light on the DataChannel.
@@ -542,7 +550,7 @@ class LocalStream:
         # ── JSON-RPC control surface (/rpc) ──────────────────────────────
         # The single wire format both the local browser UI and remote WebRTC
         # clients use (the daemon relays it over the DataChannel). Notifications
-        # (conversation.turn/phase/transcript/activity) are pushed from activity.
+        # (conversation.turn/phase/transcript/latency/activity) are pushed from activity.
         rpc = JsonRpcServer()
 
         # SDK isn't marked py.typed, so mypy sees rpc.method as untyped; safe here.
