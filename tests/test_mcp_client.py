@@ -77,6 +77,7 @@ def test_remote_tool_error_result_maps_to_app_payload() -> None:
     ).to_tool_result()
 
     assert payload["status"] == "error"
+    assert payload["error"] == "Search backend unavailable"
     assert payload["namespaced_tool_name"] == "gradio_docs__search_docs"
     assert payload["text"] == "Search backend unavailable"
 

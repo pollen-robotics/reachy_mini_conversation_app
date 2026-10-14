@@ -276,6 +276,8 @@ class RemoteToolCallResponse:
             payload["text"] = self.text
         if self.structured_content is not None:
             payload["structured_content"] = self.structured_content
+        if self.status == "error":
+            payload["error"] = self.text or f"Remote MCP tool '{self.namespaced_tool_name}' failed."
         return payload
 
 
