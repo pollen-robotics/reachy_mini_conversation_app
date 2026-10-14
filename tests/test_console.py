@@ -1024,6 +1024,7 @@ def test_rpc_transcript_notification_broadcast() -> None:
         stream._dispatch_transcript("assistant", "hello there", True)
         msg = ws.receive_json()
     assert msg["method"] == "conversation.transcript"
+    assert isinstance(msg["params"].pop("seq"), int)
     assert msg["params"] == {"role": "assistant", "text": "hello there", "final": True}
 
 
@@ -1045,7 +1046,38 @@ def test_rpc_latency_notification_broadcast() -> None:
         latency_observer(latency)
         msg = ws.receive_json()
     assert msg["method"] == "conversation.latency"
+    assert isinstance(msg["params"].pop("seq"), int)
     assert msg["params"] == latency
+
+
+def test_rpc_conversation_history_replays_final_events() -> None:
+    """conversation.history returns this run's final transcripts and latencies in order, without partials."""
+    handler = MagicMock()
+    app = FastAPI()
+    stream = LocalStream(handler, _rpc_robot(), settings_app=app)
+    stream._init_settings_ui_if_needed()
+    transcript_observer = handler.set_transcript_observer.call_args.args[0]
+    latency_observer = handler.set_latency_observer.call_args.args[0]
+    # Emitted before any page connects, like the startup greeting.
+    transcript_observer("assistant", "Hi, I'm Reachy!", True)
+    transcript_observer("user", "Hel", False)
+    transcript_observer("user", "Hello", True)
+    latency_observer({"e2e_ms": 900, "status": "completed"})
+
+    with TestClient(app).websocket_connect("/rpc") as ws:
+        ws.send_json({"jsonrpc": "2.0", "id": "1", "method": "conversation.history"})
+        events = ws.receive_json()["result"]["events"]
+
+    seqs = [event["params"].pop("seq") for event in events]
+    assert seqs == sorted(set(seqs))
+    assert events == [
+        {
+            "method": "conversation.transcript",
+            "params": {"role": "assistant", "text": "Hi, I'm Reachy!", "final": True},
+        },
+        {"method": "conversation.transcript", "params": {"role": "user", "text": "Hello", "final": True}},
+        {"method": "conversation.latency", "params": {"e2e_ms": 900, "status": "completed"}},
+    ]
 
 
 def test_rpc_settings_methods() -> None:

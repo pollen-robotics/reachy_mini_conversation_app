@@ -53,7 +53,9 @@ export async function mountTalkView({ outlet, signal }) {
   orb.root.disabled = true;
   orb.root.addEventListener("click", onMicTap);
   syncMicAria();
-  const conversationPanel = createConversationPanel();
+  const conversationPanel = createConversationPanel({
+    toggle: document.querySelector('[data-component="conversation-toggle"]'),
+  });
 
   signal.addEventListener("abort", cleanup, { once: true });
 

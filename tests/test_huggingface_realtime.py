@@ -625,7 +625,17 @@ async def test_run_session_observes_user_partial_transcript(monkeypatch: Any) ->
 async def test_run_session_observes_server_turn_latency(monkeypatch: Any) -> None:
     """response.done turn-latency metadata reaches the latency observer in ms; absent or malformed metadata is skipped."""
     turn_latency = json.dumps(
-        {"version": 2, "stt_s": 0.2104, "llm_s": 0.48, "tts_ttfa_s": 0.1, "e2e_s": None, "status": "cancelled"}
+        {
+            "version": 2,
+            "vad_decision_s": 0.0302,
+            "smart_status": "complete",
+            "stt_s": 0.2104,
+            "llm_s": 0.48,
+            "tts_ttfa_s": 0.1,
+            "e2e_s": None,
+            "hold_s": None,
+            "status": "cancelled",
+        }
     )
 
     def response_done(metadata: dict[str, str] | None) -> _FakeEvent:
@@ -645,9 +655,19 @@ async def test_run_session_observes_server_turn_latency(monkeypatch: Any) -> Non
 
     await handler._run_realtime_session()
 
+    missing_stages = dict.fromkeys(["vad_decision_ms", "stt_ms", "llm_ms", "tts_ttfa_ms", "e2e_ms", "hold_ms"])
     assert latencies == [
-        {"stt_ms": 210, "llm_ms": 480, "tts_ttfa_ms": 100, "e2e_ms": None, "status": "cancelled"},
-        {"stt_ms": None, "llm_ms": None, "tts_ttfa_ms": None, "e2e_ms": None, "status": "completed"},
+        {
+            "vad_decision_ms": 30,
+            "stt_ms": 210,
+            "llm_ms": 480,
+            "tts_ttfa_ms": 100,
+            "e2e_ms": None,
+            "hold_ms": None,
+            "smart_status": "complete",
+            "status": "cancelled",
+        },
+        {**missing_stages, "smart_status": None, "status": "completed"},
     ]
 
 

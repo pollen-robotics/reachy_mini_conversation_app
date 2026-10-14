@@ -1,13 +1,17 @@
 /** Talk view sidebar: live transcript plus the backend's per-response timings.
- * Rows live only in this panel's DOM, so every mount starts empty. */
+ * Opened from the header's conversation button; starts from the app's history
+ * of this run, so a page opened mid-conversation still shows earlier turns. */
 
-import { subscribe } from "../api.js";
+import { getConversationHistory, subscribe } from "../api.js";
 import { h } from "../ui.js";
 
 const LATENCY_STAGES = Object.freeze([
+  ["vad_decision_ms", "VAD end decision"],
+  ["smart_status", "Smart Turn decision"],
   ["stt_ms", "Transcription"],
   ["llm_ms", "Response generation"],
   ["tts_ttfa_ms", "Voice synthesis to first audio"],
+  ["hold_ms", "Hold time before response"],
 ]);
 
 const STATUS_LABELS = Object.freeze({
@@ -19,57 +23,83 @@ const STATUS_LABELS = Object.freeze({
 // Within this distance of the bottom, new rows keep the list scrolled down.
 const STICK_TO_BOTTOM_PX = 24;
 
-const SVG_ATTRS =
-  'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
-const MESSAGE_ICON = `<svg ${SVG_ATTRS}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`;
-const CLOSE_ICON = `<svg ${SVG_ATTRS}><path d="M18 6 6 18M6 6l12 12"/></svg>`;
+const CLOSE_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
 
-/** Build the panel. Returns { root, dispose }. */
-export function createConversationPanel() {
+/** Build the panel, driven by the header `toggle` button. Returns { root, dispose }. */
+export function createConversationPanel({ toggle }) {
   let partialRow = null;
+  let lastSeq = 0;
+  // Live events that arrive before the history snapshot; null once it is rendered.
+  let pending = [];
 
   const list = h("ol", {
-    id: "talk-log-list",
     class: "talk-log__list",
     role: "log",
     "data-empty": "The conversation will show up here.",
   });
-  const toggle = h("button", {
-    type: "button",
-    class: "app-shell__icon-btn talk-log__toggle",
-    "aria-controls": "talk-log-list",
-  });
-  const title = h("h2", { class: "talk-log__title" }, "Conversation");
   const root = h(
     "aside",
-    { class: "talk-log", "aria-label": "Conversation" },
-    h("div", { class: "talk-log__header" }, title, toggle),
+    { id: "talk-log", class: "talk-log", "aria-label": "Conversation" },
+    h(
+      "div",
+      { class: "talk-log__header" },
+      h("h2", { class: "talk-log__title" }, "Conversation"),
+      h("button", {
+        type: "button",
+        class: "app-shell__icon-btn",
+        "aria-label": "Hide conversation",
+        html: CLOSE_ICON,
+        onClick: () => setOpen(false),
+      })
+    ),
     list
   );
+  const onToggle = () => setOpen(root.hidden);
+  toggle.addEventListener("click", onToggle);
+  toggle.hidden = false;
   setOpen(false);
-  toggle.addEventListener("click", () => setOpen(list.hidden));
 
-  const unsubscribers = [
-    subscribe("conversation.transcript", onTranscript),
-    subscribe("conversation.latency", onLatency),
-  ];
+  const renderers = {
+    "conversation.transcript": onTranscript,
+    "conversation.latency": onLatency,
+  };
+  const unsubscribers = Object.entries(renderers).map(([method, render]) =>
+    subscribe(method, (params) => (pending ? pending.push([render, params]) : apply(render, params)))
+  );
+  getConversationHistory()
+    .then(({ events }) => {
+      for (const { method, params } of events) apply(renderers[method], params);
+    })
+    .catch((error) => console.warn("Failed to load the conversation history", error))
+    .finally(() => {
+      const buffered = pending;
+      pending = null;
+      // Buffered partials may predate a final transcript the snapshot already holds.
+      for (const [render, params] of buffered) if (params.seq != null) apply(render, params);
+    });
+
+  function apply(render, params) {
+    if (params.seq != null) {
+      if (params.seq <= lastSeq) return;
+      lastSeq = params.seq;
+    }
+    render(params);
+  }
 
   function setOpen(open) {
-    list.hidden = !open;
-    title.hidden = !open;
-    root.classList.toggle("is-open", open);
+    root.hidden = !open;
+    toggle.classList.toggle("is-active", open);
     toggle.classList.remove("has-unread");
-    toggle.innerHTML = open ? CLOSE_ICON : MESSAGE_ICON;
     toggle.setAttribute("aria-expanded", String(open));
     toggle.setAttribute("aria-label", open ? "Hide conversation" : "Show conversation");
-    toggle.title = open ? "Hide conversation" : "Conversation";
     if (open) list.scrollTop = list.scrollHeight;
   }
 
   function keepScrolledDown(mutate) {
     const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight <= STICK_TO_BOTTOM_PX;
     mutate();
-    if (list.hidden) toggle.classList.add("has-unread");
+    if (root.hidden) toggle.classList.add("has-unread");
     else if (atBottom) list.scrollTop = list.scrollHeight;
   }
 
@@ -105,9 +135,11 @@ export function createConversationPanel() {
             h(
               "dl",
               {},
-              LATENCY_STAGES.map(([key, label]) => [h("dt", {}, label), h("dd", {}, formatMs(latency[key]))])
-            ),
-            h("p", { class: "talk-log__timings-note" }, "Measured by the backend. Robot playback is not included.")
+              LATENCY_STAGES.map(([key, label]) => [
+                h("dt", {}, label),
+                h("dd", {}, typeof latency[key] === "string" ? latency[key] : formatMs(latency[key])),
+              ])
+            )
           )
         )
       );
@@ -118,6 +150,9 @@ export function createConversationPanel() {
     root,
     dispose() {
       for (const unsubscribe of unsubscribers) unsubscribe();
+      toggle.removeEventListener("click", onToggle);
+      toggle.classList.remove("is-active", "has-unread");
+      toggle.hidden = true;
     },
   };
 }

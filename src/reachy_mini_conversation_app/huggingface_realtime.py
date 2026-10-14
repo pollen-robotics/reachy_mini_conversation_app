@@ -817,10 +817,11 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                                 if isinstance(seconds := turn_latency.get(f"{stage}_s"), (int, float))
                                 and math.isfinite(seconds)
                                 else None
-                                for stage in ("stt", "llm", "tts_ttfa", "e2e")
+                                for stage in ("vad_decision", "stt", "llm", "tts_ttfa", "e2e", "hold")
                             }
-                            status = turn_latency.get("status")
-                            latency["status"] = status if isinstance(status, str) else None
+                            for field in ("smart_status", "status"):
+                                value = turn_latency.get(field)
+                                latency[field] = value if isinstance(value, str) else None
                             self._emit_latency(latency)
 
                     if event.type == "conversation.item.input_audio_transcription.delta":
