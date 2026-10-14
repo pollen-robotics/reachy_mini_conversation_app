@@ -43,11 +43,12 @@ def _vision_client(deps: ToolDependencies, persisted: list[bool], forced_off: bo
     return TestClient(app)
 
 
-def test_language_get_reports_the_active_language(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("language", ["auto", "en"])
+def test_language_get_reports_the_active_language(monkeypatch: pytest.MonkeyPatch, language: str) -> None:
     """The client reads the transcription language it is about to change."""
-    monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", "en")
+    monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", language)
 
-    assert _rpc_call(_language_client([]), "language.get")["result"] == {"language": "en"}
+    assert _rpc_call(_language_client([]), "language.get")["result"] == {"language": language}
 
 
 @pytest.mark.parametrize("language", ["fr", "EN", "auto", "Auto"])

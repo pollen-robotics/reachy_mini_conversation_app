@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.config import config, refresh_runtime_config_from_env
 from reachy_mini_conversation_app.settings_store import (
     AppSettings,
     read_settings,
@@ -56,24 +56,33 @@ def test_unusable_file_is_ignored(tmp_path: Path, content: str) -> None:
     assert read_settings(tmp_path) == AppSettings()
 
 
-def test_load_applies_over_the_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("language", ["auto", "en", "fr"])
+def test_load_applies_over_the_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, language: str) -> None:
     """Stored settings win over the env-derived defaults."""
-    monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", "en")
+    monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", "auto")
     monkeypatch.setattr(config, "MEMORY_ENABLED", True)
-    update_settings(tmp_path, AppSettings(language="fr", memory_enabled=False))
+    update_settings(tmp_path, AppSettings(language=language, memory_enabled=False))
 
     load_settings_into_runtime(tmp_path)
 
-    assert config.REALTIME_TRANSCRIPTION_LANGUAGE == "fr"
+    assert config.REALTIME_TRANSCRIPTION_LANGUAGE == language
     assert config.MEMORY_ENABLED is False
 
 
-def test_load_leaves_unset_fields_to_the_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("raw_language, expected_language", [(None, "auto"), ("de", "de")])
+def test_load_leaves_unset_fields_to_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raw_language: str | None, expected_language: str
+) -> None:
     """A setting the user never changed keeps its environment value."""
-    monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", "de")
+    if raw_language is None:
+        monkeypatch.delenv("REALTIME_TRANSCRIPTION_LANGUAGE", raising=False)
+    else:
+        monkeypatch.setenv("REALTIME_TRANSCRIPTION_LANGUAGE", raw_language)
+    monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", "stale")
     monkeypatch.setattr(config, "MEMORY_ENABLED", True)
+    refresh_runtime_config_from_env()
     update_settings(tmp_path, AppSettings(memory_enabled=False))
 
     load_settings_into_runtime(tmp_path)
 
-    assert config.REALTIME_TRANSCRIPTION_LANGUAGE == "de"
+    assert config.REALTIME_TRANSCRIPTION_LANGUAGE == expected_language
