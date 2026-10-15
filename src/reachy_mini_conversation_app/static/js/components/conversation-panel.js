@@ -25,9 +25,6 @@ const STATUS_LABELS = Object.freeze({
 // Within this distance of the bottom, new rows keep the list scrolled down.
 const STICK_TO_BOTTOM_PX = 24;
 
-const CLOSE_ICON =
-  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
-
 /** Build the panel, driven by the header `toggle` button. Returns { root, dispose }. */
 export function createConversationPanel({ toggle }) {
   // Read once per Talk mount; a Settings change applies on return.
@@ -45,18 +42,7 @@ export function createConversationPanel({ toggle }) {
   const root = h(
     "aside",
     { id: "talk-log", class: "talk-log", "aria-label": "Conversation" },
-    h(
-      "div",
-      { class: "talk-log__header" },
-      h("h2", { class: "talk-log__title" }, "Conversation"),
-      h("button", {
-        type: "button",
-        class: "app-shell__icon-btn",
-        "aria-label": "Hide conversation",
-        html: CLOSE_ICON,
-        onClick: () => setOpen(false),
-      })
-    ),
+    h("h2", { class: "talk-log__title" }, "Conversation"),
     list
   );
   const onToggle = () => setOpen(root.hidden);
