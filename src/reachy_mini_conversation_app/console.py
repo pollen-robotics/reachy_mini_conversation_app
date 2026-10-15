@@ -893,11 +893,7 @@ class LocalStream:
             audio = self._robot.media.audio
             try:
                 if audio is not None:
-                    if hasattr(audio, "clear_player") and callable(audio.clear_player):
-                        flush = audio.clear_player
-                    else:
-                        flush = audio.clear_output_buffer
-                    flush_task = asyncio.create_task(asyncio.to_thread(flush))
+                    flush_task = asyncio.create_task(asyncio.to_thread(audio.clear_player))
                     try:
                         await asyncio.shield(flush_task)
                     except asyncio.CancelledError:

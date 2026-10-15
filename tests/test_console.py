@@ -49,37 +49,18 @@ async def _wait_until(predicate: Any, timeout: float = 1.0) -> None:
 
 
 @pytest.mark.asyncio
-async def test_clear_audio_queue_prefers_clear_player() -> None:
-    """clear_player() is the canonical flush and is used whenever available."""
+async def test_clear_audio_queue_flushes_the_sdk_player() -> None:
+    """clear_player() flushes SDK playback and the pending output is dropped."""
     handler = MagicMock()
     handler.output_queue = asyncio.Queue()
     handler.output_queue.put_nowait((24000, np.zeros(4, dtype=np.int16)))
-    audio = SimpleNamespace(
-        clear_player=MagicMock(),
-        clear_output_buffer=MagicMock(),
-    )
+    audio = SimpleNamespace(clear_player=MagicMock())
     robot = SimpleNamespace(media=SimpleNamespace(audio=audio))
     stream = LocalStream(handler, robot)
 
     await stream.clear_audio_queue()
 
     audio.clear_player.assert_called_once()
-    audio.clear_output_buffer.assert_not_called()
-    assert handler.output_queue.empty()
-
-
-@pytest.mark.asyncio
-async def test_clear_audio_queue_falls_back_to_output_buffer() -> None:
-    """Older SDKs without clear_player() still flush via clear_output_buffer()."""
-    handler = MagicMock()
-    handler.output_queue = asyncio.Queue()
-    audio = SimpleNamespace(clear_output_buffer=MagicMock())  # no clear_player
-    robot = SimpleNamespace(media=SimpleNamespace(audio=audio))
-    stream = LocalStream(handler, robot)
-
-    await stream.clear_audio_queue()
-
-    audio.clear_output_buffer.assert_called_once()
     assert handler.output_queue.empty()
 
 
@@ -975,7 +956,7 @@ def test_drain_output_queue_tolerates_missing_queue() -> None:
 
 def _rpc_robot() -> SimpleNamespace:
     """Return a robot mock whose audio pipeline supports clear_audio_queue()."""
-    audio = SimpleNamespace(clear_player=MagicMock(), clear_output_buffer=MagicMock())
+    audio = SimpleNamespace(clear_player=MagicMock())
     return SimpleNamespace(media=SimpleNamespace(audio=audio))
 
 
