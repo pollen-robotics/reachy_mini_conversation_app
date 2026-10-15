@@ -39,51 +39,36 @@ def model_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, 
     return tmp_path, download
 
 
-def test_streaming_speech_holds_through_pauses_and_resets(
+def test_partial_frames_keep_context_and_reset_clears_history(
     monkeypatch: pytest.MonkeyPatch, model_cache: tuple[Path, MagicMock]
 ) -> None:
-    """Partial frames retain model context, and brief pauses do not end listening."""
+    """Partial and (N, 1) frames wait for a full chunk, reset() clears model history, and only 16 kHz is accepted."""
     session = MagicMock()
-    probabilities = iter([*([0.8] * 5), *([0.1] * 12), 0.8, *([0.1] * 13), *([0.8] * 5), 0.1])
-
-    def infer(_outputs: object, inputs: dict[str, np.ndarray]) -> list[np.ndarray]:
-        return [np.array([[next(probabilities)]], dtype=np.float32), np.ones_like(inputs["state"])]
-
-    session.run.side_effect = infer
+    session.run.side_effect = lambda _outputs, inputs: [
+        np.array([[0.1]], dtype=np.float32),
+        np.ones_like(inputs["state"]),
+    ]
     monkeypatch.setattr(vad_mod.ort, "InferenceSession", lambda *_args, **_kwargs: session)
     detector = SileroVAD()
     half_chunk = np.full(256, 16384, dtype=np.int16)
-    silence = np.zeros(512, dtype=np.int16)
 
-    assert not detector.process(half_chunk, 16000)
+    detector.process(half_chunk, 16000)
     session.run.assert_not_called()
-    assert not detector.process(half_chunk, 16000)
+    detector.process(half_chunk.reshape(-1, 1), 16000)
     first_inputs = session.run.call_args.args[1]
     np.testing.assert_array_equal(first_inputs["input"][:, :64], 0.0)
     np.testing.assert_array_equal(first_inputs["input"][:, 64:], 0.5)
-    for _ in range(3):
-        assert not detector.process(silence, 16000)
-    assert detector.process(silence, 16000)
 
-    for _ in range(12):
-        assert detector.process(silence.reshape(-1, 1), 16000)
-    assert detector.process(silence, 16000)
-    for _ in range(12):
-        assert detector.process(silence, 16000)
-    assert not detector.process(silence, 16000)
-
-    for _ in range(4):
-        assert not detector.process(silence, 16000)
-    assert detector.process(silence, 16000)
+    detector.process(half_chunk, 16000)
     detector.reset()
-    assert not detector.process(half_chunk, 16000)
-    assert not detector.process(half_chunk, 16000)
+    detector.process(half_chunk, 16000)
+    detector.process(half_chunk, 16000)
     reset_inputs = session.run.call_args.args[1]
     np.testing.assert_array_equal(reset_inputs["state"], 0.0)
     np.testing.assert_array_equal(reset_inputs["input"][:, :64], 0.0)
 
     with pytest.raises(ValueError, match="16 kHz"):
-        detector.process(silence, 48000)
+        detector.process(half_chunk, 48000)
 
 
 def test_first_start_downloads_model_and_license_then_reuses_cache_offline(

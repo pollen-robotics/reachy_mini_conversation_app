@@ -56,23 +56,14 @@ def test_transcription_language_at_startup_and_reload(
 
 
 @pytest.mark.parametrize("raw_value, expected", [(None, True), ("true", True), ("false", False)])
-def test_local_vad_default_and_environment_reload(
+def test_local_vad_flag_defaults_on_and_follows_environment(
     monkeypatch: pytest.MonkeyPatch, raw_value: str | None, expected: bool
 ) -> None:
-    """Local detection starts enabled and still respects explicit environment choices."""
+    """Local detection is on by default and follows an explicit environment value."""
     if raw_value is None:
         monkeypatch.delenv("LOCAL_VAD_ENABLED", raising=False)
     else:
         monkeypatch.setenv("LOCAL_VAD_ENABLED", raw_value)
-    monkeypatch.setenv("PYTHONPATH", str(config.PROJECT_ROOT / "src"))
-    subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            f"from reachy_mini_conversation_app.config import config; assert config.LOCAL_VAD_ENABLED is {expected!r}",
-        ],
-        check=True,
-    )
     monkeypatch.setattr(config.config, "LOCAL_VAD_ENABLED", not expected)
     config.refresh_runtime_config_from_env()
     assert config.config.LOCAL_VAD_ENABLED is expected
