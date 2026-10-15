@@ -165,7 +165,6 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self._in_flight_tool_calls: set[str] = set()
         self._tool_batch_needs_response = False
         self._local_vad: SileroVAD | None = None
-        self._local_vad_lock = asyncio.Lock()
         self._local_speech = False
         self._server_speech = False
         self._movement_listening = False
@@ -182,15 +181,14 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             self._movement_listening = listening
             self.deps.movement_manager.set_listening(listening)
 
-    async def _reset_listening(self) -> None:
-        async with self._local_vad_lock:
-            if self._local_speech_timeout is not None:
-                self._local_speech_timeout.cancel()
-                self._local_speech_timeout = None
-            if self._local_vad is not None:
-                self._local_vad.reset()
-            self._local_audio_at = None
-            self._set_listening(local=False, server=False)
+    def _reset_listening(self) -> None:
+        if self._local_speech_timeout is not None:
+            self._local_speech_timeout.cancel()
+            self._local_speech_timeout = None
+        if self._local_vad is not None:
+            self._local_vad.reset()
+        self._local_audio_at = None
+        self._set_listening(local=False, server=False)
 
     @staticmethod
     def _sanitize_tool_result_for_model(tool_name: str, tool_result: dict[str, Any]) -> dict[str, Any]:
@@ -982,7 +980,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                             )
             finally:
                 self.connection = None
-                await self._reset_listening()
+                self._reset_listening()
                 # Stop the response sender worker.
                 if response_sender_task is not None:
                     response_sender_task.cancel()
@@ -1029,41 +1027,31 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             except Exception as e:
                 logger.debug("Dropping audio frame: connection not ready (%s)", e)
 
-        async with self._local_vad_lock:
-            if self._local_vad is not None:
-                if self._local_speech_timeout is not None:
-                    self._local_speech_timeout.cancel()
-                    self._local_speech_timeout = None
-                received_at = time.monotonic()
-                if self._local_audio_at is not None and received_at - self._local_audio_at > 0.5:
-                    self._local_vad.reset()
-                self._local_audio_at = received_at
-                inference_task = asyncio.create_task(
-                    asyncio.to_thread(self._local_vad.process, audio_frame, sample_rate)
+        if self._local_vad is not None:
+            if self._local_speech_timeout is not None:
+                self._local_speech_timeout.cancel()
+                self._local_speech_timeout = None
+            received_at = time.monotonic()
+            if self._local_audio_at is not None and received_at - self._local_audio_at > 0.5:
+                self._local_vad.reset()
+            self._local_audio_at = received_at
+            try:
+                # Inline: ~2 ms per 32 ms chunk, cheaper than a thread hop on every frame.
+                local_speech = self._local_vad.process(audio_frame, sample_rate)
+            except Exception as exc:
+                logger.warning("Local VAD failed; using server VAD for movement: %s", exc)
+                self._local_vad = None
+                local_speech = False
+            self._set_listening(local=local_speech)
+            if local_speech:
+                # Muting or losing the microphone must not leave a stale local vote.
+                self._local_speech_timeout = asyncio.get_running_loop().call_later(
+                    0.5, lambda: self._set_listening(local=False)
                 )
-                try:
-                    local_speech = await asyncio.shield(inference_task)
-                except asyncio.CancelledError:
-                    # A cancelled receiver must finish inference before reset can touch its state.
-                    try:
-                        await inference_task
-                    except Exception as exc:
-                        logger.warning("Local VAD failed during cancellation: %s", exc)
-                    raise
-                except Exception as exc:
-                    logger.warning("Local VAD failed; using server VAD for movement: %s", exc)
-                    self._local_vad = None
-                    local_speech = False
-                self._set_listening(local=local_speech)
-                if local_speech:
-                    # Muting or losing the microphone must not leave a stale local vote.
-                    self._local_speech_timeout = asyncio.get_running_loop().call_later(
-                        0.5, lambda: self._set_listening(local=False)
-                    )
 
     async def shutdown(self) -> None:
         """Shutdown the handler."""
-        await self._reset_listening()
+        self._reset_listening()
         self._local_vad = None
         # Unblock the response sender worker so it can exit
         self._response_done_event.set()

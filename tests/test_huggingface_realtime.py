@@ -2,7 +2,6 @@ import json
 import time
 import base64
 import asyncio
-import threading
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, call
@@ -153,38 +152,6 @@ async def test_unavailable_local_vad_does_not_prevent_startup(
     await handler.start_up()
     session.assert_awaited_once()
     assert "Local VAD unavailable" in caplog.text
-
-
-@pytest.mark.asyncio
-async def test_cancelled_receiver_finishes_inference_before_shutdown(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Shutdown cannot reset model state while a cancelled receiver is still using it."""
-    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
-    started = threading.Event()
-    release = threading.Event()
-    detector = MagicMock()
-
-    def process(_audio: np.ndarray, _sample_rate: int) -> bool:
-        started.set()
-        assert release.wait(timeout=2.0)
-        return True
-
-    detector.process.side_effect = process
-    handler._local_vad = detector
-    monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
-    receiver = asyncio.create_task(handler.receive((16000, np.zeros(512, dtype=np.int16))))
-    try:
-        assert await asyncio.to_thread(started.wait, 1.0)
-        receiver.cancel()
-        shutdown = asyncio.create_task(handler.shutdown())
-        await asyncio.sleep(0)
-        detector.reset.assert_not_called()
-    finally:
-        release.set()
-    with pytest.raises(asyncio.CancelledError):
-        await receiver
-    await shutdown
-    detector.reset.assert_called_once()
-    assert handler._local_vad is None
 
 
 @pytest.mark.asyncio
