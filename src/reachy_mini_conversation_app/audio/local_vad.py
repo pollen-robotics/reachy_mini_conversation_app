@@ -27,6 +27,7 @@ class SileroVAD:
 
     SAMPLE_RATE = 16000
     CHUNK_SAMPLES = 512
+    MIN_SPEECH_SAMPLES = 2560  # 160 ms, ignores knocks and clicks
     SILENCE_SAMPLES = 6400  # 400 ms
     IDLE_RESET_SAMPLES = 8000  # 500 ms
 
@@ -73,6 +74,7 @@ class SileroVAD:
         self._state = np.zeros((2, 1, 128), dtype=np.float32)
         self._context = np.zeros((1, 64), dtype=np.float32)
         self._idle_samples = 0
+        self._speech_samples = 0
 
     def process(self, audio: NDArray[np.int16], sample_rate: int) -> bool:
         """Return whether speech is active, holding through 400 ms of silence."""
@@ -92,21 +94,21 @@ class SileroVAD:
             speech_probability = float(np.asarray(probability).item())
             if speech_probability >= 0.5:
                 self._idle_samples = 0
-                self._speaking = True
                 self._silence_samples = 0
-            elif self._speaking and speech_probability < 0.35:
+                self._speech_samples += self.CHUNK_SAMPLES
+                if self._speech_samples >= self.MIN_SPEECH_SAMPLES:
+                    self._speaking = True
+            elif self._speaking:
                 self._silence_samples += self.CHUNK_SAMPLES
                 if self._silence_samples >= self.SILENCE_SAMPLES:
                     self._speaking = False
                     self._silence_samples = 0
                     self._reset_model()
-            elif not self._speaking:
-                if speech_probability < 0.35:
-                    self._idle_samples += self.CHUNK_SAMPLES
-                    if self._idle_samples >= self.IDLE_RESET_SAMPLES:
-                        self._reset_model()
-                else:
-                    self._idle_samples = 0
+            else:
+                self._speech_samples = 0
+                self._idle_samples += self.CHUNK_SAMPLES
+                if self._idle_samples >= self.IDLE_RESET_SAMPLES:
+                    self._reset_model()
             offset += self.CHUNK_SAMPLES
         self._pending = self._pending[offset:].copy()
         return self._speaking

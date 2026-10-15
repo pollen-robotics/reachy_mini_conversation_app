@@ -44,7 +44,7 @@ def test_streaming_speech_holds_through_pauses_and_resets(
 ) -> None:
     """Partial frames retain model context, and brief pauses do not end listening."""
     session = MagicMock()
-    probabilities = iter([0.8, *([0.1] * 12), 0.8, *([0.1] * 13), 0.8, 0.1])
+    probabilities = iter([*([0.8] * 5), *([0.1] * 12), 0.8, *([0.1] * 13), *([0.8] * 5), 0.1])
 
     def infer(_outputs: object, inputs: dict[str, np.ndarray]) -> list[np.ndarray]:
         return [np.array([[next(probabilities)]], dtype=np.float32), np.ones_like(inputs["state"])]
@@ -57,10 +57,13 @@ def test_streaming_speech_holds_through_pauses_and_resets(
 
     assert not detector.process(half_chunk, 16000)
     session.run.assert_not_called()
-    assert detector.process(half_chunk, 16000)
+    assert not detector.process(half_chunk, 16000)
     first_inputs = session.run.call_args.args[1]
     np.testing.assert_array_equal(first_inputs["input"][:, :64], 0.0)
     np.testing.assert_array_equal(first_inputs["input"][:, 64:], 0.5)
+    for _ in range(3):
+        assert not detector.process(silence, 16000)
+    assert detector.process(silence, 16000)
 
     for _ in range(12):
         assert detector.process(silence.reshape(-1, 1), 16000)
@@ -69,9 +72,9 @@ def test_streaming_speech_holds_through_pauses_and_resets(
         assert detector.process(silence, 16000)
     assert not detector.process(silence, 16000)
 
-    assert detector.process(half_chunk, 16000) is False
-    assert detector.process(half_chunk, 16000)
-    detector.process(half_chunk, 16000)
+    for _ in range(4):
+        assert not detector.process(silence, 16000)
+    assert detector.process(silence, 16000)
     detector.reset()
     assert not detector.process(half_chunk, 16000)
     assert not detector.process(half_chunk, 16000)
@@ -141,7 +144,7 @@ def test_model_resets_preserve_audio_and_context_during_speech(
     monkeypatch: pytest.MonkeyPatch, model_cache: tuple[Path, MagicMock], input_samples: int
 ) -> None:
     """Idle and segment resets preserve every PCM sample and context throughout active speech and pauses."""
-    probabilities = iter([*([0.1] * 16), 0.8, *([0.1] * 12), 0.8, *([0.1] * 13), 0.8, 0.1, 0.1])
+    probabilities = iter([*([0.1] * 16), *([0.8] * 5), *([0.1] * 12), 0.8, *([0.1] * 13), *([0.8] * 5), 0.1, 0.1])
     chunks: list[np.ndarray] = []
     states: list[np.ndarray] = []
     contexts: list[np.ndarray] = []
@@ -156,19 +159,19 @@ def test_model_resets_preserve_audio_and_context_during_speech(
     session.run.side_effect = infer
     monkeypatch.setattr(vad_mod.ort, "InferenceSession", lambda *_args, **_kwargs: session)
     detector = SileroVAD()
-    audio = np.arange(45 * 512 + 137, dtype=np.int16)
+    audio = np.arange(53 * 512 + 137, dtype=np.int16)
     listening = [
         detector.process(audio[offset : offset + input_samples], 16000)
         for offset in range(0, audio.size, input_samples)
     ]
     assert listening[-1]
-    assert session.run.call_count == 45
+    assert session.run.call_count == 53
     assert detector.process(np.zeros(375, dtype=np.int16), 16000)
 
     expected = np.concatenate((audio, np.zeros(375, dtype=np.int16))).astype(np.float32) / 32768.0
     np.testing.assert_array_equal(np.concatenate(chunks, axis=1).ravel(), expected)
     for index, (state, context) in enumerate(zip(states, contexts)):
-        if index in (0, 16, 43):
+        if index in (0, 16, 47):
             np.testing.assert_array_equal(state, 0.0)
             np.testing.assert_array_equal(context, 0.0)
         else:
@@ -176,17 +179,17 @@ def test_model_resets_preserve_audio_and_context_during_speech(
             np.testing.assert_array_equal(context, chunks[index - 1][:, -64:])
 
     if input_samples == 512:
-        assert not any(listening[:16])
-        assert all(listening[16:42])
-        assert not listening[42]
-        assert all(listening[43:])
+        assert not any(listening[:20])
+        assert all(listening[20:46])
+        assert not any(listening[46:51])
+        assert all(listening[51:])
 
 
-def test_idle_reset_requires_consecutive_low_confidence_audio(
+def test_short_bursts_are_ignored_and_uncertain_audio_counts_as_silence(
     monkeypatch: pytest.MonkeyPatch, model_cache: tuple[Path, MagicMock]
 ) -> None:
-    """Uncertain idle audio restarts the idle timer, and active speech keeps its model history."""
-    probabilities = iter([*([0.1] * 15), 0.4, *([0.1] * 16), 0.8, *([0.4] * 40)])
+    """Knocks under 160 ms never vote, and hum below the speech threshold still ends listening."""
+    probabilities = iter([*([0.8] * 4), 0.1, *([0.8] * 5), *([0.4] * 30)])
     states: list[np.ndarray] = []
 
     def infer(_outputs: object, inputs: dict[str, np.ndarray]) -> list[np.ndarray]:
@@ -198,8 +201,9 @@ def test_idle_reset_requires_consecutive_low_confidence_audio(
     monkeypatch.setattr(vad_mod.ort, "InferenceSession", lambda *_args, **_kwargs: session)
     detector = SileroVAD()
     frame = np.full(512, 16384, dtype=np.int16)
-    listening = [detector.process(frame, 16000) for _ in range(73)]
+    listening = [detector.process(frame, 16000) for _ in range(40)]
 
-    assert not any(listening[:32])
-    assert all(listening[32:])
-    assert [index for index, state in enumerate(states) if not np.any(state)] == [0, 32]
+    assert not any(listening[:9])
+    assert all(listening[9:22])
+    assert not any(listening[22:])
+    assert [index for index, state in enumerate(states) if not np.any(state)] == [0, 23, 39]
