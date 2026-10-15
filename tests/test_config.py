@@ -55,39 +55,16 @@ def test_transcription_language_at_startup_and_reload(
     assert config.config.REALTIME_TRANSCRIPTION_LANGUAGE == expected_language
 
 
+@pytest.mark.parametrize("name", ["LOCAL_VAD_ENABLED", "LOCAL_BARGE_IN_ENABLED"])
 @pytest.mark.parametrize("raw_value, expected", [(None, True), ("true", True), ("false", False)])
-def test_local_vad_flag_defaults_on_and_follows_environment(
-    monkeypatch: pytest.MonkeyPatch, raw_value: str | None, expected: bool
+def test_local_speech_flags_default_on_and_follow_environment(
+    monkeypatch: pytest.MonkeyPatch, name: str, raw_value: str | None, expected: bool
 ) -> None:
-    """Local detection is on by default and follows an explicit environment value."""
+    """Local detection and barge-in are on by default and follow an explicit environment value."""
     if raw_value is None:
-        monkeypatch.delenv("LOCAL_VAD_ENABLED", raising=False)
+        monkeypatch.delenv(name, raising=False)
     else:
-        monkeypatch.setenv("LOCAL_VAD_ENABLED", raw_value)
-    monkeypatch.setattr(config.config, "LOCAL_VAD_ENABLED", not expected)
+        monkeypatch.setenv(name, raw_value)
+    monkeypatch.setattr(config.config, name, not expected)
     config.refresh_runtime_config_from_env()
-    assert config.config.LOCAL_VAD_ENABLED is expected
-
-
-@pytest.mark.parametrize("raw_value, expected", [(None, True), ("true", True), ("false", False)])
-def test_local_barge_in_default_and_environment_reload(
-    monkeypatch: pytest.MonkeyPatch, raw_value: str | None, expected: bool
-) -> None:
-    """Local interruptions default to enabled while respecting explicit environment choices."""
-    if raw_value is None:
-        monkeypatch.delenv("LOCAL_BARGE_IN_ENABLED", raising=False)
-    else:
-        monkeypatch.setenv("LOCAL_BARGE_IN_ENABLED", raw_value)
-    monkeypatch.setenv("PYTHONPATH", str(config.PROJECT_ROOT / "src"))
-    subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "from reachy_mini_conversation_app.config import config; "
-            f"assert config.LOCAL_BARGE_IN_ENABLED is {expected!r}",
-        ],
-        check=True,
-    )
-    monkeypatch.setattr(config.config, "LOCAL_BARGE_IN_ENABLED", not expected)
-    config.refresh_runtime_config_from_env()
-    assert config.config.LOCAL_BARGE_IN_ENABLED is expected
+    assert getattr(config.config, name) is expected

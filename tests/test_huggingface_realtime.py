@@ -1108,7 +1108,7 @@ async def test_run_session_response_lifecycle_toggles_done_event(monkeypatch: An
 
 @pytest.mark.asyncio
 async def test_local_barge_in_only_ducks_until_server_confirms(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Sustained local speech ducks playback reversibly; it never cancels or flushes on its own."""
+    """Sustained local speech ducks playback reversibly, never cancels on its own, and only ducks while playing."""
     monkeypatch.setattr(config, "LOCAL_BARGE_IN_ENABLED", True)
     handler = _plain_handler()
     detector = MagicMock()
@@ -1132,6 +1132,15 @@ async def test_local_barge_in_only_ducks_until_server_confirms(monkeypatch: pyte
     connection.response.cancel.assert_not_awaited()
     handler._clear_queue.assert_not_awaited()
     assert connection.input_audio_buffer.append.await_count == 31
+
+    detector.barge_in_candidate = True
+    handler.paced_playback = False  # barge-in disabled
+    await handler.receive((16000, microphone))
+    assert handler.playback_gain == 1.0
+    handler.paced_playback = True
+    handler.playback_until = 0.0  # nothing left to play
+    await handler.receive((16000, microphone))
+    assert handler.playback_gain == 1.0
     await handler.shutdown()
 
 
@@ -1166,55 +1175,21 @@ async def test_server_interrupt_discards_late_audio_but_allows_next_response(mon
 
 
 @pytest.mark.asyncio
-async def test_barge_in_disabled_or_idle_does_not_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The opt-in feature cannot interrupt without assistant audio to play."""
-    monkeypatch.setattr(config, "LOCAL_BARGE_IN_ENABLED", False)
-    handler = _plain_handler()
-    detector = MagicMock()
-    detector.process.return_value = True
-    detector.barge_in_candidate = True
-    handler._local_vad = detector
-    handler.connection = MagicMock()
-    handler.connection.input_audio_buffer.append = AsyncMock()
-    handler.connection.response.cancel = AsyncMock()
-    handler._clear_queue = AsyncMock()
-    handler._audio_response_id = "already-played"
-    handler.output_queue.put_nowait(AdditionalOutputs({"role": "user", "content": "hello"}))
-    for enabled in (False, True):
-        handler.paced_playback = enabled
-        await handler.receive((16000, np.zeros(512, dtype=np.int16)))
-        assert handler.playback_gain == 1.0
-    handler._clear_queue.assert_not_awaited()
-    handler.connection.response.cancel.assert_not_awaited()
-    await handler.shutdown()
-
-
-@pytest.mark.asyncio
-async def test_cancel_failure_still_flushes_playback(caplog: pytest.LogCaptureFixture) -> None:
-    """A lost cancellation message cannot prevent the playback stop."""
+@pytest.mark.parametrize("cancel_fails", [False, True])
+async def test_interrupt_cancels_response_and_always_flushes(
+    caplog: pytest.LogCaptureFixture, cancel_fails: bool
+) -> None:
+    """The stop RPC cancels generation and discards its audio; a lost cancel still stops playback."""
     handler = _plain_handler()
     handler._audio_response_id = handler._active_response_id = "response-1"
     handler._clear_queue = AsyncMock()
     handler.connection = MagicMock()
-    handler.connection.response.cancel = AsyncMock(side_effect=OSError("disconnected"))
-    await handler._interrupt_playback(audio_response_id="response-1", cancel_response_id="response-1")
-    handler._clear_queue.assert_awaited_once()
-    assert "Failed to cancel locally interrupted response" in caplog.text
-    await handler.shutdown()
-
-
-@pytest.mark.asyncio
-async def test_interrupt_cancels_active_response_and_discards_its_audio() -> None:
-    """The stop RPC cancels generation, so later deltas of that response never play."""
-    handler = _plain_handler()
-    handler._audio_response_id = handler._active_response_id = "response-1"
-    handler._clear_queue = AsyncMock()
-    handler.connection = MagicMock()
-    handler.connection.response.cancel = AsyncMock()
+    handler.connection.response.cancel = AsyncMock(side_effect=OSError("disconnected") if cancel_fails else None)
     await handler.interrupt()
     handler.connection.response.cancel.assert_awaited_once_with(response_id="response-1")
     handler._clear_queue.assert_awaited_once()
     assert "response-1" in handler._discarded_response_ids
+    assert ("Failed to cancel" in caplog.text) is cancel_fails
 
 
 @pytest.mark.asyncio
