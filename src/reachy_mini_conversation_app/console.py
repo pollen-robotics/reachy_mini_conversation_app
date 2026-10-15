@@ -626,7 +626,9 @@ class LocalStream:
             enabled = params.get("local_vad_enabled")
             barge_in = params.get("local_barge_in_enabled")
             message = ""
-            if any(name in params for name in names):
+            if (isinstance(enabled, bool) and enabled != config.LOCAL_VAD_ENABLED) or (
+                isinstance(barge_in, bool) and barge_in != config.LOCAL_BARGE_IN_ENABLED
+            ):
                 message = self._apply_setting_with_restart(
                     AppSettings(
                         local_vad_enabled=enabled if isinstance(enabled, bool) else None,

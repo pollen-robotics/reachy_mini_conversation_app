@@ -27,6 +27,7 @@ class SileroVAD:
 
     SAMPLE_RATE = 16000
     CHUNK_SAMPLES = 512
+    MIN_SPEECH_SAMPLES = 2560  # 160 ms, ignores knocks and clicks
     SILENCE_SAMPLES = 6400  # 400 ms
     IDLE_RESET_SAMPLES = 8000  # 500 ms
     BARGE_IN_SPEECH_SAMPLES = 6144  # 384 ms
@@ -80,6 +81,7 @@ class SileroVAD:
         self._state = np.zeros((2, 1, 128), dtype=np.float32)
         self._context = np.zeros((1, 64), dtype=np.float32)
         self._idle_samples = 0
+        self._speech_samples = 0
 
     def process(self, audio: NDArray[np.int16], sample_rate: int, *, detect_barge_in: bool = False) -> bool:
         """Return whether speech is active, holding through 400 ms of silence."""
@@ -90,7 +92,7 @@ class SileroVAD:
             self.barge_in_candidate = False
             self._barge_in_speech_samples = 0
             self._barge_in_silence_samples = 0
-        self._pending = np.concatenate((self._pending, audio.astype(np.float32) / 32768.0))
+        self._pending = np.concatenate((self._pending, audio.reshape(-1).astype(np.float32) / 32768.0))
         offset = 0
         while self._pending.size - offset >= self.CHUNK_SAMPLES:
             chunk = self._pending[offset : offset + self.CHUNK_SAMPLES].reshape(1, -1)
@@ -118,21 +120,21 @@ class SileroVAD:
                         self._barge_in_silence_samples = 0
             if speech_probability >= 0.5:
                 self._idle_samples = 0
-                self._speaking = True
                 self._silence_samples = 0
-            elif self._speaking and speech_probability < 0.35:
+                self._speech_samples += self.CHUNK_SAMPLES
+                if self._speech_samples >= self.MIN_SPEECH_SAMPLES:
+                    self._speaking = True
+            elif self._speaking:
                 self._silence_samples += self.CHUNK_SAMPLES
                 if self._silence_samples >= self.SILENCE_SAMPLES:
                     self._speaking = False
                     self._silence_samples = 0
                     self._reset_model()
-            elif not self._speaking:
-                if speech_probability < 0.35:
-                    self._idle_samples += self.CHUNK_SAMPLES
-                    if self._idle_samples >= self.IDLE_RESET_SAMPLES:
-                        self._reset_model()
-                else:
-                    self._idle_samples = 0
+            else:
+                self._speech_samples = 0
+                self._idle_samples += self.CHUNK_SAMPLES
+                if self._idle_samples >= self.IDLE_RESET_SAMPLES:
+                    self._reset_model()
             offset += self.CHUNK_SAMPLES
         self._pending = self._pending[offset:].copy()
         return self._speaking

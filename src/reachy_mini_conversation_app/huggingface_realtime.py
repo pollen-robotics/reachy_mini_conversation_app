@@ -166,7 +166,6 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self._in_flight_tool_calls: set[str] = set()
         self._tool_batch_needs_response = False
         self._local_vad: SileroVAD | None = None
-        self._local_vad_lock = asyncio.Lock()
         self._local_speech = False
         self._server_speech = False
         self._movement_listening = False
@@ -235,14 +234,13 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
     async def _reset_listening(self) -> None:
         if self._local_interrupt_task is not None:
             await self._local_interrupt_task
-        async with self._local_vad_lock:
-            if self._local_speech_timeout is not None:
-                self._local_speech_timeout.cancel()
-                self._local_speech_timeout = None
-            if self._local_vad is not None:
-                self._local_vad.reset()
-            self._local_audio_at = None
-            self._set_listening(local=False, server=False)
+        if self._local_speech_timeout is not None:
+            self._local_speech_timeout.cancel()
+            self._local_speech_timeout = None
+        if self._local_vad is not None:
+            self._local_vad.reset()
+        self._local_audio_at = None
+        self._set_listening(local=False, server=False)
 
     def _local_interrupt_finished(self, task: asyncio.Task[None]) -> None:
         self._local_interrupt_task = None
@@ -1135,51 +1133,47 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         # Cast if needed
         audio_frame = audio_to_int16(audio_frame)
 
+        if self.connection:
+            # Send to the realtime input buffer (guard against races during reconnect).
+            try:
+                audio_message = base64.b64encode(audio_frame.tobytes()).decode("utf-8")
+                await self.connection.input_audio_buffer.append(audio=audio_message)
+            except Exception as e:
+                logger.debug("Dropping audio frame: connection not ready (%s)", e)
+
         confirmed_barge_in = False
-        async with self._local_vad_lock:
-            if self._local_vad is not None:
-                if self._local_speech_timeout is not None:
-                    self._local_speech_timeout.cancel()
-                    self._local_speech_timeout = None
-                received_at = time.monotonic()
-                if self._local_audio_at is not None and received_at - self._local_audio_at > 0.5:
-                    self._local_vad.reset()
-                self._local_audio_at = received_at
-                detect_barge_in = (
-                    self.paced_playback
-                    and not self._playback_interrupted
-                    and self._audio_response_id is not None
-                    and (self.playback_until > received_at or self.playback_pending_frames > 0)
+        if self._local_vad is not None:
+            if self._local_speech_timeout is not None:
+                self._local_speech_timeout.cancel()
+                self._local_speech_timeout = None
+            received_at = time.monotonic()
+            if self._local_audio_at is not None and received_at - self._local_audio_at > 0.5:
+                self._local_vad.reset()
+            self._local_audio_at = received_at
+            detect_barge_in = (
+                self.paced_playback
+                and not self._playback_interrupted
+                and self._audio_response_id is not None
+                and (self.playback_until > received_at or self.playback_pending_frames > 0)
+            )
+            try:
+                # Inline: ~2 ms per 32 ms chunk, cheaper than a thread hop on every frame.
+                local_speech = self._local_vad.process(audio_frame, sample_rate, detect_barge_in=detect_barge_in)
+            except Exception as exc:
+                logger.warning("Local VAD failed; using server VAD for movement: %s", exc)
+                self._local_vad = None
+                self.paced_playback = False
+                local_speech = False
+            self._set_listening(local=local_speech)
+            if self.paced_playback and self._local_vad is not None and not self._playback_interrupted:
+                self.playback_gain = 0.25 if detect_barge_in and self._local_vad.barge_in_candidate else 1.0
+                confirmed_barge_in = detect_barge_in and self._local_vad.barge_in_confirmed
+            self._report_vad()
+            if local_speech:
+                # Muting or losing the microphone must not leave a stale local vote.
+                self._local_speech_timeout = asyncio.get_running_loop().call_later(
+                    0.5, lambda: self._set_listening(local=False)
                 )
-                inference_task = asyncio.create_task(
-                    asyncio.to_thread(
-                        self._local_vad.process, audio_frame, sample_rate, detect_barge_in=detect_barge_in
-                    )
-                )
-                try:
-                    local_speech = await asyncio.shield(inference_task)
-                except asyncio.CancelledError:
-                    # A cancelled receiver must finish inference before reset can touch its state.
-                    try:
-                        await inference_task
-                    except Exception as exc:
-                        logger.warning("Local VAD failed during cancellation: %s", exc)
-                    raise
-                except Exception as exc:
-                    logger.warning("Local VAD failed; using server VAD for movement: %s", exc)
-                    self._local_vad = None
-                    self.paced_playback = False
-                    local_speech = False
-                self._set_listening(local=local_speech)
-                if self.paced_playback and self._local_vad is not None and not self._playback_interrupted:
-                    self.playback_gain = 0.25 if detect_barge_in and self._local_vad.barge_in_candidate else 1.0
-                    confirmed_barge_in = detect_barge_in and self._local_vad.barge_in_confirmed
-                self._report_vad()
-                if local_speech:
-                    # Muting or losing the microphone must not leave a stale local vote.
-                    self._local_speech_timeout = asyncio.get_running_loop().call_later(
-                        0.5, lambda: self._set_listening(local=False)
-                    )
 
         if confirmed_barge_in:
             self._mark_activity("local_barge_in")
@@ -1190,17 +1184,6 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                     )
                 )
                 self._local_interrupt_task.add_done_callback(self._local_interrupt_finished)
-
-        if not self.connection:
-            return
-
-        # Send to the realtime input buffer (guard against races during reconnect).
-        try:
-            audio_message = base64.b64encode(audio_frame.tobytes()).decode("utf-8")
-            await self.connection.input_audio_buffer.append(audio=audio_message)
-        except Exception as e:
-            logger.debug("Dropping audio frame: connection not ready (%s)", e)
-            return
 
     async def shutdown(self) -> None:
         """Shutdown the handler."""
