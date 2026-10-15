@@ -891,10 +891,6 @@ button {
   color: var(--text);
 }
 
-.talk-log:not(.shows-latencies) .talk-log__row--timings {
-  display: none;
-}
-
 .talk-log__row--timings {
   align-self: flex-start;
   max-width: 100%;

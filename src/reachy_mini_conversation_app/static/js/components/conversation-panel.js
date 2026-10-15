@@ -1,9 +1,10 @@
 /** Talk view sidebar: live transcript plus the backend's per-response timings.
  * Opened from the header's conversation button; starts from the app's history
  * of this run, so a page opened mid-conversation still shows earlier turns.
- * Timings are always rendered but stay hidden unless Settings turns them on. */
+ * Timings show only when Settings turns them on (saved in this browser). */
 
-import { getConversationHistory, getShowLatencies, subscribe } from "../api.js";
+import { getConversationHistory, subscribe } from "../api.js";
+import { SHOW_LATENCIES_KEY } from "../constants.js";
 import { h } from "../ui.js";
 
 const LATENCY_STAGES = Object.freeze([
@@ -29,6 +30,8 @@ const CLOSE_ICON =
 
 /** Build the panel, driven by the header `toggle` button. Returns { root, dispose }. */
 export function createConversationPanel({ toggle }) {
+  // Read once per Talk mount; a Settings change applies on return.
+  const showLatencies = localStorage.getItem(SHOW_LATENCIES_KEY) === "1";
   let partialRow = null;
   let lastSeq = 0;
   // Live events that arrive before the history snapshot; null once it is rendered.
@@ -68,9 +71,6 @@ export function createConversationPanel({ toggle }) {
   const unsubscribers = Object.entries(renderers).map(([method, render]) =>
     subscribe(method, (params) => (pending ? pending.push([render, params]) : apply(render, params)))
   );
-  getShowLatencies()
-    .then(({ enabled }) => root.classList.toggle("shows-latencies", enabled))
-    .catch((error) => console.warn("Failed to load the latency display setting", error));
   getConversationHistory()
     .then(({ events }) => {
       for (const { method, params } of events) apply(renderers[method], params);
@@ -100,12 +100,11 @@ export function createConversationPanel({ toggle }) {
     if (open) list.scrollTop = list.scrollHeight;
   }
 
-  function keepScrolledDown(mutate, { visible = true } = {}) {
+  function keepScrolledDown(mutate) {
     const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight <= STICK_TO_BOTTOM_PX;
     mutate();
-    if (root.hidden) {
-      if (visible) toggle.classList.add("has-unread");
-    } else if (atBottom) list.scrollTop = list.scrollHeight;
+    if (root.hidden) toggle.classList.add("has-unread");
+    else if (atBottom) list.scrollTop = list.scrollHeight;
   }
 
   function onTranscript({ role, text, final }) {
@@ -126,6 +125,7 @@ export function createConversationPanel({ toggle }) {
   }
 
   function onLatency(latency) {
+    if (!showLatencies) return;
     const status = STATUS_LABELS[latency.status];
     const summary = `End-to-end ${formatMs(latency.e2e_ms)}${status ? ` · ${status}` : ""}`;
     keepScrolledDown(() => {
@@ -148,7 +148,7 @@ export function createConversationPanel({ toggle }) {
           )
         )
       );
-    }, { visible: root.classList.contains("shows-latencies") });
+    });
   }
 
   return {

@@ -4,14 +4,13 @@ import {
   applyVoice,
   describeError,
   getCurrentVoice,
-  getShowLatencies,
   getStatus,
   listVoices,
   saveBackendConfig,
   saveSpeechConfig,
-  setShowLatencies,
   untilReady,
 } from "../api.js";
+import { SHOW_LATENCIES_KEY } from "../constants.js";
 import { h } from "../ui.js";
 
 const HF_CONNECTION_MODES = Object.freeze({
@@ -38,7 +37,7 @@ export async function mountSettingsView({ outlet, signal }) {
   const voiceSection = buildVoiceSection();
   const statusSection = buildStatusSection();
   const speechSection = buildSpeechSection();
-  const developerSection = buildDeveloperSection({ signal });
+  const developerSection = buildDeveloperSection();
 
   const view = h(
     "section",
@@ -320,10 +319,14 @@ function buildSpeechSection() {
   };
 }
 
-function buildDeveloperSection({ signal }) {
-  const showLatencies = h("input", { type: "checkbox", name: "show_latencies", disabled: "disabled" });
-  const status = h("p", { class: "settings-status", role: "status", "aria-live": "polite" });
-  const element = h(
+function buildDeveloperSection() {
+  const showLatencies = h("input", {
+    type: "checkbox",
+    name: "show_latencies",
+    checked: localStorage.getItem(SHOW_LATENCIES_KEY) === "1",
+    onChange: (event) => localStorage.setItem(SHOW_LATENCIES_KEY, event.target.checked ? "1" : "0"),
+  });
+  return h(
     "details",
     { class: "settings-section settings-developer" },
     h("summary", { class: "settings-section-title" }, "Developer options"),
@@ -340,36 +343,9 @@ function buildDeveloperSection({ signal }) {
           h("strong", {}, "Show response latencies"),
           h("span", { class: "settings-hint" }, "Adds the backend's timing breakdown under each reply in the conversation panel.")
         )
-      ),
-      status
+      )
     )
   );
-
-  showLatencies.addEventListener("change", async () => {
-    showLatencies.disabled = true;
-    status.classList.remove("is-error");
-    status.textContent = "";
-    try {
-      showLatencies.checked = (await setShowLatencies(showLatencies.checked)).enabled;
-    } catch (error) {
-      showLatencies.checked = !showLatencies.checked;
-      status.textContent = `Failed to save: ${describeError(error)}`;
-      status.classList.add("is-error");
-    } finally {
-      showLatencies.disabled = false;
-    }
-  });
-
-  untilReady(getShowLatencies, signal)
-    .then(({ enabled }) => {
-      showLatencies.checked = enabled;
-      showLatencies.disabled = false;
-    })
-    .catch((error) => {
-      if (!signal.aborted) status.textContent = `Unavailable: ${describeError(error)}`;
-    });
-
-  return element;
 }
 
 function buildStatusSection() {

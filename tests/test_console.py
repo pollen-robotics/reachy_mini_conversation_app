@@ -1115,23 +1115,6 @@ def test_rpc_latency_notification_broadcast() -> None:
     assert msg["params"] == latency
 
 
-def test_rpc_show_latencies_persists_across_restarts(tmp_path: Path) -> None:
-    """Latency display is off by default, and turning it on survives an app restart."""
-    app = FastAPI()
-    LocalStream(MagicMock(), _rpc_robot(), settings_app=app, instance_path=str(tmp_path))._init_settings_ui_if_needed()
-    assert _rpc_call(app, "conversation.show_latencies")["result"] == {"enabled": False}
-    assert (
-        _rpc_call(app, "conversation.show_latencies", {"enabled": "yes"})["error"]["data"]["reason"]
-        == "invalid_params"
-    )
-    assert _rpc_call(app, "conversation.show_latencies", {"enabled": True})["result"] == {"enabled": True}
-
-    restarted = FastAPI()
-    stream = LocalStream(MagicMock(), _rpc_robot(), settings_app=restarted, instance_path=str(tmp_path))
-    stream._init_settings_ui_if_needed()
-    assert _rpc_call(restarted, "conversation.show_latencies")["result"] == {"enabled": True}
-
-
 def test_rpc_conversation_history_replays_final_events() -> None:
     """conversation.history returns this run's final transcripts and latencies in order, without partials."""
     handler = MagicMock()

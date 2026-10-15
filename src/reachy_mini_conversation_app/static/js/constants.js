@@ -43,6 +43,9 @@ export const ROUTES = Object.freeze({
   TOOLS: "#/tools",
 });
 
+// localStorage key; "1" shows response latencies in the conversation panel.
+export const SHOW_LATENCIES_KEY = "reachy-mini-conversation.show-latencies";
+
 export function avatarFor(profileName) {
   const file = AVATAR_BY_PROFILE[profileName] || AVATAR_BY_PROFILE.default;
   return `/static/avatars/${file}`;
