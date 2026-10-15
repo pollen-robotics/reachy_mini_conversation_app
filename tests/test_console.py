@@ -1307,7 +1307,7 @@ def test_rpc_vad_notification_broadcast() -> None:
 def test_speech_settings_persist_and_request_conversation_reconnect(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, enabled: bool, can_rebuild: bool
 ) -> None:
-    """Saving the speech switch persists it and applies it through the existing reconnect path."""
+    """Saving the speech switch persists it, survives a reload and applies through the reconnect path."""
     monkeypatch.setattr(config, "LOCAL_VAD_ENABLED", not enabled)
     app = FastAPI()
     stream = LocalStream(
@@ -1324,6 +1324,9 @@ def test_speech_settings_persist_and_request_conversation_reconnect(
     assert read_settings(tmp_path).local_vad_enabled is enabled
     assert stream._restart_requested.is_set() is can_rebuild
     assert _rpc_call(app, "conversation.status")["result"]["local_vad_enabled"] is enabled
+    monkeypatch.setattr(config, "LOCAL_VAD_ENABLED", not enabled)
+    console_mod.load_settings_into_runtime(tmp_path)
+    assert config.LOCAL_VAD_ENABLED is enabled
 
 
 def test_unchanged_speech_setting_keeps_the_conversation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
