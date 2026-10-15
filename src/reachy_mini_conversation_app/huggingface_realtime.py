@@ -1021,6 +1021,14 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         # Cast if needed
         audio_frame = audio_to_int16(audio_frame)
 
+        if self.connection:
+            # Send to the realtime input buffer (guard against races during reconnect).
+            try:
+                audio_message = base64.b64encode(audio_frame.tobytes()).decode("utf-8")
+                await self.connection.input_audio_buffer.append(audio=audio_message)
+            except Exception as e:
+                logger.debug("Dropping audio frame: connection not ready (%s)", e)
+
         async with self._local_vad_lock:
             if self._local_vad is not None:
                 if self._local_speech_timeout is not None:
@@ -1052,17 +1060,6 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                     self._local_speech_timeout = asyncio.get_running_loop().call_later(
                         0.5, lambda: self._set_listening(local=False)
                     )
-
-        if not self.connection:
-            return
-
-        # Send to the realtime input buffer (guard against races during reconnect).
-        try:
-            audio_message = base64.b64encode(audio_frame.tobytes()).decode("utf-8")
-            await self.connection.input_audio_buffer.append(audio=audio_message)
-        except Exception as e:
-            logger.debug("Dropping audio frame: connection not ready (%s)", e)
-            return
 
     async def shutdown(self) -> None:
         """Shutdown the handler."""

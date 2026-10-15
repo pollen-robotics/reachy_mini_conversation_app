@@ -126,6 +126,20 @@ async def test_local_vad_failure_keeps_sending_audio_and_server_listening(
 
 
 @pytest.mark.asyncio
+async def test_receive_sends_audio_before_local_vad() -> None:
+    """Server audio never waits for local inference."""
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.connection = AsyncMock()
+    handler._local_vad = MagicMock()
+    handler._local_vad.process.side_effect = lambda *_args: (
+        handler.connection.input_audio_buffer.append.await_count == 1
+    )
+    await handler.receive((16000, np.zeros(512, dtype=np.int16)))
+    assert handler._local_speech
+    handler._local_speech_timeout.cancel()
+
+
+@pytest.mark.asyncio
 async def test_unavailable_local_vad_does_not_prevent_startup(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
