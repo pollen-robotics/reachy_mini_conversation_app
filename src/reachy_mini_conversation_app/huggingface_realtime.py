@@ -7,6 +7,7 @@ import random
 import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Final, Tuple, Optional
+from collections import deque
 
 import httpx
 import numpy as np
@@ -24,7 +25,7 @@ from openai.types.realtime import (
     RealtimeAudioConfigOutputParam,
     RealtimeSessionCreateRequestParam,
 )
-from websockets.exceptions import ConnectionClosedError
+from websockets.exceptions import ConnectionClosed, ConnectionClosedError
 from openai.types.realtime.realtime_audio_input_turn_detection_param import ServerVad
 
 from reachy_mini_conversation_app.tools import core_tools
@@ -44,12 +45,13 @@ from reachy_mini_conversation_app.prompts import (
     get_session_greeting_prompt,
 )
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_int16
+from reachy_mini_conversation_app.audio.local_vad import SileroVAD
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolSpec,
     ToolDependencies,
     get_tool_specs,
 )
-from reachy_mini_conversation_app.conversation_handler import ConversationHandler
+from reachy_mini_conversation_app.conversation_handler import VADStatus, ConversationHandler
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolCallRoutine,
     ToolNotification,
@@ -166,6 +168,109 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self._startup_greeting_sent = False
         self._in_flight_tool_calls: set[str] = set()
         self._tool_batch_needs_response = False
+        self._local_vad: SileroVAD | None = None
+        self._local_speech = False
+        self._server_speech = False
+        self._movement_listening = False
+        self._local_audio_at: float | None = None
+        self._last_vad_report_at = 0.0
+        self._last_vad_flags: tuple[bool | float, ...] | None = None
+        self._local_speech_timeout: asyncio.TimerHandle | None = None
+        self.paced_playback = config.LOCAL_VAD_ENABLED and config.LOCAL_BARGE_IN_ENABLED
+        self._active_response_id: str | None = None
+        self._audio_response_id: str | None = None
+        self._discarded_response_ids: deque[str] = deque(maxlen=32)
+        self._playback_interrupted = False
+
+    def _set_listening(self, *, local: bool | None = None, server: bool | None = None) -> None:
+        if local is not None:
+            self._local_speech = local
+            if not local:
+                self.playback_gain = 1.0
+        if server is not None:
+            self._server_speech = server
+        listening = self._local_speech or self._server_speech
+        if listening != self._movement_listening:
+            self._movement_listening = listening
+            self.deps.movement_manager.set_listening(listening)
+
+        self._report_vad()
+
+    def _report_vad(self) -> None:
+        observer = self._vad_observer
+        if observer is None or not logger.isEnabledFor(logging.DEBUG):
+            return
+        detector = self._local_vad
+        candidate = detector is not None and detector.barge_in_candidate
+        flags = (
+            detector is not None,
+            self._local_speech,
+            self._server_speech,
+            self._movement_listening,
+            candidate,
+            self.playback_gain,
+        )
+        now = time.monotonic()
+        if flags == self._last_vad_flags and now - self._last_vad_report_at < 0.1:
+            return
+        self._last_vad_flags = flags
+        self._last_vad_report_at = now
+        status: VADStatus = {
+            "timestamp": time.time(),
+            "available": detector is not None,
+            "probability": detector.speech_probability if detector is not None else None,
+            "local_speech": self._local_speech,
+            "server_speech": self._server_speech,
+            "listening": self._movement_listening,
+            "barge_in_candidate": candidate,
+            "playback_gain": self.playback_gain,
+        }
+        try:
+            observer(status)
+        except Exception as exc:
+            logger.warning("VAD observer failed: %s", exc)
+
+    def _reset_listening(self) -> None:
+        if self._local_speech_timeout is not None:
+            self._local_speech_timeout.cancel()
+            self._local_speech_timeout = None
+        if self._local_vad is not None:
+            self._local_vad.reset()
+        self._local_audio_at = None
+        self._set_listening(local=False, server=False)
+
+    async def _interrupt_playback(
+        self, *, audio_response_id: str | None = None, cancel_response_id: str | None = None
+    ) -> None:
+        if audio_response_id is not None and audio_response_id != self._audio_response_id:
+            return
+        if self._playback_interrupted:
+            return
+        self._playback_interrupted = True
+        self.playback_gain = 0.0
+        self._report_vad()
+        self.deps.movement_manager.set_speaking(False)
+        response_ids = (
+            (audio_response_id, cancel_response_id)
+            if audio_response_id is not None
+            else (self._audio_response_id, self._active_response_id)
+        )
+        for response_id in response_ids:
+            if response_id is not None and response_id not in self._discarded_response_ids:
+                self._discarded_response_ids.append(response_id)
+        try:
+            if (
+                cancel_response_id is not None
+                and cancel_response_id == self._active_response_id
+                and self.connection is not None
+            ):
+                await self.connection.response.cancel(response_id=cancel_response_id)
+        except (ConnectionClosed, httpx.HTTPError, OSError) as exc:
+            logger.warning("Failed to cancel locally interrupted response: %s", exc)
+        finally:
+            if self._clear_queue is not None:
+                await self._clear_queue()
+            self.playback_gain = 1.0
 
     @staticmethod
     def _sanitize_tool_result_for_model(tool_name: str, tool_result: dict[str, Any]) -> dict[str, Any]:
@@ -379,6 +484,12 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
     async def start_up(self) -> None:
         """Start the handler with minimal retries on unexpected websocket closure."""
+        if config.LOCAL_VAD_ENABLED:
+            try:
+                self._local_vad = await asyncio.to_thread(SileroVAD)
+            except Exception as exc:
+                logger.warning("Local VAD unavailable; using server VAD for movement: %s", exc)
+                self.paced_playback = False
         self.client = await self._build_realtime_client()
 
         max_attempts = 3
@@ -448,6 +559,10 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         This method never blocks the caller.
         """
         await self._pending_responses.put(kwargs)
+
+    async def interrupt(self) -> None:
+        """Stop playback and cancel the response still being generated."""
+        await self._interrupt_playback(cancel_response_id=self._active_response_id)
 
     async def say(self, text: str) -> None:
         """Inject ``text`` as a turn and have the model voice it now.
@@ -745,6 +860,10 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
             # Manage events received from the realtime server.
             self.connection = conn
+            self._active_response_id = None
+            self._audio_response_id = None
+            self._discarded_response_ids.clear()
+            self._playback_interrupted = False
             try:
                 self._connected_event.set()
             except Exception:
@@ -766,17 +885,18 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         self._turn_user_done_at = None
                         self._turn_response_created_at = None
                         self._turn_first_audio_at = None
-                        if self._clear_queue:
-                            self._clear_queue()
-                        self.deps.movement_manager.set_listening(True)
+                        await self._interrupt_playback()
+                        self._set_listening(server=True)
                         logger.debug("User speech started")
 
                     if event.type == "input_audio_buffer.speech_stopped":
                         self._mark_activity("user_speech_stopped")
-                        self.deps.movement_manager.set_listening(False)
+                        self._set_listening(server=False)
                         logger.debug("User speech stopped - server will auto-commit with VAD")
 
                     if event.type == "response.output_audio.done":
+                        if event.response_id in self._discarded_response_ids:
+                            continue
                         self.deps.movement_manager.set_speaking(False)
                         logger.debug("response completed")
 
@@ -787,6 +907,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         logger.debug("response text done: %s", event.text)
 
                     if event.type == "response.created":
+                        self._active_response_id = event.response.id
+                        self._playback_interrupted = False
                         self._mark_activity("response_created")
                         self.deps.movement_manager.set_speaking(True)
                         self._response_done_event.clear()
@@ -798,6 +920,10 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         logger.debug("Response created (active)")
 
                     if event.type == "response.done":
+                        if self._active_response_id is not None and event.response.id != self._active_response_id:
+                            continue
+                        if event.response.id == self._active_response_id:
+                            self._active_response_id = None
                         # Doesn't mean the audio is done playing
                         # Resume tracking for responses that emit no audio (text-only / tool-only).
                         self.deps.movement_manager.set_speaking(False)
@@ -850,7 +976,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         raw_transcript = event.transcript or ""
                         transcript = raw_transcript.strip()
                         logger.debug("User transcript: %s", raw_transcript)
-                        self.deps.movement_manager.set_listening(False)
+                        self._set_listening(server=False)
 
                         await self._cancel_partial_transcript_task()
 
@@ -869,6 +995,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
                     # Handle assistant transcription
                     if event.type == "response.output_audio_transcript.done":
+                        if event.response_id in self._discarded_response_ids:
+                            continue
                         self._mark_activity("assistant_transcript_done")
                         logger.debug(f"Assistant transcript: {event.transcript}")
                         await self.output_queue.put(
@@ -878,6 +1006,9 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
                     # Handle audio delta
                     if event.type == "response.output_audio.delta":
+                        if event.response_id in self._discarded_response_ids:
+                            continue
+                        self._audio_response_id = event.response_id
                         decoded_pcm_bytes = base64.b64decode(event.delta)
                         decoded_pcm = np.frombuffer(decoded_pcm_bytes, dtype=np.int16).reshape(1, -1)
                         self._mark_activity("assistant_audio_delta")
@@ -885,6 +1016,9 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                             self._turn_first_audio_at = time.perf_counter()
                             delta_ms = (self._turn_first_audio_at - self._turn_user_done_at) * 1000
                             logger.info("Turn latency: first audio delta %.0f ms after user transcript", delta_ms)
+                        self.playback_frame_epochs[id(decoded_pcm)] = self.playback_epoch
+                        if self.paced_playback:
+                            self.playback_pending_frames += 1
                         await self.output_queue.put(
                             (
                                 self.SAMPLE_RATE,
@@ -960,7 +1094,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                             logger.error("Realtime error [%s]: %s (raw=%s)", code, msg, err)
 
                         if code == "input_audio_buffer_commit_empty":
-                            self.deps.movement_manager.set_listening(False)
+                            self._set_listening(server=False)
 
                         # Only show user-facing errors, not internal state errors.
                         if code not in (
@@ -971,6 +1105,10 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                                 AdditionalOutputs({"role": "assistant", "content": f"[error] {msg}"})
                             )
             finally:
+                self.connection = None
+                self._reset_listening()
+                self._active_response_id = None
+                self._audio_response_id = None
                 # Stop the response sender worker.
                 if response_sender_task is not None:
                     response_sender_task.cancel()
@@ -993,10 +1131,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             frame: A tuple containing (sample_rate, audio_data).
 
         """
-        if not self.connection:
-            return
-
-        _, audio_frame = frame
+        sample_rate, audio_frame = frame
         if audio_frame.size == 0:
             return
 
@@ -1012,16 +1147,51 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         # Cast if needed
         audio_frame = audio_to_int16(audio_frame)
 
-        # Send to the realtime input buffer (guard against races during reconnect).
-        try:
-            audio_message = base64.b64encode(audio_frame.tobytes()).decode("utf-8")
-            await self.connection.input_audio_buffer.append(audio=audio_message)
-        except Exception as e:
-            logger.debug("Dropping audio frame: connection not ready (%s)", e)
-            return
+        if self.connection:
+            # Send to the realtime input buffer (guard against races during reconnect).
+            try:
+                audio_message = base64.b64encode(audio_frame.tobytes()).decode("utf-8")
+                await self.connection.input_audio_buffer.append(audio=audio_message)
+            except Exception as e:
+                logger.debug("Dropping audio frame: connection not ready (%s)", e)
+
+        if self._local_vad is not None:
+            if self._local_speech_timeout is not None:
+                self._local_speech_timeout.cancel()
+                self._local_speech_timeout = None
+            received_at = time.monotonic()
+            if self._local_audio_at is not None and received_at - self._local_audio_at > 0.5:
+                self._local_vad.reset()
+            self._local_audio_at = received_at
+            detect_barge_in = (
+                self.paced_playback
+                and not self._playback_interrupted
+                and self._audio_response_id is not None
+                and (self.playback_until > received_at or self.playback_pending_frames > 0)
+            )
+            try:
+                # Inline: ~2 ms per 32 ms chunk, cheaper than a thread hop on every frame.
+                local_speech = self._local_vad.process(audio_frame, sample_rate, detect_barge_in=detect_barge_in)
+            except Exception as exc:
+                logger.warning("Local VAD failed; using server VAD for movement: %s", exc)
+                self._local_vad = None
+                self.paced_playback = False
+                local_speech = False
+            self._set_listening(local=local_speech)
+            if self.paced_playback and self._local_vad is not None and not self._playback_interrupted:
+                # Only duck: stopping waits for server VAD, so loud background speech cannot drop the turn.
+                self.playback_gain = 0.25 if detect_barge_in and self._local_vad.barge_in_candidate else 1.0
+            self._report_vad()
+            if local_speech:
+                # Muting or losing the microphone must not leave a stale local vote.
+                self._local_speech_timeout = asyncio.get_running_loop().call_later(
+                    0.5, lambda: self._set_listening(local=False)
+                )
 
     async def shutdown(self) -> None:
         """Shutdown the handler."""
+        self._reset_listening()
+        self._local_vad = None
         # Unblock the response sender worker so it can exit
         self._response_done_event.set()
 

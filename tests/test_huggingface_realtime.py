@@ -2,9 +2,10 @@ import json
 import time
 import base64
 import asyncio
+import logging
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import numpy as np
 import pytest
@@ -14,11 +15,180 @@ import reachy_mini_conversation_app.huggingface_realtime as hf_mod
 from reachy_mini_conversation_app.config import config, get_default_voice, refresh_runtime_config_from_env
 from reachy_mini_conversation_app.streaming import AdditionalOutputs
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
+from reachy_mini_conversation_app.conversation_handler import VADStatus
 from reachy_mini_conversation_app.huggingface_realtime import HuggingFaceRealtimeHandler
 from reachy_mini_conversation_app.tools.background_tool_manager import ToolState, ToolNotification
 
 
 HF_DEFAULT_VOICE = get_default_voice()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("local_stops_first", [False, True])
+@pytest.mark.parametrize(
+    "stop_type",
+    ["input_audio_buffer.speech_stopped", "conversation.item.input_audio_transcription.completed", "error"],
+)
+async def test_local_and_server_vad_keep_listening_until_both_stop(
+    monkeypatch: pytest.MonkeyPatch, local_stops_first: bool, stop_type: str
+) -> None:
+    """Neither detector's stop event can release the other's active listening state."""
+    movement_manager = MagicMock()
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement_manager))
+    detector = MagicMock()
+    detector.process.side_effect = [True, False]
+    handler._local_vad = detector
+    handler._clear_queue = AsyncMock()
+    connection = MagicMock()
+    connection.session.update = AsyncMock()
+    connection.input_audio_buffer.append = AsyncMock()
+    microphone = np.full((512, 2), [16384, 0], dtype=np.int16)
+
+    async def event_stream():
+        await handler.receive((16000, microphone))
+        movement_manager.set_listening.assert_called_once_with(True)
+        handler._clear_queue.assert_not_called()
+        yield _FakeEvent("input_audio_buffer.speech_started")
+        if local_stops_first:
+            await handler.receive((16000, microphone))
+            movement_manager.set_listening.assert_called_once_with(True)
+        yield _FakeEvent(stop_type, transcript="", error=_FakeEvent("error", code="input_audio_buffer_commit_empty"))
+        if not local_stops_first:
+            movement_manager.set_listening.assert_called_once_with(True)
+            await handler.receive((16000, microphone))
+        assert movement_manager.set_listening.call_args_list == [call(True), call(False)]
+
+    connection.__aiter__.side_effect = event_stream
+    handler.client = MagicMock()
+    handler.client.realtime.connect.return_value.__aenter__.return_value = connection
+    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(hf_mod, "get_tool_specs", lambda: [])
+    monkeypatch.setattr(handler, "_send_startup_greeting_prompt", AsyncMock())
+    monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
+    monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
+
+    await handler._run_realtime_session()
+
+    assert movement_manager.set_listening.call_args_list == [call(True), call(False)]
+    handler._clear_queue.assert_called_once()
+    connection.input_audio_buffer.append.assert_has_awaits(
+        [call(audio=base64.b64encode(microphone[:, 0].tobytes()).decode("utf-8"))] * 2
+    )
+    detector.reset.assert_called_once()
+    assert handler.connection is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("server_speech", [False, True])
+async def test_local_vad_timeout_preserves_server_vote(monkeypatch: pytest.MonkeyPatch, server_speech: bool) -> None:
+    """Missing microphone frames expire only the local listening vote."""
+    movement_manager = MagicMock()
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement_manager))
+    detector = MagicMock()
+    detector.process.return_value = True
+    handler._local_vad = detector
+    handler._set_listening(server=server_speech)
+    await handler.receive((16000, np.zeros(512, dtype=np.int16)))
+    assert handler._local_speech_timeout is not None
+    await asyncio.sleep(0.55)
+    assert movement_manager.set_listening.call_args == call(server_speech)
+    detector.process.return_value = False
+    handler._local_audio_at = time.monotonic() - 1.0
+    await handler.receive((16000, np.zeros(512, dtype=np.int16)))
+    detector.reset.assert_called_once()
+    monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
+    await handler.shutdown()
+    assert movement_manager.set_listening.call_args == call(False)
+
+
+@pytest.mark.asyncio
+async def test_local_vad_failure_keeps_sending_audio_and_server_listening(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Inference failure removes the local vote without breaking server audio or listening."""
+    movement_manager = MagicMock()
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement_manager))
+    handler.connection = AsyncMock()
+    detector = MagicMock()
+    detector.process.side_effect = [True, RuntimeError("model failure")]
+    handler._local_vad = detector
+    microphone = np.zeros(512, dtype=np.int16)
+    await handler.receive((16000, microphone))
+    handler._set_listening(server=True)
+    await handler.receive((16000, microphone))
+    await handler.receive((16000, microphone))
+    movement_manager.set_listening.assert_called_once_with(True)
+    assert handler.connection.input_audio_buffer.append.await_count == 3
+    assert "Local VAD failed" in caplog.text
+    assert handler._local_vad is None
+    monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
+    await handler.shutdown()
+    assert movement_manager.set_listening.call_args == call(False)
+
+
+@pytest.mark.asyncio
+async def test_receive_sends_audio_before_local_vad() -> None:
+    """Server audio never waits for local inference."""
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.connection = AsyncMock()
+    handler._local_vad = MagicMock()
+    handler._local_vad.process.side_effect = lambda *_args, **_kwargs: (
+        handler.connection.input_audio_buffer.append.await_count == 1
+    )
+    await handler.receive((16000, np.zeros(512, dtype=np.int16)))
+    assert handler._local_speech
+    handler._local_speech_timeout.cancel()
+
+
+@pytest.mark.asyncio
+async def test_unavailable_local_vad_does_not_prevent_startup(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A model load failure leaves the server conversation available."""
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    monkeypatch.setattr(config, "LOCAL_VAD_ENABLED", True)
+    monkeypatch.setattr(hf_mod, "SileroVAD", MagicMock(side_effect=OSError("missing model")))
+    monkeypatch.setattr(handler, "_build_realtime_client", AsyncMock())
+    session = AsyncMock()
+    monkeypatch.setattr(handler, "_run_realtime_session", session)
+    await handler.start_up()
+    session.assert_awaited_once()
+    assert "Local VAD unavailable" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_server_session_exit_clears_active_listening(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Disconnect releases both votes and cancels any microphone timeout."""
+    movement_manager = MagicMock()
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement_manager))
+    detector = MagicMock()
+    detector.process.return_value = True
+    handler._local_vad = detector
+    await handler.receive((16000, np.zeros(512, dtype=np.int16)))
+    timeout = handler._local_speech_timeout
+    handler.client = _make_fake_realtime_client(events=(_FakeEvent("input_audio_buffer.speech_started"),))
+    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(hf_mod, "get_tool_specs", lambda: [])
+    monkeypatch.setattr(handler, "_send_startup_greeting_prompt", AsyncMock())
+    monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
+    monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
+    await handler._run_realtime_session()
+    assert movement_manager.set_listening.call_args_list == [call(True), call(False)]
+    detector.reset.assert_called_once()
+    assert timeout is not None and timeout.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_local_vad_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Server-only configuration does not load a local model."""
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    monkeypatch.setattr(config, "LOCAL_VAD_ENABLED", False)
+    load_model = MagicMock()
+    monkeypatch.setattr(hf_mod, "SileroVAD", load_model)
+    monkeypatch.setattr(handler, "_build_realtime_client", AsyncMock())
+    monkeypatch.setattr(handler, "_run_realtime_session", AsyncMock())
+    await handler.start_up()
+    load_model.assert_not_called()
 
 
 class _FakeEvent:
@@ -27,6 +197,10 @@ class _FakeEvent:
     def __init__(self, event_type: str, **fields: Any) -> None:
         """Store the event type and any extra attributes."""
         self.type = event_type
+        if event_type in ("response.created", "response.done"):
+            fields.setdefault("response", SimpleNamespace(id="response-1", metadata=None))
+        if event_type.startswith("response.output_audio"):
+            fields.setdefault("response_id", "response-1")
         self.__dict__.update(fields)
 
 
@@ -591,7 +765,10 @@ async def test_run_session_emits_completed_transcript(monkeypatch: Any) -> None:
     """A non-empty completed transcript is enqueued as a user message and stops listening."""
     handler = _session_handler(
         monkeypatch,
-        (_FakeEvent("conversation.item.input_audio_transcription.completed", transcript="Hello there"),),
+        (
+            _FakeEvent("input_audio_buffer.speech_started"),
+            _FakeEvent("conversation.item.input_audio_transcription.completed", transcript="Hello there"),
+        ),
     )
 
     await handler._run_realtime_session()
@@ -639,7 +816,7 @@ async def test_run_session_observes_server_turn_latency(monkeypatch: Any) -> Non
     )
 
     def response_done(metadata: dict[str, str] | None) -> _FakeEvent:
-        return _FakeEvent("response.done", response=SimpleNamespace(metadata=metadata))
+        return _FakeEvent("response.done", response=SimpleNamespace(id="response-1", metadata=metadata))
 
     handler = _session_handler(
         monkeypatch,
@@ -676,7 +853,10 @@ async def test_run_session_skips_empty_completed_transcript(monkeypatch: Any) ->
     """An empty completed transcript is ignored but still stops listening."""
     handler = _session_handler(
         monkeypatch,
-        (_FakeEvent("conversation.item.input_audio_transcription.completed", transcript="   "),),
+        (
+            _FakeEvent("input_audio_buffer.speech_started"),
+            _FakeEvent("conversation.item.input_audio_transcription.completed", transcript="   "),
+        ),
     )
 
     await handler._run_realtime_session()
@@ -703,7 +883,10 @@ async def test_run_session_commit_empty_error_is_internal(monkeypatch: Any) -> N
     """A commit-empty error stops listening and is not surfaced to the UI."""
     handler = _session_handler(
         monkeypatch,
-        (_FakeEvent("error", error=SimpleNamespace(message="empty", code="input_audio_buffer_commit_empty")),),
+        (
+            _FakeEvent("input_audio_buffer.speech_started"),
+            _FakeEvent("error", error=SimpleNamespace(message="empty", code="input_audio_buffer_commit_empty")),
+        ),
     )
 
     await handler._run_realtime_session()
@@ -970,7 +1153,7 @@ async def test_receive_downmixes_stereo_and_forwards() -> None:
 async def test_run_session_speech_started_clears_queue_and_listens(monkeypatch: Any) -> None:
     """User speech start clears the playback queue and enters listening mode."""
     handler = _session_handler(monkeypatch, (_FakeEvent("input_audio_buffer.speech_started"),))
-    clear_queue = MagicMock()
+    clear_queue = AsyncMock()
     handler._clear_queue = clear_queue
 
     await handler._run_realtime_session()
@@ -984,7 +1167,10 @@ async def test_run_session_response_lifecycle_toggles_done_event(monkeypatch: An
     """response.created clears the done gate and response.done sets it again."""
     handler = _session_handler(
         monkeypatch,
-        (_FakeEvent("response.created"), _FakeEvent("response.done", response=SimpleNamespace(metadata=None))),
+        (
+            _FakeEvent("response.created"),
+            _FakeEvent("response.done", response=SimpleNamespace(id="response-1", metadata=None)),
+        ),
     )
 
     await handler._run_realtime_session()
@@ -992,3 +1178,144 @@ async def test_run_session_response_lifecycle_toggles_done_event(monkeypatch: An
     assert handler._response_done_event.is_set()
     handler.deps.movement_manager.set_speaking.assert_any_call(True)
     handler.deps.movement_manager.set_speaking.assert_any_call(False)
+
+
+@pytest.mark.asyncio
+async def test_local_barge_in_only_ducks_until_server_confirms(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sustained local speech ducks playback reversibly, never cancels on its own, and only ducks while playing."""
+    monkeypatch.setattr(config, "LOCAL_BARGE_IN_ENABLED", True)
+    handler = _plain_handler()
+    detector = MagicMock()
+    detector.process.return_value = True
+    detector.barge_in_candidate = True
+    handler._local_vad = detector
+    handler._audio_response_id = handler._active_response_id = "response"
+    handler.playback_until = time.monotonic() + 10
+    handler._clear_queue = AsyncMock()
+    connection = MagicMock()
+    connection.response.cancel = AsyncMock()
+    connection.input_audio_buffer.append = AsyncMock()
+    handler.connection = connection
+    microphone = np.zeros(512, dtype=np.int16)
+    for _ in range(30):
+        await handler.receive((16000, microphone))
+    assert handler.playback_gain == 0.25
+    detector.barge_in_candidate = False
+    await handler.receive((16000, microphone))
+    assert handler.playback_gain == 1.0
+    connection.response.cancel.assert_not_awaited()
+    handler._clear_queue.assert_not_awaited()
+    assert connection.input_audio_buffer.append.await_count == 31
+
+    detector.barge_in_candidate = True
+    handler.paced_playback = False  # barge-in disabled
+    await handler.receive((16000, microphone))
+    assert handler.playback_gain == 1.0
+    handler.paced_playback = True
+    handler.playback_until = 0.0  # nothing left to play
+    await handler.receive((16000, microphone))
+    assert handler.playback_gain == 1.0
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_server_interrupt_discards_late_audio_but_allows_next_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Audio arriving after interruption cannot restart the old response."""
+    delta = base64.b64encode(np.ones(512, dtype=np.int16).tobytes()).decode()
+    handler = _session_handler(
+        monkeypatch,
+        (
+            _FakeEvent("response.created"),
+            _FakeEvent("response.output_audio.delta", delta=delta),
+            _FakeEvent("input_audio_buffer.speech_started"),
+            _FakeEvent("response.output_audio.delta", delta=delta),
+            _FakeEvent("response.done"),
+            _FakeEvent("response.created", response=SimpleNamespace(id="response-2")),
+            _FakeEvent("response.output_audio.delta", response_id="response-2", delta=delta),
+            _FakeEvent("response.output_audio.delta", response_id="response-1", delta=delta),
+            _FakeEvent("response.output_audio.done", response_id="response-1"),
+            _FakeEvent("response.output_audio_transcript.done", response_id="response-1", transcript="stale"),
+            _FakeEvent("response.done", response=SimpleNamespace(id="response-1")),
+        ),
+    )
+    handler._clear_queue = AsyncMock()
+    await handler._run_realtime_session()
+    outputs = _drain(handler)
+    frames = [item for item in outputs if isinstance(item, tuple)]
+    assert len(frames) == 2
+    assert not _messages(outputs)
+    handler._clear_queue.assert_awaited_once()
+    assert not handler._response_done_event.is_set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_fails", [False, True])
+async def test_interrupt_cancels_response_and_always_flushes(
+    caplog: pytest.LogCaptureFixture, cancel_fails: bool
+) -> None:
+    """The stop RPC cancels generation and discards its audio; a lost cancel still stops playback."""
+    handler = _plain_handler()
+    handler._audio_response_id = handler._active_response_id = "response-1"
+    handler._clear_queue = AsyncMock()
+    handler.connection = MagicMock()
+    handler.connection.response.cancel = AsyncMock(side_effect=OSError("disconnected") if cancel_fails else None)
+    await handler.interrupt()
+    handler.connection.response.cancel.assert_awaited_once_with(response_id="response-1")
+    handler._clear_queue.assert_awaited_once()
+    assert "response-1" in handler._discarded_response_ids
+    assert ("Failed to cancel" in caplog.text) is cancel_fails
+
+
+@pytest.mark.asyncio
+async def test_debug_vad_reports_probability_and_barge_in_without_extra_inference(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Debug reports are throttled without delaying state transitions or adding inference."""
+    monkeypatch.setattr(config, "LOCAL_BARGE_IN_ENABLED", True)
+    handler = _plain_handler()
+    detector = MagicMock()
+    detector.process.return_value = True
+    detector.speech_probability = 0.8
+    detector.barge_in_candidate = False
+    handler._local_vad = detector
+    handler._audio_response_id = "response"
+    handler.playback_until = 1000.0
+    handler._clear_queue = AsyncMock()
+    statuses: list[VADStatus] = []
+    handler.set_vad_observer(statuses.append)
+    clock = [100.0]
+    monkeypatch.setattr(hf_mod, "time", SimpleNamespace(monotonic=lambda: clock[0], time=lambda: 123.0))
+    caplog.set_level(logging.DEBUG, logger=hf_mod.__name__)
+    previous_activity = handler.last_activity_time
+    frame = (16000, np.zeros(512, dtype=np.int16))
+
+    await handler.receive(frame)
+    assert statuses[-1]["probability"] == 0.8
+    assert statuses[-1]["local_speech"] and statuses[-1]["listening"]
+    assert not statuses[-1]["server_speech"]
+    assert statuses[-1]["timestamp"] == 123.0
+    assert len(statuses) == 1
+    await handler.receive(frame)
+    assert len(statuses) == 1
+    clock[0] += 0.2
+    await handler.receive(frame)
+    assert len(statuses) == 2
+    handler._set_listening(server=True)
+    assert statuses[-1]["server_speech"]
+    assert handler.last_activity_time == previous_activity
+
+    detector.barge_in_candidate = True
+    await handler.receive(frame)
+    assert statuses[-1]["barge_in_candidate"]
+    assert statuses[-1]["playback_gain"] == 0.25
+    detector.barge_in_candidate = False
+    await handler.receive(frame)
+    assert not statuses[-1]["barge_in_candidate"]
+    assert statuses[-1]["playback_gain"] == 1.0
+    assert detector.process.call_count == 5
+
+    caplog.set_level(logging.WARNING, logger=hf_mod.__name__)
+    previous_reports = len(statuses)
+    handler._set_listening(server=False)
+    assert len(statuses) == previous_reports
+    handler._reset_listening()

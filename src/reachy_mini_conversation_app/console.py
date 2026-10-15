@@ -8,6 +8,7 @@ import time
 import asyncio
 import logging
 import itertools
+import threading
 from typing import Any, List, Optional
 from pathlib import Path
 from collections import deque
@@ -57,7 +58,7 @@ from reachy_mini_conversation_app.personality_routes import (
 )
 from reachy_mini_conversation_app.profile_tool_routes import register_profile_tool_methods
 from reachy_mini_conversation_app.audio.startup_config import apply_audio_startup_config
-from reachy_mini_conversation_app.conversation_handler import ConversationHandler
+from reachy_mini_conversation_app.conversation_handler import VADStatus, AudioFrame, ConversationHandler
 
 
 try:
@@ -106,6 +107,7 @@ LEGACY_STARTUP_ENV_NAMES = (
 )
 BACKEND_RETRY_DELAY_SECONDS = 5.0
 CONVERSATION_HISTORY_LIMIT = 200  # events, about 100 exchanges
+PLAYBACK_LEAD_SECONDS = 0.1  # paced chunks reach the SDK this far ahead of their slot
 
 
 class LocalStream:
@@ -132,6 +134,8 @@ class LocalStream:
         """
         self._robot = robot
         self._stop_event = asyncio.Event()
+        self._playback_flush_lock = asyncio.Lock()
+        self._playback_clock = 0.0  # monotonic end of audio pushed to the SDK
         self._restart_requested = asyncio.Event()
         self._tasks: List[asyncio.Task[None]] = []
         self._handler_factory = handler_factory
@@ -143,6 +147,7 @@ class LocalStream:
         self._settings_initialized = False
         self._asyncio_loop = None
         self._mic_muted = False  # mic starts live; the UI toggles it via the settings API
+        self._audio_warming_up = False
         self._backend_connection_state = "not_started"
         self._backend_error: str | None = None
         self._backend_retry_delay = BACKEND_RETRY_DELAY_SECONDS
@@ -177,6 +182,12 @@ class LocalStream:
         latency_setter = getattr(self.handler, "set_latency_observer", None)
         if callable(latency_setter):
             latency_setter(self._dispatch_latency)
+
+        self.handler.set_vad_observer(self._dispatch_vad)
+
+    def _dispatch_vad(self, status: VADStatus) -> None:
+        if self._rpc is not None:
+            self._rpc.broadcast_threadsafe("conversation.vad", dict(status))
 
     def _dispatch_transcript(self, role: str, text: str, final: bool) -> None:
         """Push a conversation.transcript notification, recording final ones in the history."""
@@ -547,6 +558,8 @@ class LocalStream:
                 "voice": self.get_current_voice(),
                 "language": config.REALTIME_TRANSCRIPTION_LANGUAGE,
                 "memory_enabled": config.MEMORY_ENABLED,
+                "local_vad_enabled": config.LOCAL_VAD_ENABLED,
+                "local_barge_in_enabled": config.LOCAL_BARGE_IN_ENABLED,
                 "vision_enabled": bool(self._tool_deps and self._tool_deps.camera_enabled),
                 **backend_connection,
             }
@@ -579,15 +592,15 @@ class LocalStream:
                 raise JsonRpcError("say requires 'text'", reason="invalid_params", code=-32602)
             if not self.handler._is_connected():
                 raise JsonRpcError("no active session", reason="not_running")
-            self.clear_audio_queue()  # barge in if mid-utterance
+            await self.handler.interrupt()
             await self.handler.say(text)
             return {"ok": True}
 
         @rpc.method("conversation.interrupt")  # type: ignore[untyped-decorator]
-        def _rpc_interrupt(_params: dict[str, object]) -> dict[str, object]:
+        async def _rpc_interrupt(_params: dict[str, object]) -> dict[str, object]:
             if not self.handler._is_connected():
                 raise JsonRpcError("no active session", reason="not_running")
-            self.clear_audio_queue()
+            await self.handler.interrupt()
             self._last_turn_state = "listening"
             rpc.broadcast_threadsafe("conversation.turn", {"state": "listening", "reason": "interrupted"})
             return {"ok": True}
@@ -635,6 +648,32 @@ class LocalStream:
                 message = "Connection saved. Restart Reachy Mini Conversation from the desktop app to apply it."
             return {"ok": True, "message": message, **_status_payload()}
 
+        def _rpc_speech_config(params: dict[str, object]) -> dict[str, object]:
+            names = ("local_vad_enabled", "local_barge_in_enabled")
+            for name in names:
+                if name in params and not isinstance(params[name], bool):
+                    raise JsonRpcError(f"{name} must be a boolean", reason="invalid_params", code=-32602)
+            enabled = params.get("local_vad_enabled")
+            barge_in = params.get("local_barge_in_enabled")
+            message = ""
+            if (isinstance(enabled, bool) and enabled != config.LOCAL_VAD_ENABLED) or (
+                isinstance(barge_in, bool) and barge_in != config.LOCAL_BARGE_IN_ENABLED
+            ):
+                message = self._apply_setting_with_restart(
+                    AppSettings(
+                        local_vad_enabled=enabled if isinstance(enabled, bool) else None,
+                        local_barge_in_enabled=barge_in if isinstance(barge_in, bool) else None,
+                    ),
+                    "speech_settings_changed",
+                )
+            return {
+                "local_vad_enabled": config.LOCAL_VAD_ENABLED,
+                "local_barge_in_enabled": config.LOCAL_BARGE_IN_ENABLED,
+                "message": message,
+                "requires_restart": not self._can_rebuild_handler(),
+            }
+
+        rpc.register("speech.config", _rpc_speech_config)
         rpc.mount(settings_app)
         self._rpc = rpc
 
@@ -811,6 +850,7 @@ class LocalStream:
             self._set_backend_connection_state("not_started")
 
         # Start media after key is set/available
+        self._audio_warming_up = True
         self._robot.media.start_recording()
         self._robot.media.start_playing()
 
@@ -820,16 +860,19 @@ class LocalStream:
             self._asyncio_loop = loop  # type: ignore[assignment]
             # Connect the backend first so it overlaps the warmup and audio config below.
             handler_task = asyncio.create_task(self._run_handler_startup_loop(), name="realtime-handler")
-            self._tasks = [handler_task]
-            await asyncio.gather(
-                asyncio.sleep(1),  # give the pipelines time to start
-                asyncio.to_thread(apply_audio_startup_config, self._robot, logger=logger),
-            )
-            self._tasks += [
+            self._tasks = [
+                handler_task,
                 asyncio.create_task(self.record_loop(), name="stream-record-loop"),
-                asyncio.create_task(self.play_loop(), name="stream-play-loop"),
             ]
             try:
+                await asyncio.gather(
+                    asyncio.sleep(1),  # give the pipelines time to start
+                    asyncio.to_thread(apply_audio_startup_config, self._robot, logger=logger),
+                )
+                if self._stop_event.is_set():
+                    return
+                self._audio_warming_up = False
+                self._tasks.append(asyncio.create_task(self.play_loop(), name="stream-play-loop"))
                 await asyncio.gather(*self._tasks)
             except asyncio.CancelledError:
                 logger.info("Tasks cancelled during shutdown")
@@ -871,53 +914,86 @@ class LocalStream:
             if not task.done():
                 loop.call_soon_threadsafe(task.cancel)
 
-    def clear_audio_queue(self) -> None:
-        """Flush queued playback audio immediately on user barge-in.
-
-        Calls the SDK's ``clear_player()`` — now a first-class flush on both
-        the local GStreamer and WebRTC backends (the WebRTC one also tells the
-        daemon to drop audio already queued for the speaker). Falls back to the
-        deprecated ``clear_output_buffer()`` only for older SDKs.
-        """
-        logger.info("User intervention: flushing player queue")
-        audio = getattr(self._robot.media, "audio", None)
-        if audio is not None:
-            if hasattr(audio, "clear_player") and callable(audio.clear_player):
-                audio.clear_player()
-            elif hasattr(audio, "clear_output_buffer") and callable(audio.clear_output_buffer):
-                # Older SDK without clear_player(); best-effort.
-                audio.clear_output_buffer()
-        # Drain the handler's pending output in place — do NOT replace the
-        # queue object, since emit() may be awaiting it (wait_for_item).
-        self._drain_output_queue()
+    async def clear_audio_queue(self) -> None:
+        """Invalidate pending chunks and flush SDK playback without blocking microphone capture."""
+        async with self._playback_flush_lock:
+            logger.info("User intervention: flushing player queue")
+            handler = self.handler
+            handler.playback_epoch += 1
+            handler.playback_until = 0.0
+            self._playback_clock = 0.0
+            handler.playback_pending_frames = 0
+            handler.playback_ready.clear()
+            self._drain_output_queue()
+            audio = self._robot.media.audio
+            try:
+                if audio is not None:
+                    flush_task = asyncio.create_task(asyncio.to_thread(audio.clear_player))
+                    try:
+                        await asyncio.shield(flush_task)
+                    except asyncio.CancelledError:
+                        await flush_task
+                        raise
+            except (OSError, RuntimeError) as exc:
+                logger.warning("Failed to clear player queue: %s", exc)
+            finally:
+                handler.playback_ready.set()
 
     def _drain_output_queue(self) -> None:
-        """Empty the handler's output queue in place without replacing it."""
+        """Remove pending audio in place while retaining text and metadata."""
         queue = getattr(self.handler, "output_queue", None)
         if queue is None:
             return
+        retained_outputs: list[AdditionalOutputs] = []
         while not queue.empty():
             try:
-                queue.get_nowait()
+                output = queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
+            if isinstance(output, AdditionalOutputs):
+                retained_outputs.append(output)
+            else:
+                self.handler.playback_frame_epochs.pop(id(output[1]), None)
+        for output in retained_outputs:
+            queue.put_nowait(output)
 
     async def record_loop(self) -> None:
         """Read mic frames from the recorder and forward them to the handler."""
         input_sample_rate = self._robot.media.get_input_audio_samplerate()
         logger.debug(f"Audio recording started at {input_sample_rate} Hz")
 
-        while not self._stop_event.is_set():
-            audio_frame = self._robot.media.get_audio_sample()
-            if audio_frame is not None and not self._mic_muted:
-                await self.handler.receive((input_sample_rate, audio_frame))
-                self._emit_level("user", audio_frame)
-            await asyncio.sleep(0)  # avoid busy loop
+        loop = asyncio.get_running_loop()
+        frames: asyncio.Queue[AudioFrame] = asyncio.Queue()
+        stop_reading = threading.Event()
+
+        def read_microphone() -> None:
+            # The SDK read blocks up to 20 ms: one reader thread costs less than a thread hop per frame.
+            while not stop_reading.is_set() and not self._stop_event.is_set():
+                warming_up = self._audio_warming_up  # a read spanning the end of warmup still holds warmup audio
+                audio_frame = self._robot.media.get_audio_sample()
+                if audio_frame is not None and not warming_up:
+                    loop.call_soon_threadsafe(frames.put_nowait, (input_sample_rate, audio_frame))
+
+        reader = threading.Thread(target=read_microphone, name="microphone-reader", daemon=True)
+        reader.start()
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    frame = await asyncio.wait_for(frames.get(), timeout=0.5)
+                except asyncio.TimeoutError:
+                    continue
+                if not self._mic_muted:
+                    await self.handler.receive(frame)
+                    self._emit_level("user", frame[1])
+        finally:
+            stop_reading.set()
+            await asyncio.to_thread(reader.join)
 
     async def play_loop(self) -> None:
         """Fetch outputs from the handler: log text and play audio frames."""
         while not self._stop_event.is_set():
             handler = self.handler
+            playback_epoch = handler.playback_epoch
             try:
                 handler_output = await asyncio.wait_for(handler.emit(), timeout=0.5)
             except asyncio.TimeoutError:
@@ -934,7 +1010,12 @@ class LocalStream:
                         )
 
             elif isinstance(handler_output, tuple):
-                _, audio_data = handler_output
+                sample_rate, audio_data = handler_output
+                playback_epoch = handler.playback_frame_epochs.pop(id(audio_data), playback_epoch)
+                if handler is not self.handler or playback_epoch != handler.playback_epoch:
+                    continue
+                if handler.paced_playback is True:
+                    handler.playback_pending_frames = max(0, handler.playback_pending_frames - 1)
 
                 # Skip empty audio frames
                 if audio_data.size == 0:
@@ -952,8 +1033,34 @@ class LocalStream:
                 # Cast if needed
                 audio_frame = audio_to_float32(audio_data)
 
-                self._robot.media.push_audio_sample(audio_frame)
-                self._emit_level("assistant", audio_frame)
+                if handler.paced_playback is True:
+                    chunk_samples = max(1, sample_rate // 50)
+                    for offset in range(0, audio_frame.size, chunk_samples):
+                        # One schedule across frames: the SDK lays follow-up buffers back to back and
+                        # only re-anchors after a 200 ms gap, so restarting per frame accumulated lateness.
+                        now = time.monotonic()
+                        if now > self._playback_clock + 0.2:
+                            self._playback_clock = now
+                        await asyncio.sleep(max(0.0, self._playback_clock - PLAYBACK_LEAD_SECONDS - now))
+                        await handler.playback_ready.wait()
+                        if (
+                            self._stop_event.is_set()
+                            or handler is not self.handler
+                            or playback_epoch != handler.playback_epoch
+                        ):
+                            break
+                        chunk = audio_frame[offset : offset + chunk_samples] * handler.playback_gain
+                        self._robot.media.push_audio_sample(chunk)
+                        self._emit_level("assistant", chunk)
+                        self._playback_clock += chunk.size / sample_rate
+                        handler.playback_until = self._playback_clock + 0.1
+                else:
+                    # A flush in progress would drop or misplace this push.
+                    await handler.playback_ready.wait()
+                    if handler is not self.handler or playback_epoch != handler.playback_epoch:
+                        continue
+                    self._robot.media.push_audio_sample(audio_frame)
+                    self._emit_level("assistant", audio_frame)
 
             else:
                 logger.debug("Ignoring output type=%s", type(handler_output).__name__)

@@ -221,8 +221,6 @@ class MovementManager:
         self._antenna_blend_duration = 0.4  # seconds to blend back after listening
         self._last_listening_blend_time = self._now()
         self._breathing_active = False  # true when breathing move is running or queued
-        self._listening_debounce_s = 0.15
-        self._last_listening_toggle_time = self._now()
         self._last_set_target_err = 0.0
         self._set_target_err_interval = 1.0  # seconds between error logs
         self._set_target_err_suppressed = 0
@@ -281,9 +279,6 @@ class MovementManager:
 
         Thread-safe: the change is posted to the worker command queue.
         """
-        with self._shared_state_lock:
-            if self._shared_is_listening == listening:
-                return
         self._command_queue.put(("set_listening", listening))
 
     def set_head_tracking(self, enabled: bool) -> None:
@@ -347,10 +342,6 @@ class MovementManager:
         elif command == "set_listening":
             desired_state = bool(payload)
             now = self._now()
-            if now - self._last_listening_toggle_time < self._listening_debounce_s:
-                return
-            self._last_listening_toggle_time = now
-
             if self._is_listening == desired_state:
                 return
 

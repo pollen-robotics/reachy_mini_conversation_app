@@ -53,3 +53,18 @@ def test_transcription_language_at_startup_and_reload(
     config.refresh_runtime_config_from_env()
 
     assert config.config.REALTIME_TRANSCRIPTION_LANGUAGE == expected_language
+
+
+@pytest.mark.parametrize("name", ["LOCAL_VAD_ENABLED", "LOCAL_BARGE_IN_ENABLED"])
+@pytest.mark.parametrize("raw_value, expected", [(None, True), ("true", True), ("false", False)])
+def test_local_speech_flags_default_on_and_follow_environment(
+    monkeypatch: pytest.MonkeyPatch, name: str, raw_value: str | None, expected: bool
+) -> None:
+    """Local detection and barge-in are on by default and follow an explicit environment value."""
+    if raw_value is None:
+        monkeypatch.delenv(name, raising=False)
+    else:
+        monkeypatch.setenv(name, raw_value)
+    monkeypatch.setattr(config.config, name, not expected)
+    config.refresh_runtime_config_from_env()
+    assert getattr(config.config, name) is expected

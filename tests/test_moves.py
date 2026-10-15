@@ -59,6 +59,25 @@ def test_stop_can_skip_neutral_reset(monkeypatch: pytest.MonkeyPatch) -> None:
     robot.goto_target.assert_not_called()
 
 
+def test_listening_applies_immediately_and_preserves_queued_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Listening starts immediately, and rapid queued changes retain their order."""
+    robot = MagicMock()
+    robot.get_current_head_pose.return_value = np.eye(4)
+    robot.get_current_joint_positions.return_value = ([0.0] * 6, [0.0, 0.0])
+    manager = MovementManager(robot)
+    monkeypatch.setattr(manager, "_now", lambda: 0.0)
+    manager.set_listening(True)
+    manager._poll_signals(0.0)
+    assert manager.get_status()["is_listening"]
+    assert manager._calculate_blended_antennas((0.7, -0.7)) == (0.0, 0.0)
+
+    manager.set_listening(False)
+    manager.set_listening(True)
+    manager.set_listening(False)
+    manager._poll_signals(0.0)
+    assert not manager.get_status()["is_listening"]
+
+
 def test_head_tracking_follows_speaking() -> None:
     """Once enabled, tracking owns the head when idle and releases it while the assistant speaks."""
     robot = MagicMock()

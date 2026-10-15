@@ -3,7 +3,7 @@ import time
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias, TypedDict
 from collections.abc import Callable
 
 import numpy as np
@@ -23,6 +23,19 @@ HandlerOutput: TypeAlias = AudioFrame | AdditionalOutputs | None
 QueueItem: TypeAlias = AudioFrame | AdditionalOutputs
 
 
+class VADStatus(TypedDict):
+    """Snapshot of local speech detection and playback interruption state."""
+
+    timestamp: float
+    available: bool
+    probability: float | None
+    local_speech: bool
+    server_speech: bool
+    listening: bool
+    barge_in_candidate: bool
+    playback_gain: float
+
+
 class ConversationHandler(AsyncStreamHandler, ABC):
     """Shared app handler contract and idle behavior for realtime conversation backends."""
 
@@ -36,10 +49,19 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     _activity_observer: Callable[[str], None] | None = None
     _transcript_observer: Callable[[str, str, bool], None] | None = None
     _latency_observer: Callable[[dict[str, int | str | None]], None] | None = None
+    _vad_observer: Callable[[VADStatus], None] | None = None
 
     def __init__(self) -> None:
         """Initialize the stream handler and shared idle/activity tracking."""
         super().__init__()
+        self.paced_playback = False
+        self.playback_gain = 1.0
+        self.playback_epoch = 0
+        self.playback_frame_epochs: dict[int, int] = {}
+        self.playback_until = 0.0
+        self.playback_pending_frames = 0
+        self.playback_ready = asyncio.Event()
+        self.playback_ready.set()
         self.last_activity_time = time.monotonic()
         self.last_idle_behavior_time = self.last_activity_time
 
@@ -54,6 +76,10 @@ class ConversationHandler(AsyncStreamHandler, ABC):
     def set_latency_observer(self, observer: Callable[[dict[str, int | str | None]], None] | None) -> None:
         """Attach/detach a per-response latency observer. Pass None to clear."""
         self._latency_observer = observer
+
+    def set_vad_observer(self, observer: Callable[[VADStatus], None] | None) -> None:
+        """Attach or detach an observer for local VAD diagnostics."""
+        self._vad_observer = observer
 
     def _emit_transcript(self, role: str, text: str, final: bool = True) -> None:
         """Forward one transcript chunk to the observer, if attached."""
@@ -178,4 +204,9 @@ class ConversationHandler(AsyncStreamHandler, ABC):
         model voices, not a guaranteed-literal string. Raises if no session is
         open.
         """
+        ...
+
+    @abstractmethod
+    async def interrupt(self) -> None:
+        """Stop playback and cancel the response still being generated."""
         ...
