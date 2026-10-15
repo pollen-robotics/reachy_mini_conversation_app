@@ -1,8 +1,9 @@
 /** Talk view sidebar: live transcript plus the backend's per-response timings.
  * Opened from the header's conversation button; starts from the app's history
- * of this run, so a page opened mid-conversation still shows earlier turns. */
+ * of this run, so a page opened mid-conversation still shows earlier turns.
+ * Timings are always rendered but stay hidden unless Settings turns them on. */
 
-import { getConversationHistory, subscribe } from "../api.js";
+import { getConversationHistory, getShowLatencies, subscribe } from "../api.js";
 import { h } from "../ui.js";
 
 const LATENCY_STAGES = Object.freeze([
@@ -67,6 +68,9 @@ export function createConversationPanel({ toggle }) {
   const unsubscribers = Object.entries(renderers).map(([method, render]) =>
     subscribe(method, (params) => (pending ? pending.push([render, params]) : apply(render, params)))
   );
+  getShowLatencies()
+    .then(({ enabled }) => root.classList.toggle("shows-latencies", enabled))
+    .catch((error) => console.warn("Failed to load the latency display setting", error));
   getConversationHistory()
     .then(({ events }) => {
       for (const { method, params } of events) apply(renderers[method], params);
@@ -96,11 +100,12 @@ export function createConversationPanel({ toggle }) {
     if (open) list.scrollTop = list.scrollHeight;
   }
 
-  function keepScrolledDown(mutate) {
+  function keepScrolledDown(mutate, { visible = true } = {}) {
     const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight <= STICK_TO_BOTTOM_PX;
     mutate();
-    if (root.hidden) toggle.classList.add("has-unread");
-    else if (atBottom) list.scrollTop = list.scrollHeight;
+    if (root.hidden) {
+      if (visible) toggle.classList.add("has-unread");
+    } else if (atBottom) list.scrollTop = list.scrollHeight;
   }
 
   function onTranscript({ role, text, final }) {
@@ -143,7 +148,7 @@ export function createConversationPanel({ toggle }) {
           )
         )
       );
-    });
+    }, { visible: root.classList.contains("shows-latencies") });
   }
 
   return {

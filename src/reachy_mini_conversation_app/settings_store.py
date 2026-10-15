@@ -42,6 +42,7 @@ class AppSettings:
     camera_enabled: bool | None = None
     local_vad_enabled: bool | None = None
     local_barge_in_enabled: bool | None = None
+    show_latencies: bool | None = None
 
 
 def _settings_path(instance_path: str | Path | None) -> Path | None:
@@ -83,6 +84,7 @@ def _read_unlocked(path: Path | None) -> AppSettings:
         camera_enabled=_flag(payload, "camera_enabled"),
         local_vad_enabled=_flag(payload, "local_vad_enabled"),
         local_barge_in_enabled=_flag(payload, "local_barge_in_enabled"),
+        show_latencies=_flag(payload, "show_latencies"),
     )
 
 

@@ -135,6 +135,8 @@ export const applyPersonality = (name, { persist = false, force = false } = {}) 
 export const deletePersonality = (name) => rpcCall("personalities.delete", { name });
 
 export const getConversationHistory = () => rpcCall("conversation.history");
+export const getShowLatencies = () => rpcCall("conversation.show_latencies");
+export const setShowLatencies = (enabled) => rpcCall("conversation.show_latencies", { enabled });
 export const getMicState = () => rpcCall("conversation.mic", {});
 export const setMicMuted = (muted) => rpcCall("conversation.mic", { muted });
 

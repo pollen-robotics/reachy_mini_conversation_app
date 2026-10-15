@@ -891,6 +891,10 @@ button {
   color: var(--text);
 }
 
+.talk-log:not(.shows-latencies) .talk-log__row--timings {
+  display: none;
+}
+
 .talk-log__row--timings {
   align-self: flex-start;
   max-width: 100%;
@@ -962,6 +966,15 @@ button {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.settings-developer > summary {
+  margin: 0;
+  cursor: pointer;
+}
+
+.settings-developer[open] > summary {
+  margin-bottom: 16px;
 }
 
 .settings-toggle { display: flex; align-items: flex-start; gap: 12px; }

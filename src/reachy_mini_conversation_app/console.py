@@ -44,6 +44,7 @@ from reachy_mini_conversation_app.memory_routes import register_memory_methods
 from reachy_mini_conversation_app.vision_routes import register_vision_methods
 from reachy_mini_conversation_app.settings_store import (
     AppSettings,
+    read_settings,
     update_settings,
     apply_settings_to_runtime,
     load_settings_into_runtime,
@@ -161,6 +162,8 @@ class LocalStream:
         self._conversation_history: deque[dict[str, object]] = deque(maxlen=CONVERSATION_HISTORY_LIMIT)
         # Seeded from the wall clock so a restarted app's events sort after those an open page has seen.
         self._conversation_seq = itertools.count(int(time.time() * 1000))
+        # Whether the conversation panel shows response latencies; saved, so it outlives restarts.
+        self._show_latencies = read_settings(instance_path).show_latencies is True
         # Per-role throttle timestamps for conversation.level (orb audio meter).
         self._last_level_emit: dict[str, float] = {}
         self._install_handler(handler)
@@ -608,6 +611,16 @@ class LocalStream:
         @rpc.method("conversation.history")  # type: ignore[untyped-decorator]
         def _rpc_history(_params: dict[str, object]) -> dict[str, object]:
             return {"events": list(self._conversation_history)}
+
+        @rpc.method("conversation.show_latencies")  # type: ignore[untyped-decorator]
+        def _rpc_show_latencies(params: dict[str, object]) -> dict[str, object]:
+            if "enabled" in params:
+                enabled = params["enabled"]
+                if not isinstance(enabled, bool):
+                    raise JsonRpcError("enabled must be a boolean", reason="invalid_params", code=-32602)
+                self._show_latencies = enabled
+                self._save_settings(AppSettings(show_latencies=enabled))
+            return {"enabled": self._show_latencies}
 
         @rpc.method("conversation.mic")  # type: ignore[untyped-decorator]
         def _rpc_mic(params: dict[str, object]) -> dict[str, object]:
