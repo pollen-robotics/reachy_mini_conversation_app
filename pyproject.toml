@@ -19,6 +19,9 @@ dependencies = [
     #Instance directory resolution (same convention as the daemon's config dir)
     "platformdirs",
 
+    #IANA timezone data for zoneinfo where the OS has none (Windows)
+    "tzdata",
+
     #OpenAI (used by the Hugging Face backend)
     "openai==2.28.0",
 

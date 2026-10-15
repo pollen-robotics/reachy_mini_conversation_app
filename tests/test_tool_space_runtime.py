@@ -24,6 +24,9 @@ SEARCH_ALIAS = "example_search_tool"
 SEARCH_TOOL_ID = f"{SEARCH_ALIAS}__search_web"
 SEARCH_CLIENT_TOOL_ID = f"{SEARCH_ALIAS}__search_tool_search_web"
 SEARCH_MCP_URL = "https://example-search-tool.hf.space/gradio_api/mcp/"
+TIME_SPACE_SLUG = "pollen-robotics/reachy-mini-time-tool"
+TIME_SPACE_ALIAS = "pollen_robotics_reachy_mini_time_tool"
+TIME_SPACE_TOOL_ID = f"{TIME_SPACE_ALIAS}__get_time"
 
 
 def _reload_core_tools() -> ModuleType:
@@ -184,6 +187,55 @@ def test_initialize_tools_respects_empty_profile_tool_defaults(
     core_tools_mod.initialize_tools()
 
     assert "dance" not in core_tools_mod.ALL_TOOLS
+
+
+def test_initialize_tools_loads_the_core_time_tool_for_a_profile_saved_with_the_time_space(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An upgraded install should register the core get_time tool and not the seeded time Space."""
+    monkeypatch.chdir(tmp_path)
+    external_profiles_root = tmp_path / "external_profiles"
+    profile_dir = external_profiles_root / "upgraded"
+    profile_dir.mkdir(parents=True)
+    # Written raw: saving through the app today would already store the new tool ID.
+    (profile_dir / "profile.md").write_text(
+        f'+++\nschema_version = 1\ndefault_tools = ["{TIME_SPACE_TOOL_ID}"]\n+++\n\nhello\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "upgraded")
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", external_profiles_root)
+    monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
+    monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
+    write_installed_tool_spaces(
+        None,
+        InstalledToolSpacesManifest(
+            spaces=[
+                InstalledToolSpace(
+                    slug=TIME_SPACE_SLUG,
+                    alias=TIME_SPACE_ALIAS,
+                    mcp_url="https://pollen-robotics-reachy-mini-time-tool.hf.space/gradio_api/mcp/",
+                    private=False,
+                    tools=[
+                        InstalledToolSpaceTool(
+                            local_name=TIME_SPACE_TOOL_ID,
+                            client_tool_name=f"{TIME_SPACE_ALIAS}__reachy_mini_time_tool_get_time",
+                            remote_name="reachy_mini_time_tool_get_time",
+                            description="Get the current time",
+                            parameters_schema={"type": "object", "properties": {}, "required": []},
+                        )
+                    ],
+                )
+            ],
+            bundled_space_slugs=[TIME_SPACE_SLUG],
+        ),
+    )
+
+    core_tools_mod = _reload_core_tools()
+    core_tools_mod.initialize_tools()
+
+    assert "get_time" in core_tools_mod.ALL_TOOLS
+    assert TIME_SPACE_TOOL_ID not in core_tools_mod.ALL_TOOLS
 
 
 def _mcp_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

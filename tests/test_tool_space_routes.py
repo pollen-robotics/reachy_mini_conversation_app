@@ -1,5 +1,6 @@
 """Tests for Hugging Face Space and profile-tool management methods."""
 
+import json
 import asyncio
 import threading
 from typing import Any
@@ -16,12 +17,14 @@ from reachy_mini_conversation_app.tool_spaces import (
     InstalledToolSpace,
     InstalledToolSpaceTool,
     InstalledToolSpacesManifest,
+    resolve_tool_space_sync,
     read_installed_tool_spaces,
     write_installed_tool_spaces,
 )
 from reachy_mini_conversation_app.profile_store import write_profile
 from reachy_mini_conversation_app.profile_toolsets import (
     read_profile_tool_names,
+    get_profile_toolsets_path,
     read_profile_tool_override,
 )
 from reachy_mini_conversation_app.tool_space_routes import register_tool_space_methods
@@ -31,6 +34,9 @@ from reachy_mini_conversation_app.profile_tool_routes import register_profile_to
 SPACE_SLUG = "example/search-tool"
 SPACE_ALIAS = "example_search_tool"
 TOOL_NAME = f"{SPACE_ALIAS}__search_web"
+TIME_SPACE_SLUG = "pollen-robotics/reachy-mini-time-tool"
+TIME_SPACE_ALIAS = "pollen_robotics_reachy_mini_time_tool"
+TIME_SPACE_TOOL_NAME = f"{TIME_SPACE_ALIAS}__get_time"
 
 
 def _resolved_space() -> InstalledToolSpace:
@@ -50,6 +56,24 @@ def _resolved_space() -> InstalledToolSpace:
                     "properties": {"query": {"type": "string"}},
                     "required": ["query"],
                 },
+            )
+        ],
+    )
+
+
+def _seeded_time_space() -> InstalledToolSpace:
+    return InstalledToolSpace(
+        slug=TIME_SPACE_SLUG,
+        alias=TIME_SPACE_ALIAS,
+        mcp_url="https://pollen-robotics-reachy-mini-time-tool.hf.space/gradio_api/mcp/",
+        private=False,
+        tools=[
+            InstalledToolSpaceTool(
+                local_name=TIME_SPACE_TOOL_NAME,
+                client_tool_name=f"{TIME_SPACE_ALIAS}__reachy_mini_time_tool_get_time",
+                remote_name="reachy_mini_time_tool_get_time",
+                description="Get the current time",
+                parameters_schema={"type": "object", "properties": {}, "required": []},
             )
         ],
     )
@@ -148,10 +172,70 @@ def test_preinstalled_space_tools_are_available_to_every_profile(
     preinstalled_tool_ids = {
         "pollen_robotics_reachy_mini_search_tool__search_web",
         "pollen_robotics_reachy_mini_weather_tool__get_weather",
-        "pollen_robotics_reachy_mini_time_tool__get_time",
     }
     assert preinstalled_tool_ids <= available_ids
     assert preinstalled_tool_ids.isdisjoint(payload["enabled_tools"])
+
+
+def test_upgraded_install_offers_the_core_time_tool_instead_of_the_seeded_space(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Selections saved with the former time Space tool should show the core tool, with nothing unavailable."""
+    instance_path, profiles_root = _configure_profiles(tmp_path, monkeypatch)
+    write_installed_tool_spaces(
+        instance_path,
+        InstalledToolSpacesManifest(spaces=[_seeded_time_space()], bundled_space_slugs=[TIME_SPACE_SLUG]),
+    )
+    # Written raw: saving through the app today would already store the new tool ID.
+    (profiles_root / "guide" / "profile.md").write_text(
+        f'+++\nschema_version = 1\ndefault_tools = ["camera", "{TIME_SPACE_TOOL_NAME}"]\n+++\n\nGuide profile.\n',
+        encoding="utf-8",
+    )
+    get_profile_toolsets_path(instance_path).write_text(
+        json.dumps({"version": 1, "profiles": {"default": ["dance", TIME_SPACE_TOOL_NAME]}}),
+        encoding="utf-8",
+    )
+    client = _mount_rpc(instance_path, MagicMock(return_value=None), AsyncMock())
+
+    for profile, enabled_tools in [("guide", ["camera", "get_time"]), ("default", ["dance", "get_time"])]:
+        profile_tools = _rpc_call(client, "profile_tools.get", {"profile": profile})["result"]
+        assert profile_tools["enabled_tools"] == enabled_tools
+        assert profile_tools["unavailable_enabled_tools"] == []
+        assert TIME_SPACE_TOOL_NAME not in {tool["id"] for tool in profile_tools["available_tools"]}
+    installed_slugs = {space["slug"] for space in _rpc_call(client, "tool_spaces.list")["result"]["spaces"]}
+    assert TIME_SPACE_SLUG not in installed_slugs
+
+
+def test_reinstalled_time_space_is_hidden_and_reinstall_reports_its_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Old reinstall entries should offer only the core time tool and explain rejected reinstall attempts."""
+    instance_path, profiles_root = _configure_profiles(tmp_path, monkeypatch)
+    write_installed_tool_spaces(
+        instance_path,
+        InstalledToolSpacesManifest(spaces=[_seeded_time_space()]),
+    )
+    get_profile_toolsets_path(instance_path).write_text(
+        json.dumps({"version": 1, "profiles": {"default": [TIME_SPACE_TOOL_NAME]}}),
+        encoding="utf-8",
+    )
+    client = _mount_rpc(instance_path, MagicMock(return_value=None), AsyncMock())
+    discovery = MagicMock(side_effect=AssertionError("Retired Spaces must not be discovered"))
+    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.HfApi", discovery)
+    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.resolve_tool_space_sync", resolve_tool_space_sync)
+
+    profile_tools = _rpc_call(client, "profile_tools.get", {"profile": "default"})["result"]
+    assert profile_tools["enabled_tools"] == ["get_time"]
+    assert profile_tools["unavailable_enabled_tools"] == []
+    assert TIME_SPACE_TOOL_NAME not in {tool["id"] for tool in profile_tools["available_tools"]}
+    installed_slugs = {space["slug"] for space in _rpc_call(client, "tool_spaces.list")["result"]["spaces"]}
+    assert TIME_SPACE_SLUG not in installed_slugs
+
+    response = _rpc_call(client, "tool_spaces.add", {"slug": TIME_SPACE_SLUG})
+    assert "built-in get_time tool" in response["error"]["message"]
+    assert read_profile_tool_names("default", instance_path) == ["get_time"]
 
 
 def test_profile_tools_save_and_reset_control_one_profile(

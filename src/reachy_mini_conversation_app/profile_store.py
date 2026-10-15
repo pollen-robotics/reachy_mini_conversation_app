@@ -25,6 +25,8 @@ LEGACY_VOICE_FILENAME = "voice.txt"
 LEGACY_GREETING_FILENAME = "greeting.txt"
 _FRONT_MATTER_DELIMITER = "+++"
 _PROFILE_METADATA_FIELDS = {"schema_version", "default_tools", "voice", "greeting", "hidden"}
+# Tool IDs that saved profiles and overrides may still list, mapped to the tool that replaced them.
+_REPLACED_TOOL_NAMES = {"pollen_robotics_reachy_mini_time_tool__get_time": "get_time"}
 _STORE_LOCK = threading.Lock()
 
 
@@ -57,6 +59,7 @@ def normalize_tool_names(tool_names: Iterable[str]) -> list[str]:
     seen: set[str] = set()
     for tool_name in tool_names:
         candidate = tool_name.strip()
+        candidate = _REPLACED_TOOL_NAMES.get(candidate, candidate)
         if not candidate or candidate.startswith("#") or candidate in seen:
             continue
         normalized.append(candidate)
