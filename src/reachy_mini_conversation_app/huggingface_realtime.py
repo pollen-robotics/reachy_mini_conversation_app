@@ -556,6 +556,10 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         """
         await self._pending_responses.put(kwargs)
 
+    async def interrupt(self) -> None:
+        """Stop playback and cancel the response still being generated."""
+        await self._interrupt_playback(cancel_response_id=self._active_response_id)
+
     async def say(self, text: str) -> None:
         """Inject ``text`` as a turn and have the model voice it now.
 

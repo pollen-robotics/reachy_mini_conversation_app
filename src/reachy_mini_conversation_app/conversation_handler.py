@@ -192,3 +192,8 @@ class ConversationHandler(AsyncStreamHandler, ABC):
         open.
         """
         ...
+
+    @abstractmethod
+    async def interrupt(self) -> None:
+        """Stop playback and cancel the response still being generated."""
+        ...

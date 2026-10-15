@@ -566,7 +566,7 @@ class LocalStream:
                 raise JsonRpcError("say requires 'text'", reason="invalid_params", code=-32602)
             if not self.handler._is_connected():
                 raise JsonRpcError("no active session", reason="not_running")
-            await self.clear_audio_queue()
+            await self.handler.interrupt()
             await self.handler.say(text)
             return {"ok": True}
 
@@ -574,7 +574,7 @@ class LocalStream:
         async def _rpc_interrupt(_params: dict[str, object]) -> dict[str, object]:
             if not self.handler._is_connected():
                 raise JsonRpcError("no active session", reason="not_running")
-            await self.clear_audio_queue()
+            await self.handler.interrupt()
             self._last_turn_state = "listening"
             rpc.broadcast_threadsafe("conversation.turn", {"state": "listening", "reason": "interrupted"})
             return {"ok": True}

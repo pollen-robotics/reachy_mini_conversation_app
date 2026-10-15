@@ -998,10 +998,11 @@ def test_rpc_status_and_mic_over_websocket() -> None:
 
 
 def test_rpc_interrupt_broadcasts_turn_listening() -> None:
-    """conversation.interrupt clears playback and pushes a turn:listening event."""
+    """conversation.interrupt cancels the response and pushes a turn:listening event."""
     handler = MagicMock()
     handler.output_queue = asyncio.Queue()
     handler._is_connected.return_value = True
+    handler.interrupt = AsyncMock()
     app = FastAPI()
     stream = LocalStream(handler, _rpc_robot(), settings_app=app)
     stream._init_settings_ui_if_needed()
@@ -1012,6 +1013,7 @@ def test_rpc_interrupt_broadcasts_turn_listening() -> None:
     notes = [m for m in msgs if m.get("method") == "conversation.turn"]
     assert results and results[0]["result"] == {"ok": True}
     assert notes and notes[0]["params"] == {"state": "listening", "reason": "interrupted"}
+    handler.interrupt.assert_awaited_once()
 
 
 def test_rpc_say_requires_active_session() -> None:

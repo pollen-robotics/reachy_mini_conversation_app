@@ -1204,6 +1204,20 @@ async def test_cancel_failure_still_flushes_playback(caplog: pytest.LogCaptureFi
 
 
 @pytest.mark.asyncio
+async def test_interrupt_cancels_active_response_and_discards_its_audio() -> None:
+    """The stop RPC cancels generation, so later deltas of that response never play."""
+    handler = _plain_handler()
+    handler._audio_response_id = handler._active_response_id = "response-1"
+    handler._clear_queue = AsyncMock()
+    handler.connection = MagicMock()
+    handler.connection.response.cancel = AsyncMock()
+    await handler.interrupt()
+    handler.connection.response.cancel.assert_awaited_once_with(response_id="response-1")
+    handler._clear_queue.assert_awaited_once()
+    assert "response-1" in handler._discarded_response_ids
+
+
+@pytest.mark.asyncio
 async def test_debug_vad_reports_probability_and_barge_in_without_extra_inference(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
