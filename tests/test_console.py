@@ -1071,6 +1071,18 @@ def test_speech_settings_persist_and_request_conversation_reconnect(
     assert _rpc_call(app, "conversation.status")["result"]["local_vad_enabled"] is enabled
 
 
+def test_unchanged_speech_setting_keeps_the_conversation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Saving the current speech switch does not reconnect the conversation."""
+    monkeypatch.setattr(config, "LOCAL_VAD_ENABLED", True)
+    app = FastAPI()
+    stream = LocalStream(
+        MagicMock(), _rpc_robot(), settings_app=app, instance_path=tmp_path, handler_factory=lambda _voice: MagicMock()
+    )
+    stream._init_settings_ui_if_needed()
+    assert _rpc_call(app, "speech.config", {"local_vad_enabled": True})["result"]["local_vad_enabled"] is True
+    assert not stream._restart_requested.is_set()
+
+
 @pytest.mark.parametrize("invalid", ["false", 0, None, []])
 def test_speech_settings_reject_invalid_boolean_without_changes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid: object

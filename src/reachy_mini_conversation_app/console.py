@@ -615,7 +615,7 @@ class LocalStream:
             if "local_vad_enabled" in params and not isinstance(enabled, bool):
                 raise JsonRpcError("local_vad_enabled must be a boolean", reason="invalid_params", code=-32602)
             message = ""
-            if isinstance(enabled, bool):
+            if isinstance(enabled, bool) and enabled != config.LOCAL_VAD_ENABLED:
                 message = self._apply_setting_with_restart(
                     AppSettings(local_vad_enabled=enabled), "speech_settings_changed"
                 )
