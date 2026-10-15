@@ -43,8 +43,9 @@ function connect() {
       }
       pending.clear();
       if (!opened) reject(new RpcError("cannot reach /rpc", "disconnected"));
-      // Keep the event stream alive across drops while anyone is listening.
-      else if (subscribers.size > 0) setTimeout(() => connect().catch(() => {}), 1000);
+      // Keep the event stream alive while anyone is listening, across drops and
+      // when the page loads before the app has mounted /rpc.
+      if (subscribers.size > 0) setTimeout(() => connect().catch(() => {}), 1000);
     };
   });
   return connecting;

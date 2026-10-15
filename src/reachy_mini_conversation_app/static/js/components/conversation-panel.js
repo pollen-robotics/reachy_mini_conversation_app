@@ -3,7 +3,7 @@
  * of this run, so a page opened mid-conversation still shows earlier turns.
  * Timings show only when Settings turns them on (saved in this browser). */
 
-import { getConversationHistory, subscribe } from "../api.js";
+import { getConversationHistory, subscribe, untilReady } from "../api.js";
 import { SHOW_LATENCIES_KEY } from "../constants.js";
 import { h } from "../ui.js";
 
@@ -26,7 +26,7 @@ const STATUS_LABELS = Object.freeze({
 const STICK_TO_BOTTOM_PX = 24;
 
 /** Build the panel, driven by the header `toggle` button. Returns { root, dispose }. */
-export function createConversationPanel({ toggle }) {
+export function createConversationPanel({ toggle, signal }) {
   // Read once per Talk mount; a Settings change applies on return.
   const showLatencies = localStorage.getItem(SHOW_LATENCIES_KEY) === "1";
   let partialRow = null;
@@ -57,11 +57,14 @@ export function createConversationPanel({ toggle }) {
   const unsubscribers = Object.entries(renderers).map(([method, render]) =>
     subscribe(method, (params) => (pending ? pending.push([render, params]) : apply(render, params)))
   );
-  getConversationHistory()
+  // Retried: the desktop app can load this page before the app has mounted /rpc.
+  untilReady(getConversationHistory, signal)
     .then(({ events }) => {
       for (const { method, params } of events) apply(renderers[method], params);
     })
-    .catch((error) => console.warn("Failed to load the conversation history", error))
+    .catch((error) => {
+      if (!signal.aborted) console.warn("Failed to load the conversation history", error);
+    })
     .finally(() => {
       const buffered = pending;
       pending = null;

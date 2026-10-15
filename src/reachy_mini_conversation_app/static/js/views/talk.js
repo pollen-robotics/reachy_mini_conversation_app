@@ -55,6 +55,7 @@ export async function mountTalkView({ outlet, signal }) {
   syncMicAria();
   const conversationPanel = createConversationPanel({
     toggle: document.querySelector('[data-component="conversation-toggle"]'),
+    signal,
   });
 
   signal.addEventListener("abort", cleanup, { once: true });
