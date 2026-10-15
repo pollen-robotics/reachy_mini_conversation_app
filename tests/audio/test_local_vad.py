@@ -55,12 +55,14 @@ def test_partial_frames_keep_context_and_reset_clears_history(
     detector.process(half_chunk, 16000)
     session.run.assert_not_called()
     detector.process(half_chunk.reshape(-1, 1), 16000)
+    assert detector.speech_probability == pytest.approx(0.1)
     first_inputs = session.run.call_args.args[1]
     np.testing.assert_array_equal(first_inputs["input"][:, :64], 0.0)
     np.testing.assert_array_equal(first_inputs["input"][:, 64:], 0.5)
 
     detector.process(half_chunk, 16000)
     detector.reset()
+    assert detector.speech_probability == 0.0
     detector.process(half_chunk, 16000)
     detector.process(half_chunk, 16000)
     reset_inputs = session.run.call_args.args[1]
@@ -122,6 +124,28 @@ def test_failed_download_does_not_load_unverified_model(model_cache: tuple[Path,
     vad_mod.ort.InferenceSession.assert_not_called()
     assert not (cache / "LICENSE").exists()
     assert {path.name for path in cache.iterdir()} <= {"silero_vad_16k_op15.onnx"}
+
+
+def test_barge_in_candidate_follows_speech_during_playback_only(
+    monkeypatch: pytest.MonkeyPatch, model_cache: tuple[Path, MagicMock]
+) -> None:
+    """A candidate starts at 0.6, holds down to 0.45, clears after 64 ms below that, and never outside playback."""
+    probabilities = iter([0.5, 0.7, 0.5, 0.1, 0.1, 0.7, 0.7])
+    session = MagicMock()
+    session.run.side_effect = lambda *_args: [
+        np.array([[next(probabilities)]], dtype=np.float32),
+        np.zeros((2, 1, 128), dtype=np.float32),
+    ]
+    monkeypatch.setattr(vad_mod.ort, "InferenceSession", lambda *_args, **_kwargs: session)
+    detector = SileroVAD()
+    chunk = np.zeros(512, dtype=np.int16)
+    candidates = []
+    for _ in range(6):
+        detector.process(chunk, 16000, detect_barge_in=True)
+        candidates.append(detector.barge_in_candidate)
+    assert candidates == [False, True, True, True, False, True]
+    detector.process(chunk, 16000)
+    assert not detector.barge_in_candidate
 
 
 @pytest.mark.parametrize("input_samples", [173, 512, 4096])

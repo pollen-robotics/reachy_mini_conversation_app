@@ -263,28 +263,36 @@ function buildVoiceSection() {
 
 function buildSpeechSection() {
   const localVad = h("input", { type: "checkbox", name: "local_vad_enabled", disabled: "disabled" });
+  const localBargeIn = h("input", { type: "checkbox", name: "local_barge_in_enabled", disabled: "disabled" });
   const status = h("p", { class: "settings-status", role: "status", "aria-live": "polite" });
   const submitButton = h("button", { type: "submit", class: "btn btn--primary", disabled: "disabled" }, "Save speech settings");
   const form = h("form", { class: "settings-form" },
     h("label", { class: "settings-toggle" }, localVad,
       h("span", {}, h("strong", {}, "Local speech detection"),
         h("span", { class: "settings-hint" }, "Detect speech on the robot to pause antenna and idle movement sooner."))),
+    h("label", { class: "settings-toggle" }, localBargeIn,
+      h("span", {}, h("strong", {}, "Local barge-in"),
+        h("span", { class: "settings-hint" }, "Stop the robot's speech sooner when you speak. Requires local speech detection."))),
     h("p", { class: "settings-hint" }, "Changes are saved and reconnect the conversation to apply."),
     h("div", { class: "settings-actions" }, submitButton), status);
   const element = h("section", { class: "settings-section" },
     h("h2", { class: "settings-section-title" }, "Speech behavior"), form);
+
+  localVad.addEventListener("change", () => { localBargeIn.disabled = !localVad.checked; });
 
   form.addEventListener("submit", async event => {
     event.preventDefault();
     if (submitButton.disabled) return;
     submitButton.disabled = true;
     localVad.disabled = true;
+    localBargeIn.disabled = true;
     form.setAttribute("aria-busy", "true");
     status.classList.remove("is-error");
     status.textContent = "Saving…";
     try {
-      const result = await saveSpeechConfig({ local_vad_enabled: localVad.checked });
+      const result = await saveSpeechConfig({ local_vad_enabled: localVad.checked, local_barge_in_enabled: localBargeIn.checked });
       localVad.checked = result.local_vad_enabled;
+      localBargeIn.checked = result.local_barge_in_enabled;
       status.textContent = result.message || "Saved.";
     } catch (error) {
       status.textContent = `Failed to save: ${describeError(error)}`;
@@ -292,6 +300,7 @@ function buildSpeechSection() {
     } finally {
       submitButton.disabled = false;
       localVad.disabled = false;
+      localBargeIn.disabled = !localVad.checked;
       form.removeAttribute("aria-busy");
     }
   });
@@ -299,7 +308,9 @@ function buildSpeechSection() {
     element,
     syncFromStatus(payload) {
       localVad.checked = payload.local_vad_enabled;
+      localBargeIn.checked = payload.local_barge_in_enabled;
       localVad.disabled = false;
+      localBargeIn.disabled = !localVad.checked;
       submitButton.disabled = false;
     },
   };
