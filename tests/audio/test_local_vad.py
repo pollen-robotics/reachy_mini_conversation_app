@@ -63,7 +63,7 @@ def test_streaming_speech_holds_through_pauses_and_resets(
     np.testing.assert_array_equal(first_inputs["input"][:, 64:], 0.5)
 
     for _ in range(12):
-        assert detector.process(silence, 16000)
+        assert detector.process(silence.reshape(-1, 1), 16000)
     assert detector.process(silence, 16000)
     for _ in range(12):
         assert detector.process(silence, 16000)

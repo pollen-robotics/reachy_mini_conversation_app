@@ -78,7 +78,7 @@ class SileroVAD:
         """Return whether speech is active, holding through 400 ms of silence."""
         if sample_rate != self.SAMPLE_RATE:
             raise ValueError("Local VAD requires 16 kHz microphone audio")
-        self._pending = np.concatenate((self._pending, audio.astype(np.float32) / 32768.0))
+        self._pending = np.concatenate((self._pending, audio.reshape(-1).astype(np.float32) / 32768.0))
         offset = 0
         while self._pending.size - offset >= self.CHUNK_SAMPLES:
             chunk = self._pending[offset : offset + self.CHUNK_SAMPLES].reshape(1, -1)
