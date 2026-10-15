@@ -105,6 +105,31 @@ def _native_rate_audio_pcm() -> HFNativeRateAudioPCM:
     return {"type": "audio/pcm", "rate": None}
 
 
+def _parse_turn_latency(metadata: dict[str, str] | None) -> dict[str, int | str | None] | None:
+    """Convert response.done turn-latency metadata to ms; None when absent or malformed."""
+    raw = (metadata or {}).get(_TURN_LATENCY_METADATA_KEY)
+    if raw is None:
+        return None
+    try:
+        turn_latency = json.loads(raw)
+    except (TypeError, ValueError) as e:
+        logger.warning("Ignoring malformed turn latency metadata: %s", e)
+        return None
+    if not isinstance(turn_latency, dict):
+        return None
+    latency: dict[str, int | str | None] = {}
+    for stage in ("vad_decision", "stt", "llm", "tts_ttfa", "e2e", "hold"):
+        seconds = turn_latency.get(f"{stage}_s")
+        if isinstance(seconds, (int, float)) and math.isfinite(seconds):
+            latency[f"{stage}_ms"] = round(seconds * 1000)
+        else:
+            latency[f"{stage}_ms"] = None
+    for field in ("smart_status", "status"):
+        value = turn_latency.get(field)
+        latency[field] = value if isinstance(value, str) else None
+    return latency
+
+
 def _build_openai_compatible_client_from_realtime_url(
     realtime_url: str,
     bearer_token: str | None,
@@ -930,24 +955,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         self._response_done_event.set()
                         self._response_started_or_rejected_event.set()
                         logger.debug("Response done")
-                        latency_json = (event.response.metadata or {}).get(_TURN_LATENCY_METADATA_KEY)
-                        turn_latency = None
-                        if latency_json is not None:
-                            try:
-                                turn_latency = json.loads(latency_json)
-                            except (TypeError, ValueError) as e:
-                                logger.warning("Ignoring malformed turn latency metadata: %s", e)
-                        if isinstance(turn_latency, dict):
-                            latency: dict[str, int | str | None] = {
-                                f"{stage}_ms": round(seconds * 1000)
-                                if isinstance(seconds := turn_latency.get(f"{stage}_s"), (int, float))
-                                and math.isfinite(seconds)
-                                else None
-                                for stage in ("vad_decision", "stt", "llm", "tts_ttfa", "e2e", "hold")
-                            }
-                            for field in ("smart_status", "status"):
-                                value = turn_latency.get(field)
-                                latency[field] = value if isinstance(value, str) else None
+                        latency = _parse_turn_latency(event.response.metadata)
+                        if latency is not None:
                             self._emit_latency(latency)
 
                     if event.type == "conversation.item.input_audio_transcription.delta":
