@@ -943,8 +943,9 @@ class LocalStream:
         def read_microphone() -> None:
             # The SDK read blocks up to 20 ms: one reader thread costs less than a thread hop per frame.
             while not stop_reading.is_set() and not self._stop_event.is_set():
+                warming_up = self._audio_warming_up  # a read spanning the end of warmup still holds warmup audio
                 audio_frame = self._robot.media.get_audio_sample()
-                if audio_frame is not None and not self._audio_warming_up:
+                if audio_frame is not None and not warming_up:
                     loop.call_soon_threadsafe(frames.put_nowait, (input_sample_rate, audio_frame))
 
         reader = threading.Thread(target=read_microphone, name="microphone-reader", daemon=True)
