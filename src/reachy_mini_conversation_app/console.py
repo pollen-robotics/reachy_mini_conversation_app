@@ -7,6 +7,7 @@ served via the Reachy Mini Apps settings server so users can configure it.
 import time
 import asyncio
 import logging
+import threading
 from typing import Any, List, Optional
 from pathlib import Path
 from collections.abc import Callable
@@ -55,7 +56,7 @@ from reachy_mini_conversation_app.personality_routes import (
 )
 from reachy_mini_conversation_app.profile_tool_routes import register_profile_tool_methods
 from reachy_mini_conversation_app.audio.startup_config import apply_audio_startup_config
-from reachy_mini_conversation_app.conversation_handler import VADStatus, ConversationHandler
+from reachy_mini_conversation_app.conversation_handler import VADStatus, AudioFrame, ConversationHandler
 
 
 try:
@@ -930,12 +931,31 @@ class LocalStream:
         input_sample_rate = self._robot.media.get_input_audio_samplerate()
         logger.debug(f"Audio recording started at {input_sample_rate} Hz")
 
-        while not self._stop_event.is_set():
-            audio_frame = await asyncio.to_thread(self._robot.media.get_audio_sample)
-            if audio_frame is not None and not self._mic_muted:
-                await self.handler.receive((input_sample_rate, audio_frame))
-                self._emit_level("user", audio_frame)
-            await asyncio.sleep(0)  # avoid busy loop
+        loop = asyncio.get_running_loop()
+        frames: asyncio.Queue[AudioFrame] = asyncio.Queue()
+        stop_reading = threading.Event()
+
+        def read_microphone() -> None:
+            # The SDK read blocks up to 20 ms: one reader thread costs less than a thread hop per frame.
+            while not stop_reading.is_set() and not self._stop_event.is_set():
+                audio_frame = self._robot.media.get_audio_sample()
+                if audio_frame is not None:
+                    loop.call_soon_threadsafe(frames.put_nowait, (input_sample_rate, audio_frame))
+
+        reader = threading.Thread(target=read_microphone, name="microphone-reader", daemon=True)
+        reader.start()
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    frame = await asyncio.wait_for(frames.get(), timeout=0.5)
+                except asyncio.TimeoutError:
+                    continue
+                if not self._mic_muted:
+                    await self.handler.receive(frame)
+                    self._emit_level("user", frame[1])
+        finally:
+            stop_reading.set()
+            await asyncio.to_thread(reader.join)
 
     async def play_loop(self) -> None:
         """Fetch outputs from the handler: log text and play audio frames."""

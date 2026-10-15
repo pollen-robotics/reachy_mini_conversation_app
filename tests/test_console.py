@@ -816,13 +816,16 @@ def _stop_after(stream: LocalStream, value: Any) -> Callable[[], Any]:
 async def test_record_loop_forwards_unmuted_frames() -> None:
     """A recorded frame is forwarded to the handler with the input sample rate."""
     frame = np.zeros(4, dtype=np.int16)
-    robot = _audio_robot(get_input_audio_samplerate=MagicMock(return_value=16000), get_audio_sample=MagicMock())
+    recorded = [frame]
+    robot = _audio_robot(
+        get_input_audio_samplerate=MagicMock(return_value=16000),
+        get_audio_sample=lambda: recorded.pop() if recorded else None,
+    )
     handler = MagicMock()
-    handler.receive = AsyncMock()
     stream = LocalStream(handler, robot)
-    robot.media.get_audio_sample.side_effect = _stop_after(stream, frame)
+    handler.receive = AsyncMock(side_effect=lambda _frame: stream._stop_event.set())
 
-    await stream.record_loop()
+    await asyncio.wait_for(stream.record_loop(), timeout=2)
 
     handler.receive.assert_awaited_once_with((16000, frame))
 
