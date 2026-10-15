@@ -1107,58 +1107,32 @@ async def test_run_session_response_lifecycle_toggles_done_event(monkeypatch: An
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("generation_active", [False, True])
-async def test_local_barge_in_ducks_rejects_then_interrupts_without_stopping_microphone(
-    monkeypatch: pytest.MonkeyPatch, generation_active: bool
-) -> None:
-    """Candidates are reversible; confirmation flushes buffered playback and cancels only active generation."""
+async def test_local_barge_in_only_ducks_until_server_confirms(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sustained local speech ducks playback reversibly; it never cancels or flushes on its own."""
     monkeypatch.setattr(config, "LOCAL_BARGE_IN_ENABLED", True)
     handler = _plain_handler()
     detector = MagicMock()
     detector.process.return_value = True
     detector.barge_in_candidate = True
-    detector.barge_in_confirmed = False
     handler._local_vad = detector
-    handler._audio_response_id = "old-response"
-    handler._active_response_id = "old-response" if generation_active else None
+    handler._audio_response_id = handler._active_response_id = "response"
     handler.playback_until = time.monotonic() + 10
-    flush_started = asyncio.Event()
-    allow_flush = asyncio.Event()
-
-    async def flush() -> None:
-        flush_started.set()
-        await allow_flush.wait()
-
-    handler._clear_queue = AsyncMock(side_effect=flush)
+    handler._clear_queue = AsyncMock()
     connection = MagicMock()
     connection.response.cancel = AsyncMock()
     connection.input_audio_buffer.append = AsyncMock()
     handler.connection = connection
     microphone = np.zeros(512, dtype=np.int16)
-    await handler.receive((16000, microphone))
+    for _ in range(30):
+        await handler.receive((16000, microphone))
     assert handler.playback_gain == 0.25
-    connection.response.cancel.assert_not_awaited()
-    handler._clear_queue.assert_not_awaited()
-
     detector.barge_in_candidate = False
     await handler.receive((16000, microphone))
     assert handler.playback_gain == 1.0
-    detector.barge_in_candidate = True
-    detector.barge_in_confirmed = True
-    await handler.receive((16000, microphone))
-    await asyncio.wait_for(flush_started.wait(), timeout=1)
-    await handler.receive((16000, microphone))
-    assert connection.input_audio_buffer.append.await_count == 4
-    assert "old-response" in handler._discarded_response_ids
-    if generation_active:
-        connection.response.cancel.assert_awaited_once_with(response_id="old-response")
-    else:
-        connection.response.cancel.assert_not_awaited()
-    await handler._interrupt_playback()
-    handler._clear_queue.assert_awaited_once()
-    allow_flush.set()
+    connection.response.cancel.assert_not_awaited()
+    handler._clear_queue.assert_not_awaited()
+    assert connection.input_audio_buffer.append.await_count == 31
     await handler.shutdown()
-    assert handler.playback_gain == 1.0
 
 
 @pytest.mark.asyncio
@@ -1198,7 +1172,7 @@ async def test_barge_in_disabled_or_idle_does_not_cancel(monkeypatch: pytest.Mon
     handler = _plain_handler()
     detector = MagicMock()
     detector.process.return_value = True
-    detector.barge_in_candidate = detector.barge_in_confirmed = True
+    detector.barge_in_candidate = True
     handler._local_vad = detector
     handler.connection = MagicMock()
     handler.connection.input_audio_buffer.append = AsyncMock()
@@ -1216,26 +1190,15 @@ async def test_barge_in_disabled_or_idle_does_not_cancel(monkeypatch: pytest.Mon
 
 
 @pytest.mark.asyncio
-async def test_local_cancel_failure_still_flushes_and_forwards_audio(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """A lost cancellation message cannot prevent the local playback stop."""
-    monkeypatch.setattr(config, "LOCAL_BARGE_IN_ENABLED", True)
+async def test_cancel_failure_still_flushes_playback(caplog: pytest.LogCaptureFixture) -> None:
+    """A lost cancellation message cannot prevent the playback stop."""
     handler = _plain_handler()
-    detector = MagicMock()
-    detector.process.return_value = True
-    detector.barge_in_candidate = detector.barge_in_confirmed = True
-    handler._local_vad = detector
     handler._audio_response_id = handler._active_response_id = "response-1"
-    handler.playback_until = time.monotonic() + 10
     handler._clear_queue = AsyncMock()
     handler.connection = MagicMock()
     handler.connection.response.cancel = AsyncMock(side_effect=OSError("disconnected"))
-    handler.connection.input_audio_buffer.append = AsyncMock()
-    await handler.receive((16000, np.zeros(512, dtype=np.int16)))
-    await asyncio.sleep(0)
+    await handler._interrupt_playback(audio_response_id="response-1", cancel_response_id="response-1")
     handler._clear_queue.assert_awaited_once()
-    handler.connection.input_audio_buffer.append.assert_awaited_once()
     assert "Failed to cancel locally interrupted response" in caplog.text
     await handler.shutdown()
 
@@ -1251,7 +1214,6 @@ async def test_debug_vad_reports_probability_and_barge_in_without_extra_inferenc
     detector.process.return_value = True
     detector.speech_probability = 0.8
     detector.barge_in_candidate = False
-    detector.barge_in_confirmed = False
     handler._local_vad = detector
     handler._audio_response_id = "response"
     handler.playback_until = 1000.0
@@ -1287,18 +1249,10 @@ async def test_debug_vad_reports_probability_and_barge_in_without_extra_inferenc
     await handler.receive(frame)
     assert not statuses[-1]["barge_in_candidate"]
     assert statuses[-1]["playback_gain"] == 1.0
-    detector.barge_in_candidate = True
-    detector.barge_in_confirmed = True
-    await handler.receive(frame)
-    interrupt = handler._local_interrupt_task
-    if interrupt is not None:
-        await interrupt
-    assert statuses[-1]["barge_in_confirmed"]
-    assert statuses[-1]["playback_gain"] == 0.0
-    assert detector.process.call_count == 6
+    assert detector.process.call_count == 5
 
     caplog.set_level(logging.WARNING, logger=hf_mod.__name__)
     previous_reports = len(statuses)
     handler._set_listening(server=False)
     assert len(statuses) == previous_reports
-    await handler._reset_listening()
+    handler._reset_listening()

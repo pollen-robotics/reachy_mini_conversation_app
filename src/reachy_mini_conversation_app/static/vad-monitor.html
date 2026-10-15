@@ -31,7 +31,6 @@
       <dt>Server speech detected</dt><dd id="server_speech">—</dd>
       <dt>Movement listening state</dt><dd id="listening">—</dd>
       <dt>Possible barge-in</dt><dd id="barge_in_candidate">—</dd>
-      <dt>Barge-in confirmed</dt><dd id="barge_in_confirmed">—</dd>
       <dt>Playback amplitude</dt><dd id="playback_gain">—</dd>
     </dl>
     <p id="last-update">Waiting for VAD events…</p>
@@ -47,9 +46,9 @@
   import { subscribe, rpcCall } from "./js/api.js";
 
   const fields = ["available", "local_speech", "server_speech", "listening",
-    "barge_in_candidate", "barge_in_confirmed", "playback_gain"];
+    "barge_in_candidate", "playback_gain"];
   const labels = ["Local VAD available", "Local speech", "Server speech", "Movement listening",
-    "Possible barge-in", "Barge-in confirmed", "Playback amplitude"];
+    "Possible barge-in", "Playback amplitude"];
   const entries = [];
   let previous = null;
   let receivedAt = 0;
@@ -73,7 +72,7 @@
     previous = status;
   });
   subscribe("conversation.activity", status => {
-    if (["user_speech_started", "user_speech_stopped", "local_barge_in"].includes(status.reason))
+    if (["user_speech_started", "user_speech_stopped"].includes(status.reason))
       writeEvent(status.reason, Date.now());
   });
 

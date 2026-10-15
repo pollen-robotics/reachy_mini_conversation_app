@@ -33,7 +33,6 @@ class VADStatus(TypedDict):
     server_speech: bool
     listening: bool
     barge_in_candidate: bool
-    barge_in_confirmed: bool
     playback_gain: float
 
 

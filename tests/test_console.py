@@ -1225,7 +1225,6 @@ def test_rpc_vad_notification_broadcast() -> None:
         "server_speech": False,
         "listening": True,
         "barge_in_candidate": True,
-        "barge_in_confirmed": False,
         "playback_gain": 0.25,
     }
     observer = handler.set_vad_observer.call_args.args[0]

@@ -141,13 +141,12 @@ def test_failed_download_does_not_load_unverified_model(model_cache: tuple[Path,
     assert {path.name for path in cache.iterdir()} <= {"silero_vad_16k_op15.onnx"}
 
 
-@pytest.mark.parametrize("batched", [False, True])
-def test_barge_in_requires_active_speech_and_rejects_noise(
-    monkeypatch: pytest.MonkeyPatch, model_cache: tuple[Path, MagicMock], batched: bool
+def test_barge_in_candidate_follows_speech_during_playback_only(
+    monkeypatch: pytest.MonkeyPatch, model_cache: tuple[Path, MagicMock]
 ) -> None:
-    """Movement's silence hold cannot confirm an interruption after a single noisy frame."""
+    """A candidate starts at 0.6, holds down to 0.45, clears after 64 ms below that, and never outside playback."""
+    probabilities = iter([0.5, 0.7, 0.5, 0.1, 0.1, 0.7, 0.7])
     session = MagicMock()
-    probabilities = iter([0.7, 0.1, 0.1, 0.7, *([0.5] * 11), 0.1, 0.1, *([0.8] * 12)])
     session.run.side_effect = lambda *_args: [
         np.array([[next(probabilities)]], dtype=np.float32),
         np.zeros((2, 1, 128), dtype=np.float32),
@@ -155,44 +154,13 @@ def test_barge_in_requires_active_speech_and_rejects_noise(
     monkeypatch.setattr(vad_mod.ort, "InferenceSession", lambda *_args, **_kwargs: session)
     detector = SileroVAD()
     chunk = np.zeros(512, dtype=np.int16)
-    detector.process(chunk, 16000, detect_barge_in=True)
-    assert detector.barge_in_candidate and not detector.barge_in_confirmed
-    for _ in range(2):
+    candidates = []
+    for _ in range(6):
         detector.process(chunk, 16000, detect_barge_in=True)
-    assert not detector.barge_in_candidate and not detector.barge_in_confirmed
-    if batched:
-        detector.process(np.zeros(512 * 12, dtype=np.int16), 16000, detect_barge_in=True)
-    else:
-        for _ in range(11):
-            detector.process(chunk, 16000, detect_barge_in=True)
-            assert not detector.barge_in_confirmed
-        detector.process(chunk, 16000, detect_barge_in=True)
-    assert detector.barge_in_confirmed
-    for _ in range(2):
-        detector.process(chunk, 16000, detect_barge_in=True)
+        candidates.append(detector.barge_in_candidate)
+    assert candidates == [False, True, True, True, False, True]
+    detector.process(chunk, 16000)
     assert not detector.barge_in_candidate
-    for _ in range(12):
-        detector.process(chunk, 16000)
-    assert not detector.barge_in_candidate and not detector.barge_in_confirmed
-    detector.reset()
-    assert not detector.barge_in_confirmed
-
-
-def test_batched_speech_followed_by_silence_still_confirms_barge_in(
-    monkeypatch: pytest.MonkeyPatch, model_cache: tuple[Path, MagicMock]
-) -> None:
-    """A completed valid utterance inside a large microphone buffer still interrupts."""
-    probabilities = iter([*([0.8] * 12), 0.1, 0.1])
-    session = MagicMock()
-    session.run.side_effect = lambda *_args: [
-        np.array([[next(probabilities)]], dtype=np.float32),
-        np.zeros((2, 1, 128), dtype=np.float32),
-    ]
-    monkeypatch.setattr(vad_mod.ort, "InferenceSession", lambda *_args, **_kwargs: session)
-    detector = SileroVAD()
-    detector.process(np.zeros(512 * 14, dtype=np.int16), 16000, detect_barge_in=True)
-    assert not detector.barge_in_candidate
-    assert detector.barge_in_confirmed
 
 
 @pytest.mark.parametrize("input_samples", [173, 512, 4096])

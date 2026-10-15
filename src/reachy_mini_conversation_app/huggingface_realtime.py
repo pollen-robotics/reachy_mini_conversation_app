@@ -178,7 +178,6 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self._audio_response_id: str | None = None
         self._discarded_response_ids: deque[str] = deque(maxlen=32)
         self._playback_interrupted = False
-        self._local_interrupt_task: asyncio.Task[None] | None = None
 
     def _set_listening(self, *, local: bool | None = None, server: bool | None = None) -> None:
         if local is not None:
@@ -200,14 +199,12 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             return
         detector = self._local_vad
         candidate = detector is not None and detector.barge_in_candidate
-        confirmed = detector is not None and detector.barge_in_confirmed
         flags = (
             detector is not None,
             self._local_speech,
             self._server_speech,
             self._movement_listening,
             candidate,
-            confirmed,
             self.playback_gain,
         )
         now = time.monotonic()
@@ -223,7 +220,6 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             "server_speech": self._server_speech,
             "listening": self._movement_listening,
             "barge_in_candidate": candidate,
-            "barge_in_confirmed": confirmed,
             "playback_gain": self.playback_gain,
         }
         try:
@@ -231,9 +227,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         except Exception as exc:
             logger.warning("VAD observer failed: %s", exc)
 
-    async def _reset_listening(self) -> None:
-        if self._local_interrupt_task is not None:
-            await self._local_interrupt_task
+    def _reset_listening(self) -> None:
         if self._local_speech_timeout is not None:
             self._local_speech_timeout.cancel()
             self._local_speech_timeout = None
@@ -241,13 +235,6 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             self._local_vad.reset()
         self._local_audio_at = None
         self._set_listening(local=False, server=False)
-
-    def _local_interrupt_finished(self, task: asyncio.Task[None]) -> None:
-        self._local_interrupt_task = None
-        if not task.cancelled():
-            exception = task.exception()
-            if exception is not None:
-                logger.error("Local playback interruption failed: %s", exception)
 
     async def _interrupt_playback(
         self, *, audio_response_id: str | None = None, cancel_response_id: str | None = None
@@ -1092,7 +1079,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                             )
             finally:
                 self.connection = None
-                await self._reset_listening()
+                self._reset_listening()
                 self._active_response_id = None
                 self._audio_response_id = None
                 # Stop the response sender worker.
@@ -1141,7 +1128,6 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             except Exception as e:
                 logger.debug("Dropping audio frame: connection not ready (%s)", e)
 
-        confirmed_barge_in = False
         if self._local_vad is not None:
             if self._local_speech_timeout is not None:
                 self._local_speech_timeout.cancel()
@@ -1166,8 +1152,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 local_speech = False
             self._set_listening(local=local_speech)
             if self.paced_playback and self._local_vad is not None and not self._playback_interrupted:
+                # Only duck: stopping waits for server VAD, so loud background speech cannot drop the turn.
                 self.playback_gain = 0.25 if detect_barge_in and self._local_vad.barge_in_candidate else 1.0
-                confirmed_barge_in = detect_barge_in and self._local_vad.barge_in_confirmed
             self._report_vad()
             if local_speech:
                 # Muting or losing the microphone must not leave a stale local vote.
@@ -1175,19 +1161,9 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                     0.5, lambda: self._set_listening(local=False)
                 )
 
-        if confirmed_barge_in:
-            self._mark_activity("local_barge_in")
-            if self._local_interrupt_task is None:
-                self._local_interrupt_task = asyncio.create_task(
-                    self._interrupt_playback(
-                        audio_response_id=self._audio_response_id, cancel_response_id=self._active_response_id
-                    )
-                )
-                self._local_interrupt_task.add_done_callback(self._local_interrupt_finished)
-
     async def shutdown(self) -> None:
         """Shutdown the handler."""
-        await self._reset_listening()
+        self._reset_listening()
         self._local_vad = None
         # Unblock the response sender worker so it can exit
         self._response_done_event.set()
