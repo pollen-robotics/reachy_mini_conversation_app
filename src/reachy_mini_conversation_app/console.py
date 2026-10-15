@@ -103,6 +103,7 @@ LEGACY_STARTUP_ENV_NAMES = (
     "REACHY_MINI_VOICE_OVERRIDE",
 )
 BACKEND_RETRY_DELAY_SECONDS = 5.0
+PLAYBACK_LEAD_SECONDS = 0.1  # paced chunks reach the SDK this far ahead of their slot
 
 
 class LocalStream:
@@ -130,6 +131,7 @@ class LocalStream:
         self._robot = robot
         self._stop_event = asyncio.Event()
         self._playback_flush_lock = asyncio.Lock()
+        self._playback_clock = 0.0  # monotonic end of audio pushed to the SDK
         self._restart_requested = asyncio.Event()
         self._tasks: List[asyncio.Task[None]] = []
         self._handler_factory = handler_factory
@@ -887,6 +889,7 @@ class LocalStream:
             handler = self.handler
             handler.playback_epoch += 1
             handler.playback_until = 0.0
+            self._playback_clock = 0.0
             handler.playback_pending_frames = 0
             handler.playback_ready.clear()
             self._drain_output_queue()
@@ -980,9 +983,13 @@ class LocalStream:
 
                 if handler.paced_playback is True:
                     chunk_samples = max(1, sample_rate // 50)
-                    next_chunk_at = time.monotonic()
                     for offset in range(0, audio_frame.size, chunk_samples):
-                        await asyncio.sleep(max(0.0, next_chunk_at - time.monotonic()))
+                        # One schedule across frames: the SDK lays follow-up buffers back to back and
+                        # only re-anchors after a 200 ms gap, so restarting per frame accumulated lateness.
+                        now = time.monotonic()
+                        if now > self._playback_clock + 0.2:
+                            self._playback_clock = now
+                        await asyncio.sleep(max(0.0, self._playback_clock - PLAYBACK_LEAD_SECONDS - now))
                         await handler.playback_ready.wait()
                         if (
                             self._stop_event.is_set()
@@ -993,9 +1000,8 @@ class LocalStream:
                         chunk = audio_frame[offset : offset + chunk_samples] * handler.playback_gain
                         self._robot.media.push_audio_sample(chunk)
                         self._emit_level("assistant", chunk)
-                        next_chunk_at = max(next_chunk_at + chunk.size / sample_rate, time.monotonic())
-                        handler.playback_until = next_chunk_at + 0.1
-                    await asyncio.sleep(max(0.0, next_chunk_at - time.monotonic()))
+                        self._playback_clock += chunk.size / sample_rate
+                        handler.playback_until = self._playback_clock + 0.1
                 else:
                     self._robot.media.push_audio_sample(audio_frame)
                     self._emit_level("assistant", audio_frame)

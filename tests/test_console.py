@@ -875,6 +875,8 @@ async def test_play_loop_pushes_mono_audio_as_float32() -> None:
     """A mono int16 frame is pushed to the speaker as float32."""
     robot = _audio_robot(push_audio_sample=MagicMock())
     handler = MagicMock()
+    handler.playback_ready = asyncio.Event()
+    handler.playback_ready.set()
     stream = LocalStream(handler, robot)
     handler.playback_frame_epochs = {}
     handler.emit = AsyncMock(side_effect=_stop_after(stream, (24000, np.zeros(4, dtype=np.int16))))
@@ -892,6 +894,8 @@ async def test_play_loop_downmixes_stereo_before_pushing() -> None:
     """A stereo frame is reduced to a single mono channel before playback."""
     robot = _audio_robot(push_audio_sample=MagicMock())
     handler = MagicMock()
+    handler.playback_ready = asyncio.Event()
+    handler.playback_ready.set()
     stream = LocalStream(handler, robot)
     stereo = np.zeros((4, 2), dtype=np.int16)
     handler.playback_frame_epochs = {}
@@ -1125,6 +1129,7 @@ async def test_playback_waiting_during_flush_keeps_only_current_frames(stale: bo
     handler.paced_playback = False
     handler.playback_epoch = 0
     handler.playback_frame_epochs = {}
+    handler.playback_ready = asyncio.Event()
     handler.output_queue = asyncio.Queue()
     frame = np.ones(320, dtype=np.int16)
     waiting = asyncio.Event()
@@ -1146,6 +1151,45 @@ async def test_playback_waiting_during_flush_keeps_only_current_frames(stale: bo
     release.set()
     await asyncio.wait_for(playback, timeout=1)
     assert robot.media.push_audio_sample.call_count == (0 if stale else 1)
+
+
+@pytest.mark.asyncio
+async def test_paced_playback_keeps_one_schedule_across_frames(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A slow emit between frames is absorbed by the lead instead of pushing later chunks past their slot."""
+    clock = [100.0]
+
+    async def fake_sleep(delay: float) -> None:
+        clock[0] += max(0.0, delay)
+
+    monkeypatch.setattr(console_mod, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(console_mod.asyncio, "sleep", fake_sleep)
+    handler = MagicMock()
+    handler.paced_playback = True
+    handler.playback_pending_frames = 2
+    handler.playback_epoch = 0
+    handler.playback_frame_epochs = {}
+    handler.playback_gain = 1.0
+    handler.playback_ready = asyncio.Event()
+    handler.playback_ready.set()
+    frames = [(16000, np.ones(3200, dtype=np.int16)) for _ in range(2)]
+    push_times: list[float] = []
+    robot = _audio_robot(push_audio_sample=lambda _chunk: push_times.append(clock[0]))
+    stream = LocalStream(handler, robot)
+
+    async def emit() -> tuple[int, np.ndarray]:
+        if not frames:
+            stream._stop_event.set()
+            return 16000, np.zeros(0, dtype=np.int16)
+        if len(frames) == 1:
+            clock[0] += 0.05  # slow delta between the two frames
+        return frames.pop(0)
+
+    handler.emit = emit
+    await stream.play_loop()
+
+    assert len(push_times) == 20
+    assert all(pushed <= 100.0 + 0.02 * slot for slot, pushed in enumerate(push_times))
+    assert stream._playback_clock == pytest.approx(100.4)
 
 
 @pytest.mark.asyncio
