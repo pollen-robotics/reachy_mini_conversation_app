@@ -1154,6 +1154,43 @@ async def test_playback_waiting_during_flush_keeps_only_current_frames(stale: bo
 
 
 @pytest.mark.asyncio
+async def test_unpaced_playback_waits_for_flush_to_finish() -> None:
+    """Without pacing, a frame of the new epoch is not pushed while the SDK flush is running."""
+    flushing = threading.Event()
+    release = threading.Event()
+
+    def clear_player() -> None:
+        flushing.set()
+        assert release.wait(timeout=2)
+
+    pushed: list[np.ndarray] = []
+    robot = _audio_robot(push_audio_sample=pushed.append)
+    robot.media.audio = SimpleNamespace(clear_player=clear_player)
+    handler = MagicMock()
+    handler.paced_playback = False
+    handler.playback_epoch = 0
+    handler.playback_frame_epochs = {}
+    handler.playback_ready = asyncio.Event()
+    handler.playback_ready.set()
+    handler.output_queue = asyncio.Queue()
+    stream = LocalStream(handler, robot)
+    flush = asyncio.create_task(stream.clear_audio_queue())
+    assert await asyncio.to_thread(flushing.wait, 1)
+
+    async def emit() -> tuple[int, np.ndarray]:
+        stream._stop_event.set()
+        return 16000, np.ones(320, dtype=np.int16)
+
+    handler.emit = emit
+    playback = asyncio.create_task(stream.play_loop())
+    await asyncio.sleep(0.05)
+    assert not pushed
+    release.set()
+    await asyncio.wait_for(asyncio.gather(flush, playback), timeout=2)
+    assert len(pushed) == 1
+
+
+@pytest.mark.asyncio
 async def test_paced_playback_keeps_one_schedule_across_frames(monkeypatch: pytest.MonkeyPatch) -> None:
     """A slow emit between frames is absorbed by the lead instead of pushing later chunks past their slot."""
     clock = [100.0]

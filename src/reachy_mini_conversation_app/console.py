@@ -1003,6 +1003,10 @@ class LocalStream:
                         self._playback_clock += chunk.size / sample_rate
                         handler.playback_until = self._playback_clock + 0.1
                 else:
+                    # A flush in progress would drop or misplace this push.
+                    await handler.playback_ready.wait()
+                    if handler is not self.handler or playback_epoch != handler.playback_epoch:
+                        continue
                     self._robot.media.push_audio_sample(audio_frame)
                     self._emit_level("assistant", audio_frame)
 
