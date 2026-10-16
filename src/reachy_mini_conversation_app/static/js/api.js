@@ -100,7 +100,9 @@ export function subscribe(method, cb) {
   set.add(cb);
   connect().catch(() => {});
   return () => {
-    subscribers.get(method)?.delete(cb);
+    const current = subscribers.get(method);
+    current?.delete(cb);
+    if (current?.size === 0) subscribers.delete(method);
   };
 }
 
