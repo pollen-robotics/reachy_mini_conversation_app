@@ -8,6 +8,12 @@ import pytest
 import reachy_mini_conversation_app.personality as personality_mod
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.personality import delete_personality
+from reachy_mini_conversation_app.settings_store import (
+    AppSettings,
+    read_settings,
+    update_settings,
+    apply_settings_to_runtime,
+)
 from reachy_mini_conversation_app.profile_toolsets import (
     read_profile_tool_override,
     write_profile_tool_override,
@@ -42,6 +48,22 @@ def test_delete_removes_user_profile(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert delete_personality("user_personalities/doomed") is True
     assert not profile_dir.exists()
     assert read_profile_tool_override("user_personalities/doomed", tmp_path) is None
+
+
+def test_delete_forgets_the_language_saved_for_the_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A personality recreated under the same name must not inherit the old one's language."""
+    monkeypatch.setattr(config, "INSTANCE_PATH", tmp_path)
+    monkeypatch.setattr(config, "PROFILE_LANGUAGES", {})
+    _make_user_profile("doomed")
+    apply_settings_to_runtime(
+        update_settings(
+            tmp_path, AppSettings(profile_languages={"user_personalities/doomed": "fr", "sorry_bro": "es"})
+        )
+    )
+
+    assert delete_personality("user_personalities/doomed") is True
+    assert config.PROFILE_LANGUAGES == {"sorry_bro": "es"}
+    assert read_settings(tmp_path).profile_languages == {"sorry_bro": "es"}
 
 
 def test_delete_refuses_builtin_profile(monkeypatch: pytest.MonkeyPatch) -> None:

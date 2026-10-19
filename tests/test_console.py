@@ -234,6 +234,30 @@ def test_backend_config_persists_local_hf_selection_and_status(
     assert stored.hf_ws_url == "ws://localhost:8765/v1/realtime"
 
 
+def test_language_saved_for_one_profile_then_for_all(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A profile language overrides the shared one until a language is saved for all personalities."""
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "sorry_bro")
+    monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", "en")
+    monkeypatch.setattr(config, "PROFILE_LANGUAGES", {"chess_coach": "de"})
+    app = FastAPI()
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(MagicMock(), robot, settings_app=app, instance_path=str(tmp_path))
+    stream._init_settings_ui_if_needed()
+
+    result = _rpc_call(app, "language.set", {"language": "fr", "scope": "profile"})["result"]
+
+    assert (result["language"], result["default_language"], result["profile_language"]) == ("fr", "en", "fr")
+    assert read_settings(tmp_path).profile_languages == {"chess_coach": "de", "sorry_bro": "fr"}
+    assert _rpc_call(app, "conversation.status")["result"]["language"] == "fr"
+
+    result = _rpc_call(app, "language.set", {"language": "es", "scope": "all"})["result"]
+
+    assert (result["language"], result["default_language"], result["profile_language"]) == ("es", "es", None)
+    stored = read_settings(tmp_path)
+    assert (stored.language, stored.profile_languages) == ("es", {})
+    assert config.PROFILE_LANGUAGES == {}
+
+
 def test_backend_config_persists_deployed_mode_without_clearing_local_hf_ws_url(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

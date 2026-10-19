@@ -41,6 +41,7 @@ from reachy_mini_conversation_app.config import (
 )
 from reachy_mini_conversation_app.prompts import (
     get_session_voice,
+    get_session_language,
     get_session_instructions,
     get_session_greeting_prompt,
 )
@@ -364,7 +365,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                     format=_native_rate_audio_pcm(),  # type: ignore[typeddict-item]
                     transcription=AudioTranscriptionParam(
                         model="gpt-4o-transcribe",
-                        language=config.REALTIME_TRANSCRIPTION_LANGUAGE,
+                        language=get_session_language(),
                     ),
                     turn_detection=ServerVad(type="server_vad", interrupt_response=True),
                 ),

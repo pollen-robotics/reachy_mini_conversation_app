@@ -62,6 +62,31 @@ HF_AVAILABLE_VOICES: list[str] = [
     "Vivian",
 ]
 
+
+@dataclass(frozen=True)
+class SpeechLanguage:
+    """A conversation language offered by the UI."""
+
+    code: str
+    name: str
+    native_name: str
+    flag: str
+
+
+# Languages Qwen3-TTS speaks on the deployed Hugging Face backend; Qwen3-ASR hears these and more.
+HF_SPEECH_LANGUAGES: tuple[SpeechLanguage, ...] = (
+    SpeechLanguage("en", "English", "English", "🇬🇧"),
+    SpeechLanguage("fr", "French", "Français", "🇫🇷"),
+    SpeechLanguage("es", "Spanish", "Español", "🇪🇸"),
+    SpeechLanguage("de", "German", "Deutsch", "🇩🇪"),
+    SpeechLanguage("it", "Italian", "Italiano", "🇮🇹"),
+    SpeechLanguage("pt", "Portuguese", "Português", "🇵🇹"),
+    SpeechLanguage("ru", "Russian", "Русский", "🇷🇺"),
+    SpeechLanguage("zh", "Chinese", "中文", "🇨🇳"),
+    SpeechLanguage("ja", "Japanese", "日本語", "🇯🇵"),
+    SpeechLanguage("ko", "Korean", "한국어", "🇰🇷"),
+)
+
 HF_BACKEND = "huggingface"
 HF_REALTIME_CONNECTION_MODE_ENV = "HF_REALTIME_CONNECTION_MODE"
 HF_REALTIME_WS_URL_ENV = "HF_REALTIME_WS_URL"
@@ -322,6 +347,8 @@ class Config:
     HF_REALTIME_SESSION_URL = HF_DEFAULTS.session_url
     HF_REALTIME_WS_URL = os.getenv(HF_REALTIME_WS_URL_ENV)
     REALTIME_TRANSCRIPTION_LANGUAGE = normalize_transcription_language(os.getenv(REALTIME_TRANSCRIPTION_LANGUAGE_ENV))
+    # Languages saved for one personality, keyed by canonical profile name; they win over the one above.
+    PROFILE_LANGUAGES: dict[str, str] = {}
     MEMORY_ENABLED = _env_flag(MEMORY_ENABLED_ENV, default=True)
     CAMERA_ENABLED = _env_flag(CAMERA_ENABLED_ENV, default=True)
     LOCAL_VAD_ENABLED = _env_flag("LOCAL_VAD_ENABLED", default=True)

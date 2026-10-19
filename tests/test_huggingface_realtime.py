@@ -513,11 +513,38 @@ def test_huggingface_session_uses_configured_transcription_language(
 ) -> None:
     """Hugging Face realtime sessions should forward the configured transcription language."""
     monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", language)
+    monkeypatch.setattr(config, "PROFILE_LANGUAGES", {})
     handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
 
     session = handler._get_session_config([])
 
     assert session["audio"]["input"]["transcription"]["language"] == language
+
+
+@pytest.mark.parametrize(
+    "profile, expected_language, expected_rule",
+    [
+        ("mad_scientist_assistant", "fr", "Speak only French, starting with your first greeting"),
+        ("sorry_bro", "en", "Speak only English, starting with your first greeting"),
+        ("chess_coach", "auto", None),
+    ],
+)
+def test_huggingface_session_speaks_the_language_saved_for_its_profile(
+    monkeypatch: pytest.MonkeyPatch, profile: str, expected_language: str, expected_rule: str | None
+) -> None:
+    """The backend only forces speech in and out, so the instructions carry the language to the greeting."""
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", profile)
+    monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", "en")
+    monkeypatch.setattr(config, "PROFILE_LANGUAGES", {"mad_scientist_assistant": "fr", "chess_coach": "auto"})
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+
+    session = handler._get_session_config([])
+
+    assert session["audio"]["input"]["transcription"]["language"] == expected_language
+    if expected_rule is None:
+        assert "Speak only" not in session["instructions"]
+    else:
+        assert expected_rule in session["instructions"]
 
 
 @pytest.mark.asyncio

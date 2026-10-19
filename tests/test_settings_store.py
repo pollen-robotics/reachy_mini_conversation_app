@@ -48,6 +48,26 @@ def test_awkward_value_cannot_write_another_key(tmp_path: Path) -> None:
     assert set(payload) == {"version", "hf_ws_url"}
 
 
+def test_profile_languages_round_trip_and_apply(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Per-personality languages are stored next to the shared one and win at runtime."""
+    monkeypatch.setattr(config, "PROFILE_LANGUAGES", {})
+    update_settings(tmp_path, AppSettings(language="en", profile_languages={"sorry_bro": "fr"}))
+
+    load_settings_into_runtime(tmp_path)
+
+    assert read_settings(tmp_path).profile_languages == {"sorry_bro": "fr"}
+    assert config.PROFILE_LANGUAGES == {"sorry_bro": "fr"}
+
+
+def test_unusable_profile_language_entries_are_dropped(tmp_path: Path) -> None:
+    """One bad entry must not cost the user the languages saved for other personalities."""
+    (tmp_path / "settings.json").write_text(
+        json.dumps({"profile_languages": {"sorry_bro": "fr", "chess_coach": 3, "hype_bot": " "}}), encoding="utf-8"
+    )
+
+    assert read_settings(tmp_path).profile_languages == {"sorry_bro": "fr"}
+
+
 @pytest.mark.parametrize("content", ["{ not json", '"a string"', '{"memory_enabled": "false"}'])
 def test_unusable_file_is_ignored(tmp_path: Path, content: str) -> None:
     """A corrupt or wrongly-typed file must not stop the app from starting."""
