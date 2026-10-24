@@ -55,7 +55,7 @@ The app connects the user, AI services, and robot hardware:
 <details open>
 <summary>Using uv (recommended)</summary>
 
-Set up with [uv](https://docs.astral.sh/uv/):
+Set up with [uv](https://docs.astral.sh/uv/) 0.13.4 or newer:
 
 ```bash
 # macOS (Homebrew)
@@ -84,6 +84,7 @@ uv sync --group dev
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+python -m pip install "pip @ https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl#sha256=fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70"
 pip install -e .
 ```
 
@@ -93,6 +94,10 @@ pip install -e .[dev]                   # Development tools
 ```
 
 </details>
+
+Following the [eMudhra/emSign CA security incident](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576), installations require `certifi>=2026.10.19` and `pip>=26.2.2`. The hash-verified pip command above securely upgrades older pip installations.
+
+For existing uv environments, upgrade uv to at least 0.13.4 using the [official installation instructions](https://docs.astral.sh/uv/getting-started/installation/), then run `uv sync`. For existing pip environments, rerun the pip installation steps above. Update system CA certificates, restart the app, and rebuild deployed container images without layer caching.
 
 ## Configuration
 
