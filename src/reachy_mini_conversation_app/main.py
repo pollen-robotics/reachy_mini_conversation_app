@@ -267,6 +267,8 @@ def run(
             go_to_sleep_requested.set()
 
             logger.info("Going to sleep before stopping conversation app.")
+            # First, while the app can still reach clients: the phone can't tell an exit from silence.
+            stream_manager.emit_phase("ended", "sleep")
             sleep_error: str | None = None
 
             try:
