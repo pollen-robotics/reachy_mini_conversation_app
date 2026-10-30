@@ -465,6 +465,98 @@ async def test_parallel_tool_calls_trigger_single_response(monkeypatch: Any) -> 
     assert create.await_count == 1
 
 
+@pytest.mark.asyncio
+async def test_silent_user_turn_tool_batch_triggers_single_recovery_response(monkeypatch: Any) -> None:
+    """A user turn with only silent tools gets one spoken-recovery response."""
+    handler = _plain_handler()
+    handler.connection = _FakeConnection()
+    handler._user_turn_needs_spoken_response = True
+    handler._in_flight_tool_calls = {"call_a", "call_b"}
+    monkeypatch.setattr(hf_mod.core_tools, "get_tools", lambda: {"dance": SimpleNamespace(needs_response=False)})
+    create = AsyncMock()
+    monkeypatch.setattr(handler, "_safe_response_create", create)
+
+    def completed(call_id: str) -> ToolNotification:
+        return ToolNotification(
+            id=call_id,
+            tool_name="dance",
+            is_idle_tool_call=False,
+            status=ToolState.COMPLETED,
+            result={"ok": True},
+        )
+
+    await handler._handle_tool_result(completed("call_a"))
+    assert create.await_count == 0
+
+    await handler._handle_tool_result(completed("call_b"))
+    assert create.await_count == 1
+
+    handler._in_flight_tool_calls = {"call_c"}
+    await handler._handle_tool_result(completed("call_c"))
+    assert create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_silent_tool_recovery_requires_user_turn_without_audio(monkeypatch: Any) -> None:
+    """Idle and already-spoken turns retain their existing silent-tool behavior."""
+    handler = _plain_handler()
+    handler.connection = _FakeConnection()
+    monkeypatch.setattr(hf_mod.core_tools, "get_tools", lambda: {"dance": SimpleNamespace(needs_response=False)})
+    create = AsyncMock()
+    monkeypatch.setattr(handler, "_safe_response_create", create)
+
+    handler._in_flight_tool_calls = {"idle"}
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="idle",
+            tool_name="dance",
+            is_idle_tool_call=True,
+            status=ToolState.COMPLETED,
+            result={"ok": True},
+        )
+    )
+
+    handler._user_turn_needs_spoken_response = True
+    handler._turn_first_audio_at = 0.0
+    handler._in_flight_tool_calls = {"spoken"}
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="spoken",
+            tool_name="dance",
+            is_idle_tool_call=False,
+            status=ToolState.COMPLETED,
+            result={"ok": True},
+        )
+    )
+
+    assert create.await_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", ["go_to_sleep", "stop_dance", "stop_emotion"])
+async def test_intentionally_silent_tool_skips_user_turn_recovery(monkeypatch: Any, tool_name: str) -> None:
+    """Stopping movement and shutting down stay silent after a user turn."""
+    handler = _plain_handler()
+    handler.connection = _FakeConnection()
+    handler._user_turn_needs_spoken_response = True
+    handler._in_flight_tool_calls = {"call-1"}
+    monkeypatch.setattr(hf_mod.core_tools, "get_tools", lambda: {tool_name: SimpleNamespace(needs_response=False)})
+    create = AsyncMock()
+    monkeypatch.setattr(handler, "_safe_response_create", create)
+
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="call-1",
+            tool_name=tool_name,
+            is_idle_tool_call=False,
+            status=ToolState.COMPLETED,
+            result={"ok": True},
+        )
+    )
+
+    create.assert_not_awaited()
+
+
 def test_handler_uses_hf_startup_voice_at_startup(monkeypatch: Any) -> None:
     """Hugging Face startup should restore persisted HF voices."""
     handler = HuggingFaceRealtimeHandler(
