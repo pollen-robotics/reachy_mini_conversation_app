@@ -125,6 +125,7 @@ class LocalStream:
         startup_voice: Optional[str] = None,
         tool_deps: ToolDependencies | None = None,
         camera_forced_off: bool = False,
+        playback_observer: Callable[[float], None] | None = None,
     ):
         """Initialize the stream with a realtime handler and pipelines.
 
@@ -134,6 +135,7 @@ class LocalStream:
         - ``tool_deps``: live tool dependencies, so vision.* can toggle the camera.
         """
         self._robot = robot
+        self._playback_observer = playback_observer
         self._stop_event = asyncio.Event()
         self._playback_flush_lock = asyncio.Lock()
         self._playback_clock = 0.0  # monotonic end of audio pushed to the SDK
@@ -931,6 +933,8 @@ class LocalStream:
             handler.playback_pending_frames = 0
             handler.playback_ready.clear()
             self._drain_output_queue()
+            if self._playback_observer is not None:
+                self._playback_observer(0.0)
             audio = self._robot.media.audio
             try:
                 if audio is not None:
@@ -1057,6 +1061,8 @@ class LocalStream:
                             break
                         chunk = audio_frame[offset : offset + chunk_samples] * handler.playback_gain
                         self._robot.media.push_audio_sample(chunk)
+                        if self._playback_observer is not None:
+                            self._playback_observer(chunk.size / sample_rate)
                         self._emit_level("assistant", chunk)
                         self._playback_clock += chunk.size / sample_rate
                         handler.playback_until = self._playback_clock + 0.1
@@ -1066,6 +1072,8 @@ class LocalStream:
                     if handler is not self.handler or playback_epoch != handler.playback_epoch:
                         continue
                     self._robot.media.push_audio_sample(audio_frame)
+                    if self._playback_observer is not None:
+                        self._playback_observer(audio_frame.size / sample_rate)
                     self._emit_level("assistant", audio_frame)
 
             else:

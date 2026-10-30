@@ -195,7 +195,7 @@ def run(
 
     app_lifecycle.wake_up_if_sleeping(robot, logger)
 
-    movement_manager = MovementManager(current_robot=robot)
+    movement_manager = MovementManager(current_robot=robot, speaker_tracking=config.SPEAKER_TRACKING_ENABLED)
 
     deps = ToolDependencies(
         reachy_mini=robot,
@@ -246,6 +246,7 @@ def run(
         handler_factory=build_handler,
         startup_voice=startup_settings.voice,
         tool_deps=deps,
+        playback_observer=movement_manager.observe_playback,
         camera_forced_off=args.no_camera,
     )
 

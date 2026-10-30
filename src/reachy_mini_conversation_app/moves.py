@@ -39,6 +39,7 @@ from reachy_mini import ReachyMini
 from reachy_mini.utils import create_head_pose
 from reachy_mini.motion.move import Move
 from reachy_mini.utils.interpolation import compose_world_offset, linear_pose_interpolation
+from reachy_mini_conversation_app.speaker_tracking import SpeakerTracking
 from reachy_mini_conversation_app.dance_emotion_moves import EmotionQueueMove
 
 
@@ -187,10 +188,14 @@ class MovementManager:
     def __init__(
         self,
         current_robot: ReachyMini,
+        *,
+        speaker_tracking: bool = False,
     ):
         """Initialize movement manager."""
         self.current_robot = current_robot
         self._head_tracking = False
+        self._speaker_tracking = SpeakerTracking() if speaker_tracking else None
+        self._playback_until = 0.0
 
         # Single timing source for durations
         self._now = time.monotonic
@@ -294,6 +299,14 @@ class MovementManager:
         """
         self._command_queue.put(("set_speaking", speaking))
 
+    def set_speaker_direction(self, yaw: float, speech: bool, observed_at: float) -> None:
+        """Post a world-frame speech bearing from the direction reader."""
+        self._command_queue.put(("speaker_direction", (yaw, speech, observed_at)))
+
+    def observe_playback(self, duration: float) -> None:
+        """Extend the playback hold by queued audio duration, or clear it with zero."""
+        self._command_queue.put(("playback", (duration, self._now())))
+
     def _poll_signals(self, current_time: float) -> None:
         """Apply queued commands."""
         while True:
@@ -363,6 +376,9 @@ class MovementManager:
             if self._head_tracking == enabled:
                 return
             self._head_tracking = enabled
+            if self._speaker_tracking is not None:
+                logger.info("Audio speaker tracking owns orientation; visual tracking remains paused")
+                return
             self._track_anchor = None
             # set_speaking is gated off while disabled, so its state would go stale across a toggle.
             self._is_speaking = False
@@ -374,6 +390,9 @@ class MovementManager:
             except Exception as e:
                 logger.warning("Head-tracking toggle failed: %s", e)
         elif command == "set_speaking":
+            if self._speaker_tracking is not None:
+                self._is_speaking = bool(payload)
+                return
             if not self._head_tracking:
                 return
             speaking = bool(payload)
@@ -390,8 +409,28 @@ class MovementManager:
                     self.current_robot.start_head_tracking(weight=1.0)
             except Exception as e:
                 logger.warning("Head-tracking speaking handoff failed: %s", e)
+        elif command == "playback":
+            duration, queued_at = payload
+            self._playback_until = max(queued_at, self._playback_until) + duration if duration > 0 else queued_at
+        elif command == "speaker_direction" and self._speaker_tracking is not None:
+            yaw, speech, observed_at = payload
+            self._speaker_tracking.observe(
+                yaw,
+                speech,
+                observed_at,
+                current_time,
+                enabled=self._is_listening and self._speaker_turn_allowed(current_time),
+            )
         else:
             logger.warning("Unknown command received by MovementManager: %s", command)
+
+    def _speaker_turn_allowed(self, now: float) -> bool:
+        return (
+            not self._is_speaking
+            and now >= self._playback_until + 0.2
+            and (self.state.current_move is None or isinstance(self.state.current_move, BreathingMove))
+            and not self.move_queue
+        )
 
     def _publish_shared_state(self) -> None:
         """Expose idle-related state for external threads."""
@@ -484,6 +523,17 @@ class MovementManager:
             neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
             primary_full_body_pose = (neutral_head_pose, (0.0, 0.0), 0.0)
             self.state.last_primary_pose = clone_full_body_pose(primary_full_body_pose)
+
+        if self._speaker_tracking is not None:
+            head_pose, antennas, body_yaw = primary_full_body_pose
+            head_pose, body_yaw = self._speaker_tracking.apply(
+                head_pose,
+                body_yaw,
+                current_time,
+                allow_turn=self._speaker_turn_allowed(current_time),
+                manual=self.state.current_move is not None and not isinstance(self.state.current_move, BreathingMove),
+            )
+            primary_full_body_pose = (head_pose, antennas, body_yaw)
 
         # Speaking pauses tracking: hold the look-at anchor, overlay emotions on it, dance from neutral.
         if self._track_anchor is not None:
@@ -619,6 +669,10 @@ class MovementManager:
             logger.warning("Move worker already running; start() ignored")
             return
         self._stop_event.clear()
+        if self._speaker_tracking is not None:
+            self.current_robot.stop_head_tracking()
+            self._speaker_tracking.start(self.current_robot, self.set_speaker_direction)
+            logger.info("Audio speaker tracking enabled; visual head tracking paused")
         self._thread = threading.Thread(target=self.working_loop, daemon=True)
         self._thread.start()
         logger.debug("Move worker started")
@@ -646,6 +700,9 @@ class MovementManager:
             self._thread.join()
             self._thread = None
         logger.debug("Move worker stopped")
+
+        if self._speaker_tracking is not None:
+            self._speaker_tracking.stop()
 
         if self._head_tracking:
             try:
