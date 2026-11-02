@@ -102,7 +102,7 @@ Copy `.env.example` to `.env` when you want to point Hugging Face at your own lo
 
 | Variable | Description |
 |----------|-------------|
-| `REALTIME_TRANSCRIPTION_LANGUAGE` | Optional input transcription language for the realtime backend. Defaults to `auto` for automatic language detection; set to a backend-supported code such as `en` for English or `zh` for Chinese to fix the language. |
+| `REALTIME_TRANSCRIPTION_LANGUAGE` | Conversation language for every personality. Defaults to `auto` for automatic language detection; set to a backend-supported code such as `en` for English or `zh` for Chinese to fix the language. A fixed language forces speech recognition and synthesis, and the model is told to greet and answer in it. |
 | `LOCAL_BARGE_IN_ENABLED` | Local audio interruption. Defaults to `true`; requires `LOCAL_VAD_ENABLED=true`. |
 | `LOCAL_VAD_ENABLED` | Local Silero speech detection for faster physical listening reactions. Defaults to `true`; set to `false` to use server VAD alone for movement. |
 | `HF_REALTIME_CONNECTION_MODE` | Hugging Face connection selector: `deployed` uses the built-in Hugging Face server; `local` uses `HF_REALTIME_WS_URL`. Defaults to `deployed`. |
@@ -116,6 +116,8 @@ Copy `.env.example` to `.env` when you want to point Hugging Face at your own lo
 These variables are the starting value. What you change through the settings UI
 (or from the mobile app) is written to `settings.json` in the instance directory
 and wins over them, so a toggle always does what it says.
+
+Pick the conversation language with the flag button next to the personality on the Talk view. **Save for** chooses between the active personality only and all personalities; saving for all also clears the languages saved for single personalities. A personality's own language wins over the shared one and applies from the startup greeting on, so switching personality switches the language with it. Saving reconnects the conversation, and Reachy greets you again in the new language.
 
 `LOCAL_VAD_ENABLED` defaults to `true`. Change **Local speech detection** in the gear-wheel **Settings → Speech behavior** view. Saved choices take precedence over environment defaults and persist across launches; saving reconnects the conversation to apply the change. Local Silero VAD and server VAD both control physical listening: either detector freezes the antennas and suppresses idle movement. Movement resumes smoothly once both report silence. Local detection holds through 400 ms of silence and clears after 500 ms without microphone frames. Model history clears after each completed speech segment and after 500 ms of consecutive low-confidence idle audio (512 ms at the 32 ms inference cadence). These resets preserve pending microphone samples and context during speech and within-segment pauses. It uses the SDK's 16 kHz microphone audio; conversation turns continue to use server VAD. If local detection fails, the app logs a warning and uses server VAD alone.
 

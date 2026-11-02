@@ -145,6 +145,10 @@ export const listVoices = () => rpcCall("voices.list");
 export const getCurrentVoice = () => rpcCall("voices.current");
 export const applyVoice = (voice) => rpcCall("voices.apply", { voice });
 
+export const getLanguage = () => rpcCall("language.get");
+/** scope: "profile" saves for the active personality only, "all" for every personality. */
+export const setLanguage = (language, scope) => rpcCall("language.set", { language, scope });
+
 export const saveBackendConfig = (payload) => rpcCall("backend.config", payload);
 export const saveSpeechConfig = (payload) => rpcCall("speech.config", payload);
 

@@ -38,9 +38,10 @@ from reachy_mini_conversation_app.config import (
     get_hf_connection_selection,
     refresh_runtime_config_from_env,
 )
-from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
+from reachy_mini_conversation_app.prompts import get_session_voice, get_session_language, get_session_instructions
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_float32
 from reachy_mini_conversation_app.memory_routes import register_memory_methods
+from reachy_mini_conversation_app.profile_store import canonical_profile_name
 from reachy_mini_conversation_app.vision_routes import register_vision_methods
 from reachy_mini_conversation_app.settings_store import (
     AppSettings,
@@ -48,7 +49,7 @@ from reachy_mini_conversation_app.settings_store import (
     apply_settings_to_runtime,
     load_settings_into_runtime,
 )
-from reachy_mini_conversation_app.language_routes import register_language_methods
+from reachy_mini_conversation_app.language_routes import LanguageScope, register_language_methods
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, initialize_tools
 from reachy_mini_conversation_app.tool_space_routes import register_tool_space_methods
@@ -416,9 +417,14 @@ class LocalStream:
         """
         self._save_settings(AppSettings(memory_enabled=enabled))
 
-    def _set_transcription_language(self, language: str) -> str:
-        """Change the speech transcription language, for this run and the next ones."""
-        return self._apply_setting_with_restart(AppSettings(language=language), "language_changed")
+    def _set_language(self, language: str, scope: LanguageScope) -> str:
+        """Save the conversation language for the active personality or all of them, then reconnect."""
+        if scope == "profile":
+            profile = canonical_profile_name(config.REACHY_MINI_CUSTOM_PROFILE)
+            changes = AppSettings(profile_languages={**config.PROFILE_LANGUAGES, profile: language})
+        else:
+            changes = AppSettings(language=language, profile_languages={})
+        return self._apply_setting_with_restart(changes, "language_changed")
 
     def _persist_camera_enabled(self, enabled: bool) -> None:
         """Remember the camera switch across restarts."""
@@ -556,7 +562,7 @@ class LocalStream:
                 # What the mobile client would otherwise need four more calls for.
                 "personality": config.REACHY_MINI_CUSTOM_PROFILE,
                 "voice": self.get_current_voice(),
-                "language": config.REALTIME_TRANSCRIPTION_LANGUAGE,
+                "language": get_session_language(),
                 "memory_enabled": config.MEMORY_ENABLED,
                 "local_vad_enabled": config.LOCAL_VAD_ENABLED,
                 "local_barge_in_enabled": config.LOCAL_BARGE_IN_ENABLED,
@@ -727,7 +733,7 @@ class LocalStream:
             logger.exception("Failed to register memory methods; memory settings will be unavailable")
 
         try:
-            register_language_methods(rpc, set_language=self._set_transcription_language)
+            register_language_methods(rpc, set_language=self._set_language)
         except Exception:
             logger.exception("Failed to register language methods; the language setting will be unavailable")
 

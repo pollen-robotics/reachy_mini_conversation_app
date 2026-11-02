@@ -41,6 +41,7 @@ from reachy_mini_conversation_app.config import (
 )
 from reachy_mini_conversation_app.prompts import (
     get_session_voice,
+    get_session_language,
     get_session_instructions,
     get_session_greeting_prompt,
 )
@@ -67,6 +68,8 @@ logger = logging.getLogger(__name__)
 
 _RESPONSE_DONE_TIMEOUT: Final[float] = 30.0
 _RESPONSE_REJECTION_RETRY_DELAY: Final[float] = 0.5
+# A microphone frame that cannot be sent for this long means a dead link.
+AUDIO_SEND_TIMEOUT_S: Final[float] = 5.0
 # Server-measured stage timings the speech-to-speech backend attaches to response.done.
 _TURN_LATENCY_METADATA_KEY: Final[str] = "speech_to_speech.turn_latency"
 
@@ -103,6 +106,19 @@ class HFNativeRateAudioPCM(TypedDict):
 def _native_rate_audio_pcm() -> HFNativeRateAudioPCM:
     """Return the Hugging Face native-rate PCM config."""
     return {"type": "audio/pcm", "rate": None}
+
+
+def _abort_realtime_connection(connection: Any) -> None:
+    """Drop the realtime websocket's socket at once.
+
+    A graceful close() would queue behind the stuck write. The session loop then
+    sees the connection closed and takes its usual reconnect path.
+    """
+    try:
+        # The OpenAI SDK keeps the websockets connection private.
+        connection._connection.transport.abort()
+    except Exception as e:
+        logger.warning("Could not abort the realtime connection: %s", e)
 
 
 def _parse_turn_latency(metadata: dict[str, str] | None) -> dict[str, int | str | None] | None:
@@ -364,7 +380,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                     format=_native_rate_audio_pcm(),  # type: ignore[typeddict-item]
                     transcription=AudioTranscriptionParam(
                         model="gpt-4o-transcribe",
-                        language=config.REALTIME_TRANSCRIPTION_LANGUAGE,
+                        language=get_session_language(),
                     ),
                     turn_detection=ServerVad(type="server_vad", interrupt_response=True),
                 ),
@@ -1156,11 +1172,18 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         # Cast if needed
         audio_frame = audio_to_int16(audio_frame)
 
-        if self.connection:
+        connection = self.connection
+        if connection:
             # Send to the realtime input buffer (guard against races during reconnect).
             try:
                 audio_message = base64.b64encode(audio_frame.tobytes()).decode("utf-8")
-                await self.connection.input_audio_buffer.append(audio=audio_message)
+                await asyncio.wait_for(connection.input_audio_buffer.append(audio=audio_message), AUDIO_SEND_TIMEOUT_S)
+            except TimeoutError:
+                # On a dead link the socket buffer fills, and every send, the websocket
+                # keepalive ping included, then waits for it to drain: without this the
+                # drop only surfaces once TCP gives up.
+                logger.warning("Realtime audio send stuck for %.0f s; dropping the connection", AUDIO_SEND_TIMEOUT_S)
+                _abort_realtime_connection(connection)
             except Exception as e:
                 logger.debug("Dropping audio frame: connection not ready (%s)", e)
 

@@ -6,6 +6,7 @@
 
 import { applyPersonality, getMicState, listPersonalities, setMicMuted, subscribe } from "../api.js";
 import { createConversationPanel } from "../components/conversation-panel.js";
+import { createLanguagePicker } from "../components/language-picker.js";
 import { ORB_STATES } from "../constants.js";
 import { createOrb, mapActivityToState } from "../orb.js";
 import { consumePendingApply } from "../pending-apply.js";
@@ -44,6 +45,16 @@ export async function mountTalkView({ outlet, signal }) {
     defaultAction.hidden = true;
     defaultAction.addEventListener("click", onSetDefault);
   }
+  const languageRoot = document.querySelector('[data-component="language-picker"]');
+  const languagePicker = languageRoot
+    ? createLanguagePicker({
+        root: languageRoot,
+        signal,
+        onStatus: (message) => {
+          caption.textContent = message;
+        },
+      })
+    : null;
   const orb = createOrb({
     initialState: ORB_STATES.CONNECTING,
     onStateChange: (state) => {
@@ -153,6 +164,8 @@ export async function mountTalkView({ outlet, signal }) {
   }
 
   async function refreshPersonalityState() {
+    // The language can be saved per personality, so it follows the active one.
+    void languagePicker?.refresh();
     const personalityState = await fetchPersonalityState();
     if (signal.aborted || personalityState == null) return;
     activePersonality = personalityState.current;

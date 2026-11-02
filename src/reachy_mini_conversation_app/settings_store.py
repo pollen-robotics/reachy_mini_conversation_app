@@ -38,6 +38,7 @@ class AppSettings:
     hf_connection_mode: str | None = None
     hf_ws_url: str | None = None
     language: str | None = None
+    profile_languages: dict[str, str] | None = None
     memory_enabled: bool | None = None
     camera_enabled: bool | None = None
     local_vad_enabled: bool | None = None
@@ -63,6 +64,24 @@ def _flag(payload: dict[str, Any], name: str) -> bool | None:
     return value if isinstance(value, bool) else None
 
 
+def _profile_languages(payload: dict[str, Any], path: Path) -> dict[str, str] | None:
+    """Return the stored per-profile languages, dropping unusable entries."""
+    value = payload.get("profile_languages")
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        logger.warning("Ignoring malformed profile_languages in %s", path)
+        return None
+    languages = {
+        profile: language.strip()
+        for profile, language in value.items()
+        if isinstance(profile, str) and isinstance(language, str) and language.strip()
+    }
+    if len(languages) != len(value):
+        logger.warning("Ignoring malformed profile_languages entries in %s", path)
+    return languages
+
+
 def _read_unlocked(path: Path | None) -> AppSettings:
     if path is None or not path.exists():
         return AppSettings()
@@ -79,6 +98,7 @@ def _read_unlocked(path: Path | None) -> AppSettings:
         hf_connection_mode=_text(payload, "hf_connection_mode"),
         hf_ws_url=_text(payload, "hf_ws_url"),
         language=_text(payload, "language"),
+        profile_languages=_profile_languages(payload, path),
         memory_enabled=_flag(payload, "memory_enabled"),
         camera_enabled=_flag(payload, "camera_enabled"),
         local_vad_enabled=_flag(payload, "local_vad_enabled"),
@@ -121,6 +141,8 @@ def apply_settings_to_runtime(settings: AppSettings) -> None:
         config.HF_REALTIME_WS_URL = settings.hf_ws_url
     if settings.language is not None:
         config.REALTIME_TRANSCRIPTION_LANGUAGE = normalize_transcription_language(settings.language)
+    if settings.profile_languages is not None:
+        config.PROFILE_LANGUAGES = dict(settings.profile_languages)
     if settings.memory_enabled is not None:
         config.MEMORY_ENABLED = settings.memory_enabled
     if settings.camera_enabled is not None:

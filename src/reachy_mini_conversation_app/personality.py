@@ -22,6 +22,7 @@ from reachy_mini_conversation_app.profile_store import (
     read_profile_from_directory,
     read_packaged_default_profile,
 )
+from reachy_mini_conversation_app.settings_store import AppSettings, update_settings, apply_settings_to_runtime
 from reachy_mini_conversation_app.profile_toolsets import (
     read_profile_toolsets,
     write_profile_toolsets,
@@ -121,6 +122,17 @@ def delete_personality(name: str) -> bool:
         clear_profile_tool_override(name, config.INSTANCE_PATH)
     except (OSError, RuntimeError) as exc:
         logger.warning("Deleted personality %r but could not remove its tool override: %s", name, exc)
+    if name in config.PROFILE_LANGUAGES:
+        changes = AppSettings(
+            profile_languages={
+                profile: language for profile, language in config.PROFILE_LANGUAGES.items() if profile != name
+            }
+        )
+        try:
+            update_settings(config.INSTANCE_PATH, changes)
+        except OSError as exc:
+            logger.warning("Deleted personality %r but could not remove its saved language: %s", name, exc)
+        apply_settings_to_runtime(changes)
     return True
 
 

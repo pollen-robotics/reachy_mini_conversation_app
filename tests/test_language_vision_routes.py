@@ -21,12 +21,14 @@ def _rpc_call(client: TestClient, method: str, params: dict[str, object] | None 
         return response
 
 
-def _language_client(applied: list[str]) -> TestClient:
+def _language_client(applied: list[str], scopes: list[str] | None = None) -> TestClient:
     app = FastAPI()
     rpc = JsonRpcServer()
 
-    def _set_language(language: str) -> str:
+    def _set_language(language: str, scope: str) -> str:
         applied.append(language)
+        if scopes is not None:
+            scopes.append(scope)
         config.REALTIME_TRANSCRIPTION_LANGUAGE = language
         return "Saved."
 
@@ -47,14 +49,58 @@ def _vision_client(deps: ToolDependencies, persisted: list[bool], forced_off: bo
 def test_language_get_reports_the_active_language(monkeypatch: pytest.MonkeyPatch, language: str) -> None:
     """The client reads the transcription language it is about to change."""
     monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", language)
+    monkeypatch.setattr(config, "PROFILE_LANGUAGES", {})
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
 
-    assert _rpc_call(_language_client([]), "language.get")["result"] == {"language": language}
+    result = _rpc_call(_language_client([]), "language.get")["result"]
+
+    assert result["language"] == result["default_language"] == language
+    assert result["profile"] == "default"
+    assert result["profile_language"] is None
+    assert {"code": "fr", "name": "French", "native_name": "Français", "flag": "🇫🇷"} in result["choices"]
+
+
+def test_language_get_prefers_the_active_profile_language(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A language saved for the active personality is the one in use."""
+    monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", "en")
+    monkeypatch.setattr(config, "PROFILE_LANGUAGES", {"mad_scientist_assistant": "fr", "sorry_bro": "es"})
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "mad_scientist_assistant")
+
+    result = _rpc_call(_language_client([]), "language.get")["result"]
+
+    assert (result["language"], result["default_language"], result["profile_language"]) == ("fr", "en", "fr")
+
+
+@pytest.mark.parametrize(
+    "params, expected_scope", [({}, "all"), ({"scope": "all"}, "all"), ({"scope": "profile"}, "profile")]
+)
+def test_language_set_forwards_the_scope(
+    params: dict[str, str], expected_scope: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Older clients that send no scope keep changing the language for every personality."""
+    monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", "en")
+    scopes: list[str] = []
+
+    _rpc_call(_language_client([], scopes), "language.set", {"language": "fr", **params})
+
+    assert scopes == [expected_scope]
+
+
+def test_language_set_rejects_an_unknown_scope() -> None:
+    """A typo in the scope must not save anything."""
+    applied: list[str] = []
+
+    error = _rpc_call(_language_client(applied), "language.set", {"language": "fr", "scope": "everyone"})["error"]
+
+    assert error["data"]["reason"] == "invalid_params"
+    assert applied == []
 
 
 @pytest.mark.parametrize("language", ["fr", "EN", "auto", "Auto"])
 def test_language_set_accepts_client_codes(language: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """Two-letter codes and "auto", the forms transcription takes, are accepted and normalised."""
     monkeypatch.setattr(config, "REALTIME_TRANSCRIPTION_LANGUAGE", "en")
+    monkeypatch.setattr(config, "PROFILE_LANGUAGES", {})
     applied: list[str] = []
 
     result = _rpc_call(_language_client(applied), "language.set", {"language": language})["result"]
