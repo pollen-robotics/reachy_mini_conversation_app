@@ -257,7 +257,7 @@ class LocalStream:
                 self._last_turn_state = state
                 self._rpc.broadcast_threadsafe("conversation.turn", {"state": state})
 
-    def _emit_phase(self, phase: str, reason: Optional[str] = None) -> None:
+    def emit_phase(self, phase: str, reason: Optional[str] = None) -> None:
         """Push a conversation.phase notification to JSON-RPC clients."""
         if self._rpc is not None:
             self._rpc.broadcast_threadsafe("conversation.phase", {"phase": phase, "reason": reason})
