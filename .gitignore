@@ -71,3 +71,6 @@ external_content/external_tools/*
 external_content/user_personalities/
 external_content/installed_tool_spaces.json
 external_content/profile_toolsets.json
+
+# Release notes generator output (utils/release_notes)
+.release-notes/
