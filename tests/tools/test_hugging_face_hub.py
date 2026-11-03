@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from datetime import date, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -78,6 +79,36 @@ async def test_details_of_an_unknown_repo_points_back_to_search(api: MagicMock) 
     result = await hub_module.HuggingFaceHub()(_deps(), action="details", query="whisper")
 
     assert result["error"] == "no model named 'whisper'; search for it to get its full id"
+
+
+@pytest.mark.asyncio
+async def test_details_adds_a_readme_excerpt_without_markup(api: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The README start is flattened to text, with images and HTML tags dropped."""
+    api.model_info.return_value = _repo(
+        "openai/whisper", author="openai", card_data=None, last_modified=None, gated=False
+    )
+    readme = "# Whisper\n\n![logo](logo.png) <p align='center'>Speech</p>\n\nrecognition  model."
+    monkeypatch.setattr(hub_module.RepoCard, "load", lambda *args, **kwargs: SimpleNamespace(text=readme))
+
+    result = await hub_module.HuggingFaceHub()(_deps(), action="details", query="openai/whisper")
+
+    assert result["readme"] == "# Whisper Speech recognition model."
+    assert result["author"] == "openai"
+
+
+@pytest.mark.asyncio
+async def test_papers_fall_back_to_the_latest_day_with_papers(api: MagicMock) -> None:
+    """An empty daily page (weekend, early morning) falls back to the previous day."""
+    paper = SimpleNamespace(id="2611.1", title="Robots", upvotes=9, summary="First line\nof it. Second sentence.")
+    api.list_daily_papers.side_effect = lambda date, limit: (
+        [paper] if len(api.list_daily_papers.mock_calls) > 1 else []
+    )
+
+    result = await hub_module.HuggingFaceHub()(_deps(), action="papers")
+
+    first_day, second_day = (call.kwargs["date"] for call in api.list_daily_papers.mock_calls)
+    assert date.fromisoformat(first_day) - date.fromisoformat(second_day) == timedelta(days=1)
+    assert result["results"] == [{"id": "2611.1", "title": "Robots", "upvotes": 9, "summary": "First line of it"}]
 
 
 @pytest.mark.asyncio

@@ -1,11 +1,14 @@
+import re
 import asyncio
 import logging
 from typing import Any
+from datetime import datetime, timezone, timedelta
 from collections.abc import Callable
 
 import httpx
-from huggingface_hub import HfApi, ModelInfo, SpaceInfo, DatasetInfo
-from huggingface_hub.errors import RepositoryNotFoundError
+from huggingface_hub import HfApi, RepoCard, ModelInfo, SpaceInfo, DatasetInfo
+from huggingface_hub.errors import EntryNotFoundError, RepositoryNotFoundError
+from huggingface_hub.hf_api import PaperInfo
 
 from reachy_mini_conversation_app.tool_spaces import current_hf_token
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
@@ -13,10 +16,14 @@ from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
 logger = logging.getLogger(__name__)
 
-_ACTIONS = ("search", "trending", "details", "mine")
+_ACTIONS = ("search", "trending", "details", "mine", "papers")
 _KINDS = ("model", "dataset", "space")
 # Spoken aloud: a handful of results is all a listener can follow.
 _RESULT_LIMIT = 5
+_README_EXCERPT_CHARS = 700
+_README_MARKUP = re.compile(r"!\[[^\]]*\]\([^)]*\)|<[^>]+>")
+# Covers a weekend plus a holiday.
+_DAILY_PAPERS_LOOKBACK_DAYS = 4
 
 RepoInfo = ModelInfo | DatasetInfo | SpaceInfo
 
@@ -54,6 +61,42 @@ def _details(repo: RepoInfo) -> dict[str, Any]:
     return {key: value for key, value in details.items() if value is not None}
 
 
+def _readme_excerpt(repo_id: str, kind: str, token: str | None) -> str | None:
+    """Return the start of a repo's README as plain-ish text, or None when it has none."""
+    try:
+        text = RepoCard.load(repo_id, repo_type=kind, token=token).text
+    except EntryNotFoundError:
+        return None
+    # Images and HTML tags only burn the excerpt budget; markdown links read fine.
+    words = _README_MARKUP.sub(" ", text).split()
+    return " ".join(words)[:_README_EXCERPT_CHARS] or None
+
+
+def _papers(api: HfApi, query: str) -> list[dict[str, Any]]:
+    """List the latest daily papers page, most upvoted first, or papers matching a query."""
+    papers: list[PaperInfo] = []
+    if query:
+        papers = list(api.list_papers(query=query, limit=_RESULT_LIMIT))
+    else:
+        # The daily page stays empty on weekends and early in the UTC day.
+        today = datetime.now(timezone.utc).date()
+        for days_back in range(_DAILY_PAPERS_LOOKBACK_DAYS):
+            day = (today - timedelta(days=days_back)).isoformat()
+            papers = list(api.list_daily_papers(date=day, limit=_RESULT_LIMIT))
+            if papers:
+                break
+    # The abstract's first sentence; a full abstract per paper is too long to speak.
+    return [
+        {
+            "id": paper.id,
+            "title": paper.title,
+            "upvotes": paper.upvotes,
+            "summary": " ".join((paper.summary or "").split()).split(". ")[0],
+        }
+        for paper in papers
+    ]
+
+
 def _list(api: HfApi, kind: str, **filters: str | None) -> list[RepoInfo]:
     listing = {"model": api.list_models, "dataset": api.list_datasets, "space": api.list_spaces}[kind]
     return list(listing(limit=_RESULT_LIMIT, **filters))
@@ -70,7 +113,11 @@ def _run(action: str, kind: str, query: str) -> dict[str, Any]:
             "dataset": api.dataset_info,
             "space": api.space_info,
         }
-        return _details(repo_info[kind](query))
+        details = _details(repo_info[kind](query))
+        readme = _readme_excerpt(query, kind, token)
+        return {**details, "readme": readme} if readme else details
+    if action == "papers":
+        return {"results": _papers(api, query)}
     if action == "mine":
         if token is None:
             return {"error": "the robot is not signed in to Hugging Face"}
@@ -90,7 +137,9 @@ class HuggingFaceHub(Tool):
     description = (
         "Browse the Hugging Face Hub. Actions: 'search' finds models, datasets or Spaces matching a query, "
         "'trending' lists what is popular right now, 'details' describes one repo from its full id "
-        "(owner/name, as returned by search), 'mine' lists the signed-in user's own repos, private ones included."
+        "(owner/name, as returned by search) with the start of its README, and for a Space whether it is "
+        "running, 'mine' lists the signed-in user's own repos, private ones included, 'papers' lists today's "
+        "trending research papers, or papers matching a query."
     )
     parameters_schema = {
         "type": "object",
@@ -103,7 +152,9 @@ class HuggingFaceHub(Tool):
             },
             "query": {
                 "type": "string",
-                "description": "Search words for 'search', or the full repo id (owner/name) for 'details'.",
+                "description": (
+                    "Search words for 'search' (optional for 'papers'), or the full repo id (owner/name) for 'details'."
+                ),
             },
         },
         "required": ["action"],
