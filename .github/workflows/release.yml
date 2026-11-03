@@ -118,10 +118,12 @@ jobs:
             echo "- ❌ HF token invalid ($WHO)" >> "$GITHUB_STEP_SUMMARY"; exit 1
           fi
           # Best-effort: minimal Inference-Providers call. Cold starts can exceed a minute,
-          # so a timeout/5xx is a warning, not a failure; only an auth rejection is fatal.
+          # so a timeout/5xx is a warning, not a failure; auth and billing rejections are fatal.
+          # Billed to the org like the real notes step, so this checks the same path.
           MODEL_ID="${RELEASE_NOTES_MODEL#huggingface/}"
           CODE=$(curl -s -o /tmp/hf_resp.json -w '%{http_code}' --max-time 120 \
             -H "Authorization: Bearer $HF_TOKEN" -H 'content-type: application/json' \
+            -H 'X-HF-Bill-To: pollen-robotics' \
             -d "{\"model\":\"${MODEL_ID}\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}" \
             https://router.huggingface.co/v1/chat/completions || echo 000)
           case "$CODE" in
@@ -132,6 +134,10 @@ jobs:
               echo "❌ token lacks Inference-Providers access ($CODE)"
               head -c 400 /tmp/hf_resp.json
               echo "- ❌ no Inference-Providers access ($CODE)" >> "$GITHUB_STEP_SUMMARY"; exit 1 ;;
+            402)
+              echo "❌ billing to pollen-robotics refused ($CODE): token owner must be an org member and the org needs credits"
+              head -c 400 /tmp/hf_resp.json
+              echo "- ❌ pollen-robotics billing refused ($CODE)" >> "$GITHUB_STEP_SUMMARY"; exit 1 ;;
             *)
               echo "⚠️ provider returned $CODE (likely cold start / transient), token is valid, not failing preflight"
               echo "- ⚠️ inference call returned $CODE (transient; real run has a 30-min budget)" >> "$GITHUB_STEP_SUMMARY" ;;
