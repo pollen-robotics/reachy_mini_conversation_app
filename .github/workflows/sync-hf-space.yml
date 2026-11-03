@@ -1,14 +1,23 @@
 name: Sync to Hugging Face Space
 
+# Called by release.yml for every release. Run it by hand to re-sync a tag.
 on:
-  push:
-    tags:
-      - v*
+  workflow_call:
+    inputs:
+      ref:
+        description: "Tag to sync"
+        required: true
+        type: string
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag to sync (e.g. v1.1.0); empty syncs the selected ref"
+        required: false
+        type: string
 
 concurrency:
-  group: hf-sync-${{ github.ref }}
-  cancel-in-progress: true
+  group: hf-sync
+  cancel-in-progress: false
 
 permissions: {}
 
@@ -25,6 +34,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
+          ref: ${{ inputs.ref }}
           lfs: true
           persist-credentials: false
       - name: Sync GitHub to Hugging Face Hub

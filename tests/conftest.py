@@ -9,6 +9,9 @@ PROJECT_ROOT = Path(__file__).parents[1].resolve()
 SRC_PATH = PROJECT_ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
+# Release tooling under utils/ lives outside the package.
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.append(str(PROJECT_ROOT))
 
 
 # Make tests reproducible by ignoring machine-specific profile/tool env config.
