@@ -1,28 +1,333 @@
+# Release workflow for reachy_mini_conversation_app, adapted from reachy_mini's (wheels.yml).
+# See RELEASE.md. One workflow_dispatch trigger, run from main:
+#   - dry-run       : check secrets, vars and access, preview the next versions. Changes nothing.
+#   - patch-release : X.Y.Z -> X.Y.(Z+1)
+#   - minor-release : X.Y.Z -> X.(Y+1).0
+# A release bumps pyproject.toml + uv.lock on main, tags it, syncs the tag to the Hugging Face
+# Space robots install from, and publishes a GitHub release with AI-drafted notes.
+# No release candidates: PR preview Spaces (pr-hf-space-preview.yml) cover pre-release testing.
+#
+# main carries the last released version (single source of truth in pyproject.toml).
+#
+# Required (see RELEASE.md):
+#   - secret RELEASE_PAT           : token of a repo admin, contents write
+#                                    (pushes the bump to protected main and creates the v* tag)
+#   - secret RELEASE_NOTES_HF_TOKEN: HF token scoped to Inference Providers (release notes)
+#   - var    RELEASE_NOTES_MODEL   : provider/model for notes (e.g. huggingface/zai-org/GLM-5.2)
+#   - var    OPENCODE_VERSION      : pinned OpenCode version
+
 name: Release
 
 on:
-  push:
-    tags:
-      - v*
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "Type of release"
+        required: true
+        type: choice
+        options:
+          - dry-run
+          - patch-release
+          - minor-release
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 permissions: {}
 
 jobs:
-  release:
-    name: Release
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+  # ============================================================
+  # 0. PREFLIGHT (dry-run): verify secrets, vars and access WITHOUT tagging,
+  #    publishing, or pushing anything.
+  # ============================================================
+  preflight:
+    if: ${{ inputs.release_type == 'dry-run' }}
     permissions:
-      contents: write # Creates the GitHub release for the pushed tag.
-    environment: release
-
+      contents: read
+    runs-on: ubuntu-latest
     steps:
-      - name: Create GitHub Release
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check secrets and variables are set
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: gh release create "${GITHUB_REF_NAME}" --verify-tag --generate-notes
+          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+          RELEASE_NOTES_HF_TOKEN: ${{ secrets.RELEASE_NOTES_HF_TOKEN }}
+          RELEASE_NOTES_MODEL: ${{ vars.RELEASE_NOTES_MODEL }}
+          OPENCODE_VERSION: ${{ vars.OPENCODE_VERSION }}
+        run: |
+          fail=0
+          check() { if [ -z "${!1:-}" ]; then echo "❌ $1 is NOT set"; fail=1; else echo "✅ $1 is set"; fi; }
+          echo "### Secrets & variables" >> "$GITHUB_STEP_SUMMARY"
+          for v in RELEASE_PAT RELEASE_NOTES_HF_TOKEN RELEASE_NOTES_MODEL OPENCODE_VERSION; do
+            check "$v"
+            if [ -z "${!v:-}" ]; then echo "- ❌ \`$v\` missing" >> "$GITHUB_STEP_SUMMARY"; else echo "- ✅ \`$v\`" >> "$GITHUB_STEP_SUMMARY"; fi
+          done
+          exit $fail
+
+      # Only admins bypass the "Protect main" and "Protect release tags" rulesets.
+      - name: Check RELEASE_PAT is a repo admin
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          echo "### RELEASE_PAT access" >> "$GITHUB_STEP_SUMMARY"
+          ADMIN=$(gh api "repos/${{ github.repository }}" --jq '.permissions.admin' 2>/dev/null || echo "error")
+          if [ "$ADMIN" = "true" ]; then
+            echo "✅ RELEASE_PAT is an admin of ${{ github.repository }} (can push main and create v* tags)"
+            echo "- ✅ admin on \`${{ github.repository }}\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "❌ RELEASE_PAT is not an admin of ${{ github.repository }} (permissions.admin=${ADMIN}); the bump and tag pushes will be rejected"
+            echo "- ❌ not admin on \`${{ github.repository }}\` (got: ${ADMIN})" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Check OpenCode installs, model is available, and HF token works
+        timeout-minutes: 5
+        env:
+          HF_TOKEN: ${{ secrets.RELEASE_NOTES_HF_TOKEN }}
+          RELEASE_NOTES_MODEL: ${{ vars.RELEASE_NOTES_MODEL }}
+        run: |
+          echo "### Release-notes model" >> "$GITHUB_STEP_SUMMARY"
+          # Validate OPENCODE_VERSION installs and the model name exists in the catalog.
+          curl -fsSL https://opencode.ai/install | bash -s -- --version "${{ vars.OPENCODE_VERSION }}"
+          export PATH="$HOME/.opencode/bin:$PATH"
+          if opencode models | grep -qx "$RELEASE_NOTES_MODEL"; then
+            echo "✅ model '$RELEASE_NOTES_MODEL' is available"
+            echo "- ✅ model \`$RELEASE_NOTES_MODEL\` available" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "❌ model '$RELEASE_NOTES_MODEL' not in \`opencode models\`"
+            echo "- ❌ model \`$RELEASE_NOTES_MODEL\` not found" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          # Hard check: the HF token is valid (fast, always warm).
+          WHO=$(curl -s -o /tmp/who.json -w '%{http_code}' --max-time 20 \
+            -H "Authorization: Bearer $HF_TOKEN" https://huggingface.co/api/whoami-v2 || echo 000)
+          if [ "$WHO" = "200" ]; then
+            USER=$(python3 -c "import json;print(json.load(open('/tmp/who.json')).get('name','?'))" 2>/dev/null || echo "?")
+            echo "✅ HF token is valid (account: $USER)"
+            echo "- ✅ HF token valid (account: \`$USER\`)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "❌ HF token rejected by whoami ($WHO), check RELEASE_NOTES_HF_TOKEN"
+            echo "- ❌ HF token invalid ($WHO)" >> "$GITHUB_STEP_SUMMARY"; exit 1
+          fi
+          # Best-effort: minimal Inference-Providers call. Cold starts can exceed a minute,
+          # so a timeout/5xx is a warning, not a failure; only an auth rejection is fatal.
+          MODEL_ID="${RELEASE_NOTES_MODEL#huggingface/}"
+          CODE=$(curl -s -o /tmp/hf_resp.json -w '%{http_code}' --max-time 120 \
+            -H "Authorization: Bearer $HF_TOKEN" -H 'content-type: application/json' \
+            -d "{\"model\":\"${MODEL_ID}\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}" \
+            https://router.huggingface.co/v1/chat/completions || echo 000)
+          case "$CODE" in
+            200)
+              echo "✅ Inference Providers reachable for $MODEL_ID"
+              echo "- ✅ inference call OK" >> "$GITHUB_STEP_SUMMARY" ;;
+            401|403)
+              echo "❌ token lacks Inference-Providers access ($CODE)"
+              head -c 400 /tmp/hf_resp.json
+              echo "- ❌ no Inference-Providers access ($CODE)" >> "$GITHUB_STEP_SUMMARY"; exit 1 ;;
+            *)
+              echo "⚠️ provider returned $CODE (likely cold start / transient), token is valid, not failing preflight"
+              echo "- ⚠️ inference call returned $CODE (transient; real run has a 30-min budget)" >> "$GITHUB_STEP_SUMMARY" ;;
+          esac
+
+      - name: Preview the versions each mode would produce
+        run: |
+          set -euo pipefail
+          CURRENT=$(grep -oP '^version = "\K[^"]+' pyproject.toml)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          {
+            echo "### Version preview (from pyproject \`$CURRENT\`)"
+            echo "| Mode | Would produce |"
+            echo "|------|---------------|"
+            echo "| patch-release | \`v${MAJOR}.${MINOR}.$((PATCH + 1))\` |"
+            echo "| minor-release | \`v${MAJOR}.$((MINOR + 1)).0\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$GITHUB_STEP_SUMMARY"
+
+  # ============================================================
+  # 1. PREPARE: bump the version on main, commit, tag, push
+  # ============================================================
+  prepare:
+    if: ${{ inputs.release_type != 'dry-run' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      since_tag: ${{ steps.version.outputs.since_tag }}
+      bump_type: ${{ steps.version.outputs.bump_type }}
+    steps:
+      - name: Check the dispatch branch
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$REF_NAME" != "main" ]]; then
+            echo "::error::Releases must be run from main, not '$REF_NAME'."
+            exit 1
+          fi
+
+      # Pushes go through RELEASE_PAT: only admins may push to main and create v* tags.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Detect version
+        id: version
+        env:
+          RELEASE_TYPE: ${{ inputs.release_type }}
+        run: |
+          set -euo pipefail
+          CURRENT=$(grep -oP '^version = "\K[^"]+' pyproject.toml)
+          if [[ ! "$CURRENT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::pyproject.toml version '$CURRENT' is not X.Y.Z."
+            exit 1
+          fi
+          # The notes cover everything since the release main currently carries.
+          SINCE_TAG="v${CURRENT}"
+          if ! git rev-parse -q --verify "refs/tags/${SINCE_TAG}" >/dev/null; then
+            echo "::error::pyproject.toml says ${CURRENT} but tag ${SINCE_TAG} does not exist."
+            exit 1
+          fi
+
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          case "$RELEASE_TYPE" in
+            patch-release) VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"; BUMP_TYPE=patch ;;
+            minor-release) VERSION="${MAJOR}.$((MINOR + 1)).0"; BUMP_TYPE=minor ;;
+          esac
+          TAG="v${VERSION}"
+
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "::error::Tag $TAG already exists!"
+            exit 1
+          fi
+
+          {
+            echo "version=$VERSION"
+            echo "tag=$TAG"
+            echo "since_tag=$SINCE_TAG"
+            echo "bump_type=$BUMP_TYPE"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Release Summary"
+            echo "| Key | Value |"
+            echo "|-----|-------|"
+            echo "| Type | \`$RELEASE_TYPE\` |"
+            echo "| Version | \`$VERSION\` |"
+            echo "| Tag | \`$TAG\` |"
+            echo "| Since tag | \`$SINCE_TAG\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Bump version in pyproject.toml and uv.lock
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          sed -i -E "s/^version = \".*\"/version = \"${VERSION}\"/" pyproject.toml
+          # Root package entry in uv.lock (dist name uses hyphens)
+          sed -i "/^name = \"reachy-mini-conversation-app\"/,/^version = /s/^version = \".*\"\$/version = \"${VERSION}\"/" uv.lock
+          echo "pyproject:"; grep -m1 '^version = ' pyproject.toml
+          echo "uv.lock:"; grep -A1 '^name = "reachy-mini-conversation-app"' uv.lock
+
+      - name: Commit, tag, and push
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git add pyproject.toml uv.lock
+          git commit -m "Release: ${TAG}"
+          git tag "$TAG" -m "${TAG} release"
+          # Fast-forward only: fails if main moved since the checkout; just re-run then.
+          git push origin HEAD:main
+          git push origin "$TAG"
+
+  # ============================================================
+  # 2. PUBLISH: sync the tag to the production Hugging Face Space robots install from
+  # ============================================================
+  publish-space:
+    needs: prepare
+    permissions:
+      contents: read
+    uses: ./.github/workflows/sync-hf-space.yml
+    with:
+      ref: ${{ needs.prepare.outputs.tag }}
+    secrets: inherit
+
+  # ============================================================
+  # 3. RELEASE NOTES: AI-drafted, then published as the latest GitHub release.
+  #    Gated on the Space sync so no release is published for a version robots can't get.
+  # ============================================================
+  release-notes:
+    permissions:
+      contents: write
+    needs: [prepare, publish-space]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install PyGithub
+
+      - name: Install OpenCode
+        run: curl -fsSL https://opencode.ai/install | bash -s -- --version ${{ vars.OPENCODE_VERSION }}
+
+      # The version is already on the Space: a notes failure must still publish a release.
+      - name: Generate release notes with OpenCode
+        timeout-minutes: 30
+        continue-on-error: true
+        env:
+          HF_TOKEN: ${{ secrets.RELEASE_NOTES_HF_TOKEN }}
+          GITHUB_TOKEN_RELEASE_NOTES: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_NOTES_MODEL: ${{ vars.RELEASE_NOTES_MODEL }}
+          RELEASE_NOTES_HEAD: ${{ needs.prepare.outputs.tag }}
+        run: |
+          # OpenCode reads the huggingface provider credential from its auth store, not from
+          # HF_TOKEN env; write it non-interactively so `opencode run` doesn't hang on login.
+          mkdir -p "$HOME/.local/share/opencode"
+          jq -n --arg k "$HF_TOKEN" '{huggingface:{type:"api",key:$k}}' > "$HOME/.local/share/opencode/auth.json"
+          # Route Inference-Providers billing to the org (token owner must be a member).
+          mkdir -p "$HOME/.config/opencode"
+          jq -n '{provider:{huggingface:{options:{headers:{"X-HF-Bill-To":"pollen-robotics"}}}}}' \
+            > "$HOME/.config/opencode/opencode.json"
+          export PATH="$HOME/.opencode/bin:$PATH"
+
+          python -m utils.release_notes.generate_release_notes \
+            --since "${{ needs.prepare.outputs.since_tag }}" \
+            --${{ needs.prepare.outputs.bump_type }}
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          NOTES_FILE=".release-notes/RELEASE_NOTES_${TAG}.md"
+          if [[ ! -s "$NOTES_FILE" ]]; then
+            echo "::warning::No generated notes at $NOTES_FILE, publishing GitHub's auto-generated notes instead."
+            gh release create "$TAG" --verify-tag --latest --title "[${TAG}]" --generate-notes
+            exit 0
+          fi
+          TITLE=$(head -1 "$NOTES_FILE" | sed 's/^# //')
+          tail -n +2 "$NOTES_FILE" > "${NOTES_FILE}.body"
+          gh release create "$TAG" --verify-tag --latest --title "$TITLE" --notes-file "${NOTES_FILE}.body"

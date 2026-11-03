@@ -138,8 +138,8 @@ If you change dependencies, keep `uv.lock` in sync by running `uv lock` (CI vali
 | **Pytest** (`pytest.yml`) | PR, push to `main` | tests on Linux, macOS, Windows |
 | **uv.lock check** (`uv-lock-check.yml`) | PR | `uv.lock` matches `pyproject.toml` |
 | **Allure Report** (`allure.yml`) | push to `main`, manual | publishes test and coverage reports to GitHub Pages |
-| **Release** (`release.yml`) | tag `v*` | publishes the GitHub release |
-| **Sync to HF Space** (`sync-hf-space.yml`) | tag, manual | mirrors releases to the Hugging Face Space |
+| **Release** (`release.yml`) | manual | patch / minor release: bumps, tags, syncs the Space, AI release notes, see `RELEASE.md` |
+| **Sync to HF Space** (`sync-hf-space.yml`) | called by Release, manual | mirrors a release tag to the Hugging Face Space |
 | **PR Preview** (`pr-hf-space-preview.yml`) | PR | spins up a private preview Space per PR |
 
 ---
