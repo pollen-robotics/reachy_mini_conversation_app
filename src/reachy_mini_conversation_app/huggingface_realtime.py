@@ -72,6 +72,7 @@ _RESPONSE_REJECTION_RETRY_DELAY: Final[float] = 0.5
 AUDIO_SEND_TIMEOUT_S: Final[float] = 5.0
 # Server-measured stage timings the speech-to-speech backend attaches to response.done.
 _TURN_LATENCY_METADATA_KEY: Final[str] = "speech_to_speech.turn_latency"
+_INTENTIONALLY_SILENT_TOOLS: Final[set[str]] = {"go_to_sleep", "stop_dance", "stop_emotion"}
 
 
 class InputTranscriptChunksByItem(BaseModel):
@@ -206,9 +207,12 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self._turn_user_done_at: float | None = None
         self._turn_response_created_at: float | None = None
         self._turn_first_audio_at: float | None = None
+        self._user_turn_needs_spoken_response = False
+        self._user_turn_recovery_requested = False
         self._startup_greeting_sent = False
         self._in_flight_tool_calls: set[str] = set()
         self._tool_batch_needs_response = False
+        self._tool_batch_has_intentionally_silent_tool = False
         self._local_vad: SileroVAD | None = None
         self._local_speech = False
         self._server_speech = False
@@ -860,11 +864,26 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             # Always surface errors, skip the spoken follow-up for tools that opt out.
             if model_result_submitted and (completed_tool.error is not None or tool is None or tool.needs_response):
                 self._tool_batch_needs_response = True
+            if model_result_submitted and completed_tool.tool_name in _INTENTIONALLY_SILENT_TOOLS:
+                self._tool_batch_has_intentionally_silent_tool = True
 
             # Parallel tool calls in one turn: respond once every result is in, not per tool.
-            if self._tool_batch_needs_response and not self._in_flight_tool_calls:
+            if not self._in_flight_tool_calls:
+                needs_response = self._tool_batch_needs_response
+                has_intentionally_silent_tool = self._tool_batch_has_intentionally_silent_tool
                 self._tool_batch_needs_response = False
-                await self._safe_response_create()
+                self._tool_batch_has_intentionally_silent_tool = False
+                if needs_response:
+                    await self._safe_response_create()
+                elif (
+                    model_result_submitted
+                    and self._user_turn_needs_spoken_response
+                    and self._turn_first_audio_at is None
+                    and not self._user_turn_recovery_requested
+                    and not has_intentionally_silent_tool
+                ):
+                    self._user_turn_recovery_requested = True
+                    await self._safe_response_create()
 
         except ConnectionClosedError:
             logger.warning("Connection closed while sending tool result")
@@ -926,6 +945,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         self._turn_user_done_at = None
                         self._turn_response_created_at = None
                         self._turn_first_audio_at = None
+                        self._user_turn_needs_spoken_response = False
                         await self._interrupt_playback()
                         self._set_listening(server=True)
                         logger.debug("User speech started")
@@ -1014,6 +1034,9 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         self._turn_first_audio_at = None
                         self._in_flight_tool_calls.clear()
                         self._tool_batch_needs_response = False
+                        self._tool_batch_has_intentionally_silent_tool = False
+                        self._user_turn_needs_spoken_response = True
+                        self._user_turn_recovery_requested = False
 
                         await self.output_queue.put(AdditionalOutputs({"role": "user", "content": transcript}))
                         self._emit_transcript("user", transcript, True)
@@ -1039,6 +1062,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         self._mark_activity("assistant_audio_delta")
                         if self._turn_user_done_at is not None and self._turn_first_audio_at is None:
                             self._turn_first_audio_at = time.perf_counter()
+                            self._user_turn_needs_spoken_response = False
                             delta_ms = (self._turn_first_audio_at - self._turn_user_done_at) * 1000
                             logger.info("Turn latency: first audio delta %.0f ms after user transcript", delta_ms)
                         self.playback_frame_epochs[id(decoded_pcm)] = self.playback_epoch
