@@ -53,6 +53,7 @@ from reachy_mini_conversation_app.tools.core_tools import (
     get_tool_specs,
 )
 from reachy_mini_conversation_app.conversation_handler import VADStatus, ConversationHandler
+from reachy_mini_conversation_app.tools.tool_constants import ToolState
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolCallRoutine,
     ToolNotification,
@@ -68,6 +69,10 @@ logger = logging.getLogger(__name__)
 
 _RESPONSE_DONE_TIMEOUT: Final[float] = 30.0
 _RESPONSE_REJECTION_RETRY_DELAY: Final[float] = 0.5
+_LONG_RUNNING_ACCEPTED_NOTE: Final[str] = (
+    "Running in the background. Its result will arrive later as a separate message; keep talking with the user "
+    "meanwhile. task_cancel with this task_id stops it."
+)
 # A microphone frame that cannot be sent for this long means a dead link.
 AUDIO_SEND_TIMEOUT_S: Final[float] = 5.0
 # Server-measured stage timings the speech-to-speech backend attaches to response.done.
@@ -740,7 +745,12 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
     async def _handle_tool_result(self, completed_tool: ToolNotification) -> None:
         """Process the result of a tool call."""
-        if completed_tool.error is not None:
+        if completed_tool.is_long_running and completed_tool.status == ToolState.RUNNING:
+            # The backend refuses to respond while a call is unanswered, so a long tool answers at once.
+            tool_result = {**(completed_tool.result or {}), "status": "started", "note": _LONG_RUNNING_ACCEPTED_NOTE}
+            tool_result_for_model = tool_result
+            logger.info("Tool '%s' (id=%s) is running in the background.", completed_tool.tool_name, completed_tool.id)
+        elif completed_tool.error is not None:
             logger.error(
                 "Tool '%s' (id=%s) failed with error: %s",
                 completed_tool.tool_name,
@@ -779,6 +789,10 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             return
 
         try:
+            if completed_tool.is_long_running and completed_tool.status != ToolState.RUNNING:
+                await self._announce_long_running_result(completed_tool.tool_name, tool_result_for_model)
+                return
+
             send_result_to_model = not completed_tool.is_idle_tool_call
             if send_result_to_model:
                 self._mark_activity("tool_result_ready")
@@ -870,6 +884,34 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             logger.warning("Connection closed while sending tool result")
             self.connection = None
             self._response_done_event.set()
+
+    async def _announce_long_running_result(self, tool_name: str, result: dict[str, Any]) -> None:
+        """Give a finished long-running tool's outcome to the model as a new turn and let it speak."""
+        # Its call was answered at start, so this is a plain message: it waits for the robot to finish
+        # speaking but, unlike a function output, is never dropped when that wait times out.
+        await self._wait_for_response_done_before_tool_result()
+        if not self.connection:
+            logger.warning("Connection closed before announcing background tool '%s'", tool_name)
+            return
+        await self.connection.conversation.item.create(
+            item={
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        # Marker from speech-to-speech's start-and-notify guidance, so tool text is not taken as the user's.
+                        "text": (
+                            f"[background event, not said by the user] Task '{tool_name}' finished: "
+                            f"{json.dumps(result)} Tell the user briefly."
+                        ),
+                    }
+                ],
+            },
+        )
+        self._mark_activity("tool_result_ready")
+        await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": json.dumps(result)}))
+        await self._safe_response_create()
 
     async def _run_realtime_session(self) -> None:
         """Establish and manage a single realtime session."""
@@ -1076,6 +1118,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                             continue
 
                         self._in_flight_tool_calls.add(call_id)
+                        tool = core_tools.get_tools().get(tool_name)
                         background_tool = await self.tool_manager.start_tool(
                             call_id=call_id,
                             tool_call_routine=ToolCallRoutine(
@@ -1084,6 +1127,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                                 deps=self.deps,
                             ),
                             is_idle_tool_call=False,
+                            is_long_running=tool is not None and tool.long_running,
                         )
 
                         await self.output_queue.put(

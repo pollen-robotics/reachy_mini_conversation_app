@@ -1033,6 +1033,71 @@ async def test_handle_tool_result_no_connection_is_dropped() -> None:
 
 
 @pytest.mark.asyncio
+async def test_long_running_tool_call_is_answered_when_accepted(monkeypatch: Any) -> None:
+    """Accepting a long tool answers its call at once, so the backend keeps responding to the user."""
+    handler = _plain_handler()
+    handler.connection = _FakeConnection()
+    handler._in_flight_tool_calls = {"c1"}
+    monkeypatch.setattr(handler, "_wait_for_response_done_before_tool_result", AsyncMock(return_value=True))
+    note = ToolNotification(
+        id="c1",
+        tool_name="slow",
+        is_idle_tool_call=False,
+        status=ToolState.RUNNING,
+        is_long_running=True,
+        result={"task_id": "slow-c1-1.0"},
+    )
+
+    await handler._handle_tool_result(note)
+
+    item = handler.connection.conversation.item.create.await_args.kwargs["item"]
+    assert (item["type"], item["call_id"]) == ("function_call_output", "c1")
+    output = json.loads(item["output"])
+    assert (output["status"], output["task_id"]) == ("started", "slow-c1-1.0")
+    assert not handler._pending_responses.empty()
+
+
+@pytest.mark.asyncio
+async def test_long_running_result_is_announced_even_after_a_busy_wait(monkeypatch: Any) -> None:
+    """A finished long tool comes back as a new message, kept even if the robot was still talking."""
+    handler = _plain_handler()
+    handler.connection = _FakeConnection()
+    monkeypatch.setattr(handler, "_wait_for_response_done_before_tool_result", AsyncMock(return_value=False))
+    note = ToolNotification(
+        id="c1",
+        tool_name="slow",
+        is_idle_tool_call=False,
+        status=ToolState.COMPLETED,
+        is_long_running=True,
+        result={"label": "song"},
+    )
+
+    await handler._handle_tool_result(note)
+
+    item = handler.connection.conversation.item.create.await_args.kwargs["item"]
+    assert (item["type"], item["role"]) == ("message", "user")
+    text = item["content"][0]["text"]
+    assert text.startswith("[background event, not said by the user]") and '"label": "song"' in text
+    assert not handler._pending_responses.empty()
+
+
+@pytest.mark.asyncio
+async def test_run_session_starts_long_running_tool_as_such(monkeypatch: Any) -> None:
+    """A tool flagged long_running is started so that its call gets answered at once."""
+    handler = _session_handler(
+        monkeypatch,
+        (_FakeEvent("response.function_call_arguments.done", name="slow", arguments="{}", call_id="c1"),),
+    )
+    monkeypatch.setattr(hf_mod.core_tools, "get_tools", lambda: {"slow": SimpleNamespace(long_running=True)})
+    start_tool = AsyncMock(return_value=SimpleNamespace(tool_id="slow-1"))
+    monkeypatch.setattr(type(handler.tool_manager), "start_tool", start_tool)
+
+    await handler._run_realtime_session()
+
+    assert start_tool.await_args.kwargs["is_long_running"] is True
+
+
+@pytest.mark.asyncio
 async def test_handle_tool_result_missing_result_reports_error() -> None:
     """A tool that returns neither result nor error is reported as a failure."""
     handler = _plain_handler()

@@ -227,6 +227,26 @@ class TestRunToolLifecycle:
         assert notification.status == ToolState.COMPLETED
 
     @pytest.mark.asyncio
+    async def test_long_running_is_accepted_before_its_result(self, manager: BackgroundToolManager) -> None:
+        """A long-running tool queues an accepted notice with its task id, always ahead of the final one."""
+        routine = _make_routine("song", result={"audio": "x"})
+        bg = await manager.start_tool("c1", routine, is_idle_tool_call=False, is_long_running=True)
+        await asyncio.sleep(0.05)
+
+        accepted = manager._notification_queue.get_nowait()
+        finished = manager._notification_queue.get_nowait()
+        assert (accepted.status, accepted.result, accepted.is_long_running) == (
+            ToolState.RUNNING,
+            {"task_id": bg.tool_id},
+            True,
+        )
+        assert (finished.status, finished.result, finished.is_long_running) == (
+            ToolState.COMPLETED,
+            {"audio": "x"},
+            True,
+        )
+
+    @pytest.mark.asyncio
     async def test_tool_failure(self, manager: BackgroundToolManager) -> None:
         """Mark a tool as FAILED when it raises an exception."""
         routine = _make_routine("bad_tool", error=ValueError("boom"))

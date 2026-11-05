@@ -69,10 +69,12 @@ class Tool(abc.ABC):
 
     Tools may override:
       - needs_response: bool = True  # set False to skip the spoken follow-up after this tool runs
+      - long_running: bool = False  # set True to answer the call at once and report the result as a later turn
     """
 
     _auto_register: ClassVar[bool] = True
     needs_response: ClassVar[bool] = True
+    long_running: ClassVar[bool] = False
 
     name: str
     description: str
