@@ -206,3 +206,61 @@ def test_handle_command_queue_and_clear() -> None:
     manager._handle_command("clear_queue", None, now)
     assert len(manager.move_queue) == 0
     assert manager.state.current_move is None
+
+
+def test_speaker_tracking_holds_for_speech_and_buffered_playback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Speaker turns use listening state and remain paused until buffered speech has drained."""
+    robot = MagicMock()
+    now = 0.0
+    monkeypatch.setattr("reachy_mini_conversation_app.moves.time.monotonic", lambda: now)
+    manager = MovementManager(robot, speaker_tracking=True)
+    now = 1.0
+    manager.set_head_tracking(True)
+    manager.set_listening(True)
+    for now in (1.0, 1.1, 1.2, 1.3):
+        manager.set_speaker_direction(np.deg2rad(40), True, now)
+        manager._poll_signals(now)
+        head, _, body_yaw = manager._get_primary_pose(now)
+    assert body_yaw > 0.0
+    assert np.arctan2(head[1, 0], head[0, 0]) == pytest.approx(body_yaw)
+    robot.start_head_tracking.assert_not_called()
+
+    manager.set_speaking(True)
+    manager._poll_signals(now)
+    _, _, held_yaw = manager._get_primary_pose(1.4)
+    assert held_yaw == body_yaw
+
+    manager.observe_playback(1.0)
+    manager.observe_playback(1.0)
+    manager.set_speaking(False)
+    manager._poll_signals(now)
+    # Generation ended, but two seconds of queued speech still own the pose.
+    for tick in (1.5, 2.0, 3.4):
+        _, _, held_yaw = manager._get_primary_pose(tick)
+        assert held_yaw == body_yaw
+    _, _, resumed_yaw = manager._get_primary_pose(3.6)
+    assert resumed_yaw > body_yaw
+
+    now = 3.6
+    manager.observe_playback(10.0)
+    manager.observe_playback(0.0)
+    manager._poll_signals(now)
+    _, _, cleared_yaw = manager._get_primary_pose(3.9)
+    assert cleared_yaw > resumed_yaw
+
+
+def test_speaker_tracking_leaves_explicit_world_poses_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Manual moves are not rotated again, and returning to automatic movement stays smooth."""
+    robot = MagicMock()
+    manager = MovementManager(robot, speaker_tracking=True)
+    monkeypatch.setattr(manager, "_now", lambda: 1.0)
+    head_pose = create_head_pose(yaw=40, degrees=True)
+    manager.state.current_move = _FakeMove(head_pose)
+    manager.state.move_start_time = 1.0
+    head, _, body_yaw = manager._get_primary_pose(1.1)
+    np.testing.assert_allclose(head, head_pose)
+    assert body_yaw == 0.0
+    manager.clear_move_queue()
+    manager._poll_signals(1.1)
+    head, _, _ = manager._get_primary_pose(1.2)
+    assert 37.0 <= np.rad2deg(np.arctan2(head[1, 0], head[0, 0])) < 40.0
