@@ -1605,3 +1605,25 @@ def test_invalid_speech_switch_saves_nothing(
     assert read_settings(tmp_path).local_vad_enabled is None
     assert read_settings(tmp_path).local_barge_in_enabled is None
     assert not stream._restart_requested.is_set()
+
+
+@pytest.mark.parametrize(
+    "error_code, error, shown",
+    [
+        ("NO_BOARD", "no NFC reader board found", None),  # no add-on: the usual state
+        ("LINK_ERROR", "permission denied", "permission denied"),
+    ],
+)
+def test_nfc_status_hides_only_the_missing_board(error_code: str, error: str, shown: str | None) -> None:
+    """The panel tells a missing add-on from a fault by the daemon's code, not its wording."""
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None, backend=None))
+    stream = LocalStream(MagicMock(), robot)
+    status = {
+        "enabled": True,
+        "connected": False,
+        "driver_available": True,
+        "error": error,
+        "error_code": error_code,
+    }
+    stream._rfid_controller = SimpleNamespace(last_status=lambda: status)  # type: ignore[assignment]
+    assert stream._nfc_status()["nfc_error"] == shown

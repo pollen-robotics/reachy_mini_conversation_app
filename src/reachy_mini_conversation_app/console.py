@@ -54,7 +54,7 @@ from reachy_mini_conversation_app.settings_store import (
 from reachy_mini_conversation_app.language_routes import LanguageScope, register_language_methods
 from reachy_mini_conversation_app.startup_settings import read_startup_settings, write_startup_settings
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, initialize_tools
-from reachy_mini_conversation_app.nfc_daemon_client import NO_BOARD_ERROR
+from reachy_mini_conversation_app.nfc_daemon_client import NO_BOARD
 from reachy_mini_conversation_app.tool_space_routes import register_tool_space_methods
 from reachy_mini_conversation_app.personality_routes import (
     build_personality_ops,
@@ -514,12 +514,13 @@ class LocalStream:
         status = controller.last_status()
         enabled = status.get("enabled") is not False
         error = status.get("error")
+        no_board = status.get("error_code") == NO_BOARD
         return {
             "nfc_supported": bool(status.get("driver_available")),
             "nfc_connected": bool(status.get("connected")),
             "nfc_enabled": enabled,
             # Switched off, the daemon's error only restates that: not a fault.
-            "nfc_error": None if error == NO_BOARD_ERROR or not enabled else error,
+            "nfc_error": None if no_board or not enabled else error,
         }
 
     async def get_available_voices(self) -> list[str]:

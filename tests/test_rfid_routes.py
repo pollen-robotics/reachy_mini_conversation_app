@@ -22,7 +22,7 @@ def controller(monkeypatch):
     )
 
 
-def fake_reader(monkeypatch, *, connected, tag=None, error=None, enabled=None):
+def fake_reader(monkeypatch, *, connected, tag=None, error=None, error_code=None, enabled=None):
     """Answer the daemon's status and tag endpoints without a reader.
 
     ``enabled`` left as None leaves the field out, as daemons without the
@@ -39,6 +39,7 @@ def fake_reader(monkeypatch, *, connected, tag=None, error=None, enabled=None):
             "driver_available": True,
             "port": "/dev/nfc",
             "error": error,
+            "error_code": error_code,
         },
     )
     absent = NfcTagSnapshot(present=False, content=None, blank=False)
@@ -74,9 +75,10 @@ def test_a_tag_on_a_connected_reader_is_described_by_what_it_carries(controller,
 
 def test_the_daemon_reason_for_a_down_link_reaches_the_panel(controller, monkeypatch):
     """Not connected on its own leaves a user guessing; the daemon says which it is."""
-    fake_reader(monkeypatch, connected=False, error="no NFC reader board found")
+    fake_reader(monkeypatch, connected=False, error="no NFC reader board found", error_code="NO_BOARD")
     assert controller.connection_status()["error"] == "no NFC reader board found"
     assert controller.last_status()["error"] == "no NFC reader board found"
+    assert controller.last_status()["error_code"] == "NO_BOARD"
 
 
 @pytest.mark.parametrize("enabled, expected", [(False, False), (True, True), (None, True)])
@@ -449,3 +451,38 @@ def test_the_client_tells_an_unreadable_tag_apart(monkeypatch):
     assert not client.get_tag().readable
     body = {"present": True, "content": "hf_pirate"}
     assert client.get_tag().readable
+
+
+class _FakeResponse:
+    def __init__(self, status_code, body):
+        self.status_code = status_code
+        self._body = body
+
+    def json(self):
+        return self._body
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(self.status_code)
+
+
+@pytest.mark.parametrize(
+    "response, expected",
+    [
+        (_FakeResponse(503, {"detail": "NFC reader disabled"}), (False, "DISABLED")),
+        (_FakeResponse(200, {"success": False, "error": "UNCERTAIN"}), (False, "UNCERTAIN")),
+        (_FakeResponse(200, {"success": True}), (True, "WRITE_OK")),
+    ],
+)
+def test_a_write_outcome_is_a_code_whatever_the_wording(monkeypatch, response, expected):
+    """A switched-off reader is a 503: told by its status code, never by its message."""
+    monkeypatch.setattr("requests.post", lambda *a, **kw: response)
+    assert NfcDaemonClient().write_tag("abc") == expected
+
+
+@pytest.mark.parametrize("code", ["DISABLED", "UNCERTAIN", "BUSY"])
+def test_every_daemon_code_has_a_message(code):
+    """Codes the daemon added for the NFC API reach a user as a sentence."""
+    from reachy_mini_conversation_app.nfc_daemon_client import describe_write_error
+
+    assert describe_write_error(code) != code

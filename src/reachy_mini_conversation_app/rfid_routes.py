@@ -215,6 +215,7 @@ class RfidController:
             "port": status.get("port"),
             "driver_available": status.get("driver_available", False),
             "error": status.get("error"),
+            "error_code": status.get("error_code"),
         }
         self._last_status = summary
         return summary

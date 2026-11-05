@@ -29,11 +29,16 @@ WRITE_ERROR_MESSAGES = {
     "NOT_CONNECTED": "NFC reader not connected",
     "LINK_LOST": "Lost the link to the NFC reader",
     "TIMEOUT": "Tag was not presented in time",
+    "UNCERTAIN": "The write may not have finished: check the tag",
+    "BUSY": "The NFC reader is busy, try again",
     "DRIVER_MISSING": "NFC driver not installed on the robot",
+    # Not from a write result: the daemon answers 503 while the reader is off.
+    "DISABLED": "NFC reader is switched off",
 }
 
-# The daemon's status error when no add-on is plugged in: the normal state, not a fault.
-NO_BOARD_ERROR = "no NFC reader board found"
+# The daemon's status ``error_code`` when no add-on is plugged in: the normal
+# state, not a fault.
+NO_BOARD = "NO_BOARD"
 
 
 def describe_write_error(code: str) -> str:
@@ -104,9 +109,8 @@ class NfcDaemonClient:
         try:
             r = requests.post(f"{self.base}/api/nfc/{path}", json=payload, timeout=timeout)
             if r.status_code == 503:
-                # The reader itself is unavailable: disabled or link down.
-                detail = r.json().get("detail", "unavailable")
-                return False, "NOT_CONNECTED" if "connect" in detail.lower() else detail
+                # The daemon's only 503 on these routes: the reader is switched off.
+                return False, "DISABLED"
             if r.status_code == 422:
                 # The daemon's validator rejects text over its length limit.
                 return False, "TOO_LONG"
