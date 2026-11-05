@@ -617,13 +617,13 @@ def build_remote_client(
     alias: str,
     mcp_url: str,
     *,
-    private: bool,
     cached_tools: Sequence[InstalledToolSpaceTool] = (),
 ) -> RemoteMcpToolClient:
-    """Build an MCP client for an installed Space, sending the HF token only to private Spaces."""
+    """Build an MCP client for an installed Space, signed in as the current Hugging Face account."""
     validated_mcp_url = validate_space_mcp_url(mcp_url)
-    token = (config.HF_TOKEN or get_token()) if private else None
-    headers = {"Authorization": f"Bearer {token}"} if private and token else {}
+    # Public Spaces get it too: ZeroGPU charges the caller's quota, and anonymous callers get the least.
+    token = config.HF_TOKEN or get_token()
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
     return RemoteMcpToolClient(
         RemoteMcpServerConfig(
             alias=alias,
@@ -720,9 +720,8 @@ async def resolve_tool_space(slug: str) -> InstalledToolSpace:
     _validate_space_info(validated_slug, space_info)
 
     mcp_url = _build_space_mcp_url(space_info, validated_slug)
-    private = bool(space_info.private)
     try:
-        client = build_remote_client(alias, mcp_url, private=private)
+        client = build_remote_client(alias, mcp_url)
     except ValueError as exc:
         raise RuntimeError(f"Space '{validated_slug}' returned an unsupported MCP endpoint: {exc}") from exc
     try:
@@ -734,7 +733,7 @@ async def resolve_tool_space(slug: str) -> InstalledToolSpace:
         slug=validated_slug,
         alias=alias,
         mcp_url=mcp_url,
-        private=private,
+        private=bool(space_info.private),
         tools=_build_installed_tool_space_tools(slug=validated_slug, alias=alias, remote_specs=remote_specs),
     )
 

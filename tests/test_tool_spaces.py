@@ -171,17 +171,18 @@ def test_tool_spaces_add_installs_private_space_with_token(
     [
         (True, None, "hf_test_token", "Bearer hf_test_token"),
         (True, "hf_env_token", None, "Bearer hf_env_token"),
-        (False, None, "hf_test_token", None),
+        (False, None, "hf_test_token", "Bearer hf_test_token"),
+        (False, None, None, None),
     ],
 )
-def test_resolve_tool_space_sends_auth_only_to_private_spaces(
+def test_resolve_tool_space_signs_in_to_every_space(
     monkeypatch: pytest.MonkeyPatch,
     private: bool,
     configured_token: str | None,
     login_token: str | None,
     expected_authorization: str | None,
 ) -> None:
-    """Private Spaces use the configured/login token while public Spaces receive no credentials."""
+    """Every Space gets the configured/login token, so ZeroGPU charges the user's quota; no token sends none."""
     monkeypatch.setattr(
         "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
         lambda self, slug, **kwargs: _mock_private_space_info(slug) if private else _mock_public_space_info(slug),

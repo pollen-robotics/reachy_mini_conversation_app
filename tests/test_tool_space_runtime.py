@@ -88,13 +88,11 @@ async def test_initialize_tools_loads_enabled_installed_remote_tools_and_dispatc
         alias: str,
         mcp_url: str,
         *,
-        private: bool,
         cached_tools: list[InstalledToolSpaceTool],
     ) -> AsyncMock:
         nonlocal captured_cached_tools
         assert alias == SEARCH_ALIAS
         assert mcp_url == SEARCH_MCP_URL
-        assert private is False
         captured_cached_tools = cached_tools
         return client
 

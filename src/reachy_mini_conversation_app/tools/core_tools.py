@@ -369,7 +369,6 @@ def _resolve_remote_tools(tool_names: list[str], instance_path: str | Path | Non
         client = build_remote_client(
             installed_space.alias,
             installed_space.mcp_url,
-            private=installed_space.private,
             cached_tools=installed_space.tools,
         )
         for remote_tool in installed_space.tools:
