@@ -14,6 +14,7 @@ from dataclasses import field, asdict, dataclass
 from urllib.parse import urlsplit
 from collections.abc import Sequence
 
+import httpx
 from huggingface_hub import HfApi, SpaceInfo, get_token
 from huggingface_hub.errors import RepositoryNotFoundError
 
@@ -643,6 +644,61 @@ def build_remote_client(
             if tool.remote_name
         ],
     )
+
+
+# Messages raised by ZeroGPU's `spaces` package (0.51), surfaced verbatim by the Space.
+_ZEROGPU_FAILURES = (
+    ("exceeded your", "gpu_quota", "The Hugging Face account has used up its GPU time for now."),
+    ("reached its GPU limit", "gpu_quota", "No Hugging Face account was used, and the anonymous GPU time is used up."),
+    ("ZeroGPU credits allocated", "gpu_quota", "Too many GPU jobs are already running on this account."),
+    ("larger than the maximum allowed", "gpu_request_too_long", "This request needs more GPU time than allowed."),
+    ("No GPU was available", "gpu_busy", "No GPU was free in time; try again later."),
+)
+_SPACE_STAGE_FAILURES = {
+    "PAUSED": ("space_paused", "The Space is paused by its owner."),
+    "STOPPED": ("space_paused", "The Space is stopped."),
+    "SLEEPING": ("space_starting", "The Space was asleep and is starting; try again in a minute."),
+    "BUILDING": ("space_starting", "The Space is starting; try again in a minute."),
+    "APP_STARTING": ("space_starting", "The Space is starting; try again in a minute."),
+    "RUNNING_BUILDING": ("space_starting", "The Space is restarting; try again in a minute."),
+    "RUNNING_APP_STARTING": ("space_starting", "The Space is restarting; try again in a minute."),
+    "BUILD_ERROR": ("space_broken", "The Space is broken right now (build error)."),
+    "RUNTIME_ERROR": ("space_broken", "The Space is broken right now (runtime error)."),
+    "CONFIG_ERROR": ("space_broken", "The Space is broken right now (configuration error)."),
+    "NO_APP_FILE": ("space_broken", "The Space has no app to run."),
+    "DELETING": ("space_broken", "The Space is being deleted."),
+}
+
+
+def explain_space_failure(slug: str, detail: str) -> dict[str, str] | None:
+    """Name why a Space tool call failed, from the Space's own message or its Hub status; blocking.
+
+    Returns ``{"error", "reason", "detail"}``, or None when nothing more specific than ``detail`` is known.
+    """
+    for marker, reason, message in _ZEROGPU_FAILURES:
+        if marker in detail:
+            return {"error": message, "reason": reason, "detail": detail}
+
+    # Remote failures look alike on the wire (HTML page, 404, "error response"); the Hub says what is wrong.
+    token = config.HF_TOKEN or get_token()
+    try:
+        space_info = HfApi().space_info(slug, timeout=10.0, token=token or False)
+    except RepositoryNotFoundError:
+        message = (
+            "The signed-in Hugging Face account cannot access this Space: it is private or was deleted."
+            if token
+            else "This Space is private or was deleted; sign in with a Hugging Face account that can access it."
+        )
+        return {"error": message, "reason": "no_access", "detail": detail}
+    except httpx.HTTPError as exc:
+        logger.warning("Could not check the status of Space '%s': %s", slug, exc)
+        return None
+
+    stage = space_info.runtime.stage if space_info.runtime else None
+    if stage is None or stage not in _SPACE_STAGE_FAILURES:
+        return None
+    reason, message = _SPACE_STAGE_FAILURES[stage]
+    return {"error": message, "reason": reason, "detail": detail}
 
 
 async def resolve_tool_space(slug: str) -> InstalledToolSpace:

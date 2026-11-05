@@ -14,8 +14,12 @@ from dataclasses import dataclass
 
 from reachy_mini import ReachyMini
 from reachy_mini_conversation_app.config import config, list_tool_module_names
-from reachy_mini_conversation_app.mcp_client import McpToolTimeoutError, McpToolInvocationError
-from reachy_mini_conversation_app.tool_spaces import build_remote_client, read_installed_tool_spaces
+from reachy_mini_conversation_app.mcp_client import McpClientError, McpToolTimeoutError, McpToolInvocationError
+from reachy_mini_conversation_app.tool_spaces import (
+    build_remote_client,
+    explain_space_failure,
+    read_installed_tool_spaces,
+)
 from reachy_mini_conversation_app.profile_store import DEFAULT_PROFILE_NAME
 from reachy_mini_conversation_app.profile_toolsets import read_profile_tool_names
 from reachy_mini_conversation_app.tools.tool_constants import SystemTool
@@ -123,21 +127,36 @@ class RemoteMcpTool(Tool):
         self._registry_source = f"space:{slug}:{client_tool_name}"
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
-        """Invoke the underlying remote MCP tool."""
+        """Invoke the underlying remote MCP tool, naming the cause when the Space fails."""
         try:
-            result = await self._client.call_tool(self._client_tool_name, kwargs)
+            result = await self._call_with_retry(kwargs)
+        except McpClientError as exc:
+            detail = f"{type(exc).__name__}: {exc}"
+            logger.warning("Remote MCP tool %s from %s failed: %s", self.name, self._space_slug, detail)
+            explained = await asyncio.to_thread(explain_space_failure, self._space_slug, detail)
+            return {**(explained or {"error": detail}), "tool_space_slug": self._space_slug}
+
+        payload = dict(result)
+        if payload.get("status") == "error":
+            explained = await asyncio.to_thread(explain_space_failure, self._space_slug, payload.get("text") or "")
+            if explained is not None:
+                logger.warning("Remote MCP tool %s from %s failed: %s", self.name, self._space_slug, explained)
+                return {**explained, "tool_space_slug": self._space_slug}
+        if payload.get("namespaced_tool_name") == self._client_tool_name:
+            payload["namespaced_tool_name"] = self.name
+        payload.setdefault("tool_space_slug", self._space_slug)
+        return payload
+
+    async def _call_with_retry(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            return await self._client.call_tool(self._client_tool_name, arguments)
         except McpToolTimeoutError:
             # Timeout subclasses the retryable error, but retrying it would just double the wait.
             raise
         except McpToolInvocationError as exc:
             logger.warning("Remote MCP tool failed once; retrying %s from %s: %s", self.name, self._space_slug, exc)
             await asyncio.sleep(_REMOTE_TOOL_RETRY_DELAY_S)
-            result = await self._client.call_tool(self._client_tool_name, kwargs)
-        payload = dict(result)
-        if payload.get("namespaced_tool_name") == self._client_tool_name:
-            payload["namespaced_tool_name"] = self.name
-        payload.setdefault("tool_space_slug", self._space_slug)
-        return payload
+            return await self._client.call_tool(self._client_tool_name, arguments)
 
 
 _LOADED_REMOTE_TOOL_CACHE: Dict[tuple[str, str], RemoteMcpTool] = {}

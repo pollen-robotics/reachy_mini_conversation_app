@@ -18,6 +18,7 @@ from reachy_mini_conversation_app.tool_spaces import (
     ToolSpaceProfileUpdateError,
     remove_tool_space,
     install_tool_space,
+    explain_space_failure,
     resolve_tool_space_sync,
     handle_tool_spaces_command,
     read_installed_tool_spaces,
@@ -671,3 +672,66 @@ def test_install_tool_space_refreshes_cached_metadata(
     matching_spaces = [space for space in refreshed_result.manifest.spaces if space.slug == SEARCH_SPACE_SLUG]
     assert len(matching_spaces) == 1
     assert matching_spaces[0].tools[0].description == "Refreshed description"
+
+
+def _raise_not_found(self: object, slug: str, **kwargs: object) -> SimpleNamespace:
+    raise RepositoryNotFoundError(
+        "404 Client Error", response=httpx.Response(404, request=httpx.Request("GET", "https://hf.co"))
+    )
+
+
+def test_explain_space_failure_names_zerogpu_quota_without_asking_the_hub(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A ZeroGPU quota message is recognised from the Space's own text."""
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info", MagicMock(side_effect=AssertionError)
+    )
+    detail = "You have exceeded your free ZeroGPU quota (60s requested vs. 12s left). Try again in 3:10:00."
+
+    explained = explain_space_failure("someone/song", detail)
+
+    assert explained is not None
+    assert (explained["reason"], explained["detail"]) == ("gpu_quota", detail)
+
+
+@pytest.mark.parametrize(
+    ("stage", "reason"),
+    [("PAUSED", "space_paused"), ("SLEEPING", "space_starting"), ("RUNTIME_ERROR", "space_broken")],
+)
+def test_explain_space_failure_reads_the_space_stage(monkeypatch: pytest.MonkeyPatch, stage: str, reason: str) -> None:
+    """An opaque transport failure is explained by the Space's Hub status."""
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        lambda self, slug, **kwargs: SimpleNamespace(runtime=SimpleNamespace(stage=stage)),
+    )
+
+    explained = explain_space_failure("someone/song", "MCPError: Unexpected content type: text/html")
+
+    assert explained is not None
+    assert explained["reason"] == reason
+
+
+def test_explain_space_failure_reports_no_access_for_the_signed_in_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Hub hides private Spaces behind a 404, which means no access for this account."""
+    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.HfApi.space_info", _raise_not_found)
+    monkeypatch.setattr(config_mod.config, "HF_TOKEN", "hf_user")
+
+    explained = explain_space_failure("someone/private", "MCPError: Not Found")
+
+    assert explained is not None
+    assert explained["reason"] == "no_access"
+    assert "signed-in" in explained["error"]
+
+
+def test_explain_space_failure_keeps_unexplained_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A running Space, or a Hub that cannot be reached, leaves the original error alone."""
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        lambda self, slug, **kwargs: SimpleNamespace(runtime=SimpleNamespace(stage="RUNNING")),
+    )
+    assert explain_space_failure("someone/song", "bad input") is None
+
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        MagicMock(side_effect=httpx.ConnectError("offline")),
+    )
+    assert explain_space_failure("someone/song", "bad input") is None
