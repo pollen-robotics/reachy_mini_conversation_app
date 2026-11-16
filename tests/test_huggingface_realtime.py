@@ -1019,6 +1019,43 @@ async def test_handle_tool_result_error_is_reported_and_prompts_response() -> No
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("status", "sent"), [("cancelled", False), ("completed", True)])
+async def test_tool_result_is_not_sent_for_a_cancelled_response(monkeypatch: Any, status: str, sent: bool) -> None:
+    """The server drops a cancelled response's function call, so its result must not be sent back."""
+    handler = _session_handler(
+        monkeypatch,
+        (
+            _FakeEvent("response.created"),
+            _FakeEvent(
+                "response.function_call_arguments.done",
+                name="dance",
+                arguments="{}",
+                call_id="c1",
+                response_id="response-1",
+            ),
+            _FakeEvent("response.done", response=SimpleNamespace(id="response-1", metadata=None, status=status)),
+        ),
+    )
+    monkeypatch.setattr(
+        type(handler.tool_manager), "start_tool", AsyncMock(return_value=SimpleNamespace(tool_id="dance-1"))
+    )
+    await handler._run_realtime_session()
+    _drain(handler)
+    handler.connection = _FakeConnection()
+    note = ToolNotification(
+        id="c1", tool_name="dance", is_idle_tool_call=False, status=ToolState.COMPLETED, result={"status": "ok"}
+    )
+
+    await handler._handle_tool_result(note)
+
+    assert handler.connection.conversation.item.create.await_count == (1 if sent else 0)
+    assert handler._pending_responses.empty() is not sent
+    assert {"role": "assistant", "content": json.dumps({"status": "ok"})} in _messages(_drain(handler))
+    assert "c1" not in handler._in_flight_tool_calls
+    assert handler._tool_call_response_ids == {}
+
+
+@pytest.mark.asyncio
 async def test_handle_tool_result_no_connection_is_dropped() -> None:
     """With no connection the tool result is dropped without enqueuing anything."""
     handler = _plain_handler()

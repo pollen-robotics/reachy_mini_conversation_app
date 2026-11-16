@@ -222,6 +222,10 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self._audio_response_id: str | None = None
         self._discarded_response_ids: deque[str] = deque(maxlen=32)
         self._playback_interrupted = False
+        # The server rolls back a cancelled response, function calls included,
+        # so a tool result for one of those calls has nothing to attach to.
+        self._tool_call_response_ids: dict[str, str] = {}
+        self._cancelled_response_ids: deque[str] = deque(maxlen=32)
 
     def _set_listening(self, *, local: bool | None = None, server: bool | None = None) -> None:
         if local is not None:
@@ -769,6 +773,10 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             tool_result = {"error": "No result returned from tool execution"}
             tool_result_for_model = tool_result
 
+        response_id = (
+            self._tool_call_response_ids.pop(completed_tool.id, None) if isinstance(completed_tool.id, str) else None
+        )
+
         # Connection may have closed while tool was running
         if not self.connection:
             logger.warning(
@@ -789,6 +797,12 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 if not send_result_to_model:
                     logger.warning(
                         "Dropping realtime model result for tool '%s' (id=%s) because response.done was not observed",
+                        completed_tool.tool_name,
+                        completed_tool.id,
+                    )
+                elif response_id is not None and response_id in self._cancelled_response_ids:
+                    logger.info(
+                        "Not sending result for tool '%s' (id=%s) to the model: its response was cancelled",
                         completed_tool.tool_name,
                         completed_tool.id,
                     )
@@ -904,6 +918,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             self._active_response_id = None
             self._audio_response_id = None
             self._discarded_response_ids.clear()
+            self._tool_call_response_ids.clear()
+            self._cancelled_response_ids.clear()
             self._playback_interrupted = False
             try:
                 self._connected_event.set()
@@ -961,6 +977,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         logger.debug("Response created (active)")
 
                     if event.type == "response.done":
+                        if event.response.id is not None and getattr(event.response, "status", None) == "cancelled":
+                            self._cancelled_response_ids.append(event.response.id)
                         if self._active_response_id is not None and event.response.id != self._active_response_id:
                             continue
                         if event.response.id == self._active_response_id:
@@ -1075,6 +1093,9 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                             )
                             continue
 
+                        tool_response_id = getattr(event, "response_id", None)
+                        if isinstance(tool_response_id, str):
+                            self._tool_call_response_ids[call_id] = tool_response_id
                         self._in_flight_tool_calls.add(call_id)
                         background_tool = await self.tool_manager.start_tool(
                             call_id=call_id,
