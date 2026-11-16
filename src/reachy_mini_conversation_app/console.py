@@ -12,7 +12,7 @@ import threading
 from typing import Any, List, Optional
 from pathlib import Path
 from collections import deque
-from collections.abc import Mapping, Callable
+from collections.abc import Mapping, Callable, Coroutine
 
 import numpy as np
 
@@ -304,6 +304,27 @@ class LocalStream:
             asyncio.run_coroutine_threadsafe(self.request_backend_restart(reason), loop)
             return
         self._restart_requested.set()
+
+    async def _run_on_stream_loop(self, coroutine: Coroutine[Any, Any, None], timeout: float = 10.0) -> None:
+        """Run a handler coroutine on the stream loop, which owns the realtime socket.
+
+        /rpc handlers run on the settings server's thread and loop. Awaiting the
+        handler there writes to the websocket from a second thread while the
+        stream loop sends microphone frames, which corrupts the connection.
+        """
+        loop = self._asyncio_loop
+        if loop is None or not loop.is_running():
+            coroutine.close()
+            raise JsonRpcError("no active session", reason="not_running")
+        try:
+            on_stream_loop = asyncio.get_running_loop() is loop
+        except RuntimeError:
+            on_stream_loop = False
+        if on_stream_loop:
+            await coroutine
+            return
+        future = asyncio.run_coroutine_threadsafe(coroutine, loop)
+        await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout)
 
     async def request_backend_restart(self, reason: str) -> None:
         """Ask the startup loop to rebuild the backend and stop the current handler."""
@@ -598,15 +619,19 @@ class LocalStream:
                 raise JsonRpcError("say requires 'text'", reason="invalid_params", code=-32602)
             if not self.handler._is_connected():
                 raise JsonRpcError("no active session", reason="not_running")
-            await self.handler.interrupt()
-            await self.handler.say(text)
+
+            async def _interrupt_then_say() -> None:
+                await self.handler.interrupt()
+                await self.handler.say(text)
+
+            await self._run_on_stream_loop(_interrupt_then_say())
             return {"ok": True}
 
         @rpc.method("conversation.interrupt")  # type: ignore[untyped-decorator]
         async def _rpc_interrupt(_params: dict[str, object]) -> dict[str, object]:
             if not self.handler._is_connected():
                 raise JsonRpcError("no active session", reason="not_running")
-            await self.handler.interrupt()
+            await self._run_on_stream_loop(self.handler.interrupt())
             self._last_turn_state = "listening"
             rpc.broadcast_threadsafe("conversation.turn", {"state": "listening", "reason": "interrupted"})
             return {"ok": True}
