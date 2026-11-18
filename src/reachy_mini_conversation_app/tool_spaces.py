@@ -6,6 +6,7 @@ import json
 import asyncio
 import logging
 import argparse
+import itertools
 import threading
 from typing import Any
 from pathlib import Path
@@ -177,6 +178,9 @@ _V2_BUNDLED_SPACE_SLUGS = (
     "pollen-robotics/reachy-mini-weather-tool",
 )
 _SLUG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
+# A Space page link, as copied from the browser: https://huggingface.co/spaces/owner/name[/...].
+_SPACE_URL_PATTERN = re.compile(r"^https?://(?:www\.)?(?:huggingface\.co|hf\.co)/spaces/([^/?#]+/[^/?#]+)")
+_SEARCH_RESULT_LIMIT = 8
 
 
 @dataclass(frozen=True)
@@ -504,8 +508,10 @@ def _restore_profile_toolsets(
 
 
 def validate_space_slug(slug: str) -> str:
-    """Validate a public HF Space slug."""
+    """Validate an HF Space slug, also accepting the Space's page URL."""
     candidate = slug.strip()
+    if url_match := _SPACE_URL_PATTERN.match(candidate):
+        candidate = url_match.group(1)
     if _SLUG_PATTERN.fullmatch(candidate) is None:
         raise ValueError(
             f"Invalid Space slug '{slug}'. Expected the form 'owner/space-name' with alnum, '.', '_' or '-'."
@@ -670,7 +676,7 @@ _ZEROGPU_FAILURES = (
 _SPACE_STAGE_FAILURES = {
     "PAUSED": ("space_paused", "The Space is paused by its owner."),
     "STOPPED": ("space_paused", "The Space is stopped."),
-    "SLEEPING": ("space_starting", "The Space was asleep and is starting; try again in a minute."),
+    "SLEEPING": ("space_asleep", "The Space is asleep; the first call wakes it, which takes about a minute."),
     "BUILDING": ("space_starting", "The Space is starting; try again in a minute."),
     "APP_STARTING": ("space_starting", "The Space is starting; try again in a minute."),
     "RUNNING_BUILDING": ("space_starting", "The Space is restarting; try again in a minute."),
@@ -693,6 +699,18 @@ def explain_space_failure(slug: str, detail: str) -> dict[str, str] | None:
             return {"error": message, "reason": reason, "detail": detail}
 
     # Remote failures look alike on the wire (HTML page, 404, "error response"); the Hub says what is wrong.
+    availability = check_space_availability(slug)
+    if availability["state"] in ("online", "unknown"):
+        return None
+    return {"error": availability["message"], "reason": availability["state"], "detail": detail}
+
+
+def check_space_availability(slug: str) -> dict[str, str]:
+    """Report whether a Space can serve tool calls, as ``{"state", "message"}``; blocking (one Hub call).
+
+    States: online, no_access, space_asleep, space_starting, space_paused, space_broken, or unknown when the
+    Hub is unreachable.
+    """
     token = current_hf_token()
     try:
         space_info = HfApi().space_info(slug, timeout=10.0, token=token or False)
@@ -702,16 +720,32 @@ def explain_space_failure(slug: str, detail: str) -> dict[str, str] | None:
             if token
             else "This Space is private or was deleted; sign in with a Hugging Face account that can access it."
         )
-        return {"error": message, "reason": "no_access", "detail": detail}
+        return {"state": "no_access", "message": message}
     except httpx.HTTPError as exc:
         logger.warning("Could not check the status of Space '%s': %s", slug, exc)
-        return None
+        return {"state": "unknown", "message": "Could not reach Hugging Face to check this Space."}
 
     stage = space_info.runtime.stage if space_info.runtime else None
-    if stage is None or stage not in _SPACE_STAGE_FAILURES:
-        return None
-    reason, message = _SPACE_STAGE_FAILURES[stage]
-    return {"error": message, "reason": reason, "detail": detail}
+    if stage in _SPACE_STAGE_FAILURES:
+        state, message = _SPACE_STAGE_FAILURES[stage]
+        return {"state": state, "message": message}
+    return {"state": "online", "message": "The Space is running."}
+
+
+def search_mcp_spaces(query: str) -> list[dict[str, object]]:
+    """Find running Gradio Spaces that expose MCP tools, best match first; blocking."""
+    token = current_hf_token()
+    results = HfApi().search_spaces(query, sdk="gradio", filter="mcp-server", token=token or False)
+    return [
+        {
+            "slug": space.id,
+            "title": space.title or space.id,
+            "emoji": space.emoji,
+            "description": space.ai_short_description,
+            "likes": space.likes,
+        }
+        for space in itertools.islice(results, _SEARCH_RESULT_LIMIT)
+    ]
 
 
 async def resolve_tool_space(slug: str) -> InstalledToolSpace:

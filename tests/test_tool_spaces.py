@@ -19,8 +19,10 @@ from reachy_mini_conversation_app.tool_spaces import (
     remove_tool_space,
     install_tool_space,
     build_remote_client,
+    validate_space_slug,
     explain_space_failure,
     resolve_tool_space_sync,
+    check_space_availability,
     handle_tool_spaces_command,
     read_installed_tool_spaces,
     migrate_bundled_tool_spaces,
@@ -709,7 +711,7 @@ def test_explain_space_failure_names_zerogpu_quota_without_asking_the_hub(monkey
 
 @pytest.mark.parametrize(
     ("stage", "reason"),
-    [("PAUSED", "space_paused"), ("SLEEPING", "space_starting"), ("RUNTIME_ERROR", "space_broken")],
+    [("PAUSED", "space_paused"), ("SLEEPING", "space_asleep"), ("RUNTIME_ERROR", "space_broken")],
 )
 def test_explain_space_failure_reads_the_space_stage(monkeypatch: pytest.MonkeyPatch, stage: str, reason: str) -> None:
     """An opaque transport failure is explained by the Space's Hub status."""
@@ -734,6 +736,29 @@ def test_explain_space_failure_reports_no_access_for_the_signed_in_account(monke
     assert explained is not None
     assert explained["reason"] == "no_access"
     assert "signed-in" in explained["error"]
+
+
+def test_check_space_availability_reports_online_and_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A running Space is online; an unreachable Hub is unknown rather than an error."""
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        lambda self, slug, **kwargs: SimpleNamespace(runtime=SimpleNamespace(stage="RUNNING")),
+    )
+    assert check_space_availability("someone/song")["state"] == "online"
+
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        MagicMock(side_effect=httpx.ConnectError("offline")),
+    )
+    assert check_space_availability("someone/song")["state"] == "unknown"
+
+
+def test_validate_space_slug_accepts_hub_links_only() -> None:
+    """A Space page link is reduced to its slug; links to other sites stay invalid."""
+    assert validate_space_slug("https://huggingface.co/spaces/owner/my-space/tree/main") == "owner/my-space"
+    assert validate_space_slug("https://hf.co/spaces/owner/my-space") == "owner/my-space"
+    with pytest.raises(ValueError):
+        validate_space_slug("https://example.com/spaces/owner/my-space")
 
 
 def test_explain_space_failure_keeps_unexplained_failures(monkeypatch: pytest.MonkeyPatch) -> None:

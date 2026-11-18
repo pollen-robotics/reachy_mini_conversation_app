@@ -1243,6 +1243,16 @@ button {
   color: var(--success);
 }
 
+.settings-pill.is-warn {
+  border-color: color-mix(in srgb, var(--warn) 35%, var(--border));
+  color: var(--warn);
+}
+
+.settings-pill.is-danger {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+  color: var(--danger);
+}
+
 .settings-tool-groups {
   display: flex;
   flex-direction: column;
@@ -1385,6 +1395,13 @@ button {
   overflow-wrap: anywhere;
   font-size: 0.92rem;
   font-weight: 600;
+}
+
+.settings-tool-space-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .settings-tool-space-meta {
