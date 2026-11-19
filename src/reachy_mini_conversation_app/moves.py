@@ -203,6 +203,7 @@ class MovementManager:
 
         # Move queue (primary moves)
         self.move_queue: deque[Move] = deque()
+        self._gesture: Move | None = None
 
         # Configuration
         self.idle_inactivity_delay = 0.3  # seconds
@@ -242,6 +243,14 @@ class MovementManager:
         control loop remains the sole mutator of movement state.
         """
         self._command_queue.put(("queue_move", move))
+
+    def play_gesture(self, move: Move) -> None:
+        """Play a speech gesture now, unless a move other than breathing is already playing or queued."""
+        self._command_queue.put(("play_gesture", move))
+
+    def cancel_gesture(self) -> None:
+        """Stop the speech gesture, playing or queued, and leave every other move alone."""
+        self._command_queue.put(("cancel_gesture", None))
 
     def clear_move_queue(self) -> None:
         """Stop the active move and discard any queued primary moves.
@@ -324,6 +333,23 @@ class MovementManager:
                 )
             else:
                 logger.warning("Ignored queue_move command with invalid payload: %s", payload)
+        elif command == "play_gesture":
+            if any(
+                move is not None and not isinstance(move, BreathingMove)
+                for move in (self.state.current_move, *self.move_queue)
+            ):
+                return
+            self._gesture = payload
+            self.move_queue.append(payload)
+            self.state.update_activity()
+        elif command == "cancel_gesture":
+            if self._gesture in self.move_queue:
+                self.move_queue.remove(self._gesture)
+            elif self._gesture is not None and self.state.current_move is self._gesture:
+                self.state.current_move = None
+                self.state.move_start_time = None
+                self.state.update_activity()
+            self._gesture = None
         elif command == "clear_queue":
             self.move_queue.clear()
             self.state.current_move = None

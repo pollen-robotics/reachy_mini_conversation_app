@@ -206,3 +206,27 @@ def test_handle_command_queue_and_clear() -> None:
     manager._handle_command("clear_queue", None, now)
     assert len(manager.move_queue) == 0
     assert manager.state.current_move is None
+
+
+def test_gesture_yields_to_other_moves_and_cancels_alone() -> None:
+    """A gesture never stacks on another move, and cancelling it leaves that move in place."""
+    manager = MovementManager(MagicMock())
+    now = manager._now()
+    head = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
+    gesture, dance = _FakeMove(head), _FakeMove(head)
+
+    manager._handle_command("play_gesture", gesture, now)
+    manager._manage_move_queue(now)
+    assert manager.state.current_move is gesture
+
+    manager._handle_command("queue_move", GotoQueueMove(target_head_pose=head), now)
+    manager._handle_command("cancel_gesture", None, now)
+    assert manager.state.current_move is None
+    assert len(manager.move_queue) == 1
+
+    manager.move_queue.clear()
+    manager.state.current_move = dance
+    manager._handle_command("play_gesture", gesture, now)
+    assert len(manager.move_queue) == 0
+    manager._handle_command("cancel_gesture", None, now)
+    assert manager.state.current_move is dance

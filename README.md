@@ -104,6 +104,7 @@ Copy `.env.example` to `.env` when you want to point Hugging Face at your own lo
 |----------|-------------|
 | `REALTIME_TRANSCRIPTION_LANGUAGE` | Conversation language for every personality. Defaults to `auto` for automatic language detection; set to a backend-supported code such as `en` for English or `zh` for Chinese to fix the language. A fixed language forces speech recognition and synthesis, and the model is told to greet and answer in it. |
 | `LOCAL_BARGE_IN_ENABLED` | Local audio interruption. Defaults to `true`; requires `LOCAL_VAD_ENABLED=true`. |
+| `GESTURES_ENABLED` | Experimental speech-driven gestures. Defaults to `false`. The robot plays a matching recorded emotion as it starts an expressive sentence and reacts to what the user says, with no tool call; neutral sentences get none. A 118 MB multilingual gesture model (MiniLM fine-tuned to pick a move) is downloaded to the Hugging Face cache on first use and runs on CPU with ONNX Runtime. |
 | `LOCAL_VAD_ENABLED` | Local Silero speech detection for faster physical listening reactions. Defaults to `true`; set to `false` to use server VAD alone for movement. |
 | `HF_REALTIME_CONNECTION_MODE` | Hugging Face connection selector: `deployed` uses the built-in Hugging Face server; `local` uses `HF_REALTIME_WS_URL`. Defaults to `deployed`. |
 | `HF_REALTIME_WS_URL` | Direct websocket endpoint for your own Hugging Face backend. Accepts either a base URL like `ws://127.0.0.1:8765/v1` or the full websocket URL `ws://127.0.0.1:8765/v1/realtime`. Used when `HF_REALTIME_CONNECTION_MODE=local`. |
