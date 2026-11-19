@@ -55,6 +55,11 @@ exclude-newer = "7 days"
 "pip" = false
 "reachy-mini" = false
 "reachy-mini-dances-library" = false
+"reachy-mini-motor-controller" = false
+"reachy-mini-rust-kinematics" = false
+"pollen-bmi088-imu-library" = false
+"rustypot" = false
+"winnie-nfc" = false
 
 [project.entry-points."reachy_mini_apps"]
 reachy_mini_conversation_app = "reachy_mini_conversation_app.main:ReachyMiniConversationApp"
