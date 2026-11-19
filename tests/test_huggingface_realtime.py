@@ -1367,6 +1367,13 @@ async def test_debug_vad_reports_probability_and_barge_in_without_extra_inferenc
     handler._reset_listening()
 
 
+async def _settle_gestures(handler: HuggingFaceRealtimeHandler) -> None:
+    """Let gesture matches finish and their due timers fire; a fixed short sleep is flaky on Windows' coarse clock."""
+    if handler._gesture_task is not None:
+        await asyncio.wait([handler._gesture_task], timeout=1.0)
+    await asyncio.sleep(0.05)
+
+
 def _gesture_handler(monkeypatch: Any, events: Any) -> tuple[HuggingFaceRealtimeHandler, SimpleNamespace]:
     """Build a session handler whose gesture library matches every sentence to one two-second move."""
     handler = _session_handler(monkeypatch, events)
@@ -1390,7 +1397,7 @@ async def test_reply_sentence_plays_one_gesture_at_a_time(monkeypatch: Any) -> N
     )
 
     await handler._run_realtime_session()
-    await asyncio.sleep(0.01)
+    await _settle_gestures(handler)
 
     handler._gestures.match.assert_called_once_with("We did it!", "say")
     handler.deps.movement_manager.play_gesture.assert_called_once_with(move)
@@ -1410,7 +1417,7 @@ async def test_reply_gesture_waits_for_queued_audio_and_is_dropped_on_interrupt(
     )
 
     await handler._run_realtime_session()
-    await asyncio.sleep(0.01)
+    await _settle_gestures(handler)
     delay = handler._pending_gesture.when() - asyncio.get_running_loop().time()
     assert delay == pytest.approx(1.0, abs=0.2)
 
@@ -1443,7 +1450,7 @@ async def test_reply_that_calls_a_tool_gets_no_gesture(monkeypatch: Any) -> None
     monkeypatch.setattr(type(handler.tool_manager), "start_tool", AsyncMock())
 
     await handler._run_realtime_session()
-    await asyncio.sleep(0.01)
+    await _settle_gestures(handler)
 
     handler._gestures.match.assert_not_called()
     handler.deps.movement_manager.cancel_gesture.assert_called_once()
@@ -1459,7 +1466,7 @@ async def test_user_transcript_plays_a_reaction(monkeypatch: Any) -> None:
     )
 
     await handler._run_realtime_session()
-    await asyncio.sleep(0.01)
+    await _settle_gestures(handler)
 
     handler._gestures.match.assert_called_once_with("My dog died yesterday.", "react")
     handler.deps.movement_manager.play_gesture.assert_called_once_with(move)
@@ -1479,7 +1486,7 @@ async def test_reply_sentence_waits_for_the_users_sentence_to_be_matched(monkeyp
     handler._gestures.match.side_effect = lambda _text, kind: None if kind == "react" else move
 
     await handler._run_realtime_session()
-    await asyncio.sleep(0.01)
+    await _settle_gestures(handler)
 
     assert handler._gestures.match.call_args_list == [
         call("I'm playing chess.", "react"),
@@ -1508,7 +1515,7 @@ async def test_gestures_resume_after_a_tool_call_cancels_one(monkeypatch: Any) -
     monkeypatch.setattr(type(handler.tool_manager), "start_tool", AsyncMock())
 
     await handler._run_realtime_session()
-    await asyncio.sleep(0.01)
+    await _settle_gestures(handler)
 
     handler._gestures.match.assert_called_with("My dog died yesterday.", "react")
     handler.deps.movement_manager.play_gesture.assert_called_once_with(move)
