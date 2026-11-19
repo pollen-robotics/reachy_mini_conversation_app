@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 import numpy as np
 import pytest
@@ -1072,7 +1072,21 @@ def test_rpc_status_and_mic_over_websocket() -> None:
     assert stream._mic_muted is True
 
 
-def test_rpc_interrupt_broadcasts_turn_listening() -> None:
+@pytest.fixture
+def stream_loop() -> Iterator[asyncio.AbstractEventLoop]:
+    """Run an event loop in its own thread, like the stream loop in launch()."""
+    loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=loop.run_forever, name="stream-loop", daemon=True)
+    thread.start()
+    try:
+        yield loop
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join()
+        loop.close()
+
+
+def test_rpc_interrupt_broadcasts_turn_listening(stream_loop: asyncio.AbstractEventLoop) -> None:
     """conversation.interrupt cancels the response and pushes a turn:listening event."""
     handler = MagicMock()
     handler.output_queue = asyncio.Queue()
@@ -1080,6 +1094,7 @@ def test_rpc_interrupt_broadcasts_turn_listening() -> None:
     handler.interrupt = AsyncMock()
     app = FastAPI()
     stream = LocalStream(handler, _rpc_robot(), settings_app=app)
+    stream._asyncio_loop = stream_loop  # type: ignore[assignment]
     stream._init_settings_ui_if_needed()
     with TestClient(app).websocket_connect("/rpc") as ws:
         ws.send_json({"jsonrpc": "2.0", "id": "1", "method": "conversation.interrupt"})
@@ -1089,6 +1104,51 @@ def test_rpc_interrupt_broadcasts_turn_listening() -> None:
     assert results and results[0]["result"] == {"ok": True}
     assert notes and notes[0]["params"] == {"state": "listening", "reason": "interrupted"}
     handler.interrupt.assert_awaited_once()
+
+
+def test_rpc_say_and_interrupt_run_on_the_stream_loop(stream_loop: asyncio.AbstractEventLoop) -> None:
+    """The realtime socket belongs to the stream loop: /rpc must not touch it from its own thread."""
+    calls: list[tuple[str, asyncio.AbstractEventLoop]] = []
+
+    async def interrupt() -> None:
+        calls.append(("interrupt", asyncio.get_running_loop()))
+
+    async def say(text: str) -> None:
+        calls.append((f"say:{text}", asyncio.get_running_loop()))
+
+    handler = MagicMock()
+    handler._is_connected.return_value = True
+    handler.interrupt = interrupt
+    handler.say = say
+    app = FastAPI()
+    stream = LocalStream(handler, _rpc_robot(), settings_app=app)
+    stream._asyncio_loop = stream_loop  # type: ignore[assignment]
+    stream._init_settings_ui_if_needed()
+    with TestClient(app).websocket_connect("/rpc") as ws:
+        ws.send_json({"jsonrpc": "2.0", "id": "1", "method": "conversation.say", "params": {"text": "hi"}})
+        assert ws.receive_json()["result"] == {"ok": True}
+        ws.send_json({"jsonrpc": "2.0", "id": "2", "method": "conversation.interrupt"})
+        msgs = [ws.receive_json(), ws.receive_json()]
+    assert any(m.get("result") == {"ok": True} for m in msgs)
+    assert [name for name, _ in calls] == ["interrupt", "say:hi", "interrupt"]
+    assert all(loop is stream_loop for _, loop in calls)
+
+
+def test_rpc_say_without_stream_loop_is_not_running() -> None:
+    """Without a running stream loop there is no session to speak on."""
+    handler = MagicMock()
+    handler._is_connected.return_value = True
+    handler.interrupt = AsyncMock()
+    handler.say = AsyncMock()
+    app = FastAPI()
+    stream = LocalStream(handler, _rpc_robot(), settings_app=app)
+    stream._init_settings_ui_if_needed()
+    with TestClient(app).websocket_connect("/rpc") as ws:
+        ws.send_json({"jsonrpc": "2.0", "id": "1", "method": "conversation.say", "params": {"text": "hi"}})
+        resp = ws.receive_json()
+    assert resp["error"]["data"]["reason"] == "not_running"
+    handler.interrupt.assert_not_awaited()
+    handler.say.assert_not_awaited()
 
 
 def test_rpc_say_requires_active_session() -> None:
