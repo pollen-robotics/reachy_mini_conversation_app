@@ -1,6 +1,5 @@
 """Manage installed Hugging Face Space tool sources for the conversation app."""
 
-import os
 import re
 import json
 import asyncio
@@ -38,13 +37,13 @@ from reachy_mini_conversation_app.profile_toolsets import (
     disable_profile_tools_by_prefix,
     read_profile_default_tool_names,
 )
+from reachy_mini_conversation_app.remote_tool_sources import source_manifest_path, write_manifest_payload
 
 
 logger = logging.getLogger(__name__)
 
 INSTALLED_TOOL_SPACES_FILENAME = "installed_tool_spaces.json"
 INSTALLED_TOOL_SPACES_VERSION = 3
-TERMINAL_EXTERNAL_CONTENT_DIRECTORY = Path("external_content")
 _MANIFEST_LOCK = threading.RLock()
 # Bundled Pollen Spaces seeded when no manifest exists, so startup needs no Hugging Face discovery.
 PREINSTALLED_TOOL_SPACE_SPECS = {
@@ -244,9 +243,7 @@ class ToolSpaceRemovalResult:
 
 def get_installed_tool_spaces_path(instance_path: str | Path | None) -> Path:
     """Return the installed tool-spaces manifest path for the current mode."""
-    if instance_path is not None:
-        return Path(instance_path) / INSTALLED_TOOL_SPACES_FILENAME
-    return TERMINAL_EXTERNAL_CONTENT_DIRECTORY / INSTALLED_TOOL_SPACES_FILENAME
+    return source_manifest_path(instance_path, INSTALLED_TOOL_SPACES_FILENAME)
 
 
 def _preinstalled_installed_spaces() -> list[InstalledToolSpace]:
@@ -444,24 +441,13 @@ def write_installed_tool_spaces(
     manifest: InstalledToolSpacesManifest,
 ) -> Path:
     """Persist the installed tool-spaces manifest."""
+    payload = {
+        "version": manifest.version,
+        "spaces": [asdict(space) for space in manifest.spaces],
+        "bundled_space_slugs": manifest.bundled_space_slugs,
+    }
     with _MANIFEST_LOCK:
-        manifest_path = get_installed_tool_spaces_path(instance_path)
-        manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "version": manifest.version,
-            "spaces": [asdict(space) for space in manifest.spaces],
-            "bundled_space_slugs": manifest.bundled_space_slugs,
-        }
-        temporary_path = manifest_path.with_name(f".{manifest_path.name}.{os.getpid()}.tmp")
-        try:
-            temporary_path.write_text(f"{json.dumps(payload, indent=2, sort_keys=True)}\n", encoding="utf-8")
-            temporary_path.replace(manifest_path)
-        finally:
-            try:
-                temporary_path.unlink(missing_ok=True)
-            except OSError as exc:
-                logger.warning("Failed to remove temporary Tool Space manifest %s: %s", temporary_path, exc)
-        return manifest_path
+        return write_manifest_payload(get_installed_tool_spaces_path(instance_path), payload)
 
 
 def migrate_bundled_tool_spaces(instance_path: str | Path | None) -> list[str]:
