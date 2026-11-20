@@ -10,7 +10,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from collections.abc import Mapping
 
-from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.config import LOCAL_MEMORY_BACKEND, config
 
 
 logger = logging.getLogger(__name__)
@@ -202,9 +202,14 @@ def clear_memory_facts(instance_path: str | Path | None = None) -> None:
         _write_memory_file(path, [])
 
 
+def local_memory_in_use() -> bool:
+    """Return whether the JSON store is the conversation's memory."""
+    return config.MEMORY_ENABLED and config.MEMORY_BACKEND == LOCAL_MEMORY_BACKEND
+
+
 def format_memory_for_prompt(instance_path: str | Path | None = None) -> str:
     """Return the prompt fragment injected before the session instructions."""
-    if not config.MEMORY_ENABLED:
+    if not local_memory_in_use():
         return ""
 
     facts = list_memory_facts(instance_path)

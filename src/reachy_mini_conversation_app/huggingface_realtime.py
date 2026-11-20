@@ -30,6 +30,7 @@ from openai.types.realtime.realtime_audio_input_turn_detection_param import Serv
 
 from reachy_mini_conversation_app.tools import core_tools
 from reachy_mini_conversation_app.config import (
+    SERVER_MEMORY_BACKEND,
     HF_LOCAL_CONNECTION_MODE,
     config,
     get_default_voice,
@@ -46,6 +47,8 @@ from reachy_mini_conversation_app.prompts import (
     get_session_greeting_prompt,
 )
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_int16
+from reachy_mini_conversation_app.tools.forget import Forget
+from reachy_mini_conversation_app.tools.remember import Remember
 from reachy_mini_conversation_app.audio.local_vad import SileroVAD
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolSpec,
@@ -873,7 +876,12 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
     async def _run_realtime_session(self) -> None:
         """Establish and manage a single realtime session."""
-        tool_specs = get_tool_specs()
+        server_memory = config.MEMORY_BACKEND == SERVER_MEMORY_BACKEND
+        tool_specs = [
+            spec for spec in get_tool_specs() if not (server_memory and spec["name"] in {Remember.name, Forget.name})
+        ]
+        if server_memory:
+            logger.info("Long-term memory is the speech server's; the local memory store is not used")
         logger.info(
             "Tools to be used in conversation: %s",
             [tool["name"] for tool in tool_specs],

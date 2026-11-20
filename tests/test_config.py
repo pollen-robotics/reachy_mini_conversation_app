@@ -68,3 +68,20 @@ def test_local_speech_flags_default_on_and_follow_environment(
     monkeypatch.setattr(config.config, name, not expected)
     config.refresh_runtime_config_from_env()
     assert getattr(config.config, name) is expected
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [(None, "local"), ("", "local"), ("local", "local"), (" SERVER ", "server"), ("sever", "local")],
+)
+def test_memory_backend_defaults_to_local_and_follows_environment(
+    monkeypatch: pytest.MonkeyPatch, raw_value: str | None, expected: str
+) -> None:
+    """Long-term memory stays local unless the environment names the speech server."""
+    if raw_value is None:
+        monkeypatch.delenv(config.MEMORY_BACKEND_ENV, raising=False)
+    else:
+        monkeypatch.setenv(config.MEMORY_BACKEND_ENV, raw_value)
+    monkeypatch.setattr(config.config, "MEMORY_BACKEND", "unset")
+    config.refresh_runtime_config_from_env()
+    assert config.config.MEMORY_BACKEND == expected

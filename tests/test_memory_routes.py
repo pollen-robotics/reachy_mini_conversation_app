@@ -3,11 +3,13 @@
 from typing import Any
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from reachy_mini.apps.jsonrpc_server import JsonRpcServer
+import reachy_mini_conversation_app.memory_routes as memory_routes_mod
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.memory import add_memory_fact, list_memory_facts, format_memory_for_prompt
 from reachy_mini_conversation_app.memory_routes import register_memory_methods
@@ -152,3 +154,41 @@ def test_set_enabled_rejects_non_boolean(tmp_path: Path) -> None:
     error = _rpc_call(_client(tmp_path), "memory.set_enabled", {"enabled": "yes"})["error"]
 
     assert error["data"]["reason"] == "invalid_params"
+
+
+def test_server_memory_reports_server_status_and_refuses_local_edits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the speech server's memory, clients see its status and cannot change the unused local store."""
+    add_memory_fact(tmp_path, "Has a dog named Mochi")
+    monkeypatch.setattr(config, "MEMORY_BACKEND", "server")
+    monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "local")
+    monkeypatch.setattr(config, "HF_REALTIME_WS_URL", "ws://speech.test:8765/v1/realtime")
+    requested: list[str] = []
+    status = {"enabled": True, "profile": "read_only", "state": "ready", "deadlineMs": 450}
+
+    def capabilities(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        return httpx.Response(200, json={"pipelines": [], "memory": status})
+
+    async_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        memory_routes_mod.httpx,
+        "AsyncClient",
+        lambda **kwargs: async_client(transport=httpx.MockTransport(capabilities), **kwargs),
+    )
+    client = _client(tmp_path)
+
+    listed = _rpc_call(client, "memory.list")["result"]
+
+    assert listed["backend"] == "server"
+    assert listed["facts"] == []
+    assert listed["server"] == {"reachable": True, **status}
+    assert requested == ["http://speech.test:8765/v1/realtime/capabilities"]
+    for method, params in (
+        ("memory.forget", {"query": "Mochi"}),
+        ("memory.clear", {}),
+        ("memory.set_enabled", {"enabled": False}),
+    ):
+        assert _rpc_call(client, method, params)["error"]["data"]["reason"] == "memory_on_server"
+    assert [fact.text for fact in list_memory_facts(tmp_path)] == ["Has a dog named Mochi"]

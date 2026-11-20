@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.config import SERVER_MEMORY_BACKEND, config
 from reachy_mini_conversation_app.memory import add_memory_fact
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
@@ -36,6 +36,8 @@ class Remember(Tool):
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> dict[str, Any]:
         """Save one memory fact."""
+        if config.MEMORY_BACKEND == SERVER_MEMORY_BACKEND:
+            return {"error": "Memory is kept by the speech server"}
         if not config.MEMORY_ENABLED:
             return {"error": "Memory is disabled"}
 

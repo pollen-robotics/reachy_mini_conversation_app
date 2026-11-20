@@ -1365,3 +1365,29 @@ async def test_debug_vad_reports_probability_and_barge_in_without_extra_inferenc
     handler._set_listening(server=False)
     assert len(statuses) == previous_reports
     handler._reset_listening()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("backend", "expected"), [("local", ["remember", "forget", "move_head"]), ("server", ["move_head"])]
+)
+async def test_session_offers_local_memory_tools_only_with_local_memory(
+    monkeypatch: pytest.MonkeyPatch, backend: str, expected: list[str]
+) -> None:
+    """With the speech server's memory, the model is not offered tools that write the local store."""
+    specs = [
+        {"type": "function", "name": name, "description": name, "parameters": {"type": "object", "properties": {}}}
+        for name in ("remember", "forget", "move_head")
+    ]
+    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: default)
+    monkeypatch.setattr(hf_mod, "get_tool_specs", lambda: specs)
+    monkeypatch.setattr(config, "MEMORY_BACKEND", backend)
+    monkeypatch.setattr(config, "HF_REALTIME_SESSION_URL", "https://lb.example.test/session")
+    captured_update: dict[str, Any] = {}
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.client = _make_fake_realtime_client(captured_update=captured_update)
+
+    await handler._run_realtime_session()
+
+    assert [tool["name"] for tool in captured_update["session"]["tools"]] == expected

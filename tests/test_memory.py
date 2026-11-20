@@ -103,3 +103,20 @@ def test_prompt_includes_memory_fragment(tmp_path: Path, monkeypatch: pytest.Mon
     assert instructions.startswith("Things you remember about the user")
     assert "- Prefers concise answers" in instructions
     assert "## IDENTITY" in instructions
+
+
+@pytest.mark.asyncio
+async def test_server_memory_keeps_the_local_store_out_of_the_conversation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the speech server's memory, local facts reach neither the prompt nor the memory tools."""
+    monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", None)
+    add_memory_fact(tmp_path, "Prefers concise answers")
+    monkeypatch.setattr(config, "MEMORY_BACKEND", "server")
+    deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock(), instance_path=tmp_path)
+
+    assert format_memory_for_prompt(tmp_path) == ""
+    assert "Prefers concise answers" not in prompts_mod.get_session_instructions(instance_path=tmp_path)
+    assert await Remember()(deps, fact="Has a dog named Mochi") == {"error": "Memory is kept by the speech server"}
+    assert await Forget()(deps, query="concise") == {"error": "Memory is kept by the speech server"}
+    assert [fact.text for fact in list_memory_facts(tmp_path)] == ["Prefers concise answers"]
