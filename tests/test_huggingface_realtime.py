@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, call
 import numpy as np
 import pytest
 
+import reachy_mini_conversation_app.server_memory as server_memory_mod
 import reachy_mini_conversation_app.conversation_handler as conv_mod
 import reachy_mini_conversation_app.huggingface_realtime as hf_mod
 from reachy_mini_conversation_app.config import config, get_default_voice, refresh_runtime_config_from_env
@@ -1369,12 +1370,25 @@ async def test_debug_vad_reports_probability_and_barge_in_without_extra_inferenc
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("backend", "expected"), [("local", ["remember", "forget", "move_head"]), ("server", ["move_head"])]
+    ("backend", "server_has_memory", "expected"),
+    [
+        ("local", True, ["remember", "forget", "move_head"]),
+        ("server", False, ["move_head"]),
+        # auto (the default): nothing to configure; the speech server's report at the session start decides.
+        ("auto", True, ["move_head"]),
+        ("auto", False, ["remember", "forget", "move_head"]),
+    ],
 )
 async def test_session_offers_local_memory_tools_only_with_local_memory(
-    monkeypatch: pytest.MonkeyPatch, backend: str, expected: list[str]
+    monkeypatch: pytest.MonkeyPatch, backend: str, server_has_memory: bool, expected: list[str]
 ) -> None:
     """With the speech server's memory, the model is not offered tools that write the local store."""
+
+    async def reported(timeout_s: float = 3.0) -> dict[str, object]:
+        return {"reachable": True, "enabled": server_has_memory}
+
+    monkeypatch.setattr(server_memory_mod, "server_memory_status", reported)
+    monkeypatch.setattr(server_memory_mod, "_resolved", "local")
     specs = [
         {"type": "function", "name": name, "description": name, "parameters": {"type": "object", "properties": {}}}
         for name in ("remember", "forget", "move_head")

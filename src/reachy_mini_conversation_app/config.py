@@ -95,6 +95,7 @@ MEMORY_ENABLED_ENV = "REACHY_MINI_MEMORY_ENABLED"
 MEMORY_BACKEND_ENV = "REACHY_MINI_MEMORY_BACKEND"
 LOCAL_MEMORY_BACKEND = "local"
 SERVER_MEMORY_BACKEND = "server"
+AUTO_MEMORY_BACKEND = "auto"
 CAMERA_ENABLED_ENV = "REACHY_MINI_CAMERA_ENABLED"
 INSTANCE_PATH_ENV = "REACHY_MINI_INSTANCE_PATH"
 HF_LOCAL_CONNECTION_MODE = "local"
@@ -188,13 +189,16 @@ def normalize_hf_connection_mode(value: str | None) -> str | None:
 
 
 def normalize_memory_backend(value: str | None) -> str:
-    """Normalize where long-term memory lives: the local JSON store or the speech server."""
+    """Normalize where long-term memory lives: the local JSON store, the speech server, or auto.
+
+    Auto (the default) is the speech server's memory when it reports one at a session start, else the local store.
+    """
     candidate = (value or "").strip().lower()
     if not candidate:
-        return LOCAL_MEMORY_BACKEND
-    if candidate not in {LOCAL_MEMORY_BACKEND, SERVER_MEMORY_BACKEND}:
-        logger.warning("Invalid %s=%r. Expected local or server; using local.", MEMORY_BACKEND_ENV, value)
-        return LOCAL_MEMORY_BACKEND
+        return AUTO_MEMORY_BACKEND
+    if candidate not in {AUTO_MEMORY_BACKEND, LOCAL_MEMORY_BACKEND, SERVER_MEMORY_BACKEND}:
+        logger.warning("Invalid %s=%r. Expected auto, local or server; using auto.", MEMORY_BACKEND_ENV, value)
+        return AUTO_MEMORY_BACKEND
     return candidate
 
 
@@ -364,7 +368,8 @@ class Config:
     # Languages saved for one personality, keyed by canonical profile name; they win over the one above.
     PROFILE_LANGUAGES: dict[str, str] = {}
     MEMORY_ENABLED = _env_flag(MEMORY_ENABLED_ENV, default=True)
-    # With "server", the speech server's memory is the only one: the JSON store is neither shown to the model nor written.
+    # With "server" (or "auto" when the speech server reports its own memory), that memory is the only one: the JSON
+    # store is neither shown to the model nor written. See server_memory.py.
     MEMORY_BACKEND = normalize_memory_backend(os.getenv(MEMORY_BACKEND_ENV))
     CAMERA_ENABLED = _env_flag(CAMERA_ENABLED_ENV, default=True)
     LOCAL_VAD_ENABLED = _env_flag("LOCAL_VAD_ENABLED", default=True)

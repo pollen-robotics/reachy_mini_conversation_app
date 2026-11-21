@@ -72,12 +72,12 @@ def test_local_speech_flags_default_on_and_follow_environment(
 
 @pytest.mark.parametrize(
     ("raw_value", "expected"),
-    [(None, "local"), ("", "local"), ("local", "local"), (" SERVER ", "server"), ("sever", "local")],
+    [(None, "auto"), ("", "auto"), (" Auto ", "auto"), ("local", "local"), (" SERVER ", "server"), ("sever", "auto")],
 )
-def test_memory_backend_defaults_to_local_and_follows_environment(
+def test_memory_backend_defaults_to_auto_and_follows_environment(
     monkeypatch: pytest.MonkeyPatch, raw_value: str | None, expected: str
 ) -> None:
-    """Long-term memory stays local unless the environment names the speech server."""
+    """Auto unless the environment names local or the speech server; an unknown value is auto too."""
     if raw_value is None:
         monkeypatch.delenv(config.MEMORY_BACKEND_ENV, raising=False)
     else:

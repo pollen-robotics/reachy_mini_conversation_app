@@ -48,6 +48,7 @@ from reachy_mini_conversation_app.prompts import (
 )
 from reachy_mini_conversation_app.streaming import AdditionalOutputs, audio_to_int16
 from reachy_mini_conversation_app.tools.forget import Forget
+from reachy_mini_conversation_app.server_memory import resolve_memory_backend
 from reachy_mini_conversation_app.tools.remember import Remember
 from reachy_mini_conversation_app.audio.local_vad import SileroVAD
 from reachy_mini_conversation_app.tools.core_tools import (
@@ -876,7 +877,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
     async def _run_realtime_session(self) -> None:
         """Establish and manage a single realtime session."""
-        server_memory = config.MEMORY_BACKEND == SERVER_MEMORY_BACKEND
+        # Resolved before the instructions are built: with "auto" the speech server says whether it keeps memory.
+        server_memory = await resolve_memory_backend() == SERVER_MEMORY_BACKEND
         tool_specs = [
             spec for spec in get_tool_specs() if not (server_memory and spec["name"] in {Remember.name, Forget.name})
         ]

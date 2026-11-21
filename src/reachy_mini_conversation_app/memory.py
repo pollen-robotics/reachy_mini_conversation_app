@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from collections.abc import Mapping
 
 from reachy_mini_conversation_app.config import LOCAL_MEMORY_BACKEND, config
+from reachy_mini_conversation_app.server_memory import effective_memory_backend
 
 
 logger = logging.getLogger(__name__)
@@ -204,7 +205,7 @@ def clear_memory_facts(instance_path: str | Path | None = None) -> None:
 
 def local_memory_in_use() -> bool:
     """Return whether the JSON store is the conversation's memory."""
-    return config.MEMORY_ENABLED and config.MEMORY_BACKEND == LOCAL_MEMORY_BACKEND
+    return config.MEMORY_ENABLED and effective_memory_backend() == LOCAL_MEMORY_BACKEND
 
 
 def format_memory_for_prompt(instance_path: str | Path | None = None) -> str:

@@ -4,20 +4,13 @@ import asyncio
 import logging
 from typing import Any
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
 from collections.abc import Callable, Awaitable
-
-import httpx
 
 from reachy_mini.io.jsonrpc import JsonRpcError
 from reachy_mini.apps.jsonrpc_server import JsonRpcServer
-from reachy_mini_conversation_app.config import (
-    SERVER_MEMORY_BACKEND,
-    HF_LOCAL_CONNECTION_MODE,
-    config,
-    get_hf_direct_ws_url,
-)
+from reachy_mini_conversation_app.config import SERVER_MEMORY_BACKEND, config
 from reachy_mini_conversation_app.memory import MAX_FACTS, list_memory_facts, clear_memory_facts, forget_memory_fact
+from reachy_mini_conversation_app.server_memory import server_memory_status, effective_memory_backend
 
 
 logger = logging.getLogger(__name__)
@@ -32,28 +25,8 @@ def _str_param(params: dict[str, Any], name: str) -> str | None:
     return value.strip()
 
 
-async def _server_memory_status() -> dict[str, object]:
-    """Return the speech server's memory status from its capabilities endpoint."""
-    ws_url = get_hf_direct_ws_url()
-    if config.HF_REALTIME_CONNECTION_MODE != HF_LOCAL_CONNECTION_MODE or not ws_url:
-        return {"reachable": False, "reason": "no local speech server is configured"}
-    parts = urlsplit(ws_url)
-    scheme = {"ws": "http", "wss": "https"}.get(parts.scheme, parts.scheme)
-    url = urlunsplit((scheme, parts.netloc, "/v1/realtime/capabilities", "", ""))
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as http_client:
-            response = await http_client.get(url)
-            response.raise_for_status()
-            capabilities = response.json()
-    except (httpx.HTTPError, ValueError) as exc:
-        logger.warning("Failed to read the speech server's memory status: %s", exc)
-        return {"reachable": False, "reason": str(exc)}
-    memory = capabilities.get("memory") if isinstance(capabilities, dict) else None
-    return {"reachable": True, **(memory if isinstance(memory, dict) else {"enabled": False})}
-
-
 def _refuse_on_server() -> None:
-    if config.MEMORY_BACKEND == SERVER_MEMORY_BACKEND:
+    if effective_memory_backend() == SERVER_MEMORY_BACKEND:
         raise JsonRpcError("Memory is kept by the speech server", reason="memory_on_server")
 
 
@@ -77,13 +50,14 @@ def register_memory_methods(
             return False
 
     async def _list(_params: dict[str, Any]) -> dict[str, object]:
-        if config.MEMORY_BACKEND == SERVER_MEMORY_BACKEND:
+        if effective_memory_backend() == SERVER_MEMORY_BACKEND:
             return {
                 "facts": [],
                 "max_facts": MAX_FACTS,
                 "enabled": config.MEMORY_ENABLED,
                 "backend": SERVER_MEMORY_BACKEND,
-                "server": await _server_memory_status(),
+                "configured_backend": config.MEMORY_BACKEND,
+                "server": await server_memory_status(),
             }
         try:
             facts = await asyncio.to_thread(list_memory_facts, instance_path)
@@ -94,7 +68,8 @@ def register_memory_methods(
             "facts": [fact.to_json() for fact in facts],
             "max_facts": MAX_FACTS,
             "enabled": config.MEMORY_ENABLED,
-            "backend": config.MEMORY_BACKEND,
+            "backend": effective_memory_backend(),
+            "configured_backend": config.MEMORY_BACKEND,
         }
 
     async def _forget(params: dict[str, Any]) -> dict[str, object]:

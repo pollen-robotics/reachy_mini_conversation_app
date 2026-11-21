@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from reachy_mini.apps.jsonrpc_server import JsonRpcServer
-import reachy_mini_conversation_app.memory_routes as memory_routes_mod
+import reachy_mini_conversation_app.server_memory as server_memory_mod
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.memory import add_memory_fact, list_memory_facts, format_memory_for_prompt
 from reachy_mini_conversation_app.memory_routes import register_memory_methods
@@ -173,7 +173,7 @@ def test_server_memory_reports_server_status_and_refuses_local_edits(
 
     async_client = httpx.AsyncClient
     monkeypatch.setattr(
-        memory_routes_mod.httpx,
+        server_memory_mod.httpx,
         "AsyncClient",
         lambda **kwargs: async_client(transport=httpx.MockTransport(capabilities), **kwargs),
     )
