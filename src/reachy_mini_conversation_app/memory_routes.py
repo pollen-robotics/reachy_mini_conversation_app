@@ -8,8 +8,9 @@ from collections.abc import Callable, Awaitable
 
 from reachy_mini.io.jsonrpc import JsonRpcError
 from reachy_mini.apps.jsonrpc_server import JsonRpcServer
-from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.config import SERVER_MEMORY_BACKEND, config
 from reachy_mini_conversation_app.memory import MAX_FACTS, list_memory_facts, clear_memory_facts, forget_memory_fact
+from reachy_mini_conversation_app.server_memory import server_memory_status, effective_memory_backend
 
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,11 @@ def _str_param(params: dict[str, Any], name: str) -> str | None:
     if not isinstance(value, str) or not value.strip():
         raise JsonRpcError(f"{name} must be a non-empty string", reason="invalid_params", code=-32602)
     return value.strip()
+
+
+def _refuse_on_server() -> None:
+    if effective_memory_backend() == SERVER_MEMORY_BACKEND:
+        raise JsonRpcError("Memory is kept by the speech server", reason="memory_on_server")
 
 
 def register_memory_methods(
@@ -44,6 +50,15 @@ def register_memory_methods(
             return False
 
     async def _list(_params: dict[str, Any]) -> dict[str, object]:
+        if effective_memory_backend() == SERVER_MEMORY_BACKEND:
+            return {
+                "facts": [],
+                "max_facts": MAX_FACTS,
+                "enabled": config.MEMORY_ENABLED,
+                "backend": SERVER_MEMORY_BACKEND,
+                "configured_backend": config.MEMORY_BACKEND,
+                "server": await server_memory_status(),
+            }
         try:
             facts = await asyncio.to_thread(list_memory_facts, instance_path)
         except OSError as exc:
@@ -53,9 +68,12 @@ def register_memory_methods(
             "facts": [fact.to_json() for fact in facts],
             "max_facts": MAX_FACTS,
             "enabled": config.MEMORY_ENABLED,
+            "backend": effective_memory_backend(),
+            "configured_backend": config.MEMORY_BACKEND,
         }
 
     async def _forget(params: dict[str, Any]) -> dict[str, object]:
+        _refuse_on_server()
         fact_id = _str_param(params, "id")
         query = _str_param(params, "query")
         if fact_id is None and query is None:
@@ -78,6 +96,7 @@ def register_memory_methods(
         }
 
     async def _clear(_params: dict[str, Any]) -> dict[str, object]:
+        _refuse_on_server()
         try:
             await asyncio.to_thread(clear_memory_facts, instance_path)
         except OSError as exc:
@@ -86,6 +105,7 @@ def register_memory_methods(
         return {"ok": True, "applied_live": await _refresh()}
 
     async def _set_enabled(params: dict[str, Any]) -> dict[str, object]:
+        _refuse_on_server()
         enabled = params.get("enabled")
         if not isinstance(enabled, bool):
             raise JsonRpcError("enabled must be a boolean", reason="invalid_params", code=-32602)

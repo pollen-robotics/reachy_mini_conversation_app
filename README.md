@@ -111,6 +111,7 @@ Copy `.env.example` to `.env` when you want to point Hugging Face at your own lo
 | `REACHY_MINI_APP_TIMEOUT_MINUTES` | Minutes of inactivity before Reachy goes to sleep and the app stops. Defaults to `1440` (one day); set to `0` to disable. |
 | `REACHY_MINI_INSTANCE_PATH` | Directory for this instance's data: long-term memory, user personalities and settings. Defaults to `conversation_app` beside the daemon's own config (`~/.config/reachy_mini` on Linux). Data written by an older version inside the installed package is copied over once. |
 | `REACHY_MINI_MEMORY_ENABLED` | Long-term memory. When `false`, remembered facts stay on disk but are not injected into the prompt, and the `remember` / `forget` tools decline. Defaults to `true`. |
+| `REACHY_MINI_MEMORY_BACKEND` | Where long-term memory lives: `auto` (default), `local` (the facts above) or `server`, when the speech server keeps memory itself (for example AgentMemory). With `auto` nothing needs setting: at each session start the app asks a local speech server whether it keeps memory and uses it if so, else the facts above. With the server's memory, local facts are neither injected nor offered through `remember` / `forget`, and `memory.list` reports the server's memory status while the other `memory.*` methods decline. |
 | `REACHY_MINI_CAMERA_ENABLED` | Camera tool. `--no-camera` forces it off regardless. Defaults to `true`. |
 
 These variables are the starting value. What you change through the settings UI
