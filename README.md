@@ -104,6 +104,7 @@ Copy `.env.example` to `.env` when you want to point Hugging Face at your own lo
 |----------|-------------|
 | `REALTIME_TRANSCRIPTION_LANGUAGE` | Conversation language for every personality. Defaults to `auto` for automatic language detection; set to a backend-supported code such as `en` for English or `zh` for Chinese to fix the language. A fixed language forces speech recognition and synthesis, and the model is told to greet and answer in it. |
 | `LOCAL_BARGE_IN_ENABLED` | Local audio interruption. Defaults to `true`; requires `LOCAL_VAD_ENABLED=true`. |
+| `SPEAKER_TRACKING_ENABLED` | Experimental body and head turning toward speech. Defaults to `true`; pauses visual face tracking. Set to `false` to disable, then restart. |
 | `LOCAL_VAD_ENABLED` | Local Silero speech detection for faster physical listening reactions. Defaults to `true`; set to `false` to use server VAD alone for movement. |
 | `HF_REALTIME_CONNECTION_MODE` | Hugging Face connection selector: `deployed` uses the built-in Hugging Face server; `local` uses `HF_REALTIME_WS_URL`. Defaults to `deployed`. |
 | `HF_REALTIME_WS_URL` | Direct websocket endpoint for your own Hugging Face backend. Accepts either a base URL like `ws://127.0.0.1:8765/v1` or the full websocket URL `ws://127.0.0.1:8765/v1/realtime`. Used when `HF_REALTIME_CONNECTION_MODE=local`. |
@@ -202,6 +203,16 @@ reachy-mini-conversation-app --ui
 
 The default profile exposes these tools. Use Tools → Tool access to customize any profile.
 Every bundled profile enables `head_tracking` by default; users can still disable it per personality.
+
+Audio speaker tracking is enabled by default in this WIP prototype for hardware testing.
+Reachy turns its body and head together toward sustained speech, holds that direction through silence and replies,
+and preserves breathing. Turns are limited to 30°/s with an 8° deadband; explicit moves take priority, then Reachy
+smoothly returns toward the last speaker. This prototype pauses visual face tracking, including requests through
+the `head_tracking` tool.
+It reads the robot daemon's `/api/state/doa` endpoint, so it works with local and remote robots without direct USB access.
+Missing readings retain the last target. A working ReSpeaker DoA setup is required; the linear array
+cannot distinguish front from back, identify speakers, or measure their height. Simultaneous speakers and echoes
+can produce unreliable bearings. Set the flag to `false` and restart to restore visual tracking.
 
 | Tool | Action | Dependencies |
 |------|--------|--------------|

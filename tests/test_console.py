@@ -1208,7 +1208,8 @@ async def test_paced_playback_changes_gain_and_preserves_or_discards_remaining_a
     second_chunk = asyncio.Event()
     robot = _audio_robot()
     robot.media.audio = SimpleNamespace(clear_player=MagicMock())
-    stream = LocalStream(handler, robot)
+    observer = MagicMock()
+    stream = LocalStream(handler, robot, playback_observer=observer)
 
     def push(chunk: np.ndarray) -> None:
         pushed.append(chunk.copy())
@@ -1231,6 +1232,7 @@ async def test_paced_playback_changes_gain_and_preserves_or_discards_remaining_a
         stream._stop_event.set()
     await asyncio.wait_for(playback, timeout=1)
     assert [chunk.size for chunk in pushed] == ([320, 320] if confirm else [320, 320, 320])
+    assert [entry.args[0] for entry in observer.call_args_list] == ([0.02, 0.02, 0.0] if confirm else [0.02] * 3)
     np.testing.assert_array_equal(pushed[0], 0.5)
     np.testing.assert_array_equal(pushed[1], 0.125)
     if not confirm:
@@ -1501,3 +1503,25 @@ def test_invalid_speech_switch_saves_nothing(
     assert read_settings(tmp_path).local_vad_enabled is None
     assert read_settings(tmp_path).local_barge_in_enabled is None
     assert not stream._restart_requested.is_set()
+
+
+@pytest.mark.asyncio
+async def test_playback_observer_tracks_audio_duration_and_flush() -> None:
+    """Movement receives the duration actually queued for playback and a reset on interruption."""
+    handler = MagicMock()
+    handler.playback_frame_epochs = {}
+    handler.playback_ready = asyncio.Event()
+    handler.playback_ready.set()
+    robot = MagicMock()
+    observer = MagicMock()
+    stream = LocalStream(handler, robot, playback_observer=observer)
+    handler.emit = AsyncMock(return_value=(16000, np.zeros(8000, dtype=np.int16)))
+
+    def stop_after_playback(audio: np.ndarray) -> None:
+        stream._stop_event.set()
+
+    robot.media.push_audio_sample.side_effect = stop_after_playback
+    await stream.play_loop()
+    observer.assert_called_once_with(0.5)
+    await stream.clear_audio_queue()
+    assert observer.call_args.args == (0.0,)
