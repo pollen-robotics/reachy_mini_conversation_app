@@ -9,10 +9,28 @@ from reachy_mini_conversation_app.tools.tool_constants import SystemTool
 
 
 if TYPE_CHECKING:
-    from reachy_mini_conversation_app.tools.background_tool_manager import BackgroundToolManager
+    from reachy_mini_conversation_app.tools.background_tool_manager import BackgroundTool, BackgroundToolManager
 
 
 logger = logging.getLogger(__name__)
+
+
+def _describe(tool: "BackgroundTool") -> Dict[str, Any]:
+    """Summarize one background task: what it is, what it was asked, how long it has run."""
+    end = tool.completed_at or time.monotonic()
+    info: Dict[str, Any] = {
+        "tool_id": tool.tool_id,
+        "name": tool.tool_name,
+        "status": tool.status.value,
+        "elapsed_seconds": round(end - tool.started_at, 1),
+    }
+    if tool.arguments:
+        info["arguments"] = tool.arguments
+    if tool.progress is not None:
+        info["progress_percent"] = f"{tool.progress.progress:.0%}"
+        if tool.progress.message:
+            info["progress_message"] = tool.progress.message
+    return info
 
 
 class TaskStatus(Tool):
@@ -49,20 +67,7 @@ class TaskStatus(Tool):
             if not tool:
                 return {"error": f"Tool {tool_id} not found."}
 
-            result: Dict[str, Any] = {
-                "tool_id": tool.tool_id,
-                "name": tool.tool_name,
-                "status": tool.status.value,
-                "started_at": tool.started_at,
-            }
-            if tool.completed_at:
-                result["completed_at"] = tool.completed_at
-
-            if tool.progress is not None:
-                result["progress_percent"] = f"{tool.progress.progress:.0%}"
-                if tool.progress.message:
-                    result["progress_message"] = tool.progress.message
-
+            result = _describe(tool)
             if tool.result:
                 result["result"] = tool.result
             if tool.error:
@@ -78,25 +83,8 @@ class TaskStatus(Tool):
                 "message": "No tools running in the background.",
             }
 
-        tools_info = []
-        for tool in [
-            tool for tool in running if tool.tool_name not in [system_tool.value for system_tool in SystemTool]
-        ]:
-            elapsed = time.monotonic() - tool.started_at
-            tool_info: Dict[str, Any] = {
-                "tool_id": tool.tool_id,
-                "name": tool.tool_name,
-                "status": tool.status.value,
-                "elapsed_seconds": round(elapsed, 1),
-            }
-
-            # Add progress if tracking
-            if tool.progress is not None:
-                tool_info["progress_percent"] = f"{tool.progress.progress:.0%}"
-                if tool.progress.message:
-                    tool_info["progress_message"] = tool.progress.message
-
-            tools_info.append(tool_info)
+        system_tool_names = {system_tool.value for system_tool in SystemTool}
+        tools_info = [_describe(tool) for tool in running if tool.tool_name not in system_tool_names]
 
         return {
             "status": "running",

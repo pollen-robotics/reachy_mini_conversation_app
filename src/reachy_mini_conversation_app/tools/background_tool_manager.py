@@ -15,6 +15,7 @@ from pydantic import Field, BaseModel, PrivateAttr
 
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
+    _safe_load_obj,
     dispatch_tool_call,
     dispatch_tool_call_with_manager,
 )
@@ -68,6 +69,8 @@ class BackgroundTool(ToolNotification):
     """Represents a background tool."""
 
     progress: Optional[ToolProgress] = None
+    # What the model asked for, so a task can be told apart from others of the same tool.
+    arguments: Dict[str, Any] = Field(default_factory=dict)
     started_at: float = Field(default_factory=time.monotonic)
     completed_at: Optional[float] = None
     _task: Optional[asyncio.Task[None]] = PrivateAttr(default=None)
@@ -156,6 +159,7 @@ class BackgroundToolManager(BaseModel):
             progress=ToolProgress(progress=0.0) if with_progress else None,
             status=ToolState.RUNNING,
             is_long_running=is_long_running,
+            arguments=_safe_load_obj(tool_call_routine.args_json_str),
         )
         self._tools[background_tool.tool_id] = background_tool
 
