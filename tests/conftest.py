@@ -4,6 +4,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 
 PROJECT_ROOT = Path(__file__).parents[1].resolve()
 SRC_PATH = PROJECT_ROOT / "src"
@@ -21,3 +23,9 @@ os.environ["REACHY_MINI_SKIP_DOTENV"] = "1"
 os.environ.pop("REACHY_MINI_CUSTOM_PROFILE", None)
 os.environ.pop("REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY", None)
 os.environ.pop("REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY", None)
+
+
+@pytest.fixture(autouse=True)
+def _no_daemon_sign_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep a robot daemon's stored HF sign-in on this machine out of the tests."""
+    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.get_hf_token", lambda: None)

@@ -18,6 +18,7 @@ from reachy_mini_conversation_app.tool_spaces import (
     ToolSpaceProfileUpdateError,
     remove_tool_space,
     install_tool_space,
+    build_remote_client,
     explain_space_failure,
     resolve_tool_space_sync,
     handle_tool_spaces_command,
@@ -193,7 +194,7 @@ def test_resolve_tool_space_signs_in_to_every_space(
 
     async def _capture_authorization(self: RemoteMcpToolClient) -> list[RemoteToolSpec]:
         nonlocal authorization
-        authorization = self.server.headers.get("Authorization")
+        authorization = (await self._headers()).get("Authorization")
         return await _mock_list_tool_specs(self)
 
     monkeypatch.setattr(
@@ -204,6 +205,18 @@ def test_resolve_tool_space_signs_in_to_every_space(
     resolve_tool_space_sync(PRIVATE_SPACE_SLUG if private else SEARCH_SPACE_SLUG)
 
     assert authorization == expected_authorization
+
+
+@pytest.mark.asyncio
+async def test_space_client_sends_the_current_token_on_each_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A cached client follows the daemon's token refresh instead of keeping the one it was built with."""
+    tokens = iter(["hf_before_refresh", "hf_after_refresh"])
+    monkeypatch.setattr(config_mod.config, "HF_TOKEN", None)
+    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.get_hf_token", lambda: next(tokens))
+    client = build_remote_client("example_search_tool", "https://example-search-tool.hf.space/gradio_api/mcp/")
+
+    assert (await client._headers())["Authorization"] == "Bearer hf_before_refresh"
+    assert (await client._headers())["Authorization"] == "Bearer hf_after_refresh"
 
 
 def test_tool_spaces_add_private_space_without_token_hints_at_auth(

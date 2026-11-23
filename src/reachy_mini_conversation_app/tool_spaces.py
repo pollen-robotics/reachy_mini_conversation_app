@@ -12,12 +12,13 @@ from pathlib import Path
 from collections import Counter
 from dataclasses import field, asdict, dataclass
 from urllib.parse import urlsplit
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 import httpx
 from huggingface_hub import HfApi, SpaceInfo, get_token
 from huggingface_hub.errors import RepositoryNotFoundError
 
+from reachy_mini.apps.sources.hf_auth import get_hf_token
 from reachy_mini_conversation_app.config import USER_PERSONALITIES_DIRNAME, config
 from reachy_mini_conversation_app.mcp_client import (
     McpClientError,
@@ -613,6 +614,21 @@ def _validate_space_info(slug: str, space_info: SpaceInfo) -> None:
         raise RuntimeError(f"Space '{slug}' is not a Gradio Space and cannot expose the standard MCP endpoint.")
 
 
+def current_hf_token() -> str | None:
+    """Return the token for Hub and Space calls: HF_TOKEN, then the robot's daemon sign-in, then `hf auth login`."""
+    # On a robot the daemon keeps its sign-in in its own store, which get_token() does not read.
+    return config.HF_TOKEN or get_hf_token() or get_token()
+
+
+class _SignedInMcpClient(RemoteMcpToolClient):
+    """MCP client that signs each connection in with the current token."""
+
+    async def _headers(self) -> Mapping[str, str]:
+        # Read per connection: the client is cached for the app's lifetime and the daemon refreshes its token.
+        token = await asyncio.to_thread(current_hf_token)
+        return {**self.server.headers, "Authorization": f"Bearer {token}"} if token else self.server.headers
+
+
 def build_remote_client(
     alias: str,
     mcp_url: str,
@@ -621,14 +637,11 @@ def build_remote_client(
 ) -> RemoteMcpToolClient:
     """Build an MCP client for an installed Space, signed in as the current Hugging Face account."""
     validated_mcp_url = validate_space_mcp_url(mcp_url)
-    # Public Spaces get it too: ZeroGPU charges the caller's quota, and anonymous callers get the least.
-    token = config.HF_TOKEN or get_token()
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
-    return RemoteMcpToolClient(
+    # Public Spaces get the token too: ZeroGPU charges the caller's quota, and anonymous callers get the least.
+    return _SignedInMcpClient(
         RemoteMcpServerConfig(
             alias=alias,
             url=validated_mcp_url,
-            headers=headers,
             request_timeout_s=10.0,
             tool_timeout_s=30.0,
         ),
@@ -680,7 +693,7 @@ def explain_space_failure(slug: str, detail: str) -> dict[str, str] | None:
             return {"error": message, "reason": reason, "detail": detail}
 
     # Remote failures look alike on the wire (HTML page, 404, "error response"); the Hub says what is wrong.
-    token = config.HF_TOKEN or get_token()
+    token = current_hf_token()
     try:
         space_info = HfApi().space_info(slug, timeout=10.0, token=token or False)
     except RepositoryNotFoundError:
@@ -705,7 +718,7 @@ async def resolve_tool_space(slug: str) -> InstalledToolSpace:
     """Validate and discover tools from one HF Space, authenticating private Spaces with the HF token."""
     validated_slug = validate_space_slug(slug)
     alias = normalize_space_alias(validated_slug)
-    token = config.HF_TOKEN or get_token()
+    token = current_hf_token()
     try:
         space_info = HfApi().space_info(validated_slug, timeout=10.0, token=token or False)
     except RepositoryNotFoundError as exc:
