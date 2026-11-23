@@ -43,6 +43,7 @@ class AppSettings:
     camera_enabled: bool | None = None
     local_vad_enabled: bool | None = None
     local_barge_in_enabled: bool | None = None
+    gestures_enabled: bool | None = None
 
 
 def _settings_path(instance_path: str | Path | None) -> Path | None:
@@ -103,6 +104,7 @@ def _read_unlocked(path: Path | None) -> AppSettings:
         camera_enabled=_flag(payload, "camera_enabled"),
         local_vad_enabled=_flag(payload, "local_vad_enabled"),
         local_barge_in_enabled=_flag(payload, "local_barge_in_enabled"),
+        gestures_enabled=_flag(payload, "gestures_enabled"),
     )
 
 
@@ -151,6 +153,8 @@ def apply_settings_to_runtime(settings: AppSettings) -> None:
         config.LOCAL_VAD_ENABLED = settings.local_vad_enabled
     if settings.local_barge_in_enabled is not None:
         config.LOCAL_BARGE_IN_ENABLED = settings.local_barge_in_enabled
+    if settings.gestures_enabled is not None:
+        config.GESTURES_ENABLED = settings.gestures_enabled
 
 
 def load_settings_into_runtime(instance_path: str | Path | None) -> AppSettings:

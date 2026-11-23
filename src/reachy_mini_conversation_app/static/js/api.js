@@ -151,6 +151,7 @@ export const setLanguage = (language, scope) => rpcCall("language.set", { langua
 
 export const saveBackendConfig = (payload) => rpcCall("backend.config", payload);
 export const saveSpeechConfig = (payload) => rpcCall("speech.config", payload);
+export const setGesturesEnabled = (enabled) => rpcCall("gestures.set_enabled", { enabled });
 
 export const listToolSpaces = () => rpcCall("tool_spaces.list");
 export const addToolSpace = (slug) =>

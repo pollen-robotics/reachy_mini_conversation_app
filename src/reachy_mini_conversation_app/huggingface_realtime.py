@@ -236,7 +236,10 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self._tool_call_response_id: str | None = None
 
     def _start_loading_gestures(self) -> None:
-        """Load the gesture model once the first reply, usually the greeting, has finished playing."""
+        """Load the gesture model once a reply, usually the greeting, has finished playing.
+
+        Called after every reply, so turning gestures on in the settings takes effect without reconnecting.
+        """
         if config.GESTURES_ENABLED and self._gestures_loading is None:
             self._gestures_loading = asyncio.create_task(self._load_gestures())
 
@@ -254,7 +257,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
     def _play_gesture(self, text: str, kind: GestureKind, delay: float = 0.0) -> None:
         """Play the move matching ``text`` in ``delay`` seconds unless a gesture is already under way."""
         starts_at = time.monotonic() + delay
-        if self._gestures is None or starts_at < self._gesture_ends_at:
+        if not config.GESTURES_ENABLED or self._gestures is None or starts_at < self._gesture_ends_at:
             return
         # The reply's first sentence arrives while the user's is still being matched; it waits its turn.
         self._gesture_task = asyncio.create_task(

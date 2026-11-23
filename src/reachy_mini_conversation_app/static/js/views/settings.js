@@ -8,6 +8,7 @@ import {
   listVoices,
   saveBackendConfig,
   saveSpeechConfig,
+  setGesturesEnabled,
   untilReady,
 } from "../api.js";
 import { SHOW_LATENCIES_KEY } from "../constants.js";
@@ -30,13 +31,14 @@ export async function mountSettingsView({ outlet, signal }) {
   const connectionSection = buildConnectionSection({
     onSaved: () =>
       Promise.all([
-        refreshStatus({ statusSection, connectionSection, speechSection, signal }),
+        refreshStatus({ statusSection, connectionSection, speechSection, movementSection, signal }),
         refreshVoices({ voiceSection, signal }),
       ]),
   });
   const voiceSection = buildVoiceSection();
   const statusSection = buildStatusSection();
   const speechSection = buildSpeechSection();
+  const movementSection = buildMovementSection();
   const developerSection = buildDeveloperSection();
 
   const view = h(
@@ -46,18 +48,19 @@ export async function mountSettingsView({ outlet, signal }) {
       "header",
       { class: "view-header" },
       h("h1", { class: "view-title" }, "Settings"),
-      h("p", { class: "view-subtitle" }, "Connection, voice, speech behavior, and runtime state for Reachy Mini.")
+      h("p", { class: "view-subtitle" }, "Connection, voice, speech behavior, movement, and runtime state for Reachy Mini.")
     ),
     connectionSection.element,
     voiceSection.element,
     speechSection.element,
+    movementSection.element,
     statusSection.element,
     developerSection
   );
   outlet.replaceChildren(view);
 
   await Promise.all([
-    refreshStatus({ statusSection, connectionSection, speechSection, signal }),
+    refreshStatus({ statusSection, connectionSection, speechSection, movementSection, signal }),
     refreshVoices({ voiceSection, signal }),
   ]);
 }
@@ -319,6 +322,45 @@ function buildSpeechSection() {
   };
 }
 
+function buildMovementSection() {
+  const gestures = h("input", { type: "checkbox", name: "gestures_enabled", disabled: "disabled" });
+  const status = h("p", { class: "settings-status", role: "status", "aria-live": "polite" });
+  const element = h("section", { class: "settings-section" },
+    h("h2", { class: "settings-section-title" }, "Movement"),
+    h("div", { class: "settings-form" },
+      h("label", { class: "settings-toggle" }, gestures,
+        h("span", {}, h("strong", {}, "Gestures while talking"),
+          h("span", { class: "settings-hint" },
+            "Play a short emotion that fits what the robot says and hears. The first time, a 118 MB model downloads after the next reply."))),
+      status));
+
+  // Saved and applied as soon as it is switched: the conversation reads it for every sentence.
+  gestures.addEventListener("change", async () => {
+    const wanted = gestures.checked;
+    gestures.disabled = true;
+    status.classList.remove("is-error");
+    status.textContent = "Saving…";
+    try {
+      const result = await setGesturesEnabled(wanted);
+      gestures.checked = result.enabled;
+      status.textContent = result.enabled ? "Gestures on." : "Gestures off.";
+    } catch (error) {
+      gestures.checked = !wanted;
+      status.textContent = `Failed to save: ${describeError(error)}`;
+      status.classList.add("is-error");
+    } finally {
+      gestures.disabled = false;
+    }
+  });
+  return {
+    element,
+    syncFromStatus(payload) {
+      gestures.checked = Boolean(payload.gestures_enabled);
+      gestures.disabled = false;
+    },
+  };
+}
+
 function buildDeveloperSection() {
   const showLatencies = h("input", {
     type: "checkbox",
@@ -429,13 +471,14 @@ function formatHfTarget(payload) {
   return `${host}:${port || DEFAULT_HF_PORT}`;
 }
 
-async function refreshStatus({ statusSection, connectionSection, speechSection, signal }) {
+async function refreshStatus({ statusSection, connectionSection, speechSection, movementSection, signal }) {
   try {
     const payload = await untilReady(getStatus, signal);
     if (signal.aborted) return;
     statusSection.render(payload);
     connectionSection.syncFromStatus(payload);
     speechSection.syncFromStatus(payload);
+    movementSection.syncFromStatus(payload);
   } catch (error) {
     if (signal.aborted) return;
     statusSection.renderUnavailable(error);

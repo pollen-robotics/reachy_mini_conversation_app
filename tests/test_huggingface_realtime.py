@@ -1376,6 +1376,7 @@ async def _settle_gestures(handler: HuggingFaceRealtimeHandler) -> None:
 
 def _gesture_handler(monkeypatch: Any, events: Any) -> tuple[HuggingFaceRealtimeHandler, SimpleNamespace]:
     """Build a session handler whose gesture library matches every sentence to one two-second move."""
+    monkeypatch.setattr(hf_mod.config, "GESTURES_ENABLED", True)
     handler = _session_handler(monkeypatch, events)
     handler._clear_queue = AsyncMock()
     move = SimpleNamespace(duration=2.0, emotion_name="success1")
@@ -1401,6 +1402,25 @@ async def test_reply_sentence_plays_one_gesture_at_a_time(monkeypatch: Any) -> N
 
     handler._gestures.match.assert_called_once_with("We did it!", "say")
     handler.deps.movement_manager.play_gesture.assert_called_once_with(move)
+
+
+@pytest.mark.asyncio
+async def test_gestures_switched_off_in_the_settings_stop_at_once(monkeypatch: Any) -> None:
+    """The settings switch is read for every sentence, so a loaded model plays nothing once it is turned off."""
+    handler, _move = _gesture_handler(
+        monkeypatch,
+        (
+            _FakeEvent("response.created"),
+            _FakeEvent("response.output_audio_transcript.delta", delta="We did it!"),
+        ),
+    )
+    monkeypatch.setattr(hf_mod.config, "GESTURES_ENABLED", False)
+
+    await handler._run_realtime_session()
+    await _settle_gestures(handler)
+
+    handler._gestures.match.assert_not_called()
+    handler.deps.movement_manager.play_gesture.assert_not_called()
 
 
 @pytest.mark.asyncio

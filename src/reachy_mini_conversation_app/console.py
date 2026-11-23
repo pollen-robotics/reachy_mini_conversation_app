@@ -417,6 +417,13 @@ class LocalStream:
         """
         self._save_settings(AppSettings(memory_enabled=enabled))
 
+    def _set_gestures_enabled(self, enabled: bool) -> None:
+        """Turn speech-driven gestures on or off, for this run and the next ones.
+
+        The handler reads the flag for every sentence and loads the model after the next reply, so nothing reconnects.
+        """
+        self._save_settings(AppSettings(gestures_enabled=enabled))
+
     def _set_language(self, language: str, scope: LanguageScope) -> str:
         """Save the conversation language for the active personality or all of them, then reconnect."""
         if scope == "profile":
@@ -566,6 +573,7 @@ class LocalStream:
                 "memory_enabled": config.MEMORY_ENABLED,
                 "local_vad_enabled": config.LOCAL_VAD_ENABLED,
                 "local_barge_in_enabled": config.LOCAL_BARGE_IN_ENABLED,
+                "gestures_enabled": config.GESTURES_ENABLED,
                 "vision_enabled": bool(self._tool_deps and self._tool_deps.camera_enabled),
                 **backend_connection,
             }
@@ -679,7 +687,15 @@ class LocalStream:
                 "requires_restart": not self._can_rebuild_handler(),
             }
 
+        def _rpc_gestures_set_enabled(params: dict[str, object]) -> dict[str, object]:
+            enabled = params.get("enabled")
+            if not isinstance(enabled, bool):
+                raise JsonRpcError("enabled must be a boolean", reason="invalid_params", code=-32602)
+            self._set_gestures_enabled(enabled)
+            return {"enabled": config.GESTURES_ENABLED}
+
         rpc.register("speech.config", _rpc_speech_config)
+        rpc.register("gestures.set_enabled", _rpc_gestures_set_enabled)
         rpc.mount(settings_app)
         self._rpc = rpc
 
