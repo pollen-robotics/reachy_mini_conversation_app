@@ -27,8 +27,9 @@ dependencies = [
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy-mini>=1.11.0",
-    "mcp>=2.0,<3",
-    "mcp-types>=2.0,<3",
+    # 2.3 caps SSE events at 1 MiB and adds max_sse_event_size to lift it per client.
+    "mcp>=2.3,<3",
+    "mcp-types>=2.3,<3",
     "httpx2>=2.5.0",
 ]
 

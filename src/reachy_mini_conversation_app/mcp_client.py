@@ -179,6 +179,8 @@ class RemoteMcpServerConfig:
     headers: Mapping[str, str] = field(default_factory=dict)
     request_timeout_s: float = 10.0
     tool_timeout_s: float = 30.0
+    # The MCP SDK's own cap on one streamed event; raise it for tools returning inline media.
+    max_event_bytes: int = 1024 * 1024
 
     def __post_init__(self) -> None:
         """Validate configuration once the dataclass has been created."""
@@ -189,6 +191,8 @@ class RemoteMcpServerConfig:
             raise ValueError("request_timeout_s must be greater than zero.")
         if self.tool_timeout_s <= 0:
             raise ValueError("tool_timeout_s must be greater than zero.")
+        if self.max_event_bytes <= 0:
+            raise ValueError("max_event_bytes must be greater than zero.")
 
 
 @dataclass(frozen=True)
@@ -378,7 +382,11 @@ class RemoteMcpToolClient:
             follow_redirects=False,
             timeout=client_timeout,
         ) as http_client:
-            transport = streamable_http_client(self.server.url, http_client=http_client)
+            transport = streamable_http_client(
+                self.server.url,
+                http_client=http_client,
+                max_sse_event_size=self.server.max_event_bytes,
+            )
             # The default mode='auto' probes `server/discover` and falls back to the
             # `initialize` handshake, so one client speaks every protocol revision.
             async with client_cls(transport) as client:
