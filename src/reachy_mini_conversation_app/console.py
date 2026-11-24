@@ -317,14 +317,11 @@ class LocalStream:
         if loop is None or not loop.is_running():
             coroutine.close()
             raise JsonRpcError("no active session", reason="not_running")
-        try:
-            on_stream_loop = asyncio.get_running_loop() is loop
-        except RuntimeError:
-            on_stream_loop = False
-        if on_stream_loop:
-            return await coroutine
         future = asyncio.run_coroutine_threadsafe(coroutine, loop)
-        return await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout)
+        try:
+            return await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout)
+        except TimeoutError as exc:
+            raise JsonRpcError("the conversation did not answer in time", reason="timeout") from exc
 
     async def request_backend_restart(self, reason: str) -> None:
         """Ask the startup loop to rebuild the backend and stop the current handler."""

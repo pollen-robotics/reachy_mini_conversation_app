@@ -14,6 +14,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
+from reachy_mini.io.jsonrpc import JsonRpcError
 import reachy_mini_conversation_app.console as console_mod
 from reachy_mini_conversation_app.config import HF_AVAILABLE_VOICES, config
 from reachy_mini_conversation_app.console import LocalStream
@@ -1165,6 +1166,15 @@ def test_refresh_instructions_runs_on_the_stream_loop(stream_loop: asyncio.Abstr
     stream._asyncio_loop = stream_loop  # type: ignore[assignment]
     assert asyncio.run(stream._refresh_instructions()) is True
     assert loops == [stream_loop]
+
+
+def test_run_on_stream_loop_timeout_is_a_json_rpc_error(stream_loop: asyncio.AbstractEventLoop) -> None:
+    """A stuck stream loop gives clients a 'timeout' reason, not an empty error."""
+    stream = LocalStream(MagicMock(), _rpc_robot())
+    stream._asyncio_loop = stream_loop  # type: ignore[assignment]
+    with pytest.raises(JsonRpcError) as exc_info:
+        asyncio.run(stream._run_on_stream_loop(asyncio.sleep(1), timeout=0.05))
+    assert exc_info.value.reason == "timeout"
 
 
 def test_rpc_say_requires_active_session() -> None:
