@@ -15,6 +15,7 @@ from pydantic import Field, BaseModel, PrivateAttr
 
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
+    _safe_load_obj,
     dispatch_tool_call,
     dispatch_tool_call_with_manager,
 )
@@ -53,12 +54,13 @@ class ToolCallRoutine(BaseModel):
 
 
 class ToolNotification(BaseModel):
-    """Notification payload for completed tools."""
+    """Notification payload for a finished tool, or for a long-running tool that was just accepted."""
 
     id: str
     tool_name: str
     is_idle_tool_call: bool
     status: ToolState
+    is_long_running: bool = False
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
@@ -67,6 +69,8 @@ class BackgroundTool(ToolNotification):
     """Represents a background tool."""
 
     progress: Optional[ToolProgress] = None
+    # What the model asked for, so a task can be told apart from others of the same tool.
+    arguments: Dict[str, Any] = Field(default_factory=dict)
     started_at: float = Field(default_factory=time.monotonic)
     completed_at: Optional[float] = None
     _task: Optional[asyncio.Task[None]] = PrivateAttr(default=None)
@@ -83,6 +87,7 @@ class BackgroundTool(ToolNotification):
             tool_name=self.tool_name,
             is_idle_tool_call=self.is_idle_tool_call,
             status=self.status,
+            is_long_running=self.is_long_running,
             result=self.result,
             error=self.error,
         )
@@ -130,6 +135,7 @@ class BackgroundToolManager(BaseModel):
         tool_call_routine: ToolCallRoutine,
         is_idle_tool_call: bool,
         with_progress: bool = False,
+        is_long_running: bool = False,
     ) -> BackgroundTool:
         """Start a new background tool.
 
@@ -138,6 +144,7 @@ class BackgroundToolManager(BaseModel):
             tool_call_routine: The ToolCallRoutine containing the callable and its arguments
             with_progress: Whether to track progress (0.0-1.0)
             is_idle_tool_call: Whether the tool call was triggered by an idle signal
+            is_long_running: Whether to notify once at start (status RUNNING) before the final notification
 
         Returns:
             BackgroundTool object with tool ID
@@ -151,8 +158,16 @@ class BackgroundToolManager(BaseModel):
             is_idle_tool_call=is_idle_tool_call,
             progress=ToolProgress(progress=0.0) if with_progress else None,
             status=ToolState.RUNNING,
+            is_long_running=is_long_running,
+            arguments=_safe_load_obj(tool_call_routine.args_json_str),
         )
         self._tools[background_tool.tool_id] = background_tool
+
+        if is_long_running:
+            # Queued before the task exists, so it always reaches listeners ahead of the final notification.
+            accepted = background_tool.get_notification()
+            accepted.result = {"task_id": background_tool.tool_id}
+            await self._notification_queue.put(accepted)
 
         async_task = asyncio.create_task(
             self._run_tool(background_tool, tool_call_routine),

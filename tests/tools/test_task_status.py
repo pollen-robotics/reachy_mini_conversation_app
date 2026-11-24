@@ -1,3 +1,4 @@
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -47,10 +48,29 @@ async def test_task_status_single_tool_formats_progress_and_result() -> None:
 
 
 @pytest.mark.asyncio
+async def test_task_status_tells_same_tool_tasks_apart_and_reports_elapsed_time() -> None:
+    """Each task shows what it was asked and how long it ran, in seconds, in both views."""
+    finished = _tool("compose_song", ToolState.COMPLETED, arguments={"description": "a lullaby"}, started_at=100.0)
+    finished.completed_at = 152.5
+    running = _tool("compose_song", arguments={"description": "a rock song"}, started_at=time.monotonic() - 12)
+    manager = MagicMock()
+    manager.get_tool.return_value = finished
+    manager.get_all_tools.return_value = [running]
+
+    single = await TaskStatus()(_deps(), tool_id=finished.tool_id, tool_manager=manager)
+    listing = await TaskStatus()(_deps(), tool_manager=manager)
+
+    assert (single["arguments"], single["elapsed_seconds"]) == ({"description": "a lullaby"}, 52.5)
+    assert "started_at" not in single
+    assert listing["tools"][0]["arguments"] == {"description": "a rock song"}
+    assert 12 <= listing["tools"][0]["elapsed_seconds"] < 13
+
+
+@pytest.mark.asyncio
 async def test_task_status_no_running_tools_is_idle() -> None:
     """With nothing running the tool reports idle."""
     manager = MagicMock()
-    manager.get_running_tools.return_value = []
+    manager.get_all_tools.return_value = [_tool("move_head", ToolState.COMPLETED)]
     result = await TaskStatus()(_deps(), tool_manager=manager)
     assert result == {"status": "idle", "message": "No tools running in the background."}
 
@@ -59,8 +79,22 @@ async def test_task_status_no_running_tools_is_idle() -> None:
 async def test_task_status_lists_running_and_filters_system_tools() -> None:
     """System tools (task_status/task_cancel) are excluded from the running list."""
     manager = MagicMock()
-    manager.get_running_tools.return_value = [_tool("long_job"), _tool("task_status")]
+    manager.get_all_tools.return_value = [_tool("long_job"), _tool("task_status")]
     result = await TaskStatus()(_deps(), tool_manager=manager)
     assert result["status"] == "running"
     assert result["count"] == 1
     assert [tool["name"] for tool in result["tools"]] == ["long_job"]
+
+
+@pytest.mark.asyncio
+async def test_task_status_recalls_long_tasks_finished_earlier() -> None:
+    """A song that finished earlier is still listed with its result; finished short tools are not."""
+    song = _tool("compose_song", ToolState.COMPLETED, is_long_running=True, result={"title": "Wiggle"})
+    song.completed_at = song.started_at + 50
+    manager = MagicMock()
+    manager.get_all_tools.return_value = [song, _tool("move_head", ToolState.COMPLETED)]
+
+    result = await TaskStatus()(_deps(), tool_manager=manager)
+
+    assert (result["status"], result["tools"]) == ("idle", [])
+    assert [(task["name"], task["result"]) for task in result["finished"]] == [("compose_song", {"title": "Wiggle"})]

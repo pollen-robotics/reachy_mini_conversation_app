@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+from typing import Any
 from collections.abc import AsyncIterator
 
 import pytest
@@ -12,6 +13,7 @@ pytest.importorskip("mcp.server")
 
 from mcp.server import MCPServer
 
+import reachy_mini_conversation_app.mcp_client as mcp_client_module
 from reachy_mini_conversation_app.mcp_client import (
     RemoteToolSpec,
     McpTransportError,
@@ -37,7 +39,7 @@ class _BearerAuthMiddleware:
         await self.app(scope, receive, send)
 
 
-def _build_local_mcp_app(required_token: str) -> object:
+def _build_local_mcp_app(required_token: str, *, json_response: bool = True) -> object:
     mcp_server = MCPServer("Reachy Test MCP")
 
     @mcp_server.tool()
@@ -51,7 +53,8 @@ def _build_local_mcp_app(required_token: str) -> object:
         await asyncio.sleep(delay_s)
         return {"echo": message}
 
-    app = mcp_server.streamable_http_app(json_response=True, stateless_http=True)
+    # Gradio Spaces answer over SSE (json_response=False), where the SDK caps the size of one event.
+    app = mcp_server.streamable_http_app(json_response=json_response, stateless_http=True)
     return _BearerAuthMiddleware(app, required_token)
 
 
@@ -71,11 +74,11 @@ async def _wait_for_server(host: str, port: int) -> None:
     raise RuntimeError(f"Timed out waiting for local MCP server on {host}:{port}")
 
 
-@pytest_asyncio.fixture
-async def local_mcp_server(unused_tcp_port: int) -> AsyncIterator[tuple[str, str]]:
-    """Run a local HTTP MCP server that requires a bearer token."""
+@pytest_asyncio.fixture(params=[True, False], ids=["json", "sse"])
+async def local_mcp_server(unused_tcp_port: int, request: pytest.FixtureRequest) -> AsyncIterator[tuple[str, str]]:
+    """Run a local HTTP MCP server that requires a bearer token, answering in JSON or over SSE."""
     token = "local-test-token"
-    app = _build_local_mcp_app(token)
+    app = _build_local_mcp_app(token, json_response=request.param)
     server = uvicorn.Server(
         uvicorn.Config(
             app,
@@ -191,3 +194,37 @@ async def test_remote_mcp_tool_client_discovers_calls_and_handles_timeout(
     )
     with pytest.raises(McpTransportError, match="Failed to discover MCP tools"):
         await unauthorized_client.list_tool_specs()
+
+
+@pytest.mark.asyncio
+async def test_remote_mcp_tool_client_passes_its_event_size_cap_to_the_transport(
+    local_mcp_server: tuple[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """max_event_bytes reaches the SDK transport, whose 1 MiB default refuses a Space's inline audio.
+
+    The SDK only enforces the cap while an event arrives in several network reads, which a local
+    server sends in one, so this checks the wiring rather than the refusal.
+    """
+    server_url, token = local_mcp_server
+    client_cls, streamable_http_client = mcp_client_module._load_mcp_sdk()
+    seen_limits: list[int | None] = []
+
+    def _recording_transport(url: str, **kwargs: Any) -> Any:
+        seen_limits.append(kwargs.get("max_sse_event_size"))
+        return streamable_http_client(url, **kwargs)
+
+    monkeypatch.setattr(mcp_client_module, "_load_mcp_sdk", lambda: (client_cls, _recording_transport))
+    client = RemoteMcpToolClient(
+        RemoteMcpServerConfig(
+            alias="media",
+            url=server_url,
+            headers={"Authorization": f"Bearer {token}"},
+            max_event_bytes=32 * 1024 * 1024,
+        )
+    )
+
+    result = await client.call_tool("media__echo_text", {"message": "hello"})
+
+    assert result["status"] == "ok"
+    assert seen_limits and set(seen_limits) == {32 * 1024 * 1024}
