@@ -9,7 +9,7 @@ import asyncio
 import logging
 import itertools
 import threading
-from typing import Any, List, Optional
+from typing import Any, List, TypeVar, Optional
 from pathlib import Path
 from collections import deque
 from collections.abc import Mapping, Callable, Coroutine
@@ -75,6 +75,7 @@ except Exception:  # pragma: no cover - only loaded when settings_app is used
     BaseModel = object  # type: ignore
 
 logger = logging.getLogger(__name__)
+ResultT = TypeVar("ResultT")
 
 
 def _detach_framework_root_routes(app: "FastAPI") -> None:
@@ -305,7 +306,7 @@ class LocalStream:
             return
         self._restart_requested.set()
 
-    async def _run_on_stream_loop(self, coroutine: Coroutine[Any, Any, None], timeout: float = 10.0) -> None:
+    async def _run_on_stream_loop(self, coroutine: Coroutine[Any, Any, ResultT], timeout: float = 10.0) -> ResultT:
         """Run a handler coroutine on the stream loop, which owns the realtime socket.
 
         /rpc handlers run on the settings server's thread and loop. Awaiting the
@@ -321,10 +322,9 @@ class LocalStream:
         except RuntimeError:
             on_stream_loop = False
         if on_stream_loop:
-            await coroutine
-            return
+            return await coroutine
         future = asyncio.run_coroutine_threadsafe(coroutine, loop)
-        await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout)
+        return await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout)
 
     async def request_backend_restart(self, reason: str) -> None:
         """Ask the startup loop to rebuild the backend and stop the current handler."""
@@ -428,7 +428,7 @@ class LocalStream:
 
     async def _refresh_instructions(self) -> bool:
         """Push rebuilt instructions to the live session (see memory.clear)."""
-        return await self.handler.refresh_instructions()
+        return await self._run_on_stream_loop(self.handler.refresh_instructions())
 
     def _set_memory_enabled(self, enabled: bool) -> None:
         """Turn long-term memory on or off, for this run and the next ones.

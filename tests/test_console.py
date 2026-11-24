@@ -1151,6 +1151,22 @@ def test_rpc_say_without_stream_loop_is_not_running() -> None:
     handler.say.assert_not_awaited()
 
 
+def test_refresh_instructions_runs_on_the_stream_loop(stream_loop: asyncio.AbstractEventLoop) -> None:
+    """memory.* refreshes send session.update, so they must run on the stream loop too."""
+    loops: list[asyncio.AbstractEventLoop] = []
+
+    async def refresh_instructions() -> bool:
+        loops.append(asyncio.get_running_loop())
+        return True
+
+    handler = MagicMock()
+    handler.refresh_instructions = refresh_instructions
+    stream = LocalStream(handler, _rpc_robot())
+    stream._asyncio_loop = stream_loop  # type: ignore[assignment]
+    assert asyncio.run(stream._refresh_instructions()) is True
+    assert loops == [stream_loop]
+
+
 def test_rpc_say_requires_active_session() -> None:
     """conversation.say fails with not_running when no session is connected."""
     handler = MagicMock()
