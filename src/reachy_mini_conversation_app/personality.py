@@ -3,7 +3,7 @@
 import re
 import shutil
 import logging
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, NotRequired
 from pathlib import Path
 from collections.abc import Iterable
 
@@ -30,6 +30,8 @@ from reachy_mini_conversation_app.profile_toolsets import (
     clear_profile_tool_override,
     profile_toolsets_transaction,
 )
+from reachy_mini_conversation_app.tools.compose_song import SONG_SPACE
+from reachy_mini_conversation_app.tools.speak_in_voice import VOICE_SPACE
 from reachy_mini_conversation_app.tools.tool_constants import SystemTool
 
 
@@ -43,6 +45,11 @@ class AvailableTool(TypedDict):
     kind: Literal["shared", "external", "tool_space"]
     source: str
     description: str
+    # The Hugging Face Space a built-in tool calls in the background, shown so its outages make sense.
+    space: NotRequired[str]
+
+
+BUILT_IN_TOOL_SPACES = {"compose_song": SONG_SPACE, "speak_in_voice": VOICE_SPACE}
 
 
 def _visible_profile_names(profiles_root: Path, prefix: str = "") -> list[str]:
@@ -86,6 +93,8 @@ def available_tool_catalog() -> list[AvailableTool]:
             "source": "Built-in",
             "description": "",
         }
+        if tool_name in BUILT_IN_TOOL_SPACES:
+            catalog[tool_name]["space"] = BUILT_IN_TOOL_SPACES[tool_name]
 
     for tool_name in list_tool_module_names(config.TOOLS_DIRECTORY):
         catalog[tool_name] = {

@@ -1335,6 +1335,11 @@ button {
   font-weight: 600;
 }
 
+.settings-tool-choice-space {
+  margin-left: 6px;
+  cursor: help;
+}
+
 .settings-tool-choice-id {
   overflow-wrap: anywhere;
   color: var(--text-muted);
