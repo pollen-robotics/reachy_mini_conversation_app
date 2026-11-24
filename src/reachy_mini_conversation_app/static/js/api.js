@@ -108,6 +108,8 @@ export function subscribe(method, cb) {
 
 const STARTUP_POLL_MS = 2000;
 const STARTUP_DEADLINE_MS = 90000;
+// Errors a backend still coming up returns; anything else is real and surfaces at once.
+const STARTUP_REASONS = new Set(["disconnected", "timeout", "loop_unavailable"]);
 
 /** Retry a request while the backend is still coming up at startup. */
 export async function untilReady(requestFn, signal, onRetry) {
@@ -117,7 +119,7 @@ export async function untilReady(requestFn, signal, onRetry) {
     try {
       return await requestFn();
     } catch (error) {
-      if (signal.aborted || Date.now() >= deadline) throw error;
+      if (!STARTUP_REASONS.has(error?.reason) || signal.aborted || Date.now() >= deadline) throw error;
       if (!notified) {
         notified = true;
         onRetry?.();

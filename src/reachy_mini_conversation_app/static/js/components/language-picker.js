@@ -3,7 +3,7 @@
  * saves it for the active personality only or for all of them.
  */
 
-import { describeError, getLanguage, setLanguage } from "../api.js";
+import { describeError, getLanguage, setLanguage, untilReady } from "../api.js";
 import { h, prettifyProfileName } from "../ui.js";
 
 const AUTO_CHOICE = Object.freeze({ code: "auto", name: "Auto-detect", native_name: "Auto-detect", flag: "🌐" });
@@ -81,7 +81,7 @@ export function createLanguagePicker({ root, signal, onStatus }) {
 
   async function refresh() {
     try {
-      state = await getLanguage();
+      state = await untilReady(getLanguage, signal);
     } catch (error) {
       console.warn("Failed to load the conversation language", error);
       return;
