@@ -16,6 +16,7 @@ default_tools = [
   "volume_control",
   "robot_status",
   "hugging_face_hub",
+  "compose_song",
   "pollen_robotics_reachy_mini_search_tool__search_web",
   "pollen_robotics_reachy_mini_weather_tool__get_weather",
   "pollen_robotics_reachy_mini_time_tool__get_time",
