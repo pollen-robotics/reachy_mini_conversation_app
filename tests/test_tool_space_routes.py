@@ -225,6 +225,41 @@ def test_remove_tool_space_disables_its_tools_in_every_profile(
     assert read_installed_tool_spaces(instance_path).spaces == []
 
 
+def test_add_tool_space_accepts_the_space_page_link(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Space link pasted from the browser installs the same Space as its owner/name slug."""
+    instance_path, _ = _configure_profiles(tmp_path, monkeypatch)
+    client = _mount_rpc(instance_path, MagicMock(return_value=None), AsyncMock())
+
+    response = _rpc_call(client, "tool_spaces.add", {"slug": f"https://huggingface.co/spaces/{SPACE_SLUG}?logs=build"})
+
+    assert [space["slug"] for space in response["result"]["spaces"]] == [SPACE_SLUG]
+
+
+def test_status_and_search_report_installed_spaces(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Status checks every installed Space; search flags results that are already installed."""
+    instance_path, _ = _configure_profiles(tmp_path, monkeypatch)
+    paused = {"state": "space_paused", "message": "The Space is paused by its owner."}
+    monkeypatch.setattr("reachy_mini_conversation_app.tool_space_routes.check_space_availability", lambda slug: paused)
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_space_routes.search_mcp_spaces",
+        lambda query: [{"slug": SPACE_SLUG, "title": "Search"}, {"slug": "other/weather", "title": "Weather"}],
+    )
+    client = _mount_rpc(instance_path, MagicMock(return_value=None), AsyncMock())
+    _rpc_call(client, "tool_spaces.add", {"slug": SPACE_SLUG})
+
+    statuses = _rpc_call(client, "tool_spaces.status")["result"]["statuses"]
+    results = _rpc_call(client, "tool_spaces.search", {"query": "search the web"})["result"]["results"]
+
+    assert statuses == {SPACE_SLUG: paused}
+    assert [(result["slug"], result["installed"]) for result in results] == [
+        (SPACE_SLUG, True),
+        ("other/weather", False),
+    ]
+    assert (
+        _rpc_call(client, "tool_spaces.search", {"query": "  "})["error"]["data"]["reason"] == "invalid_search_query"
+    )
+
+
 def test_add_tool_space_rejects_invalid_slug_without_network_access(tmp_path: Path) -> None:
     """The UI method should only accept Hugging Face owner/Space slugs."""
     app = FastAPI()

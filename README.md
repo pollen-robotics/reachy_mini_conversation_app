@@ -219,6 +219,7 @@ Every bundled profile enables `head_tracking` by default; users can still disabl
 | `forget` | Remove a saved memory fact by matching a short query. | Core install only. |
 | `volume_control` | Read or change Reachy's speaker or microphone volume. | Core install only. Uses the daemon REST API; setting the speaker volume plays a short confirmation sound. |
 | `robot_status` | Read one status topic: `name`, `software` (version, update available), `wifi` (IP address, network), `account` (Hugging Face sign-in), `imu` (which way the head is tilted, motion, temperature), `apps` (installed apps). | Core install only. Uses the daemon REST API. The update check and the Wi-Fi network details are wireless-version only; the IP address is reported on any robot. |
+| `hugging_face_hub` | Browse the Hugging Face Hub: `search` models, datasets or Spaces, list `trending` ones, read a repo's `details` (with the start of its README, and whether a Space is running), list the signed-in user's own repos (`mine`, private ones included), or list the latest daily `papers` or papers matching a query. | Core install only. Signs in with `HF_TOKEN` if set, else the robot's Hugging Face login from the daemon, else `hf auth login`. |
 | `pollen_robotics_reachy_mini_search_tool__search_web` | Search the web and return a short list of results. | Preinstalled MCP Space: `pollen-robotics/reachy-mini-search-tool`. |
 | `pollen_robotics_reachy_mini_weather_tool__get_weather` | Report today's weather for a place: current conditions, high and low temperature, and rain chance. | Preinstalled MCP Space: `pollen-robotics/reachy-mini-weather-tool`. |
 | `pollen_robotics_reachy_mini_time_tool__get_time` | Report the current time for a timezone or the user's local time, or the difference between two timezones. | Preinstalled MCP Space: `pollen-robotics/reachy-mini-time-tool`. |
@@ -368,7 +369,7 @@ Loading rules:
 
 You can install MCP-compatible Hugging Face Spaces as remote tool sources for this app. Private Spaces work too, as long as `HF_TOKEN` is set (or you have run `hf auth login`) for an account that can access them. To publish a new Space, follow [Creating and adding tools](#hugging-face-space-tools).
 
-Tools → Tool Spaces installs or refreshes a global source. Its tools then appear under Tools → Tool access for per-profile selection. Removing a Space removes its tools from every profile. Active-profile changes reconnect the conversation; other changes apply when selected.
+Tools → Tool Spaces installs or refreshes a global source: search the Hub for MCP Spaces by what they do, or paste a Space name or link. Each installed Space shows its live status (online, asleep, starting, paused, broken, no access), since community Spaces can go offline at any time. Its tools then appear under Tools → Tool access for per-profile selection. Removing a Space removes its tools from every profile. Active-profile changes reconnect the conversation; other changes apply when selected.
 
 The app accepts Hugging Face Spaces exposing the standard `/gradio_api/mcp/` endpoint, not arbitrary MCP URLs. Installation discovers the Space's tools and assigns namespaced local IDs, so do not guess or hard-code those IDs beforehand.
 
@@ -389,7 +390,7 @@ reachy-mini-conversation-app tool-spaces list
 reachy-mini-conversation-app tool-spaces remove owner/space-name
 ```
 
-Bundled Pollen Spaces use static specs and are enabled by the default profile. Newly bundled Spaces are added to existing installations without restoring older tools the user removed. Custom Spaces are validated through the Hugging Face Hub; HF tokens are sent only to private Spaces. Tool metadata is cached in:
+Bundled Pollen Spaces use static specs and are enabled by the default profile. Newly bundled Spaces are added to existing installations without restoring older tools the user removed. Custom Spaces are validated through the Hugging Face Hub. Every Space call carries the HF token when one is set, so ZeroGPU Spaces use that account's GPU quota rather than the small anonymous one. When a call fails, the tool reports why: no access, Space paused, starting or broken, GPU quota used up, or a job longer than allowed. Tool metadata is cached in:
 
 - `installed_tool_spaces.json` in the managed app instance directory
 - `external_content/installed_tool_spaces.json` in terminal mode

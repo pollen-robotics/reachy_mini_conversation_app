@@ -14,7 +14,9 @@ from reachy_mini_conversation_app.tool_spaces import (
     ToolSpaceAliasConflictError,
     ToolSpaceProfileUpdateError,
     remove_tool_space,
+    search_mcp_spaces,
     install_tool_space,
+    check_space_availability,
     read_installed_tool_spaces,
 )
 from reachy_mini_conversation_app.profile_store import canonical_profile_name
@@ -173,6 +175,37 @@ def register_tool_space_methods(
             "message": message,
         }
 
+    async def _tool_space_status(_params: dict[str, Any]) -> dict[str, object]:
+        # Separate from list, which stays instant and works offline; this asks the Hub once per Space.
+        try:
+            manifest = await asyncio.to_thread(read_installed_tool_spaces, instance_path)
+        except Exception as exc:
+            logger.exception("Failed to read installed tool Spaces")
+            raise_tool_settings_error("tool_spaces_unavailable", _error_detail(exc))
+        slugs = [space.slug for space in manifest.spaces]
+        statuses = await asyncio.gather(*(asyncio.to_thread(check_space_availability, slug) for slug in slugs))
+        return {"statuses": dict(zip(slugs, statuses, strict=True))}
+
+    async def _search_tool_spaces(params: dict[str, Any]) -> dict[str, object]:
+        query = params.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise_tool_settings_error("invalid_search_query", "Describe what the tool should do.")
+        try:
+            results = await asyncio.to_thread(search_mcp_spaces, query.strip())
+        except Exception as exc:
+            logger.warning("Tool Space search failed for %r: %s", query, exc)
+            raise_tool_settings_error("tool_space_search_failed", _error_detail(exc))
+        try:
+            manifest = await asyncio.to_thread(read_installed_tool_spaces, instance_path)
+            installed = {space.slug for space in manifest.spaces}
+        except (RuntimeError, ValueError) as exc:
+            # A broken manifest is reported by tool_spaces.list; search still works without the installed flags.
+            logger.warning("Could not read installed tool Spaces during search: %s", exc)
+            installed = set()
+        return {"results": [{**result, "installed": result["slug"] in installed} for result in results]}
+
     rpc.register("tool_spaces.list", _list_tool_spaces)
+    rpc.register("tool_spaces.status", _tool_space_status)
+    rpc.register("tool_spaces.search", _search_tool_spaces)
     rpc.register("tool_spaces.add", _add_tool_space)
     rpc.register("tool_spaces.remove", _remove_tool_space)

@@ -88,13 +88,11 @@ async def test_initialize_tools_loads_enabled_installed_remote_tools_and_dispatc
         alias: str,
         mcp_url: str,
         *,
-        private: bool,
         cached_tools: list[InstalledToolSpaceTool],
     ) -> AsyncMock:
         nonlocal captured_cached_tools
         assert alias == SEARCH_ALIAS
         assert mcp_url == SEARCH_MCP_URL
-        assert private is False
         captured_cached_tools = cached_tools
         return client
 
@@ -246,6 +244,7 @@ async def test_remote_tool_does_not_retry_timeout(
     client = AsyncMock()
     client.call_tool.side_effect = McpToolTimeoutError("slow tool")
     monkeypatch.setattr(tool_spaces_mod, "build_remote_client", lambda *a, **k: client)
+    monkeypatch.setattr(tool_spaces_mod, "explain_space_failure", lambda slug, detail: None)
     write_installed_tool_spaces(None, InstalledToolSpacesManifest(spaces=[_installed_search_space()]))
 
     core_tools_mod = _reload_core_tools()
@@ -257,8 +256,79 @@ async def test_remote_tool_does_not_retry_timeout(
         core_tools_mod.ToolDependencies(reachy_mini=object(), movement_manager=object()),
     )
 
-    assert "error" in result
+    assert result["error"] == "McpToolTimeoutError: slow tool"
     assert client.call_tool.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_remote_tool_transport_failure_reports_the_space_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Space that cannot be reached reports why (here: paused), with the raw error kept as detail."""
+    monkeypatch.chdir(tmp_path)
+    _mcp_profile(tmp_path, monkeypatch)
+
+    client = AsyncMock()
+    client.call_tool.side_effect = McpToolInvocationError("Unexpected content type: text/html")
+    explanations: list[tuple[str, str]] = []
+
+    def _explain(slug: str, detail: str) -> dict[str, str]:
+        explanations.append((slug, detail))
+        return {"error": "The Space is paused by its owner.", "reason": "space_paused", "detail": detail}
+
+    monkeypatch.setattr(tool_spaces_mod, "build_remote_client", lambda *a, **k: client)
+    monkeypatch.setattr(tool_spaces_mod, "explain_space_failure", _explain)
+    write_installed_tool_spaces(None, InstalledToolSpacesManifest(spaces=[_installed_search_space()]))
+
+    core_tools_mod = _reload_core_tools()
+    monkeypatch.setattr(core_tools_mod, "_REMOTE_TOOL_RETRY_DELAY_S", 0.0)
+    core_tools_mod.initialize_tools()
+
+    result = await core_tools_mod.dispatch_tool_call(
+        SEARCH_TOOL_ID,
+        json.dumps({"query": "hello"}),
+        core_tools_mod.ToolDependencies(reachy_mini=object(), movement_manager=object()),
+    )
+
+    assert (result["reason"], result["tool_space_slug"]) == ("space_paused", SEARCH_SPACE_SLUG)
+    assert explanations == [(SEARCH_SPACE_SLUG, "McpToolInvocationError: Unexpected content type: text/html")]
+
+
+@pytest.mark.asyncio
+async def test_remote_tool_error_result_is_explained_when_known(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Space-side error with a known cause becomes a tool error; other Space errors pass through."""
+    monkeypatch.chdir(tmp_path)
+    _mcp_profile(tmp_path, monkeypatch)
+
+    quota_text = "You have exceeded your free ZeroGPU quota (60s requested vs. 12s left)."
+    client = AsyncMock()
+    client.call_tool.side_effect = [
+        {"status": "error", "namespaced_tool_name": SEARCH_CLIENT_TOOL_ID, "text": quota_text},
+        {"status": "error", "namespaced_tool_name": SEARCH_CLIENT_TOOL_ID, "text": "query too long"},
+    ]
+    monkeypatch.setattr(tool_spaces_mod, "build_remote_client", lambda *a, **k: client)
+    monkeypatch.setattr(
+        tool_spaces_mod,
+        "explain_space_failure",
+        lambda slug, detail: (
+            {"error": "quota", "reason": "gpu_quota", "detail": detail} if "quota" in detail else None
+        ),
+    )
+    write_installed_tool_spaces(None, InstalledToolSpacesManifest(spaces=[_installed_search_space()]))
+
+    core_tools_mod = _reload_core_tools()
+    core_tools_mod.initialize_tools()
+    deps = core_tools_mod.ToolDependencies(reachy_mini=object(), movement_manager=object())
+
+    explained = await core_tools_mod.dispatch_tool_call(SEARCH_TOOL_ID, json.dumps({"query": "a"}), deps)
+    passed_through = await core_tools_mod.dispatch_tool_call(SEARCH_TOOL_ID, json.dumps({"query": "b"}), deps)
+
+    assert (explained["reason"], explained["detail"]) == ("gpu_quota", quota_text)
+    assert (passed_through["status"], passed_through["text"]) == ("error", "query too long")
 
 
 def test_initialize_tools_survives_a_corrupt_installed_spaces_manifest(

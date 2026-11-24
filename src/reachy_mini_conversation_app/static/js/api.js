@@ -159,6 +159,10 @@ export const addToolSpace = (slug) =>
   rpcCall("tool_spaces.add", { slug }, { timeoutMs: TOOL_SPACE_TIMEOUT_MS });
 export const removeToolSpace = (slug) =>
   rpcCall("tool_spaces.remove", { slug }, { timeoutMs: TOOL_SPACE_TIMEOUT_MS });
+export const getToolSpaceStatuses = () =>
+  rpcCall("tool_spaces.status", {}, { timeoutMs: TOOL_SPACE_TIMEOUT_MS });
+export const searchToolSpaces = (query) =>
+  rpcCall("tool_spaces.search", { query }, { timeoutMs: TOOL_SPACE_TIMEOUT_MS });
 
 export const getProfileTools = (profile) =>
   rpcCall("profile_tools.get", profile ? { profile } : {});

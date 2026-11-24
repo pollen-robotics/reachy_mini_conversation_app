@@ -6,17 +6,20 @@ import json
 import asyncio
 import logging
 import argparse
+import itertools
 import threading
 from typing import Any
 from pathlib import Path
 from collections import Counter
 from dataclasses import field, asdict, dataclass
 from urllib.parse import urlsplit
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
+import httpx
 from huggingface_hub import HfApi, SpaceInfo, get_token
 from huggingface_hub.errors import RepositoryNotFoundError
 
+from reachy_mini.apps.sources.hf_auth import get_hf_token
 from reachy_mini_conversation_app.config import USER_PERSONALITIES_DIRNAME, config
 from reachy_mini_conversation_app.mcp_client import (
     McpClientError,
@@ -175,6 +178,9 @@ _V2_BUNDLED_SPACE_SLUGS = (
     "pollen-robotics/reachy-mini-weather-tool",
 )
 _SLUG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
+# A Space page link, as copied from the browser: https://huggingface.co/spaces/owner/name[/...].
+_SPACE_URL_PATTERN = re.compile(r"^https?://(?:www\.)?(?:huggingface\.co|hf\.co)/spaces/([^/?#]+/[^/?#]+)")
+_SEARCH_RESULT_LIMIT = 8
 
 
 @dataclass(frozen=True)
@@ -502,8 +508,10 @@ def _restore_profile_toolsets(
 
 
 def validate_space_slug(slug: str) -> str:
-    """Validate a public HF Space slug."""
+    """Validate an HF Space slug, also accepting the Space's page URL."""
     candidate = slug.strip()
+    if url_match := _SPACE_URL_PATTERN.match(candidate):
+        candidate = url_match.group(1)
     if _SLUG_PATTERN.fullmatch(candidate) is None:
         raise ValueError(
             f"Invalid Space slug '{slug}'. Expected the form 'owner/space-name' with alnum, '.', '_' or '-'."
@@ -612,22 +620,34 @@ def _validate_space_info(slug: str, space_info: SpaceInfo) -> None:
         raise RuntimeError(f"Space '{slug}' is not a Gradio Space and cannot expose the standard MCP endpoint.")
 
 
+def current_hf_token() -> str | None:
+    """Return the token for Hub and Space calls: HF_TOKEN, then the robot's daemon sign-in, then `hf auth login`."""
+    # On a robot the daemon keeps its sign-in in its own store, which get_token() does not read.
+    return config.HF_TOKEN or get_hf_token() or get_token()
+
+
+class _SignedInMcpClient(RemoteMcpToolClient):
+    """MCP client that signs each connection in with the current token."""
+
+    async def _headers(self) -> Mapping[str, str]:
+        # Read per connection: the client is cached for the app's lifetime and the daemon refreshes its token.
+        token = await asyncio.to_thread(current_hf_token)
+        return {**self.server.headers, "Authorization": f"Bearer {token}"} if token else self.server.headers
+
+
 def build_remote_client(
     alias: str,
     mcp_url: str,
     *,
-    private: bool,
     cached_tools: Sequence[InstalledToolSpaceTool] = (),
 ) -> RemoteMcpToolClient:
-    """Build an MCP client for an installed Space, sending the HF token only to private Spaces."""
+    """Build an MCP client for an installed Space, signed in as the current Hugging Face account."""
     validated_mcp_url = validate_space_mcp_url(mcp_url)
-    token = (config.HF_TOKEN or get_token()) if private else None
-    headers = {"Authorization": f"Bearer {token}"} if private and token else {}
-    return RemoteMcpToolClient(
+    # Public Spaces get the token too: ZeroGPU charges the caller's quota, and anonymous callers get the least.
+    return _SignedInMcpClient(
         RemoteMcpServerConfig(
             alias=alias,
             url=validated_mcp_url,
-            headers=headers,
             request_timeout_s=10.0,
             tool_timeout_s=30.0,
         ),
@@ -645,11 +665,94 @@ def build_remote_client(
     )
 
 
+# Messages raised by ZeroGPU's `spaces` package (0.51), surfaced verbatim by the Space.
+_ZEROGPU_FAILURES = (
+    ("exceeded your", "gpu_quota", "The Hugging Face account has used up its GPU time for now."),
+    ("reached its GPU limit", "gpu_quota", "No Hugging Face account was used, and the anonymous GPU time is used up."),
+    ("ZeroGPU credits allocated", "gpu_quota", "Too many GPU jobs are already running on this account."),
+    ("larger than the maximum allowed", "gpu_request_too_long", "This request needs more GPU time than allowed."),
+    ("No GPU was available", "gpu_busy", "No GPU was free in time; try again later."),
+)
+_SPACE_STAGE_FAILURES = {
+    "PAUSED": ("space_paused", "The Space is paused by its owner."),
+    "STOPPED": ("space_paused", "The Space is stopped."),
+    "SLEEPING": ("space_asleep", "The Space is asleep; the first call wakes it, which takes about a minute."),
+    "BUILDING": ("space_starting", "The Space is starting; try again in a minute."),
+    "APP_STARTING": ("space_starting", "The Space is starting; try again in a minute."),
+    "RUNNING_BUILDING": ("space_starting", "The Space is restarting; try again in a minute."),
+    "RUNNING_APP_STARTING": ("space_starting", "The Space is restarting; try again in a minute."),
+    "BUILD_ERROR": ("space_broken", "The Space is broken right now (build error)."),
+    "RUNTIME_ERROR": ("space_broken", "The Space is broken right now (runtime error)."),
+    "CONFIG_ERROR": ("space_broken", "The Space is broken right now (configuration error)."),
+    "NO_APP_FILE": ("space_broken", "The Space has no app to run."),
+    "DELETING": ("space_broken", "The Space is being deleted."),
+}
+
+
+def explain_space_failure(slug: str, detail: str) -> dict[str, str] | None:
+    """Name why a Space tool call failed, from the Space's own message or its Hub status; blocking.
+
+    Returns ``{"error", "reason", "detail"}``, or None when nothing more specific than ``detail`` is known.
+    """
+    for marker, reason, message in _ZEROGPU_FAILURES:
+        if marker in detail:
+            return {"error": message, "reason": reason, "detail": detail}
+
+    # Remote failures look alike on the wire (HTML page, 404, "error response"); the Hub says what is wrong.
+    availability = check_space_availability(slug)
+    if availability["state"] in ("online", "unknown"):
+        return None
+    return {"error": availability["message"], "reason": availability["state"], "detail": detail}
+
+
+def check_space_availability(slug: str) -> dict[str, str]:
+    """Report whether a Space can serve tool calls, as ``{"state", "message"}``; blocking (one Hub call).
+
+    States: online, no_access, space_asleep, space_starting, space_paused, space_broken, or unknown when the
+    Hub is unreachable.
+    """
+    token = current_hf_token()
+    try:
+        space_info = HfApi().space_info(slug, timeout=10.0, token=token or False)
+    except RepositoryNotFoundError:
+        message = (
+            "The signed-in Hugging Face account cannot access this Space: it is private or was deleted."
+            if token
+            else "This Space is private or was deleted; sign in with a Hugging Face account that can access it."
+        )
+        return {"state": "no_access", "message": message}
+    except httpx.HTTPError as exc:
+        logger.warning("Could not check the status of Space '%s': %s", slug, exc)
+        return {"state": "unknown", "message": "Could not reach Hugging Face to check this Space."}
+
+    stage = space_info.runtime.stage if space_info.runtime else None
+    if stage in _SPACE_STAGE_FAILURES:
+        state, message = _SPACE_STAGE_FAILURES[stage]
+        return {"state": state, "message": message}
+    return {"state": "online", "message": "The Space is running."}
+
+
+def search_mcp_spaces(query: str) -> list[dict[str, object]]:
+    """Find running Gradio Spaces that expose MCP tools, best match first; blocking."""
+    token = current_hf_token()
+    results = HfApi().search_spaces(query, sdk="gradio", filter="mcp-server", token=token or False)
+    return [
+        {
+            "slug": space.id,
+            "title": space.title or space.id,
+            "emoji": space.emoji,
+            "description": space.ai_short_description,
+            "likes": space.likes,
+        }
+        for space in itertools.islice(results, _SEARCH_RESULT_LIMIT)
+    ]
+
+
 async def resolve_tool_space(slug: str) -> InstalledToolSpace:
     """Validate and discover tools from one HF Space, authenticating private Spaces with the HF token."""
     validated_slug = validate_space_slug(slug)
     alias = normalize_space_alias(validated_slug)
-    token = config.HF_TOKEN or get_token()
+    token = current_hf_token()
     try:
         space_info = HfApi().space_info(validated_slug, timeout=10.0, token=token or False)
     except RepositoryNotFoundError as exc:
@@ -664,9 +767,8 @@ async def resolve_tool_space(slug: str) -> InstalledToolSpace:
     _validate_space_info(validated_slug, space_info)
 
     mcp_url = _build_space_mcp_url(space_info, validated_slug)
-    private = bool(space_info.private)
     try:
-        client = build_remote_client(alias, mcp_url, private=private)
+        client = build_remote_client(alias, mcp_url)
     except ValueError as exc:
         raise RuntimeError(f"Space '{validated_slug}' returned an unsupported MCP endpoint: {exc}") from exc
     try:
@@ -678,7 +780,7 @@ async def resolve_tool_space(slug: str) -> InstalledToolSpace:
         slug=validated_slug,
         alias=alias,
         mcp_url=mcp_url,
-        private=private,
+        private=bool(space_info.private),
         tools=_build_installed_tool_space_tools(slug=validated_slug, alias=alias, remote_specs=remote_specs),
     )
 

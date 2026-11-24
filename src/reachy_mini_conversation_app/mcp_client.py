@@ -363,6 +363,10 @@ class RemoteMcpToolClient:
             if cursor is None:
                 return tools
 
+    async def _headers(self) -> Mapping[str, str]:
+        """Return the headers for one connection; override for credentials that change over time."""
+        return self.server.headers
+
     @asynccontextmanager
     async def _connected_client(self) -> AsyncIterator["Client"]:
         client_cls, streamable_http_client = _load_mcp_sdk()
@@ -370,7 +374,7 @@ class RemoteMcpToolClient:
         client_timeout = max(self.server.request_timeout_s, self.server.tool_timeout_s)
 
         async with httpx2.AsyncClient(
-            headers=self.server.headers,
+            headers=await self._headers(),
             follow_redirects=False,
             timeout=client_timeout,
         ) as http_client:

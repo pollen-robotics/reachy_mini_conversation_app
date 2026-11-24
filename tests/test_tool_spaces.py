@@ -18,7 +18,11 @@ from reachy_mini_conversation_app.tool_spaces import (
     ToolSpaceProfileUpdateError,
     remove_tool_space,
     install_tool_space,
+    build_remote_client,
+    validate_space_slug,
+    explain_space_failure,
     resolve_tool_space_sync,
+    check_space_availability,
     handle_tool_spaces_command,
     read_installed_tool_spaces,
     migrate_bundled_tool_spaces,
@@ -170,17 +174,18 @@ def test_tool_spaces_add_installs_private_space_with_token(
     [
         (True, None, "hf_test_token", "Bearer hf_test_token"),
         (True, "hf_env_token", None, "Bearer hf_env_token"),
-        (False, None, "hf_test_token", None),
+        (False, None, "hf_test_token", "Bearer hf_test_token"),
+        (False, None, None, None),
     ],
 )
-def test_resolve_tool_space_sends_auth_only_to_private_spaces(
+def test_resolve_tool_space_signs_in_to_every_space(
     monkeypatch: pytest.MonkeyPatch,
     private: bool,
     configured_token: str | None,
     login_token: str | None,
     expected_authorization: str | None,
 ) -> None:
-    """Private Spaces use the configured/login token while public Spaces receive no credentials."""
+    """Every Space gets the configured/login token, so ZeroGPU charges the user's quota; no token sends none."""
     monkeypatch.setattr(
         "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
         lambda self, slug, **kwargs: _mock_private_space_info(slug) if private else _mock_public_space_info(slug),
@@ -191,7 +196,7 @@ def test_resolve_tool_space_sends_auth_only_to_private_spaces(
 
     async def _capture_authorization(self: RemoteMcpToolClient) -> list[RemoteToolSpec]:
         nonlocal authorization
-        authorization = self.server.headers.get("Authorization")
+        authorization = (await self._headers()).get("Authorization")
         return await _mock_list_tool_specs(self)
 
     monkeypatch.setattr(
@@ -202,6 +207,18 @@ def test_resolve_tool_space_sends_auth_only_to_private_spaces(
     resolve_tool_space_sync(PRIVATE_SPACE_SLUG if private else SEARCH_SPACE_SLUG)
 
     assert authorization == expected_authorization
+
+
+@pytest.mark.asyncio
+async def test_space_client_sends_the_current_token_on_each_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A cached client follows the daemon's token refresh instead of keeping the one it was built with."""
+    tokens = iter(["hf_before_refresh", "hf_after_refresh"])
+    monkeypatch.setattr(config_mod.config, "HF_TOKEN", None)
+    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.get_hf_token", lambda: next(tokens))
+    client = build_remote_client("example_search_tool", "https://example-search-tool.hf.space/gradio_api/mcp/")
+
+    assert (await client._headers())["Authorization"] == "Bearer hf_before_refresh"
+    assert (await client._headers())["Authorization"] == "Bearer hf_after_refresh"
 
 
 def test_tool_spaces_add_private_space_without_token_hints_at_auth(
@@ -671,3 +688,89 @@ def test_install_tool_space_refreshes_cached_metadata(
     matching_spaces = [space for space in refreshed_result.manifest.spaces if space.slug == SEARCH_SPACE_SLUG]
     assert len(matching_spaces) == 1
     assert matching_spaces[0].tools[0].description == "Refreshed description"
+
+
+def _raise_not_found(self: object, slug: str, **kwargs: object) -> SimpleNamespace:
+    raise RepositoryNotFoundError(
+        "404 Client Error", response=httpx.Response(404, request=httpx.Request("GET", "https://hf.co"))
+    )
+
+
+def test_explain_space_failure_names_zerogpu_quota_without_asking_the_hub(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A ZeroGPU quota message is recognised from the Space's own text."""
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info", MagicMock(side_effect=AssertionError)
+    )
+    detail = "You have exceeded your free ZeroGPU quota (60s requested vs. 12s left). Try again in 3:10:00."
+
+    explained = explain_space_failure("someone/song", detail)
+
+    assert explained is not None
+    assert (explained["reason"], explained["detail"]) == ("gpu_quota", detail)
+
+
+@pytest.mark.parametrize(
+    ("stage", "reason"),
+    [("PAUSED", "space_paused"), ("SLEEPING", "space_asleep"), ("RUNTIME_ERROR", "space_broken")],
+)
+def test_explain_space_failure_reads_the_space_stage(monkeypatch: pytest.MonkeyPatch, stage: str, reason: str) -> None:
+    """An opaque transport failure is explained by the Space's Hub status."""
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        lambda self, slug, **kwargs: SimpleNamespace(runtime=SimpleNamespace(stage=stage)),
+    )
+
+    explained = explain_space_failure("someone/song", "MCPError: Unexpected content type: text/html")
+
+    assert explained is not None
+    assert explained["reason"] == reason
+
+
+def test_explain_space_failure_reports_no_access_for_the_signed_in_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Hub hides private Spaces behind a 404, which means no access for this account."""
+    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.HfApi.space_info", _raise_not_found)
+    monkeypatch.setattr(config_mod.config, "HF_TOKEN", "hf_user")
+
+    explained = explain_space_failure("someone/private", "MCPError: Not Found")
+
+    assert explained is not None
+    assert explained["reason"] == "no_access"
+    assert "signed-in" in explained["error"]
+
+
+def test_check_space_availability_reports_online_and_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A running Space is online; an unreachable Hub is unknown rather than an error."""
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        lambda self, slug, **kwargs: SimpleNamespace(runtime=SimpleNamespace(stage="RUNNING")),
+    )
+    assert check_space_availability("someone/song")["state"] == "online"
+
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        MagicMock(side_effect=httpx.ConnectError("offline")),
+    )
+    assert check_space_availability("someone/song")["state"] == "unknown"
+
+
+def test_validate_space_slug_accepts_hub_links_only() -> None:
+    """A Space page link is reduced to its slug; links to other sites stay invalid."""
+    assert validate_space_slug("https://huggingface.co/spaces/owner/my-space/tree/main") == "owner/my-space"
+    assert validate_space_slug("https://hf.co/spaces/owner/my-space") == "owner/my-space"
+    with pytest.raises(ValueError):
+        validate_space_slug("https://example.com/spaces/owner/my-space")
+
+
+def test_explain_space_failure_keeps_unexplained_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A running Space, or a Hub that cannot be reached, leaves the original error alone."""
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        lambda self, slug, **kwargs: SimpleNamespace(runtime=SimpleNamespace(stage="RUNNING")),
+    )
+    assert explain_space_failure("someone/song", "bad input") is None
+
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.HfApi.space_info",
+        MagicMock(side_effect=httpx.ConnectError("offline")),
+    )
+    assert explain_space_failure("someone/song", "bad input") is None
