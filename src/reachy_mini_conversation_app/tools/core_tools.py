@@ -48,6 +48,8 @@ class ToolDependencies:
     camera_enabled: bool = False
     motion_duration_s: float = 1.0
     go_to_sleep: Callable[[], dict[str, Any]] | None = None
+    # True while the robot speaks or the user talks; set by the realtime handler.
+    conversation_busy: Callable[[], bool] | None = None
 
 
 class ToolSpec(TypedDict):

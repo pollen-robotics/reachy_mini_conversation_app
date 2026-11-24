@@ -227,6 +227,17 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self._audio_response_id: str | None = None
         self._discarded_response_ids: deque[str] = deque(maxlen=32)
         self._playback_interrupted = False
+        # Tools playing their own audio wait on this; a rebuilt handler takes over the shared deps.
+        deps.conversation_busy = self.conversation_busy
+
+    def conversation_busy(self) -> bool:
+        """Whether the robot is generating or still playing speech, or the user is talking."""
+        robot_speaking = (
+            self._active_response_id is not None
+            or self.playback_pending_frames > 0
+            or self.playback_until > time.monotonic()
+        )
+        return robot_speaking or self._local_speech or self._server_speech
 
     def _set_listening(self, *, local: bool | None = None, server: bool | None = None) -> None:
         if local is not None:

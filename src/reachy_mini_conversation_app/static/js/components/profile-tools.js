@@ -317,7 +317,24 @@ function toolChoice(tool, checked) {
     h(
       "span",
       { class: "settings-tool-choice-copy" },
-      h("strong", { class: "settings-tool-choice-name" }, prettifyToolName(tool.id)),
+      h(
+        "strong",
+        { class: "settings-tool-choice-name" },
+        prettifyToolName(tool.id),
+        // Built-in tools backed by a Hugging Face Space can fail when that Space is down.
+        tool.space
+          ? h(
+              "span",
+              {
+                class: "settings-tool-choice-space",
+                role: "img",
+                title: `Calls the Hugging Face Space ${tool.space} in the background`,
+                "aria-label": `Calls the Hugging Face Space ${tool.space}`,
+              },
+              "🤗"
+            )
+          : null
+      ),
       tool.kind === "unavailable" ? h("code", { class: "settings-tool-choice-id" }, tool.id) : null,
       tool.description ? h("span", { class: "settings-tool-choice-description" }, tool.description) : null
     )

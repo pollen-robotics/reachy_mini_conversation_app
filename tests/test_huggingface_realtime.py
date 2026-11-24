@@ -987,6 +987,19 @@ async def test_run_session_ignores_invalid_tool_call(monkeypatch: Any) -> None:
     assert not any("Used tool" in msg["content"] for msg in _messages(_drain(handler)))
 
 
+def test_conversation_busy_covers_queued_speech_and_the_user_talking() -> None:
+    """Tools see the robot as busy until its speech has played out, and while the user talks."""
+    handler = _plain_handler()
+
+    assert handler.deps.conversation_busy == handler.conversation_busy
+    assert handler.conversation_busy() is False
+    handler.playback_until = time.monotonic() + 1.0
+    assert handler.conversation_busy() is True
+    handler.playback_until = 0.0
+    handler._server_speech = True
+    assert handler.conversation_busy() is True
+
+
 def test_sanitize_tool_result_strips_camera_image() -> None:
     """Camera results drop the raw image bytes and flag that an image was attached."""
     sanitized = HuggingFaceRealtimeHandler._sanitize_tool_result_for_model("camera", {"b64_im": "x", "seen": "cat"})
