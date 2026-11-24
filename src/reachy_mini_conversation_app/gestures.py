@@ -16,7 +16,7 @@ from reachy_mini_conversation_app.dance_emotion_moves import EmotionQueueMove
 
 logger = logging.getLogger(__name__)
 # MiniLM fine-tuned to pick a gesture, with one output layer for what the robot says and one for what it hears.
-_MODEL_REPO = "HuggingFaceM4/reachy-gesture-student-minilm-e15-t4-full-q8b"
+_MODEL_REPO = "HuggingFaceM4/reachy-gestures"
 _MODEL_REVISION = "027bfbeb49656ecb623f89d329c32c190e712c68"
 # The fine-tuned model keeps the base model's tokenizer, published there as a SentencePiece file.
 _TOKENIZER_REPO = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
