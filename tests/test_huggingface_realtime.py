@@ -1568,3 +1568,32 @@ async def test_gesture_model_loads_after_the_first_reply_has_played(monkeypatch:
 
     loaded.assert_called_once_with()
     assert handler._gestures is loaded.return_value
+
+
+@pytest.mark.asyncio
+async def test_unavailable_gesture_model_leaves_the_conversation_without_gestures(
+    monkeypatch: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A model that cannot be downloaded or loaded is reported once; the conversation carries on with no gestures."""
+    handler = _session_handler(
+        monkeypatch,
+        (
+            _FakeEvent("response.created"),
+            _FakeEvent("response.done", response=SimpleNamespace(id="response-1", metadata=None)),
+            _FakeEvent("response.created"),
+            _FakeEvent("response.output_audio_transcript.delta", delta="We did it!"),
+        ),
+    )
+    handler._clear_queue = AsyncMock()
+    monkeypatch.setattr(hf_mod.config, "GESTURES_ENABLED", True)
+    monkeypatch.setattr(hf_mod, "_GESTURE_LOAD_MARGIN_S", 0.0)
+    monkeypatch.setattr(hf_mod, "GestureLibrary", MagicMock(side_effect=OSError("offline and not cached")))
+    caplog.set_level(logging.WARNING, logger=hf_mod.__name__)
+
+    await handler._run_realtime_session()
+    await asyncio.wait_for(handler._gestures_loading, 1.0)
+    await _settle_gestures(handler)
+
+    assert "Gestures unavailable: offline and not cached" in caplog.text
+    assert handler._gestures is None
+    handler.deps.movement_manager.play_gesture.assert_not_called()
