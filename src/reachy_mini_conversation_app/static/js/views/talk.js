@@ -4,7 +4,7 @@
  * Robot stays live, tapping the orb only mutes or unmutes the user's mic.
  */
 
-import { applyPersonality, getMicState, listPersonalities, setMicMuted, subscribe } from "../api.js";
+import { applyPersonality, getMicState, listPersonalities, setMicMuted, subscribe, untilReady } from "../api.js";
 import { createConversationPanel } from "../components/conversation-panel.js";
 import { createLanguagePicker } from "../components/language-picker.js";
 import { ORB_STATES } from "../constants.js";
@@ -166,7 +166,7 @@ export async function mountTalkView({ outlet, signal }) {
   async function refreshPersonalityState() {
     // The language can be saved per personality, so it follows the active one.
     void languagePicker?.refresh();
-    const personalityState = await fetchPersonalityState();
+    const personalityState = await fetchPersonalityState(signal);
     if (signal.aborted || personalityState == null) return;
     activePersonality = personalityState.current;
     setPersonality(personalityState.current);
@@ -205,9 +205,9 @@ export async function mountTalkView({ outlet, signal }) {
   }
 }
 
-async function fetchPersonalityState() {
+async function fetchPersonalityState(signal) {
   try {
-    const data = await listPersonalities();
+    const data = await untilReady(listPersonalities, signal);
     const current = data?.current;
     if (!current) return null;
     return {
