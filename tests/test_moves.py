@@ -9,6 +9,10 @@ import pytest
 from reachy_mini.utils import create_head_pose
 from reachy_mini.utils.interpolation import compose_world_offset
 from reachy_mini_conversation_app.moves import (
+    REST_ANTENNAS,
+    SETTLE_MAX_SECONDS,
+    SETTLE_MIN_SECONDS,
+    SettleMove,
     BreathingMove,
     MovementManager,
     LoopFrequencyStats,
@@ -230,3 +234,72 @@ def test_gesture_yields_to_other_moves_and_cancels_alone() -> None:
     assert len(manager.move_queue) == 0
     manager._handle_command("cancel_gesture", None, now)
     assert manager.state.current_move is dance
+
+
+def _tilted_pose(pitch_degrees: float, antennas: tuple[float, float] = REST_ANTENNAS) -> tuple:
+    return (create_head_pose(0, 0, 0, 0, pitch_degrees, 0, degrees=True), antennas, 0.0)
+
+
+def test_settle_glides_to_rest_gently_in_a_time_that_grows_with_distance() -> None:
+    """The glide starts at the held pose, ends at rest with no jolt, and takes longer the further it has to go."""
+    small, large = SettleMove(_tilted_pose(12.0)), SettleMove(_tilted_pose(24.0, (2.4, -2.4)))
+
+    assert SETTLE_MIN_SECONDS <= small.duration < large.duration <= SETTLE_MAX_SECONDS
+    head, antennas, body_yaw = large.evaluate(0.0)
+    np.testing.assert_allclose(head, _tilted_pose(24.0)[0], atol=1e-9)
+    np.testing.assert_allclose(antennas, (2.4, -2.4))
+    head, antennas, body_yaw = large.evaluate(large.duration)
+    np.testing.assert_allclose(head, np.eye(4), atol=1e-9)
+    np.testing.assert_allclose(antennas, REST_ANTENNAS)
+    assert body_yaw == 0.0
+    # Minimum jerk: nearly still just after starting and just before arriving.
+    early = large.evaluate(0.02 * large.duration)[1]
+    assert abs(early[0] - 2.4) < 0.01 * abs(2.4 - REST_ANTENNAS[0])
+    assert SettleMove(_tilted_pose(0.0)).duration == 0.0
+
+
+def test_listening_settles_a_held_pose_back_to_rest() -> None:
+    """A gesture cut off by the user speaking glides back to rest, antennas included, instead of freezing mid-move."""
+    manager = MovementManager(MagicMock())
+    now = manager._now()
+    manager._last_commanded_pose = clone_full_body_pose(_tilted_pose(20.0, (1.5, -1.5)))
+    manager._handle_command("set_listening", True, now)
+
+    manager._update_primary_motion(now)
+    settle = manager.state.current_move
+    assert isinstance(settle, SettleMove)
+
+    # Halfway: the head is between the held tilt and level, and the antennas follow the glide despite listening.
+    head, antennas, _ = manager._get_primary_pose(now + settle.duration / 2)
+    assert not np.allclose(head, np.eye(4), atol=1e-3)
+    assert not np.allclose(head, _tilted_pose(20.0)[0], atol=1e-3)
+    commanded = manager._calculate_blended_antennas(antennas)
+    assert commanded == pytest.approx(tuple(antennas))
+    assert REST_ANTENNAS[0] < commanded[0] < 1.5
+
+    # The last tick of the glide reaches rest; after it, nothing glides again and the antennas stay frozen there.
+    head, antennas, body_yaw = manager._get_primary_pose(now + settle.duration)
+    manager._last_commanded_pose = (head, manager._calculate_blended_antennas(antennas), body_yaw)
+    manager._update_primary_motion(now + settle.duration + 0.01)
+    assert manager.state.current_move is None
+    assert manager._calculate_blended_antennas((0.7, -0.7)) == pytest.approx(REST_ANTENNAS, abs=1e-6)
+
+
+def test_settle_waits_for_listening_and_gives_way_to_any_move() -> None:
+    """Nothing glides while the robot isn't listening, and a gesture or other move replaces a glide at once."""
+    manager = MovementManager(MagicMock())
+    now = manager._now()
+    manager._last_commanded_pose = clone_full_body_pose(_tilted_pose(20.0))
+    manager._update_primary_motion(now)
+    assert not isinstance(manager.state.current_move, SettleMove)
+
+    manager.state.current_move = None
+    manager.move_queue.clear()
+    manager._handle_command("set_listening", True, now)
+    manager._update_primary_motion(now)
+    assert isinstance(manager.state.current_move, SettleMove)
+
+    gesture = _FakeMove(create_head_pose(0, 0, 0, 0, 0, 0, degrees=True))
+    manager._handle_command("play_gesture", gesture, now)
+    manager._update_primary_motion(now + 0.1)
+    assert manager.state.current_move is gesture

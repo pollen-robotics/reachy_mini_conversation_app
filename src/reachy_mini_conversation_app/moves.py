@@ -19,6 +19,7 @@ Units and frames
 
 Safety
 - Listening freezes antennas, then blends them back on unfreeze.
+- While listening, a pose left behind by a cut-off move glides slowly back to rest (`SettleMove`).
 - Interpolations and blends are used to avoid jumps at all times.
 - `set_target` errors are rate-limited in logs.
 """
@@ -49,6 +50,16 @@ CONTROL_LOOP_FREQUENCY_HZ = 60.0  # Hz - Target frequency for the movement contr
 
 # Type definitions
 FullBodyPose = Tuple[NDArray[np.float32], Tuple[float, float], float]  # (head_pose_4x4, antennas, body_yaw)
+
+REST_ANTENNAS = (-0.1745, 0.1745)  # ~10° offset to reduce shaking
+# While the robot listens, a held pose returns to rest at these average speeds: slow, so the motors stay quiet
+# near the microphones. The minimum-jerk profile peaks at about twice the average.
+SETTLE_HEAD_DEG_PER_S = 8.0
+SETTLE_HEAD_MM_PER_S = 10.0
+SETTLE_ANTENNA_DEG_PER_S = 45.0
+SETTLE_BODY_DEG_PER_S = 10.0
+SETTLE_MIN_SECONDS = 1.0
+SETTLE_MAX_SECONDS = 4.0
 
 
 class BreathingMove(Move):  # type: ignore
@@ -120,6 +131,49 @@ class BreathingMove(Move):  # type: ignore
 
         # Return in official Move interface format: (head_pose, antennas_array, body_yaw)
         return (head_pose, antennas, 0.0)
+
+
+def _settle_seconds(pose: FullBodyPose) -> float:
+    """Return how long a slow glide from ``pose`` back to rest takes, or 0.0 when it is already there."""
+    head, antennas, body_yaw = pose
+    head_degrees = float(np.degrees(np.arccos(np.clip((np.trace(head[:3, :3]) - 1.0) / 2.0, -1.0, 1.0))))
+    head_mm = float(np.linalg.norm(head[:3, 3])) * 1000.0
+    antenna_degrees = float(np.degrees(np.max(np.abs(np.asarray(antennas) - np.asarray(REST_ANTENNAS)))))
+    body_degrees = abs(float(np.degrees(body_yaw)))
+    if head_degrees < 1.0 and head_mm < 1.0 and antenna_degrees < 2.0 and body_degrees < 1.0:
+        return 0.0
+    seconds = max(
+        head_degrees / SETTLE_HEAD_DEG_PER_S,
+        head_mm / SETTLE_HEAD_MM_PER_S,
+        antenna_degrees / SETTLE_ANTENNA_DEG_PER_S,
+        body_degrees / SETTLE_BODY_DEG_PER_S,
+    )
+    return float(np.clip(seconds, SETTLE_MIN_SECONDS, SETTLE_MAX_SECONDS))
+
+
+class SettleMove(Move):  # type: ignore
+    """Glide from a held pose back to rest, starting and stopping gently, while the robot listens."""
+
+    def __init__(self, start: FullBodyPose) -> None:
+        """Glide from ``start`` to the rest pose; the duration grows with the distance (see ``_settle_seconds``)."""
+        self._start_head = np.asarray(start[0], dtype=np.float64).copy()
+        self._start_antennas = np.asarray(start[1], dtype=np.float64)
+        self._start_body_yaw = float(start[2])
+        self._rest_head = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
+        self._duration = _settle_seconds(start)
+
+    @property
+    def duration(self) -> float:
+        """Length of the glide in seconds."""
+        return self._duration
+
+    def evaluate(self, t: float) -> tuple[NDArray[np.float64] | None, NDArray[np.float64] | None, float | None]:
+        """Evaluate the glide at time t."""
+        progress = min(1.0, max(0.0, t / self._duration)) if self._duration > 0 else 1.0
+        eased = progress**3 * (10.0 - 15.0 * progress + 6.0 * progress**2)  # minimum jerk: no jolt at either end
+        head = linear_pose_interpolation(self._start_head, self._rest_head, eased)
+        antennas = (1.0 - eased) * self._start_antennas + eased * np.asarray(REST_ANTENNAS)
+        return head, antennas, (1.0 - eased) * self._start_body_yaw
 
 
 def clone_full_body_pose(pose: FullBodyPose) -> FullBodyPose:
@@ -335,7 +389,7 @@ class MovementManager:
                 logger.warning("Ignored queue_move command with invalid payload: %s", payload)
         elif command == "play_gesture":
             if any(
-                move is not None and not isinstance(move, BreathingMove)
+                move is not None and not isinstance(move, (BreathingMove, SettleMove))
                 for move in (self.state.current_move, *self.move_queue)
             ):
                 return
@@ -427,9 +481,13 @@ class MovementManager:
 
     def _manage_move_queue(self, current_time: float) -> None:
         """Manage the primary move queue (sequential execution)."""
-        if self.state.current_move is None or (
-            self.state.move_start_time is not None
-            and current_time - self.state.move_start_time >= self.state.current_move.duration
+        if (
+            self.state.current_move is None
+            or (isinstance(self.state.current_move, SettleMove) and self.move_queue)
+            or (
+                self.state.move_start_time is not None
+                and current_time - self.state.move_start_time >= self.state.current_move.duration
+            )
         ):
             self.state.current_move = None
             self.state.move_start_time = None
@@ -523,10 +581,21 @@ class MovementManager:
 
         return primary_full_body_pose
 
+    def _manage_listening_settle(self, current_time: float) -> None:
+        """While listening with nothing playing, glide a pose left away from rest back to it, slowly."""
+        if not self._is_listening or self.state.current_move is not None or self.move_queue:
+            return
+        settle = SettleMove(self._last_commanded_pose)
+        if settle.duration > 0:
+            self.state.current_move = settle
+            self.state.move_start_time = current_time
+            logger.debug("Settling back to rest over %.1f s while listening", settle.duration)
+
     def _update_primary_motion(self, current_time: float) -> None:
         """Advance queue state and idle behaviours for this tick."""
         self._manage_move_queue(current_time)
         self._manage_breathing(current_time)
+        self._manage_listening_settle(current_time)
 
     def _calculate_blended_antennas(self, target_antennas: Tuple[float, float]) -> Tuple[float, float]:
         """Blend target antennas with listening freeze state and update blending."""
@@ -539,6 +608,8 @@ class MovementManager:
         self._last_listening_blend_time = now
 
         if listening:
+            if isinstance(self.state.current_move, SettleMove):
+                listening_antennas = self._listening_antennas = (float(target_antennas[0]), float(target_antennas[1]))
             antennas_cmd = listening_antennas
             new_blend = 0.0
         else:
