@@ -18,12 +18,36 @@ from reachy_mini_conversation_app.mcp_client import (
     build_namespaced_tool_name,
 )
 from reachy_mini_conversation_app.tool_spaces import current_hf_token, explain_space_failure
+from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 
 
 logger = logging.getLogger(__name__)
 
 AUDIO_DIRECTORY = Path(tempfile.gettempdir()) / "reachy_mini_audio"
 _ALIAS = "space"
+# Quiet this long first: shorter gaps are the pause between the user's turn and the robot's reply.
+QUIET_BEFORE_PLAYING_S = 1.5
+_MAX_WAIT_FOR_QUIET_S = 60.0
+_QUIET_POLL_S = 0.1
+
+
+async def wait_for_quiet(deps: ToolDependencies) -> None:
+    """Wait until neither the robot nor the user has spoken for a moment; play anyway after a minute."""
+    if deps.conversation_busy is None:
+        return
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _MAX_WAIT_FOR_QUIET_S
+    quiet_since: float | None = None
+    while loop.time() < deadline:
+        now = loop.time()
+        if deps.conversation_busy():
+            quiet_since = None
+        elif quiet_since is None:
+            quiet_since = now
+        elif now - quiet_since >= QUIET_BEFORE_PLAYING_S:
+            return
+        await asyncio.sleep(_QUIET_POLL_S)
+    logger.warning("The conversation stayed busy for %.0f s; playing anyway", _MAX_WAIT_FOR_QUIET_S)
 
 
 async def call_space_tool(
