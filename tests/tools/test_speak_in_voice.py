@@ -1,6 +1,7 @@
 import wave
 from typing import Any
 from pathlib import Path
+from collections import deque
 from unittest.mock import MagicMock
 
 import pytest
@@ -39,11 +40,21 @@ async def test_speak_in_voice_plays_the_line_and_returns_once_heard(
 
     monkeypatch.setattr(speak_in_voice, "call_space_tool", _fake_call)
     monkeypatch.setattr(speak_in_voice, "save_audio", _fake_save)
+    older = tmp_path / "older.wav"
+    older.write_bytes(b"RIFF")
+    monkeypatch.setattr(
+        speak_in_voice, "recent_lines", deque([speak_in_voice.VoiceLine("Hi.", "mouse", older, 1.0)], maxlen=1)
+    )
     deps = _deps()
 
     result = await speak_in_voice.SpeakInVoice()(
         deps, text="I find your lack of snacks disturbing.", voice="deep villain", language="EN"
     )
+    # The line that drops out of the replay list is deleted with it.
+    assert [(line.text, line.path) for line in speak_in_voice.recent_lines] == [
+        ("I find your lack of snacks disturbing.", clip)
+    ]
+    assert not older.exists()
 
     assert calls == [
         (
