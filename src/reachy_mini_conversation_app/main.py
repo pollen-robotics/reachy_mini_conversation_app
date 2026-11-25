@@ -266,6 +266,9 @@ def run(
                 return {"status": "already_requested"}
             go_to_sleep_requested.set()
 
+            # The model usually says goodbye in the same response that calls the tool.
+            stream_manager.finish_speaking()
+
             logger.info("Going to sleep before stopping conversation app.")
             # First, while the app can still reach clients: the phone can't tell an exit from silence.
             stream_manager.emit_phase("ended", "sleep")

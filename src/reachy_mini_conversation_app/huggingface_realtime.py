@@ -52,7 +52,11 @@ from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_tool_specs,
 )
-from reachy_mini_conversation_app.conversation_handler import VADStatus, ConversationHandler
+from reachy_mini_conversation_app.conversation_handler import (
+    FINISH_SPEAKING_TIMEOUT_S,
+    VADStatus,
+    ConversationHandler,
+)
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolCallRoutine,
     ToolNotification,
@@ -222,6 +226,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self._audio_response_id: str | None = None
         self._discarded_response_ids: deque[str] = deque(maxlen=32)
         self._playback_interrupted = False
+        # Set once the robot is going to sleep: nothing may cut its last words short.
+        self._finishing_speech = False
 
     def _set_listening(self, *, local: bool | None = None, server: bool | None = None) -> None:
         if local is not None:
@@ -283,6 +289,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
     async def _interrupt_playback(
         self, *, audio_response_id: str | None = None, cancel_response_id: str | None = None
     ) -> None:
+        if self._finishing_speech:
+            return
         if audio_response_id is not None and audio_response_id != self._audio_response_id:
             return
         if self._playback_interrupted:
@@ -340,6 +348,23 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             return True
         except asyncio.TimeoutError:
             return False
+
+    async def finish_speaking(self, timeout: float = FINISH_SPEAKING_TIMEOUT_S) -> None:
+        """Let the response in progress be generated and played to its end, deaf to interruptions.
+
+        The flag is never cleared: the only caller is the sleep sequence, which
+        stops the app next, and hearing the room again would let a new turn
+        start while the robot lies down.
+        """
+        self._finishing_speech = True
+        self._reset_listening()
+        deadline = time.monotonic() + timeout
+        try:
+            await asyncio.wait_for(self._response_done_event.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning("Response still being generated after %.0f s; not waiting any longer", timeout)
+            return
+        await super().finish_speaking(max(0.0, deadline - time.monotonic()))
 
     def _resolve_backend_voice(
         self,
@@ -1042,8 +1067,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                             delta_ms = (self._turn_first_audio_at - self._turn_user_done_at) * 1000
                             logger.info("Turn latency: first audio delta %.0f ms after user transcript", delta_ms)
                         self.playback_frame_epochs[id(decoded_pcm)] = self.playback_epoch
-                        if self.paced_playback:
-                            self.playback_pending_frames += 1
+                        self.playback_pending_frames += 1
                         await self.output_queue.put(
                             (
                                 self.SAMPLE_RATE,
@@ -1158,6 +1182,9 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         """
         sample_rate, audio_frame = frame
         if audio_frame.size == 0:
+            return
+        if self._finishing_speech:
+            # Neither server VAD nor local barge-in gets to hear anything.
             return
 
         # Reshape if needed

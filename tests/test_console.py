@@ -969,15 +969,21 @@ async def test_play_loop_pushes_mono_audio_as_float32() -> None:
     handler.playback_ready = asyncio.Event()
     handler.playback_ready.set()
     stream = LocalStream(handler, robot)
+    handler.paced_playback = False
+    handler.playback_pending_frames = 1
     handler.playback_frame_epochs = {}
-    handler.emit = AsyncMock(side_effect=_stop_after(stream, (24000, np.zeros(4, dtype=np.int16))))
+    handler.emit = AsyncMock(side_effect=_stop_after(stream, (24000, np.zeros(2400, dtype=np.int16))))
 
+    started = time.monotonic()
     await stream.play_loop()
 
     robot.media.push_audio_sample.assert_called_once()
     pushed = robot.media.push_audio_sample.call_args.args[0]
     assert pushed.ndim == 1
     assert pushed.dtype == np.float32
+    # Without pacing the SDK still needs the frame's duration to play it: a pending sleep waits on this.
+    assert handler.playback_pending_frames == 0
+    assert handler.playback_until >= started + 0.1
 
 
 @pytest.mark.asyncio
@@ -990,6 +996,8 @@ async def test_play_loop_downmixes_stereo_before_pushing() -> None:
     stream = LocalStream(handler, robot)
     stereo = np.zeros((4, 2), dtype=np.int16)
     handler.playback_frame_epochs = {}
+    handler.paced_playback = False
+    handler.playback_pending_frames = 1
     handler.emit = AsyncMock(side_effect=_stop_after(stream, (24000, stereo)))
 
     await stream.play_loop()
@@ -1005,6 +1013,7 @@ async def test_play_loop_skips_empty_audio() -> None:
     handler = MagicMock()
     stream = LocalStream(handler, robot)
     handler.playback_frame_epochs = {}
+    handler.playback_pending_frames = 1
     handler.emit = AsyncMock(side_effect=_stop_after(stream, (24000, np.array([], dtype=np.int16))))
 
     await stream.play_loop()
@@ -1587,3 +1596,30 @@ def test_invalid_speech_switch_saves_nothing(
     assert read_settings(tmp_path).local_vad_enabled is None
     assert read_settings(tmp_path).local_barge_in_enabled is None
     assert not stream._restart_requested.is_set()
+
+
+def test_finish_speaking_blocks_the_caller_until_the_handler_is_done() -> None:
+    """The sleep thread waits on the stream loop, where playback state lives."""
+    handler = MagicMock()
+    finished = threading.Event()
+
+    async def finish_speaking(timeout: float) -> None:
+        await asyncio.sleep(0.05)
+        finished.set()
+
+    handler.finish_speaking = finish_speaking
+    stream = LocalStream(handler, _audio_robot())
+    stream.finish_speaking()  # no loop yet: nothing can be playing
+    assert not finished.is_set()
+
+    loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+    try:
+        stream._asyncio_loop = loop  # type: ignore[assignment]
+        stream.finish_speaking()
+        assert finished.is_set()
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(timeout=2)
+        loop.close()
