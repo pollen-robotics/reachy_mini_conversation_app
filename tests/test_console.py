@@ -1589,6 +1589,43 @@ def test_gesture_switch_applies_live_and_survives_restart(
     assert config.GESTURES_ENABLED is enabled
 
 
+@pytest.mark.parametrize("level", ["when_necessary", "every_sentence"])
+def test_gestures_level_applies_live_and_survives_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, level: str
+) -> None:
+    """The expressiveness control saves the level and applies it without reconnecting."""
+    monkeypatch.setattr(config, "GESTURES_LEVEL", "when_sure")
+    app = FastAPI()
+    stream = LocalStream(MagicMock(), _rpc_robot(), settings_app=app, instance_path=tmp_path)
+    stream._init_settings_ui_if_needed()
+
+    assert _rpc_call(app, "gestures.set_level", {"level": level})["result"] == {"level": level}
+
+    assert config.GESTURES_LEVEL == level
+    assert not stream._restart_requested.is_set()
+    assert _rpc_call(app, "conversation.status")["result"]["gestures_level"] == level
+    config.GESTURES_LEVEL = "when_sure"
+    console_mod.load_settings_into_runtime(tmp_path)
+    assert config.GESTURES_LEVEL == level
+
+
+@pytest.mark.parametrize("invalid", ["always", 0.4, None])
+def test_invalid_gestures_level_saves_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid: object
+) -> None:
+    """Anything but one of the four levels is refused."""
+    monkeypatch.setattr(config, "GESTURES_LEVEL", "when_sure")
+    app = FastAPI()
+    stream = LocalStream(MagicMock(), _rpc_robot(), settings_app=app, instance_path=tmp_path)
+    stream._init_settings_ui_if_needed()
+
+    error = _rpc_call(app, "gestures.set_level", {"level": invalid})["error"]
+
+    assert error["data"]["reason"] == "invalid_params"
+    assert config.GESTURES_LEVEL == "when_sure"
+    assert read_settings(tmp_path).gestures_level is None
+
+
 @pytest.mark.parametrize("invalid", ["true", 1, None])
 def test_invalid_gesture_switch_saves_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid: object

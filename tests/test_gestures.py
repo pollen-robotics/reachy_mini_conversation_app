@@ -4,11 +4,14 @@ import logging
 from types import SimpleNamespace
 from typing import Any
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pytest
 
 import reachy_mini_conversation_app.gestures as gestures_mod
+import reachy_mini_conversation_app.dance_emotion_moves as dance_emotion_moves_mod
+from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.gestures import GestureLibrary
 
 
@@ -53,9 +56,9 @@ def recorded_move_names(monkeypatch: pytest.MonkeyPatch, model_files: None) -> l
     durations = {"success1": 2.5, "downcast1": 6.0, "welcoming2": 4.3}
     recorded_moves = SimpleNamespace(
         list_moves=lambda: move_names,
-        get=lambda name: SimpleNamespace(duration=durations[name], evaluate=lambda t: (t, None, None)),
+        get=lambda name: SimpleNamespace(duration=durations.get(name, 2.0), evaluate=lambda t: (t, None, None)),
     )
-    monkeypatch.setattr(gestures_mod, "RecordedMoves", lambda _dataset: recorded_moves)
+    monkeypatch.setattr(gestures_mod, "emotions_library", lambda: recorded_moves)
     return move_names
 
 
@@ -88,7 +91,9 @@ def test_match_logs_its_decision_and_duration(
 
     GestureLibrary().match("hello there", "say")
 
-    assert re.search(r"Gesture model: welcoming2 for say sentence \(p=\d\.\d\d, 4 tokens, \d+ ms\)", caplog.text)
+    assert re.search(
+        r"Gesture model: welcoming2 for say sentence \(p=\d\.\d\d, p\(none\)=\d\.\d\d, 4 tokens, \d+ ms\)", caplog.text
+    )
 
 
 def test_long_turns_are_read_from_their_end(recorded_move_names: list[str]) -> None:
@@ -110,10 +115,51 @@ def test_long_moves_are_cut_to_gesture_length_and_slow_to_a_stop(recorded_move_n
     assert gesture.evaluate(3.0)[0] == pytest.approx(2.75)
 
 
-def test_gestures_whose_move_is_unavailable_are_skipped(
-    recorded_move_names: list[str], caplog: pytest.LogCaptureFixture
+@pytest.fixture(autouse=True)
+def default_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Match at the shipped level unless a test sets its own."""
+    monkeypatch.setattr(config, "GESTURES_LEVEL", "when_sure")
+
+
+# "No gesture" leads with about 0.67 and welcoming2 follows with about 0.25.
+_LEANING_NEUTRAL = "hello hello weather weather weather " + " ".join(["um"] * 20)
+
+
+@pytest.mark.parametrize(
+    "level, expected",
+    [("every_sentence", "welcoming2"), ("when_unsure", "welcoming2"), ("when_sure", None), ("when_necessary", None)],
+)
+def test_livelier_levels_play_the_best_gesture_even_when_none_leads(
+    recorded_move_names: list[str], monkeypatch: pytest.MonkeyPatch, level: str, expected: str | None
 ) -> None:
-    """A move missing from the emotions library is reported and never returned."""
+    """Each level is how sure the model must be of the gesture, so a livelier level plays more gestures."""
+    monkeypatch.setattr(config, "GESTURES_LEVEL", level)
+
+    gesture = GestureLibrary().match(_LEANING_NEUTRAL, "say")
+
+    assert (gesture and gesture.emotion_name) == expected
+
+
+def test_calm_moves_alternate_and_skip_missing_ones(recorded_move_names: list[str]) -> None:
+    """The filler for plain sentences alternates a nod and a thinking look, from whatever the library has."""
+    recorded_move_names.extend(["understanding2", "thoughtful2"])
+    gestures = GestureLibrary()
+    assert [gestures.calm_move().emotion_name for _ in range(3)] == ["understanding2", "thoughtful2", "understanding2"]
+
+    recorded_move_names.remove("thoughtful2")
+    gestures = GestureLibrary()
+    assert [gestures.calm_move().emotion_name for _ in range(2)] == ["understanding2", "understanding2"]
+
+    recorded_move_names.remove("understanding2")
+    assert GestureLibrary().calm_move() is None
+
+
+@pytest.mark.parametrize("level", ["when_unsure", "when_sure"])
+def test_gestures_whose_move_is_unavailable_are_skipped(
+    recorded_move_names: list[str], caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch, level: str
+) -> None:
+    """A move missing from the emotions library is reported and never returned, nor swapped for a worse one."""
+    monkeypatch.setattr(config, "GESTURES_LEVEL", level)
     recorded_move_names.remove("success1")
     caplog.set_level(logging.WARNING, logger=gestures_mod.__name__)
 
@@ -121,3 +167,16 @@ def test_gestures_whose_move_is_unavailable_are_skipped(
 
     assert gestures.match("Mission accomplished.", "say") is None
     assert "success1" in caplog.text
+
+
+def test_play_emotion_and_gestures_share_one_emotions_library(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The emotions dataset is loaded once, however many callers and threads ask for it."""
+    loads: list[str] = []
+    monkeypatch.setattr(dance_emotion_moves_mod, "_emotions_library", None)
+    monkeypatch.setattr(dance_emotion_moves_mod, "RecordedMoves", lambda dataset: loads.append(dataset) or object())
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        libraries = list(pool.map(lambda _: dance_emotion_moves_mod.emotions_library(), range(8)))
+
+    assert loads == ["pollen-robotics/reachy-mini-emotions-library"]
+    assert all(library is libraries[0] for library in libraries)

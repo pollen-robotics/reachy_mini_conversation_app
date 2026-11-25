@@ -68,3 +68,25 @@ def test_speech_and_gesture_flags_default_on_and_follow_environment(
     monkeypatch.setattr(config.config, name, not expected)
     config.refresh_runtime_config_from_env()
     assert getattr(config.config, name) is expected
+
+
+@pytest.mark.parametrize(
+    "raw_value, expected",
+    [
+        (None, "when_sure"),
+        ("every_sentence", "every_sentence"),
+        (" When-Unsure ", "when_unsure"),
+        ("lots", "when_sure"),
+    ],
+)
+def test_gestures_level_follows_environment(
+    monkeypatch: pytest.MonkeyPatch, raw_value: str | None, expected: str
+) -> None:
+    """GESTURES_LEVEL defaults to the shipped level, is forgiving about spelling and ignores unknown values."""
+    if raw_value is None:
+        monkeypatch.delenv("GESTURES_LEVEL", raising=False)
+    else:
+        monkeypatch.setenv("GESTURES_LEVEL", raw_value)
+    monkeypatch.setattr(config.config, "GESTURES_LEVEL", "unset")
+    config.refresh_runtime_config_from_env()
+    assert config.config.GESTURES_LEVEL == expected

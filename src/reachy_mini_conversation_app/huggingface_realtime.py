@@ -74,6 +74,8 @@ AUDIO_SEND_TIMEOUT_S: Final[float] = 5.0
 # The gesture model loads this long after the first reply has finished playing, checked at this interval.
 _GESTURE_LOAD_MARGIN_S: Final[float] = 0.5
 _GESTURE_LOAD_POLL_S: Final[float] = 0.25
+# A gesture that follows another starts this long after it, so the movement loop has let the first one go.
+_GESTURE_GAP_S: Final[float] = 0.15
 # Server-measured stage timings the speech-to-speech backend attaches to response.done.
 _TURN_LATENCY_METADATA_KEY: Final[str] = "speech_to_speech.turn_latency"
 
@@ -232,6 +234,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self._gesture_epoch = 0  # bumped on every cancel; a match from an older epoch plays nothing
         self._pending_gesture: asyncio.TimerHandle | None = None
         self._gesture_ends_at = 0.0
+        self._gesture_kind: GestureKind | None = None  # what the last scheduled gesture answered
+        self._turn_had_reaction = False  # the user's latest turn got a gesture of its own
         self._reply_audio_ends_at = 0.0
         self._tool_call_response_id: str | None = None
 
@@ -254,10 +258,16 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         except Exception as exc:
             logger.warning("Gestures unavailable: %s", exc)
 
+    def _may_follow_reaction(self, kind: GestureKind) -> bool:
+        """At "every_sentence", the robot's own confident gesture waits for the one answering the user to end."""
+        return config.GESTURES_LEVEL == "every_sentence" and kind == "say" and self._gesture_kind == "react"
+
     def _play_gesture(self, text: str, kind: GestureKind, delay: float = 0.0) -> None:
         """Play the move matching ``text`` in ``delay`` seconds unless a gesture is already under way."""
         starts_at = time.monotonic() + delay
-        if not config.GESTURES_ENABLED or self._gestures is None or starts_at < self._gesture_ends_at:
+        if not config.GESTURES_ENABLED or self._gestures is None:
+            return
+        if starts_at < self._gesture_ends_at and not self._may_follow_reaction(kind):
             return
         # The reply's first sentence arrives while the user's is still being matched; it waits its turn.
         self._gesture_task = asyncio.create_task(
@@ -275,7 +285,9 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
     ) -> None:
         if after is not None:
             await asyncio.wait([after])  # waits even when that match was cancelled
-            if epoch != self._gesture_epoch or starts_at < self._gesture_ends_at:
+            if epoch != self._gesture_epoch:
+                return
+            if starts_at < self._gesture_ends_at and not self._may_follow_reaction(kind):
                 return
         # Matching takes tens of milliseconds on the robot, so it must not hold up the loop that forwards audio.
         try:
@@ -283,12 +295,27 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         except Exception as exc:
             logger.warning("Gesture matching failed: %s", exc)
             return
-        if move is None or epoch != self._gesture_epoch:
+        if epoch != self._gesture_epoch:
+            return
+        if starts_at < self._gesture_ends_at:
+            if move is None or not self._may_follow_reaction(kind):
+                return
+            # Both what the user said and this sentence called for a gesture: this one plays right after.
+            starts_at = self._gesture_ends_at + _GESTURE_GAP_S
+        elif move is None and kind == "say" and config.GESTURES_LEVEL == "every_sentence":
+            # A calm move fills a sentence without a gesture, unless the robot already answered the user's turn.
+            if self._turn_had_reaction:
+                return
+            move = gestures.calm_move()
+        if move is None:
             return
         lead = starts_at - time.monotonic()  # negative when matching finished after the sentence started
         delay = max(0.0, lead)
         logger.info("Gesture %s for %s sentence starts in %+.2f s: %s", move.emotion_name, kind, lead, text)
-        self._gesture_ends_at = starts_at + move.duration
+        self._gesture_ends_at = time.monotonic() + delay + move.duration
+        self._gesture_kind = kind
+        if kind == "react":
+            self._turn_had_reaction = True
         self._pending_gesture = asyncio.get_running_loop().call_later(
             delay, self.deps.movement_manager.play_gesture, move
         )
@@ -1099,6 +1126,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
                         await self.output_queue.put(AdditionalOutputs({"role": "user", "content": transcript}))
                         self._emit_transcript("user", transcript, True)
+                        self._turn_had_reaction = False
                         self._play_gesture(transcript, "react")
 
                     if event.type == "response.output_audio_transcript.delta":

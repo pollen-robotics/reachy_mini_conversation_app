@@ -23,6 +23,7 @@ from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.config import (
     HF_BACKEND,
     LOCKED_PROFILE,
+    GESTURES_LEVELS,
     HF_REALTIME_WS_URL_ENV,
     HF_LOCAL_CONNECTION_MODE,
     HF_DEPLOYED_CONNECTION_MODE,
@@ -35,6 +36,7 @@ from reachy_mini_conversation_app.config import (
     build_hf_direct_ws_url,
     has_hf_realtime_target,
     parse_hf_direct_target,
+    normalize_gestures_level,
     get_hf_connection_selection,
     refresh_runtime_config_from_env,
 )
@@ -442,6 +444,10 @@ class LocalStream:
         """
         self._save_settings(AppSettings(gestures_enabled=enabled))
 
+    def _set_gestures_level(self, level: str) -> None:
+        """Set how readily the robot gestures, for this run and the next ones; the next sentence uses it."""
+        self._save_settings(AppSettings(gestures_level=level))
+
     def _set_language(self, language: str, scope: LanguageScope) -> str:
         """Save the conversation language for the active personality or all of them, then reconnect."""
         if scope == "profile":
@@ -592,6 +598,7 @@ class LocalStream:
                 "local_vad_enabled": config.LOCAL_VAD_ENABLED,
                 "local_barge_in_enabled": config.LOCAL_BARGE_IN_ENABLED,
                 "gestures_enabled": config.GESTURES_ENABLED,
+                "gestures_level": config.GESTURES_LEVEL,
                 "vision_enabled": bool(self._tool_deps and self._tool_deps.camera_enabled),
                 **backend_connection,
             }
@@ -716,8 +723,18 @@ class LocalStream:
             self._set_gestures_enabled(enabled)
             return {"enabled": config.GESTURES_ENABLED}
 
+        def _rpc_gestures_set_level(params: dict[str, object]) -> dict[str, object]:
+            level = normalize_gestures_level(params.get("level"))
+            if level is None:
+                raise JsonRpcError(
+                    f"level must be one of {', '.join(GESTURES_LEVELS)}", reason="invalid_params", code=-32602
+                )
+            self._set_gestures_level(level)
+            return {"level": config.GESTURES_LEVEL}
+
         rpc.register("speech.config", _rpc_speech_config)
         rpc.register("gestures.set_enabled", _rpc_gestures_set_enabled)
+        rpc.register("gestures.set_level", _rpc_gestures_set_level)
         rpc.mount(settings_app)
         self._rpc = rpc
 

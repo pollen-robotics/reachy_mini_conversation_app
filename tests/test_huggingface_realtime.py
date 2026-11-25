@@ -1377,6 +1377,7 @@ async def _settle_gestures(handler: HuggingFaceRealtimeHandler) -> None:
 def _gesture_handler(monkeypatch: Any, events: Any) -> tuple[HuggingFaceRealtimeHandler, SimpleNamespace]:
     """Build a session handler whose gesture library matches every sentence to one two-second move."""
     monkeypatch.setattr(hf_mod.config, "GESTURES_ENABLED", True)
+    monkeypatch.setattr(hf_mod.config, "GESTURES_LEVEL", "when_sure")
     handler = _session_handler(monkeypatch, events)
     handler._clear_queue = AsyncMock()
     move = SimpleNamespace(duration=2.0, emotion_name="success1")
@@ -1513,6 +1514,76 @@ async def test_reply_sentence_waits_for_the_users_sentence_to_be_matched(monkeyp
         call("Good luck, I hope you win!", "say"),
     ]
     handler.deps.movement_manager.play_gesture.assert_called_once_with(move)
+
+
+def _user_turn_then_reply() -> tuple[_FakeEvent, ...]:
+    return (
+        _FakeEvent("conversation.item.input_audio_transcription.completed", transcript="I won my chess game!"),
+        _FakeEvent("response.created"),
+        _FakeEvent("response.output_audio_transcript.delta", delta="Congratulations, that's wonderful!"),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("level, reply_follows", [("when_sure", False), ("every_sentence", True)])
+async def test_confident_reply_gesture_follows_the_reaction_only_at_every_sentence(
+    monkeypatch: Any, level: str, reply_follows: bool
+) -> None:
+    """When both the user's turn and the reply call for a gesture, "every_sentence" plays both, one after the other."""
+    handler, reaction = _gesture_handler(monkeypatch, _user_turn_then_reply())
+    monkeypatch.setattr(hf_mod.config, "GESTURES_LEVEL", level)
+    reply_move = SimpleNamespace(duration=2.0, emotion_name="success2")
+    handler._gestures.match.side_effect = lambda _text, kind: reaction if kind == "react" else reply_move
+
+    await handler._run_realtime_session()
+    await _settle_gestures(handler)
+
+    handler.deps.movement_manager.play_gesture.assert_called_once_with(reaction)
+    assert handler._gestures.match.call_count == (2 if reply_follows else 1)
+    pending_in = handler._pending_gesture.when() - asyncio.get_running_loop().time()
+    if reply_follows:
+        assert pending_in == pytest.approx(reaction.duration + hf_mod._GESTURE_GAP_S, abs=0.2)
+    else:
+        assert pending_in <= 0
+    handler._gestures.calm_move.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_got_a_reaction", [False, True])
+async def test_every_sentence_fills_plain_sentences_with_a_calm_move_unless_the_user_got_one(
+    monkeypatch: Any, user_got_a_reaction: bool
+) -> None:
+    """A reply sentence the model gives no gesture gets a calm move, but not when the user's turn already got one."""
+    handler, reaction = _gesture_handler(monkeypatch, _user_turn_then_reply())
+    monkeypatch.setattr(hf_mod.config, "GESTURES_LEVEL", "every_sentence")
+    calm = SimpleNamespace(duration=2.0, emotion_name="understanding2")
+    handler._gestures.calm_move.return_value = calm
+    handler._gestures.match.side_effect = lambda _text, kind: (
+        reaction if kind == "react" and user_got_a_reaction else None
+    )
+
+    await handler._run_realtime_session()
+    await _settle_gestures(handler)
+
+    played = [args.args[0] for args in handler.deps.movement_manager.play_gesture.call_args_list]
+    assert played == ([reaction] if user_got_a_reaction else [calm])
+
+
+@pytest.mark.asyncio
+async def test_user_turns_never_get_a_calm_move(monkeypatch: Any) -> None:
+    """Calm moves are for the robot's own sentences; a plain user turn still gets nothing."""
+    handler, _move = _gesture_handler(
+        monkeypatch,
+        (_FakeEvent("conversation.item.input_audio_transcription.completed", transcript="What time is it?"),),
+    )
+    monkeypatch.setattr(hf_mod.config, "GESTURES_LEVEL", "every_sentence")
+    handler._gestures.match.return_value = None
+
+    await handler._run_realtime_session()
+    await _settle_gestures(handler)
+
+    handler._gestures.calm_move.assert_not_called()
+    handler.deps.movement_manager.play_gesture.assert_not_called()
 
 
 @pytest.mark.asyncio

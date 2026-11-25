@@ -1,6 +1,7 @@
 import json
 import time
 import logging
+import itertools
 from typing import Literal
 from pathlib import Path
 
@@ -10,8 +11,8 @@ from numpy.typing import NDArray
 from sentencepiece import SentencePieceProcessor
 from huggingface_hub import hf_hub_download
 
-from reachy_mini.motion.recorded_move import RecordedMoves
-from reachy_mini_conversation_app.dance_emotion_moves import EmotionQueueMove
+from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.dance_emotion_moves import EmotionQueueMove, emotions_library
 
 
 logger = logging.getLogger(__name__)
@@ -23,8 +24,13 @@ _TOKENIZER_REPO = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 _TOKENIZER_REVISION = "e8f8c211226b894fcb81acc59f3b34ba3efd5f42"
 _MAX_TOKENS = 64  # the length the model was trained on
 _EMBEDDING_SCALE = 10.0  # the output layers read the normalized sentence embedding at this scale
-_MIN_PROBABILITY = 0.3  # chosen on held-out sentences; below it the model is often wrong
 _MAX_GESTURE_SECONDS = 3.0
+# How sure the model must be of a gesture at each level, chosen on the public test sets. "when_sure" scored best on
+# held-out sentences. Below 0.05 the model's pick is close to random: forced onto neutral sentences it picks a
+# negative gesture such as fear for about 30% of them. So "every_sentence" trusts the model no further than
+# "when_unsure" and fills the rest of the robot's sentences with calm moves instead.
+LEVEL_THRESHOLDS = {"when_necessary": 0.8, "when_sure": 0.4, "when_unsure": 0.05, "every_sentence": 0.05}
+_CALM_MOVES = ("understanding2", "thoughtful2")  # a nod, and looking up as if thinking
 _SLOWDOWN_SECONDS = 0.5
 
 GestureKind = Literal["say", "react"]
@@ -72,15 +78,18 @@ class GestureLibrary:
             }
         labels_path = Path(hf_hub_download(_MODEL_REPO, "gesture_labels.json", revision=_MODEL_REVISION))
         labels = json.loads(labels_path.read_text(encoding="utf-8"))
-        self._recorded_moves = RecordedMoves("pollen-robotics/reachy-mini-emotions-library")
+        self._recorded_moves = emotions_library()
         available_moves = set(self._recorded_moves.list_moves())
         # "none" and moves missing from the library map to None: the sentence gets no gesture.
         self._labels: dict[GestureKind, list[str | None]] = {}
+        self._none_index: dict[GestureKind, int] = {}
         for kind in ("say", "react"):
+            self._none_index[kind] = labels[kind].index("none")
             for move_name in labels[kind]:
                 if move_name != "none" and move_name not in available_moves:
                     logger.warning("Gesture move %s is missing from the emotions library", move_name)
             self._labels[kind] = [name if name in available_moves else None for name in labels[kind]]
+        self._calm_moves = itertools.cycle([name for name in _CALM_MOVES if name in available_moves] or [None])
         logger.info("Gesture model loaded in %.1f s", time.perf_counter() - started)
 
     def _embed(self, text: str) -> tuple[NDArray[np.float32], int]:
@@ -101,7 +110,11 @@ class GestureLibrary:
         return normalized, input_ids.shape[1]
 
     def match(self, text: str, kind: GestureKind) -> GestureMove | None:
-        """Return the move for something the robot says or hears, or None when it calls for no gesture."""
+        """Return the move for something the robot says or hears, or None when it calls for no gesture.
+
+        The most likely gesture plays when the model gives it at least the threshold of ``config.GESTURES_LEVEL``,
+        even if "no gesture" is likelier: that is how the livelier levels play more gestures.
+        """
         if not text.strip():
             return None
         started = time.perf_counter()
@@ -110,13 +123,17 @@ class GestureLibrary:
         logits = weight @ (embedding * _EMBEDDING_SCALE) + bias
         probabilities = np.exp(logits - logits.max())
         probabilities /= probabilities.sum()
-        best = int(probabilities.argmax())
-        move_name = self._labels[kind][best] if probabilities[best] >= _MIN_PROBABILITY else None
+        gesture_probabilities = probabilities.copy()
+        gesture_probabilities[self._none_index[kind]] = -1.0
+        best = int(gesture_probabilities.argmax())
+        threshold = LEVEL_THRESHOLDS.get(config.GESTURES_LEVEL, LEVEL_THRESHOLDS["when_sure"])
+        move_name = self._labels[kind][best] if probabilities[best] >= threshold else None
         logger.debug(
-            "Gesture model: %s for %s sentence (p=%.2f, %d tokens, %.0f ms): %s",
+            "Gesture model: %s for %s sentence (p=%.2f, p(none)=%.2f, %d tokens, %.0f ms): %s",
             move_name or "none",
             kind,
             probabilities[best],
+            probabilities[self._none_index[kind]],
             token_count,
             (time.perf_counter() - started) * 1000,
             text,
@@ -124,3 +141,8 @@ class GestureLibrary:
         if move_name is None:
             return None
         return GestureMove(move_name, self._recorded_moves)
+
+    def calm_move(self) -> GestureMove | None:
+        """Return a calm move for a sentence the model gives no gesture, alternating between a nod and a thinking look."""
+        move_name = next(self._calm_moves)
+        return None if move_name is None else GestureMove(move_name, self._recorded_moves)
