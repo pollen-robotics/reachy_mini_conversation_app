@@ -21,3 +21,5 @@ os.environ["REACHY_MINI_SKIP_DOTENV"] = "1"
 os.environ.pop("REACHY_MINI_CUSTOM_PROFILE", None)
 os.environ.pop("REACHY_MINI_EXTERNAL_PROFILES_DIRECTORY", None)
 os.environ.pop("REACHY_MINI_EXTERNAL_TOOLS_DIRECTORY", None)
+# Gestures are on in the app, but a test must not download the gesture model; the ones that need them turn them on.
+os.environ["GESTURES_ENABLED"] = "false"

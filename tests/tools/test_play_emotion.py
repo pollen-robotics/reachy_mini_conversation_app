@@ -181,8 +181,8 @@ async def test_play_emotion_queues_resolved_emotion(monkeypatch: pytest.MonkeyPa
     movement_manager = MagicMock()
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement_manager)
 
+    monkeypatch.setattr(play_emotion_module, "emotions_library", FakeRecordedMoves)
     tool = PlayEmotion()
-    monkeypatch.setattr(tool, "_library", FakeRecordedMoves())
     result = await tool(deps, emotion="sad no")
 
     assert result == {"status": "queued", "emotion": "no_sad1"}
@@ -219,8 +219,8 @@ async def test_play_emotion_queues_random_for_unknown_emotion(
     movement_manager = MagicMock()
     deps = ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement_manager)
 
+    monkeypatch.setattr(play_emotion_module, "emotions_library", FakeRecordedMoves)
     tool = PlayEmotion()
-    monkeypatch.setattr(tool, "_library", FakeRecordedMoves())
     with caplog.at_level(logging.INFO, logger=play_emotion_module.logger.name):
         result = await tool(deps, emotion="contento")
 

@@ -6,6 +6,7 @@ and executed sequentially by the MovementManager.
 
 from __future__ import annotations
 import logging
+import threading
 from typing import Tuple
 
 import numpy as np
@@ -17,6 +18,22 @@ from reachy_mini_dances_library.dance_move import DanceMove
 
 
 logger = logging.getLogger(__name__)
+EMOTIONS_DATASET = "pollen-robotics/reachy-mini-emotions-library"
+_emotions_library: RecordedMoves | None = None
+_emotions_library_lock = threading.Lock()
+
+
+def emotions_library() -> RecordedMoves:
+    """Return the recorded emotions, downloaded and loaded once and shared by play_emotion and gestures.
+
+    The first call downloads the dataset, so it must not run at import. The lock keeps two threads, such as the
+    gesture model loading while play_emotion runs, from loading their own copy.
+    """
+    global _emotions_library
+    with _emotions_library_lock:
+        if _emotions_library is None:
+            _emotions_library = RecordedMoves(EMOTIONS_DATASET)
+        return _emotions_library
 
 
 class DanceQueueMove(Move):  # type: ignore

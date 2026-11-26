@@ -1138,6 +1138,22 @@ button {
   margin-bottom: 16px;
 }
 
+.settings-subsection > summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.settings-subsection[open] > summary {
+  margin-bottom: 12px;
+}
+
+.settings-range { display: flex; flex-direction: column; gap: 8px; }
+.settings-range-row { display: flex; align-items: center; gap: 12px; }
+.settings-range-row input { flex: 1; min-width: 0; accent-color: var(--accent); }
+.settings-range-row input:disabled { opacity: 0.65; }
+.settings-range-value { font-size: 0.9rem; font-weight: 600; }
+
 .settings-toggle { display: flex; align-items: flex-start; gap: 12px; }
 .settings-toggle > span { display: flex; flex-direction: column; gap: 6px; }
 .settings-toggle input { width: 18px; height: 18px; margin-top: 3px; flex-shrink: 0; accent-color: var(--accent); }

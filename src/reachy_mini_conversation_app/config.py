@@ -151,6 +151,32 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return default
 
 
+# How readily the robot gestures, calmest first. Each level sets how sure the gesture model must be (see
+# gestures.py); "every_sentence" also fills sentences the model leaves without a gesture with a calm move.
+GESTURES_LEVELS = ("when_necessary", "when_sure", "when_unsure", "every_sentence")
+DEFAULT_GESTURES_LEVEL = "when_sure"
+
+
+def normalize_gestures_level(value: object) -> str | None:
+    """Return a known gestures level, accepting dashes, spaces and any case, or None."""
+    if not isinstance(value, str):
+        return None
+    level = value.strip().lower().replace("-", "_").replace(" ", "_")
+    return level if level in GESTURES_LEVELS else None
+
+
+def _env_gestures_level() -> str:
+    """Read GESTURES_LEVEL, falling back to the default when absent or unknown."""
+    raw = os.getenv("GESTURES_LEVEL")
+    if raw is None or not raw.strip():
+        return DEFAULT_GESTURES_LEVEL
+    level = normalize_gestures_level(raw)
+    if level is None:
+        logger.warning("Unknown GESTURES_LEVEL=%r, using %s", raw, DEFAULT_GESTURES_LEVEL)
+        return DEFAULT_GESTURES_LEVEL
+    return level
+
+
 APP_TIMEOUT_MINUTES_ENV = "REACHY_MINI_APP_TIMEOUT_MINUTES"
 DEFAULT_APP_TIMEOUT_MINUTES = 1440.0
 
@@ -353,6 +379,8 @@ class Config:
     CAMERA_ENABLED = _env_flag(CAMERA_ENABLED_ENV, default=True)
     LOCAL_VAD_ENABLED = _env_flag("LOCAL_VAD_ENABLED", default=True)
     LOCAL_BARGE_IN_ENABLED = _env_flag("LOCAL_BARGE_IN_ENABLED", default=True)
+    GESTURES_ENABLED = _env_flag("GESTURES_ENABLED", default=True)
+    GESTURES_LEVEL = _env_gestures_level()
     HF_TOKEN = os.getenv("HF_TOKEN")  # Optional, falls back to hf auth login if not set
 
     logger.debug(
@@ -471,6 +499,8 @@ def refresh_runtime_config_from_env() -> None:
     config.CAMERA_ENABLED = _env_flag(CAMERA_ENABLED_ENV, default=True)
     config.LOCAL_VAD_ENABLED = _env_flag("LOCAL_VAD_ENABLED", default=True)
     config.LOCAL_BARGE_IN_ENABLED = _env_flag("LOCAL_BARGE_IN_ENABLED", default=True)
+    config.GESTURES_ENABLED = _env_flag("GESTURES_ENABLED", default=True)
+    config.GESTURES_LEVEL = _env_gestures_level()
 
 
 # Files the app writes into its instance directory, migrated once when the
