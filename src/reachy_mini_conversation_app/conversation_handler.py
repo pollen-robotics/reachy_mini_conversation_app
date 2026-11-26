@@ -22,6 +22,8 @@ AudioFrame: TypeAlias = tuple[int, NDArray[np.int16]]
 HandlerOutput: TypeAlias = AudioFrame | AdditionalOutputs | None
 QueueItem: TypeAlias = AudioFrame | AdditionalOutputs
 
+FINISH_SPEAKING_TIMEOUT_S = 30.0  # longest a pending sleep waits for the goodbye to play out
+
 
 class VADStatus(TypedDict):
     """Snapshot of local speech detection and playback interruption state."""
@@ -146,6 +148,15 @@ class ConversationHandler(AsyncStreamHandler, ABC):
             available_tool_names=available_tool_names,
             idle_duration=idle_duration,
         )
+
+    async def finish_speaking(self, timeout: float = FINISH_SPEAKING_TIMEOUT_S) -> None:
+        """Return once the assistant audio already produced has played out, or after ``timeout``."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self.playback_pending_frames == 0 and time.monotonic() >= self.playback_until:
+                return
+            await asyncio.sleep(0.05)
+        logger.warning("Speech still playing after %.0f s; not waiting any longer", timeout)
 
     @abstractmethod
     def _is_connected(self) -> bool:

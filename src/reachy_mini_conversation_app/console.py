@@ -61,7 +61,12 @@ from reachy_mini_conversation_app.personality_routes import (
 )
 from reachy_mini_conversation_app.profile_tool_routes import register_profile_tool_methods
 from reachy_mini_conversation_app.audio.startup_config import apply_audio_startup_config
-from reachy_mini_conversation_app.conversation_handler import VADStatus, AudioFrame, ConversationHandler
+from reachy_mini_conversation_app.conversation_handler import (
+    FINISH_SPEAKING_TIMEOUT_S,
+    VADStatus,
+    AudioFrame,
+    ConversationHandler,
+)
 
 
 try:
@@ -975,6 +980,22 @@ class LocalStream:
             if not task.done():
                 loop.call_soon_threadsafe(task.cancel)
 
+    def finish_speaking(self, timeout: float = FINISH_SPEAKING_TIMEOUT_S) -> None:
+        """Block the calling thread until the robot has finished what it is saying.
+
+        Called before going to sleep, from the tool's worker thread or a
+        watcher thread, never from the stream loop itself.
+        """
+        loop = self._asyncio_loop
+        if loop is None or not loop.is_running():
+            return
+        future = asyncio.run_coroutine_threadsafe(self.handler.finish_speaking(timeout), loop)
+        try:
+            future.result(timeout + 1.0)
+        except Exception as e:
+            future.cancel()
+            logger.warning("Could not wait for speech to finish: %s: %s", type(e).__name__, e)
+
     async def clear_audio_queue(self) -> None:
         """Invalidate pending chunks and flush SDK playback without blocking microphone capture."""
         async with self._playback_flush_lock:
@@ -1050,6 +1071,62 @@ class LocalStream:
             stop_reading.set()
             await asyncio.to_thread(reader.join)
 
+    async def _play_audio_frame(
+        self,
+        handler: ConversationHandler,
+        sample_rate: int,
+        audio_data: Any,
+        playback_epoch: int,
+    ) -> None:
+        """Submit one assistant audio frame to the SDK player."""
+        # Skip empty audio frames
+        if audio_data.size == 0:
+            return
+
+        # Reshape if needed
+        if audio_data.ndim == 2:
+            # channels-last convention
+            if audio_data.shape[1] > audio_data.shape[0]:
+                audio_data = audio_data.T
+            # Multiple channels -> Mono channel
+            if audio_data.shape[1] > 1:
+                audio_data = audio_data[:, 0]
+
+        # Cast if needed
+        audio_frame = audio_to_float32(audio_data)
+
+        if handler.paced_playback is True:
+            chunk_samples = max(1, sample_rate // 50)
+            for offset in range(0, audio_frame.size, chunk_samples):
+                # One schedule across frames: the SDK lays follow-up buffers back to back and
+                # only re-anchors after a 200 ms gap, so restarting per frame accumulated lateness.
+                now = time.monotonic()
+                if now > self._playback_clock + 0.2:
+                    self._playback_clock = now
+                await asyncio.sleep(max(0.0, self._playback_clock - PLAYBACK_LEAD_SECONDS - now))
+                await handler.playback_ready.wait()
+                if (
+                    self._stop_event.is_set()
+                    or handler is not self.handler
+                    or playback_epoch != handler.playback_epoch
+                ):
+                    break
+                chunk = audio_frame[offset : offset + chunk_samples] * handler.playback_gain
+                self._robot.media.push_audio_sample(chunk)
+                self._emit_level("assistant", chunk)
+                self._playback_clock += chunk.size / sample_rate
+                handler.playback_until = self._playback_clock + 0.1
+        else:
+            # A flush in progress would drop or misplace this push.
+            await handler.playback_ready.wait()
+            if handler is not self.handler or playback_epoch != handler.playback_epoch:
+                return
+            self._robot.media.push_audio_sample(audio_frame)
+            self._emit_level("assistant", audio_frame)
+            # Frames arrive faster than they play and the SDK queues them back to back.
+            self._playback_clock = max(self._playback_clock, time.monotonic()) + audio_frame.size / sample_rate
+            handler.playback_until = self._playback_clock + 0.1
+
     async def play_loop(self) -> None:
         """Fetch outputs from the handler: log text and play audio frames."""
         while not self._stop_event.is_set():
@@ -1075,53 +1152,11 @@ class LocalStream:
                 playback_epoch = handler.playback_frame_epochs.pop(id(audio_data), playback_epoch)
                 if handler is not self.handler or playback_epoch != handler.playback_epoch:
                     continue
-                if handler.paced_playback is True:
+                await self._play_audio_frame(handler, sample_rate, audio_data, playback_epoch)
+                # Counted until submitted, so a frame in hand still reads as speech in progress.
+                # A flush has already zeroed the count; the frames counted since are not this one.
+                if playback_epoch == handler.playback_epoch:
                     handler.playback_pending_frames = max(0, handler.playback_pending_frames - 1)
-
-                # Skip empty audio frames
-                if audio_data.size == 0:
-                    continue
-
-                # Reshape if needed
-                if audio_data.ndim == 2:
-                    # channels-last convention
-                    if audio_data.shape[1] > audio_data.shape[0]:
-                        audio_data = audio_data.T
-                    # Multiple channels -> Mono channel
-                    if audio_data.shape[1] > 1:
-                        audio_data = audio_data[:, 0]
-
-                # Cast if needed
-                audio_frame = audio_to_float32(audio_data)
-
-                if handler.paced_playback is True:
-                    chunk_samples = max(1, sample_rate // 50)
-                    for offset in range(0, audio_frame.size, chunk_samples):
-                        # One schedule across frames: the SDK lays follow-up buffers back to back and
-                        # only re-anchors after a 200 ms gap, so restarting per frame accumulated lateness.
-                        now = time.monotonic()
-                        if now > self._playback_clock + 0.2:
-                            self._playback_clock = now
-                        await asyncio.sleep(max(0.0, self._playback_clock - PLAYBACK_LEAD_SECONDS - now))
-                        await handler.playback_ready.wait()
-                        if (
-                            self._stop_event.is_set()
-                            or handler is not self.handler
-                            or playback_epoch != handler.playback_epoch
-                        ):
-                            break
-                        chunk = audio_frame[offset : offset + chunk_samples] * handler.playback_gain
-                        self._robot.media.push_audio_sample(chunk)
-                        self._emit_level("assistant", chunk)
-                        self._playback_clock += chunk.size / sample_rate
-                        handler.playback_until = self._playback_clock + 0.1
-                else:
-                    # A flush in progress would drop or misplace this push.
-                    await handler.playback_ready.wait()
-                    if handler is not self.handler or playback_epoch != handler.playback_epoch:
-                        continue
-                    self._robot.media.push_audio_sample(audio_frame)
-                    self._emit_level("assistant", audio_frame)
 
             else:
                 logger.debug("Ignoring output type=%s", type(handler_output).__name__)

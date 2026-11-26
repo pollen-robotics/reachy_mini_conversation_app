@@ -1367,6 +1367,54 @@ async def test_debug_vad_reports_probability_and_barge_in_without_extra_inferenc
     handler._reset_listening()
 
 
+@pytest.mark.asyncio
+async def test_finish_speaking_waits_for_the_response_and_its_audio_and_ignores_interruptions() -> None:
+    """A pending sleep lets the goodbye be generated and played, whatever the microphone hears."""
+    handler = _plain_handler()
+    handler._clear_queue = AsyncMock()
+    connection = MagicMock()
+    connection.response.cancel = AsyncMock()
+    connection.input_audio_buffer.append = AsyncMock()
+    handler.connection = connection
+    handler._audio_response_id = handler._active_response_id = "response"
+    handler._response_done_event.clear()  # the response calling go_to_sleep is still streaming
+    handler.playback_pending_frames = 1
+
+    waiting = asyncio.create_task(handler.finish_speaking(timeout=2))
+    await asyncio.sleep(0.02)
+    assert not waiting.done()
+
+    await handler.receive((16000, np.zeros(512, dtype=np.int16)))
+    connection.input_audio_buffer.append.assert_not_awaited()
+    await handler.interrupt()
+    connection.response.cancel.assert_not_awaited()
+    handler._clear_queue.assert_not_awaited()
+
+    handler._response_done_event.set()
+    await asyncio.sleep(0.1)
+    assert not waiting.done()  # generated, but the last frame is still queued
+
+    handler.playback_pending_frames = 0
+    handler.playback_until = time.monotonic() + 0.15
+    await asyncio.sleep(0.07)
+    assert not waiting.done()  # submitted, but still coming out of the speaker
+    await asyncio.wait_for(waiting, timeout=1)
+    assert time.monotonic() >= handler.playback_until
+    await handler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_finish_speaking_gives_up_after_the_timeout() -> None:
+    """A response that never completes must not keep the robot awake forever."""
+    handler = _plain_handler()
+    handler._response_done_event.clear()
+    await asyncio.wait_for(handler.finish_speaking(timeout=0.05), timeout=1)
+    handler._response_done_event.set()
+    handler.playback_pending_frames = 1
+    await asyncio.wait_for(handler.finish_speaking(timeout=0.1), timeout=1)
+    await handler.shutdown()
+
+
 async def _settle_gestures(handler: HuggingFaceRealtimeHandler) -> None:
     """Let gesture matches finish and their due timers fire; a fixed short sleep is flaky on Windows' coarse clock."""
     if handler._gesture_task is not None:
