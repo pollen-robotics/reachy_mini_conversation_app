@@ -8,6 +8,8 @@ import {
   listVoices,
   saveBackendConfig,
   saveSpeechConfig,
+  setGesturesEnabled,
+  setGesturesLevel,
   untilReady,
 } from "../api.js";
 import { SHOW_LATENCIES_KEY } from "../constants.js";
@@ -30,13 +32,14 @@ export async function mountSettingsView({ outlet, signal }) {
   const connectionSection = buildConnectionSection({
     onSaved: () =>
       Promise.all([
-        refreshStatus({ statusSection, connectionSection, speechSection, signal }),
+        refreshStatus({ statusSection, connectionSection, speechSection, movementSection, signal }),
         refreshVoices({ voiceSection, signal }),
       ]),
   });
   const voiceSection = buildVoiceSection();
   const statusSection = buildStatusSection();
   const speechSection = buildSpeechSection();
+  const movementSection = buildMovementSection();
   const developerSection = buildDeveloperSection();
 
   const view = h(
@@ -46,18 +49,19 @@ export async function mountSettingsView({ outlet, signal }) {
       "header",
       { class: "view-header" },
       h("h1", { class: "view-title" }, "Settings"),
-      h("p", { class: "view-subtitle" }, "Connection, voice, speech behavior, and runtime state for Reachy Mini.")
+      h("p", { class: "view-subtitle" }, "Connection, voice, speech behavior, movement, and runtime state for Reachy Mini.")
     ),
     connectionSection.element,
     voiceSection.element,
     speechSection.element,
+    movementSection.element,
     statusSection.element,
     developerSection
   );
   outlet.replaceChildren(view);
 
   await Promise.all([
-    refreshStatus({ statusSection, connectionSection, speechSection, signal }),
+    refreshStatus({ statusSection, connectionSection, speechSection, movementSection, signal }),
     refreshVoices({ voiceSection, signal }),
   ]);
 }
@@ -319,6 +323,121 @@ function buildSpeechSection() {
   };
 }
 
+// Expressiveness stops, calmest first; the backend maps each to how sure the gesture model must be.
+const GESTURE_LEVELS = [
+  { value: "when_necessary", label: "When necessary", hint: "Only for clearly emotional sentences." },
+  { value: "when_sure", label: "When sure", hint: "When the model is confident a gesture fits. The default." },
+  { value: "when_unsure", label: "Even when unsure", hint: "More gestures, including some that don't fit." },
+  {
+    value: "every_sentence",
+    label: "Every sentence",
+    hint: "Also fills the robot's other sentences with a calm nod or thinking look, unless it already reacted to you.",
+  },
+];
+const DEFAULT_GESTURE_STOP = GESTURE_LEVELS.findIndex((level) => level.value === "when_sure");
+
+function gestureStop(level) {
+  const index = GESTURE_LEVELS.findIndex((entry) => entry.value === level);
+  return index === -1 ? DEFAULT_GESTURE_STOP : index;
+}
+
+function buildMovementSection() {
+  const gestures = h("input", { type: "checkbox", name: "gestures_enabled", disabled: "disabled" });
+  const status = h("p", { class: "settings-status", role: "status", "aria-live": "polite" });
+  const expressiveness = h("input", {
+    type: "range",
+    name: "gestures_expressiveness",
+    min: "0",
+    max: String(GESTURE_LEVELS.length - 1),
+    step: "1",
+    value: String(DEFAULT_GESTURE_STOP),
+    disabled: "disabled",
+    "aria-label": "Expressiveness",
+  });
+  const expressivenessValue = h("span", { class: "settings-range-value" });
+  const expressivenessHint = h("p", { class: "settings-hint" });
+  const showGestureStop = (index) => {
+    expressivenessValue.textContent = GESTURE_LEVELS[index].label;
+    expressivenessHint.textContent = GESTURE_LEVELS[index].hint;
+  };
+  showGestureStop(DEFAULT_GESTURE_STOP);
+  const expressivenessPanel = h("details", { class: "settings-subsection" },
+    h("summary", {}, "Expressiveness"),
+    h("div", { class: "settings-range" },
+      h("div", { class: "settings-range-row" },
+        h("span", { class: "settings-hint" }, "Calm"),
+        expressiveness,
+        h("span", { class: "settings-hint" }, "Lively")),
+      expressivenessValue,
+      expressivenessHint));
+  const element = h("section", { class: "settings-section" },
+    h("h2", { class: "settings-section-title" }, "Movement"),
+    h("div", { class: "settings-form" },
+      h("label", { class: "settings-toggle" }, gestures,
+        h("span", {}, h("strong", {}, "Gestures while talking"),
+          h("span", { class: "settings-hint" },
+            "Play a short emotion that fits what the robot says and hears. The first time, a 118 MB model downloads after the next reply."))),
+      expressivenessPanel,
+      status));
+
+  // Saved and applied as soon as it is switched: the conversation reads it for every sentence.
+  gestures.addEventListener("change", async () => {
+    const wanted = gestures.checked;
+    gestures.disabled = true;
+    status.classList.remove("is-error");
+    status.textContent = "Saving…";
+    try {
+      const result = await setGesturesEnabled(wanted);
+      gestures.checked = result.enabled;
+      status.textContent = result.enabled ? "Gestures on." : "Gestures off.";
+    } catch (error) {
+      gestures.checked = !wanted;
+      status.textContent = `Failed to save: ${describeError(error)}`;
+      status.classList.add("is-error");
+    } finally {
+      gestures.disabled = false;
+      expressiveness.disabled = !gestures.checked;
+    }
+  });
+
+  let savedStop = DEFAULT_GESTURE_STOP;
+  expressiveness.addEventListener("input", () => {
+    showGestureStop(Number(expressiveness.value));
+  });
+  // Saved when the slider is released, not on every step it passes through.
+  expressiveness.addEventListener("change", async () => {
+    const wanted = Number(expressiveness.value);
+    expressiveness.disabled = true;
+    status.classList.remove("is-error");
+    status.textContent = "Saving…";
+    try {
+      const result = await setGesturesLevel(GESTURE_LEVELS[wanted].value);
+      savedStop = gestureStop(result.level);
+      status.textContent = "Expressiveness saved.";
+    } catch (error) {
+      status.textContent = `Failed to save: ${describeError(error)}`;
+      status.classList.add("is-error");
+    } finally {
+      expressiveness.value = String(savedStop);
+      showGestureStop(savedStop);
+      expressiveness.disabled = !gestures.checked;
+    }
+  });
+  return {
+    element,
+    syncFromStatus(payload) {
+      gestures.checked = Boolean(payload.gestures_enabled);
+      gestures.disabled = false;
+      if (typeof payload.gestures_level === "string") {
+        savedStop = gestureStop(payload.gestures_level);
+        expressiveness.value = String(savedStop);
+        showGestureStop(savedStop);
+      }
+      expressiveness.disabled = !gestures.checked;
+    },
+  };
+}
+
 function buildDeveloperSection() {
   const showLatencies = h("input", {
     type: "checkbox",
@@ -429,13 +548,14 @@ function formatHfTarget(payload) {
   return `${host}:${port || DEFAULT_HF_PORT}`;
 }
 
-async function refreshStatus({ statusSection, connectionSection, speechSection, signal }) {
+async function refreshStatus({ statusSection, connectionSection, speechSection, movementSection, signal }) {
   try {
     const payload = await untilReady(getStatus, signal);
     if (signal.aborted) return;
     statusSection.render(payload);
     connectionSection.syncFromStatus(payload);
     speechSection.syncFromStatus(payload);
+    movementSection.syncFromStatus(payload);
   } catch (error) {
     if (signal.aborted) return;
     statusSection.renderUnavailable(error);

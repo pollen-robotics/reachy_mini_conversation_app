@@ -68,6 +68,23 @@ def test_unusable_profile_language_entries_are_dropped(tmp_path: Path) -> None:
     assert read_settings(tmp_path).profile_languages == {"sorry_bro": "fr"}
 
 
+@pytest.mark.parametrize(
+    "stored, expected",
+    [("every_sentence", "every_sentence"), ("WHEN_UNSURE", "when_unsure"), ("loud", None), (3, None)],
+)
+def test_gestures_level_round_trips_and_ignores_unknown_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stored: object, expected: str | None
+) -> None:
+    """A hand-edited level is read if it is one of the four, and ignored otherwise."""
+    monkeypatch.setattr(config, "GESTURES_LEVEL", "when_sure")
+    (tmp_path / "settings.json").write_text(json.dumps({"gestures_level": stored}), encoding="utf-8")
+
+    load_settings_into_runtime(tmp_path)
+
+    assert read_settings(tmp_path).gestures_level == expected
+    assert config.GESTURES_LEVEL == (expected or "when_sure")
+
+
 @pytest.mark.parametrize("content", ["{ not json", '"a string"', '{"memory_enabled": "false"}'])
 def test_unusable_file_is_ignored(tmp_path: Path, content: str) -> None:
     """A corrupt or wrongly-typed file must not stop the app from starting."""

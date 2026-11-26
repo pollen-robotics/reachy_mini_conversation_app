@@ -1413,3 +1413,306 @@ async def test_finish_speaking_gives_up_after_the_timeout() -> None:
     handler.playback_pending_frames = 1
     await asyncio.wait_for(handler.finish_speaking(timeout=0.1), timeout=1)
     await handler.shutdown()
+
+
+async def _settle_gestures(handler: HuggingFaceRealtimeHandler) -> None:
+    """Let gesture matches finish and their due timers fire; a fixed short sleep is flaky on Windows' coarse clock."""
+    if handler._gesture_task is not None:
+        await asyncio.wait([handler._gesture_task], timeout=1.0)
+    await asyncio.sleep(0.05)
+
+
+def _gesture_handler(monkeypatch: Any, events: Any) -> tuple[HuggingFaceRealtimeHandler, SimpleNamespace]:
+    """Build a session handler whose gesture library matches every sentence to one two-second move."""
+    monkeypatch.setattr(hf_mod.config, "GESTURES_ENABLED", True)
+    monkeypatch.setattr(hf_mod.config, "GESTURES_LEVEL", "when_sure")
+    handler = _session_handler(monkeypatch, events)
+    handler._clear_queue = AsyncMock()
+    move = SimpleNamespace(duration=2.0, emotion_name="success1")
+    handler._gestures = MagicMock()
+    handler._gestures.match.return_value = move
+    return handler, move
+
+
+@pytest.mark.asyncio
+async def test_reply_sentence_plays_one_gesture_at_a_time(monkeypatch: Any) -> None:
+    """A reply sentence starts its gesture at once; the next sentence does not stack another on top."""
+    handler, move = _gesture_handler(
+        monkeypatch,
+        (
+            _FakeEvent("response.created"),
+            _FakeEvent("response.output_audio_transcript.delta", delta="We did it!"),
+            _FakeEvent("response.output_audio_transcript.delta", delta="That's amazing."),
+        ),
+    )
+
+    await handler._run_realtime_session()
+    await _settle_gestures(handler)
+
+    handler._gestures.match.assert_called_once_with("We did it!", "say")
+    handler.deps.movement_manager.play_gesture.assert_called_once_with(move)
+
+
+@pytest.mark.asyncio
+async def test_gestures_switched_off_in_the_settings_stop_at_once(monkeypatch: Any) -> None:
+    """The settings switch is read for every sentence, so a loaded model plays nothing once it is turned off."""
+    handler, _move = _gesture_handler(
+        monkeypatch,
+        (
+            _FakeEvent("response.created"),
+            _FakeEvent("response.output_audio_transcript.delta", delta="We did it!"),
+        ),
+    )
+    monkeypatch.setattr(hf_mod.config, "GESTURES_ENABLED", False)
+
+    await handler._run_realtime_session()
+    await _settle_gestures(handler)
+
+    handler._gestures.match.assert_not_called()
+    handler.deps.movement_manager.play_gesture.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reply_gesture_waits_for_queued_audio_and_is_dropped_on_interrupt(monkeypatch: Any) -> None:
+    """A sentence's gesture is held until the audio ahead of it has played, and never plays once interrupted."""
+    one_second_of_audio = base64.b64encode(np.zeros(HuggingFaceRealtimeHandler.SAMPLE_RATE, dtype=np.int16).tobytes())
+    handler, _move = _gesture_handler(
+        monkeypatch,
+        (
+            _FakeEvent("response.created"),
+            _FakeEvent("response.output_audio.delta", delta=one_second_of_audio.decode()),
+            _FakeEvent("response.output_audio_transcript.delta", delta="We did it!"),
+        ),
+    )
+
+    await handler._run_realtime_session()
+    await _settle_gestures(handler)
+    delay = handler._pending_gesture.when() - asyncio.get_running_loop().time()
+    assert delay == pytest.approx(1.0, abs=0.2)
+
+    await handler.interrupt()
+    await asyncio.sleep(0.01)
+
+    assert handler._pending_gesture.cancelled()
+    handler.deps.movement_manager.cancel_gesture.assert_called_once()
+    handler.deps.movement_manager.play_gesture.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reply_that_calls_a_tool_gets_no_gesture(monkeypatch: Any) -> None:
+    """A tool call stops the reply's gesture and keeps its later sentences from starting another."""
+    handler, _move = _gesture_handler(
+        monkeypatch,
+        (
+            _FakeEvent("response.created"),
+            _FakeEvent("response.output_audio_transcript.delta", delta="Sure, watch this!"),
+            _FakeEvent(
+                "response.function_call_arguments.done",
+                name="dance",
+                arguments="{}",
+                call_id="call-1",
+                response_id="response-1",
+            ),
+            _FakeEvent("response.output_audio_transcript.delta", delta="Here we go!"),
+        ),
+    )
+    monkeypatch.setattr(type(handler.tool_manager), "start_tool", AsyncMock())
+
+    await handler._run_realtime_session()
+    await _settle_gestures(handler)
+
+    handler._gestures.match.assert_not_called()
+    handler.deps.movement_manager.cancel_gesture.assert_called_once()
+    handler.deps.movement_manager.play_gesture.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_user_transcript_plays_a_reaction(monkeypatch: Any) -> None:
+    """The finished user transcript is matched against reactions and its move is queued."""
+    handler, move = _gesture_handler(
+        monkeypatch,
+        (_FakeEvent("conversation.item.input_audio_transcription.completed", transcript="My dog died yesterday."),),
+    )
+
+    await handler._run_realtime_session()
+    await _settle_gestures(handler)
+
+    handler._gestures.match.assert_called_once_with("My dog died yesterday.", "react")
+    handler.deps.movement_manager.play_gesture.assert_called_once_with(move)
+
+
+@pytest.mark.asyncio
+async def test_reply_sentence_waits_for_the_users_sentence_to_be_matched(monkeypatch: Any) -> None:
+    """The reply's text arrives while the user's sentence is still being matched; it is matched next, not dropped."""
+    handler, move = _gesture_handler(
+        monkeypatch,
+        (
+            _FakeEvent("conversation.item.input_audio_transcription.completed", transcript="I'm playing chess."),
+            _FakeEvent("response.created"),
+            _FakeEvent("response.output_audio_transcript.delta", delta="Good luck, I hope you win!"),
+        ),
+    )
+    handler._gestures.match.side_effect = lambda _text, kind: None if kind == "react" else move
+
+    await handler._run_realtime_session()
+    await _settle_gestures(handler)
+
+    assert handler._gestures.match.call_args_list == [
+        call("I'm playing chess.", "react"),
+        call("Good luck, I hope you win!", "say"),
+    ]
+    handler.deps.movement_manager.play_gesture.assert_called_once_with(move)
+
+
+def _user_turn_then_reply() -> tuple[_FakeEvent, ...]:
+    return (
+        _FakeEvent("conversation.item.input_audio_transcription.completed", transcript="I won my chess game!"),
+        _FakeEvent("response.created"),
+        _FakeEvent("response.output_audio_transcript.delta", delta="Congratulations, that's wonderful!"),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("level, reply_follows", [("when_sure", False), ("every_sentence", True)])
+async def test_confident_reply_gesture_follows_the_reaction_only_at_every_sentence(
+    monkeypatch: Any, level: str, reply_follows: bool
+) -> None:
+    """When both the user's turn and the reply call for a gesture, "every_sentence" plays both, one after the other."""
+    handler, reaction = _gesture_handler(monkeypatch, _user_turn_then_reply())
+    monkeypatch.setattr(hf_mod.config, "GESTURES_LEVEL", level)
+    reply_move = SimpleNamespace(duration=2.0, emotion_name="success2")
+    handler._gestures.match.side_effect = lambda _text, kind: reaction if kind == "react" else reply_move
+
+    await handler._run_realtime_session()
+    await _settle_gestures(handler)
+
+    handler.deps.movement_manager.play_gesture.assert_called_once_with(reaction)
+    assert handler._gestures.match.call_count == (2 if reply_follows else 1)
+    pending_in = handler._pending_gesture.when() - asyncio.get_running_loop().time()
+    if reply_follows:
+        assert pending_in == pytest.approx(reaction.duration + hf_mod._GESTURE_GAP_S, abs=0.2)
+    else:
+        assert pending_in <= 0
+    handler._gestures.calm_move.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_got_a_reaction", [False, True])
+async def test_every_sentence_fills_plain_sentences_with_a_calm_move_unless_the_user_got_one(
+    monkeypatch: Any, user_got_a_reaction: bool
+) -> None:
+    """A reply sentence the model gives no gesture gets a calm move, but not when the user's turn already got one."""
+    handler, reaction = _gesture_handler(monkeypatch, _user_turn_then_reply())
+    monkeypatch.setattr(hf_mod.config, "GESTURES_LEVEL", "every_sentence")
+    calm = SimpleNamespace(duration=2.0, emotion_name="understanding2")
+    handler._gestures.calm_move.return_value = calm
+    handler._gestures.match.side_effect = lambda _text, kind: (
+        reaction if kind == "react" and user_got_a_reaction else None
+    )
+
+    await handler._run_realtime_session()
+    await _settle_gestures(handler)
+
+    played = [args.args[0] for args in handler.deps.movement_manager.play_gesture.call_args_list]
+    assert played == ([reaction] if user_got_a_reaction else [calm])
+
+
+@pytest.mark.asyncio
+async def test_user_turns_never_get_a_calm_move(monkeypatch: Any) -> None:
+    """Calm moves are for the robot's own sentences; a plain user turn still gets nothing."""
+    handler, _move = _gesture_handler(
+        monkeypatch,
+        (_FakeEvent("conversation.item.input_audio_transcription.completed", transcript="What time is it?"),),
+    )
+    monkeypatch.setattr(hf_mod.config, "GESTURES_LEVEL", "every_sentence")
+    handler._gestures.match.return_value = None
+
+    await handler._run_realtime_session()
+    await _settle_gestures(handler)
+
+    handler._gestures.calm_move.assert_not_called()
+    handler.deps.movement_manager.play_gesture.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_gestures_resume_after_a_tool_call_cancels_one(monkeypatch: Any) -> None:
+    """A tool call drops the gesture being matched, and the next user sentence still gets its reaction."""
+    handler, move = _gesture_handler(
+        monkeypatch,
+        (
+            _FakeEvent("conversation.item.input_audio_transcription.completed", transcript="Show me a dance."),
+            _FakeEvent(
+                "response.function_call_arguments.done",
+                name="dance",
+                arguments="{}",
+                call_id="call-1",
+                response_id="response-1",
+            ),
+            _FakeEvent("conversation.item.input_audio_transcription.completed", transcript="My dog died yesterday."),
+        ),
+    )
+    monkeypatch.setattr(type(handler.tool_manager), "start_tool", AsyncMock())
+
+    await handler._run_realtime_session()
+    await _settle_gestures(handler)
+
+    handler._gestures.match.assert_called_with("My dog died yesterday.", "react")
+    handler.deps.movement_manager.play_gesture.assert_called_once_with(move)
+
+
+@pytest.mark.asyncio
+async def test_gesture_model_loads_after_the_first_reply_has_played(monkeypatch: Any) -> None:
+    """Loading waits until the greeting's audio has played, so its pause in Python threads cannot cut that audio."""
+    handler = _session_handler(
+        monkeypatch,
+        (
+            _FakeEvent("response.created"),
+            _FakeEvent("response.done", response=SimpleNamespace(id="response-1", metadata=None)),
+        ),
+    )
+    handler._clear_queue = AsyncMock()
+    monkeypatch.setattr(hf_mod.config, "GESTURES_ENABLED", True)
+    monkeypatch.setattr(hf_mod, "_GESTURE_LOAD_POLL_S", 0.01)
+    monkeypatch.setattr(hf_mod, "_GESTURE_LOAD_MARGIN_S", 0.0)
+    loaded = MagicMock()
+    monkeypatch.setattr(hf_mod, "GestureLibrary", loaded)
+    handler.playback_pending_frames = 1  # the greeting is still queued for the speaker
+
+    await handler._run_realtime_session()
+    await asyncio.sleep(0.05)
+    loaded.assert_not_called()
+
+    handler.playback_pending_frames = 0
+    await asyncio.wait_for(handler._gestures_loading, 1.0)
+
+    loaded.assert_called_once_with()
+    assert handler._gestures is loaded.return_value
+
+
+@pytest.mark.asyncio
+async def test_unavailable_gesture_model_leaves_the_conversation_without_gestures(
+    monkeypatch: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A model that cannot be downloaded or loaded is reported once; the conversation carries on with no gestures."""
+    handler = _session_handler(
+        monkeypatch,
+        (
+            _FakeEvent("response.created"),
+            _FakeEvent("response.done", response=SimpleNamespace(id="response-1", metadata=None)),
+            _FakeEvent("response.created"),
+            _FakeEvent("response.output_audio_transcript.delta", delta="We did it!"),
+        ),
+    )
+    handler._clear_queue = AsyncMock()
+    monkeypatch.setattr(hf_mod.config, "GESTURES_ENABLED", True)
+    monkeypatch.setattr(hf_mod, "_GESTURE_LOAD_MARGIN_S", 0.0)
+    monkeypatch.setattr(hf_mod, "GestureLibrary", MagicMock(side_effect=OSError("offline and not cached")))
+    caplog.set_level(logging.WARNING, logger=hf_mod.__name__)
+
+    await handler._run_realtime_session()
+    await asyncio.wait_for(handler._gestures_loading, 1.0)
+    await _settle_gestures(handler)
+
+    assert "Gestures unavailable: offline and not cached" in caplog.text
+    assert handler._gestures is None
+    handler.deps.movement_manager.play_gesture.assert_not_called()
