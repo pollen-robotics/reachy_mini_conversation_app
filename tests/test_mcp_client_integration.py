@@ -189,5 +189,6 @@ async def test_remote_mcp_tool_client_discovers_calls_and_handles_timeout(
             tool_timeout_s=1.0,
         )
     )
-    with pytest.raises(McpTransportError, match="Failed to discover MCP tools"):
+    with pytest.raises(McpTransportError, match="Failed to discover MCP tools") as discovery_error:
         await unauthorized_client.list_tool_specs()
+    assert "TaskGroup" not in str(discovery_error.value)

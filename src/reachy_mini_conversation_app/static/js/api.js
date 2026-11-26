@@ -182,7 +182,6 @@ const ERROR_MESSAGES = Object.freeze({
   invalid_name: "Enter a valid profile name.",
   invalid_instructions: "Enter personality instructions.",
   profile_exists: "A personality with this name already exists.",
-  invalid_tool_space_slug: "Enter a Space in owner/name format.",
   invalid_tool_selection: "One or more selected tools are no longer available.",
   unknown_profile: "That personality is no longer available.",
   missing_voice: "Choose a voice first.",

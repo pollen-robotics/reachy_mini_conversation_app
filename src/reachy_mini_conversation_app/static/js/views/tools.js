@@ -62,7 +62,7 @@ function buildToolSpacesSection({ signal, onBeforeChange, onChanged } = {}) {
     autocapitalize: "none",
     spellcheck: "false",
     enterkeyhint: "go",
-    placeholder: "owner/space-name",
+    placeholder: "owner/space-name or MCP server URL",
     class: "settings-input",
   });
   const addButton = h("button", { type: "submit", class: "btn btn--primary" }, "Add Space");
@@ -80,7 +80,7 @@ function buildToolSpacesSection({ signal, onBeforeChange, onChanged } = {}) {
     h(
       "p",
       { class: "settings-hint" },
-      "Install an MCP-compatible Hugging Face Space, then choose access per personality above."
+      "Install an MCP-compatible Hugging Face Space or a custom MCP server, then choose access per personality above."
     ),
     status
   );
