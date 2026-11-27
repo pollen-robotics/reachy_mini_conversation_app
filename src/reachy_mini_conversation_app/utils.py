@@ -23,11 +23,16 @@ def parse_args() -> tuple[argparse.Namespace, list]:  # type: ignore
         help="[Optional] Robot name to target. Must match the daemon's --robot-name when connecting to a specific robot, mainly useful for development with multiple robots.",
     )
     subparsers = parser.add_subparsers(dest="command")
-    tool_spaces_parser = subparsers.add_parser("tool-spaces", help="Manage installed Hugging Face Space tool sources")
+    tool_spaces_parser = subparsers.add_parser(
+        "tool-spaces", help="Manage installed tool sources: Hugging Face Spaces and custom MCP servers"
+    )
     tool_spaces_subparsers = tool_spaces_parser.add_subparsers(dest="tool_spaces_command", required=True)
 
-    add_parser = tool_spaces_subparsers.add_parser("add", help="Install one Space tool source by slug")
-    add_parser.add_argument("space_slug", help="Hugging Face Space slug in the form owner/space-name")
+    add_parser = tool_spaces_subparsers.add_parser("add", help="Install one tool source by Space slug or MCP URL")
+    add_parser.add_argument(
+        "space_slug",
+        help="Hugging Face Space slug in the form owner/space-name, or the URL of a custom MCP server",
+    )
     add_parser.add_argument(
         "--install-only",
         action="store_true",
@@ -41,11 +46,28 @@ def parse_args() -> tuple[argparse.Namespace, list]:  # type: ignore
         metavar="PROFILE",
         help="Enable tools in this profile instead of the active profile.",
     )
+    add_parser.add_argument(
+        "--alias",
+        default=None,
+        help="Custom MCP server only: prefix for its tool IDs instead of one derived from the host name.",
+    )
+    add_parser.add_argument(
+        "--token-env",
+        default=None,
+        metavar="ENV_VAR",
+        help="Custom MCP server only: environment variable holding its bearer token. The token is never stored.",
+    )
+    add_parser.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        default=False,
+        help="Custom MCP server only: send the token over plain HTTP, where anyone on the network can read it.",
+    )
 
-    remove_parser = tool_spaces_subparsers.add_parser("remove", help="Remove one installed Space tool source")
-    remove_parser.add_argument("space_slug", help="Installed Hugging Face Space slug in the form owner/space-name")
+    remove_parser = tool_spaces_subparsers.add_parser("remove", help="Remove one installed tool source")
+    remove_parser.add_argument("space_slug", help="Installed Space slug in the form owner/space-name, or MCP URL")
 
-    tool_spaces_subparsers.add_parser("list", help="List installed Space tool sources")
+    tool_spaces_subparsers.add_parser("list", help="List installed tool sources")
     return parser.parse_known_args()
 
 

@@ -226,7 +226,7 @@ def test_remove_tool_space_disables_its_tools_in_every_profile(
 
 
 def test_add_tool_space_rejects_invalid_slug_without_network_access(tmp_path: Path) -> None:
-    """The UI method should only accept Hugging Face owner/Space slugs."""
+    """The UI method should reject input that is neither an owner/Space slug nor an MCP URL."""
     app = FastAPI()
     rpc = JsonRpcServer()
     register_tool_space_methods(
@@ -237,7 +237,7 @@ def test_add_tool_space_rejects_invalid_slug_without_network_access(tmp_path: Pa
     )
     rpc.mount(app)
 
-    response = _rpc_call(TestClient(app), "tool_spaces.add", {"slug": "https://example.com/mcp"})
+    response = _rpc_call(TestClient(app), "tool_spaces.add", {"slug": "not a slug"})
 
     assert response["error"]["data"]["reason"] == "invalid_tool_space_slug"
 
@@ -334,3 +334,24 @@ def test_saved_tool_change_reports_success_when_runtime_reload_fails(
 
     assert "Restart the conversation app" in response["result"]["message"]
     assert read_profile_tool_override("default", instance_path) == ["dance"]
+
+
+def test_web_install_accepts_custom_mcp_server_url(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Tools page installs and removes a custom MCP server by the URL typed into the same field."""
+    instance_path, _ = _configure_profiles(tmp_path, monkeypatch)
+    server_url = "https://mcp.example.com/mcp"
+
+    async def _resolve_custom_server(url: str, **_settings: object) -> InstalledToolSpace:
+        return InstalledToolSpace(slug=url, alias="mcp_example_com", mcp_url=url, private=False)
+
+    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.resolve_custom_server", _resolve_custom_server)
+    client = _mount_rpc(instance_path, MagicMock(return_value=None), AsyncMock())
+
+    added = _rpc_call(client, "tool_spaces.add", {"slug": server_url})["result"]
+    assert added["spaces"] == [{"slug": server_url, "private": False, "tool_count": 0}]
+
+    removed = _rpc_call(client, "tool_spaces.remove", {"slug": server_url})["result"]
+    assert removed["spaces"] == []

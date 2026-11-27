@@ -1,4 +1,4 @@
-"""Manage installed Hugging Face Space tool sources for the conversation app."""
+"""Manage installed tool sources for the conversation app: Hugging Face Spaces and custom MCP servers."""
 
 import os
 import re
@@ -10,7 +10,7 @@ import threading
 from typing import Any
 from pathlib import Path
 from collections import Counter
-from dataclasses import field, asdict, dataclass
+from dataclasses import field, asdict, replace, dataclass
 from urllib.parse import urlsplit
 from collections.abc import Sequence
 
@@ -23,6 +23,7 @@ from reachy_mini_conversation_app.mcp_client import (
     RemoteToolSpec,
     RemoteMcpToolClient,
     RemoteMcpServerConfig,
+    validate_http_mcp_url,
     apply_name_normalization,
     build_namespaced_tool_name,
 )
@@ -43,7 +44,7 @@ from reachy_mini_conversation_app.profile_toolsets import (
 logger = logging.getLogger(__name__)
 
 INSTALLED_TOOL_SPACES_FILENAME = "installed_tool_spaces.json"
-INSTALLED_TOOL_SPACES_VERSION = 3
+INSTALLED_TOOL_SPACES_VERSION = 4
 TERMINAL_EXTERNAL_CONTENT_DIRECTORY = Path("external_content")
 _MANIFEST_LOCK = threading.RLock()
 # Bundled Pollen Spaces seeded when no manifest exists, so startup needs no Hugging Face discovery.
@@ -190,13 +191,20 @@ class InstalledToolSpaceTool:
 
 @dataclass(frozen=True)
 class InstalledToolSpace:
-    """Metadata for one Space and its discovered tools."""
+    """Metadata for one Space or custom MCP server and its discovered tools."""
 
-    slug: str
+    slug: str  # A custom server has no slug and goes by its URL.
     alias: str
     mcp_url: str
     private: bool
     tools: list[InstalledToolSpaceTool] = field(default_factory=list)
+    token_env: str | None = None
+    allow_insecure_http: bool = False
+
+    @property
+    def is_custom_server(self) -> bool:
+        """Whether this is an MCP server added by URL, not a Hugging Face Space."""
+        return self.slug == self.mcp_url
 
 
 @dataclass(frozen=True)
@@ -282,7 +290,7 @@ def read_installed_tool_spaces(instance_path: str | Path | None) -> InstalledToo
         raise RuntimeError(f"Invalid installed tool spaces payload in {manifest_path}: expected a JSON object.")
 
     version = payload.get("version")
-    if not isinstance(version, int) or isinstance(version, bool) or version not in {2, INSTALLED_TOOL_SPACES_VERSION}:
+    if not isinstance(version, int) or isinstance(version, bool) or not 2 <= version <= INSTALLED_TOOL_SPACES_VERSION:
         raise RuntimeError(
             f"Unsupported installed tool spaces version in {manifest_path}: expected {INSTALLED_TOOL_SPACES_VERSION}."
         )
@@ -323,26 +331,47 @@ def read_installed_tool_spaces(instance_path: str | Path | None) -> InstalledToo
         if not isinstance(raw_space, dict):
             raise RuntimeError(f"Invalid installed tool spaces entry in {manifest_path}: expected an object.")
 
-        expected_space_fields = {"slug", "alias", "mcp_url", "private", "tools"}
+        custom_server = "url" in raw_space
+        expected_space_fields = (
+            {"url", "alias", "token_env", "allow_insecure_http", "tools"}
+            if custom_server
+            else {"slug", "alias", "mcp_url", "private", "tools"}
+        )
         if set(raw_space) != expected_space_fields:
             invalid_fields = sorted(set(raw_space) ^ expected_space_fields)
             raise RuntimeError(
                 f"Invalid installed tool spaces entry in {manifest_path}: missing or unknown fields: "
                 f"{', '.join(invalid_fields)}."
             )
-        if not isinstance(raw_space["slug"], str):
-            raise RuntimeError(f"Invalid installed tool spaces entry in {manifest_path}: 'slug' must be a string.")
         if not isinstance(raw_space["alias"], str):
             raise RuntimeError(f"Invalid installed tool spaces entry in {manifest_path}: 'alias' must be a string.")
-        if not isinstance(raw_space["mcp_url"], str):
-            raise RuntimeError(f"Invalid installed tool spaces entry in {manifest_path}: 'mcp_url' must be a string.")
-        if not isinstance(raw_space["private"], bool):
-            raise RuntimeError(f"Invalid installed tool spaces entry in {manifest_path}: 'private' must be a boolean.")
         if not isinstance(raw_space["tools"], list):
             raise RuntimeError(f"Invalid installed tool spaces entry in {manifest_path}: 'tools' must be a list.")
-
-        slug = validate_space_slug(raw_space["slug"])
-        alias = normalize_space_alias(slug)
+        if custom_server:
+            if (
+                not isinstance(raw_space["url"], str)
+                or not isinstance(raw_space["token_env"], str | None)
+                or not isinstance(raw_space["allow_insecure_http"], bool)
+            ):
+                raise RuntimeError(
+                    f"Invalid installed tool spaces entry in {manifest_path}: 'url' must be a string, "
+                    "'token_env' a string or null, and 'allow_insecure_http' a boolean."
+                )
+            slug = validate_http_mcp_url(raw_space["url"])
+            alias = normalize_space_alias(raw_space["alias"])
+        else:
+            if not isinstance(raw_space["slug"], str):
+                raise RuntimeError(f"Invalid installed tool spaces entry in {manifest_path}: 'slug' must be a string.")
+            if not isinstance(raw_space["mcp_url"], str):
+                raise RuntimeError(
+                    f"Invalid installed tool spaces entry in {manifest_path}: 'mcp_url' must be a string."
+                )
+            if not isinstance(raw_space["private"], bool):
+                raise RuntimeError(
+                    f"Invalid installed tool spaces entry in {manifest_path}: 'private' must be a boolean."
+                )
+            slug = validate_space_slug(raw_space["slug"])
+            alias = normalize_space_alias(slug)
         if raw_space["alias"] != alias:
             raise RuntimeError(f"Invalid installed tool space '{slug}' in {manifest_path}: alias must be '{alias}'.")
         if slug in seen_slugs:
@@ -352,7 +381,7 @@ def read_installed_tool_spaces(instance_path: str | Path | None) -> InstalledToo
                 f"Installed tool spaces manifest contains alias collision '{alias}' in {manifest_path}. "
                 "Remove one of the conflicting spaces with 'tool-spaces remove'."
             )
-        mcp_url = validate_space_mcp_url(raw_space["mcp_url"])
+        mcp_url = slug if custom_server else validate_space_mcp_url(raw_space["mcp_url"])
         cached_tools: list[InstalledToolSpaceTool] = []
         seen_local_names: set[str] = set()
         seen_client_tool_names: set[str] = set()
@@ -420,8 +449,10 @@ def read_installed_tool_spaces(instance_path: str | Path | None) -> InstalledToo
                 slug=slug,
                 alias=alias,
                 mcp_url=mcp_url,
-                private=raw_space["private"],
+                private=raw_space.get("private", False),
                 tools=cached_tools,
+                token_env=raw_space.get("token_env"),
+                allow_insecure_http=raw_space.get("allow_insecure_http", False),
             )
         )
     known_bundled_slugs = set(bundled_space_slugs)
@@ -449,7 +480,24 @@ def write_installed_tool_spaces(
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "version": manifest.version,
-            "spaces": [asdict(space) for space in manifest.spaces],
+            "spaces": [
+                {
+                    "url": space.mcp_url,
+                    "alias": space.alias,
+                    "token_env": space.token_env,
+                    "allow_insecure_http": space.allow_insecure_http,
+                    "tools": [asdict(tool) for tool in space.tools],
+                }
+                if space.is_custom_server
+                else {
+                    "slug": space.slug,
+                    "alias": space.alias,
+                    "mcp_url": space.mcp_url,
+                    "private": space.private,
+                    "tools": [asdict(tool) for tool in space.tools],
+                }
+                for space in manifest.spaces
+            ],
             "bundled_space_slugs": manifest.bundled_space_slugs,
         }
         temporary_path = manifest_path.with_name(f".{manifest_path.name}.{os.getpid()}.tmp")
@@ -499,6 +547,10 @@ def _restore_profile_toolsets(
         write_profile_toolsets(instance_path, toolsets)
     else:
         settings_path.unlink(missing_ok=True)
+
+
+def _is_custom_server_url(source: str) -> bool:
+    return source.strip().lower().startswith(("http://", "https://"))
 
 
 def validate_space_slug(slug: str) -> str:
@@ -612,36 +664,64 @@ def _validate_space_info(slug: str, space_info: SpaceInfo) -> None:
         raise RuntimeError(f"Space '{slug}' is not a Gradio Space and cannot expose the standard MCP endpoint.")
 
 
-def build_remote_client(
-    alias: str,
-    mcp_url: str,
-    *,
-    private: bool,
-    cached_tools: Sequence[InstalledToolSpaceTool] = (),
-) -> RemoteMcpToolClient:
-    """Build an MCP client for an installed Space, sending the HF token only to private Spaces."""
-    validated_mcp_url = validate_space_mcp_url(mcp_url)
-    token = (config.HF_TOKEN or get_token()) if private else None
-    headers = {"Authorization": f"Bearer {token}"} if private and token else {}
+def build_remote_client(space: InstalledToolSpace) -> RemoteMcpToolClient:
+    """Build an MCP client for an installed source, sending the HF token only to private Spaces."""
+    if space.is_custom_server:
+        token = os.environ.get(space.token_env) if space.token_env else None
+        if space.token_env and not token:
+            raise ValueError(
+                f"Environment variable '{space.token_env}' holding the token for {space.slug} is not set."
+            )
+    else:
+        validate_space_mcp_url(space.mcp_url)
+        token = (config.HF_TOKEN or get_token()) if space.private else None
     return RemoteMcpToolClient(
         RemoteMcpServerConfig(
-            alias=alias,
-            url=validated_mcp_url,
-            headers=headers,
+            alias=space.alias,
+            url=space.mcp_url,
+            headers={"Authorization": f"Bearer {token}"} if token else {},
             request_timeout_s=10.0,
             tool_timeout_s=30.0,
+            allow_insecure_http=space.allow_insecure_http,
         ),
         known_tools=[
             RemoteToolSpec(
-                server_alias=alias,
+                server_alias=space.alias,
                 remote_name=tool.remote_name,
                 namespaced_name=tool.client_tool_name,
                 description=tool.description,
                 parameters_schema=tool.parameters_schema,
             )
-            for tool in cached_tools
+            for tool in space.tools
             if tool.remote_name
         ],
+    )
+
+
+async def resolve_custom_server(
+    url: str,
+    *,
+    alias: str | None = None,
+    token_env: str | None = None,
+    allow_insecure_http: bool = False,
+) -> InstalledToolSpace:
+    """Validate and discover tools from one custom MCP server, sending it only its own token."""
+    validated_url = validate_http_mcp_url(url.strip())
+    server = InstalledToolSpace(
+        slug=validated_url,
+        alias=normalize_space_alias(alias or urlsplit(validated_url).hostname or ""),
+        mcp_url=validated_url,
+        private=False,
+        token_env=token_env,
+        allow_insecure_http=allow_insecure_http,
+    )
+    try:
+        remote_specs = await build_remote_client(server).list_tool_specs()
+    except McpClientError as exc:
+        raise RuntimeError(f"Failed to discover MCP tools for '{validated_url}': {exc}") from exc
+    return replace(
+        server,
+        tools=_build_installed_tool_space_tools(slug=validated_url, alias=server.alias, remote_specs=remote_specs),
     )
 
 
@@ -663,10 +743,14 @@ async def resolve_tool_space(slug: str) -> InstalledToolSpace:
         ) from exc
     _validate_space_info(validated_slug, space_info)
 
-    mcp_url = _build_space_mcp_url(space_info, validated_slug)
-    private = bool(space_info.private)
+    space = InstalledToolSpace(
+        slug=validated_slug,
+        alias=alias,
+        mcp_url=_build_space_mcp_url(space_info, validated_slug),
+        private=bool(space_info.private),
+    )
     try:
-        client = build_remote_client(alias, mcp_url, private=private)
+        client = build_remote_client(space)
     except ValueError as exc:
         raise RuntimeError(f"Space '{validated_slug}' returned an unsupported MCP endpoint: {exc}") from exc
     try:
@@ -674,11 +758,8 @@ async def resolve_tool_space(slug: str) -> InstalledToolSpace:
     except McpClientError as exc:
         raise RuntimeError(f"Failed to discover MCP tools for '{validated_slug}': {exc}") from exc
 
-    return InstalledToolSpace(
-        slug=validated_slug,
-        alias=alias,
-        mcp_url=mcp_url,
-        private=private,
+    return replace(
+        space,
         tools=_build_installed_tool_space_tools(slug=validated_slug, alias=alias, remote_specs=remote_specs),
     )
 
@@ -694,8 +775,11 @@ def install_tool_space(
     *,
     install_only: bool = False,
     profile: str | None = None,
+    alias: str | None = None,
+    token_env: str | None = None,
+    allow_insecure_http: bool = False,
 ) -> ToolSpaceInstallResult:
-    """Install or refresh one Space and optionally enable its tools in a profile."""
+    """Install or refresh one Space or custom MCP server and optionally enable its tools in a profile."""
     target_profile = profile or config.REACHY_MINI_CUSTOM_PROFILE or "default"
     if not install_only:
         try:
@@ -705,7 +789,22 @@ def install_tool_space(
                 f"Cannot enable Space tools in profile '{target_profile}': {exc}"
             ) from exc
 
-    resolved_space = resolve_tool_space_sync(slug)
+    if _is_custom_server_url(slug):
+        installed_server = next(
+            (space for space in read_installed_tool_spaces(instance_path).spaces if space.slug == slug.strip()), None
+        )
+        if installed_server is not None:
+            # A refresh by URL alone, as the Tools page does, keeps the alias its tool IDs are built from.
+            alias = alias or installed_server.alias
+            token_env = token_env or installed_server.token_env
+            allow_insecure_http = allow_insecure_http or installed_server.allow_insecure_http
+        resolved_space = asyncio.run(
+            resolve_custom_server(slug, alias=alias, token_env=token_env, allow_insecure_http=allow_insecure_http)
+        )
+    elif alias or token_env or allow_insecure_http:
+        raise ValueError("--alias, --token-env and --allow-insecure-http only apply to a custom MCP server URL.")
+    else:
+        resolved_space = resolve_tool_space_sync(slug)
     with _MANIFEST_LOCK, profile_toolsets_transaction():
         manifest = read_installed_tool_spaces(instance_path)
         alias_conflict = next(
@@ -719,7 +818,8 @@ def install_tool_space(
         if alias_conflict is not None:
             raise ToolSpaceAliasConflictError(
                 f"Cannot install '{resolved_space.slug}': its local alias '{resolved_space.alias}' conflicts with "
-                f"already-installed '{alias_conflict.slug}'. Rename one Space on Hugging Face to get a distinct alias."
+                f"already-installed '{alias_conflict.slug}'. Rename one Space on Hugging Face to get a distinct alias, "
+                "or give a custom MCP server another one with --alias."
             )
 
         refreshed = any(installed_space.slug == resolved_space.slug for installed_space in manifest.spaces)
@@ -774,8 +874,8 @@ def remove_tool_space(
     slug: str,
     instance_path: str | Path | None,
 ) -> ToolSpaceRemovalResult:
-    """Remove one installed Space and disable its tools in all profiles."""
-    validated_slug = validate_space_slug(slug)
+    """Remove one installed Space or custom MCP server and disable its tools in all profiles."""
+    validated_slug = slug.strip() if _is_custom_server_url(slug) else validate_space_slug(slug)
     with _MANIFEST_LOCK, profile_toolsets_transaction():
         manifest = read_installed_tool_spaces(instance_path)
         removed_space = next((space for space in manifest.spaces if space.slug == validated_slug), None)
@@ -850,13 +950,16 @@ def handle_tool_spaces_command(args: argparse.Namespace, *, instance_path: str |
                 instance_path,
                 install_only=args.install_only,
                 profile=target_profile,
+                alias=args.alias,
+                token_env=args.token_env,
+                allow_insecure_http=args.allow_insecure_http,
             )
         except (RuntimeError, ValueError) as exc:
             logger.error("%s", exc)
             return 1
 
         action = "Refreshed" if install_result.refreshed else "Installed"
-        logger.info("%s Space tool source: %s", action, install_result.resolved_space.slug)
+        logger.info("%s tool source: %s", action, install_result.resolved_space.slug)
         logger.info("Manifest: %s", install_result.manifest_path)
         logger.info("%s", format_space_tool_listing(install_result.resolved_space))
 
@@ -880,7 +983,7 @@ def handle_tool_spaces_command(args: argparse.Namespace, *, instance_path: str |
             logger.error("%s", exc)
             return 1
 
-        logger.info("Removed Space tool source: %s", removal_result.removed_space.slug)
+        logger.info("Removed tool source: %s", removal_result.removed_space.slug)
         for profile_name, disabled_tool_ids in removal_result.disabled_profiles:
             logger.info("Disabled in profile '%s': %s", profile_name, disabled_tool_ids)
         return 0
@@ -890,7 +993,7 @@ def handle_tool_spaces_command(args: argparse.Namespace, *, instance_path: str |
         manifest_path = get_installed_tool_spaces_path(instance_path)
         logger.info("Manifest: %s", manifest_path)
         if not manifest.spaces:
-            logger.info("No installed Space tool sources.")
+            logger.info("No installed tool sources.")
             return 0
 
         for installed_space in manifest.spaces:

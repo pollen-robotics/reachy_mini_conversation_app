@@ -84,18 +84,12 @@ async def test_initialize_tools_loads_enabled_installed_remote_tools_and_dispatc
     }
     captured_cached_tools: list[InstalledToolSpaceTool] | None = None
 
-    def _build_remote_client(
-        alias: str,
-        mcp_url: str,
-        *,
-        private: bool,
-        cached_tools: list[InstalledToolSpaceTool],
-    ) -> AsyncMock:
+    def _build_remote_client(space: InstalledToolSpace) -> AsyncMock:
         nonlocal captured_cached_tools
-        assert alias == SEARCH_ALIAS
-        assert mcp_url == SEARCH_MCP_URL
-        assert private is False
-        captured_cached_tools = cached_tools
+        assert space.alias == SEARCH_ALIAS
+        assert space.mcp_url == SEARCH_MCP_URL
+        assert space.private is False
+        captured_cached_tools = space.tools
         return client
 
     monkeypatch.setattr(tool_spaces_mod, "build_remote_client", _build_remote_client)
@@ -314,3 +308,51 @@ def test_initialize_tools_survives_a_corrupt_installed_spaces_manifest(
     assert SEARCH_TOOL_ID not in core_tools_mod.ALL_TOOLS
     # The registry still came up: built-in tools are unaffected by a bad manifest.
     assert core_tools_mod.ALL_TOOLS
+
+
+def test_initialize_tools_skips_custom_server_whose_token_is_not_set(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A custom server missing its token is skipped with a warning and the other tools still load."""
+    monkeypatch.chdir(tmp_path)
+    server_url = "https://mcp.example.com/mcp"
+    server_tool = InstalledToolSpaceTool(
+        local_name="hub__turn_on",
+        client_tool_name="hub__turn_on",
+        remote_name="turn_on",
+        description="Turn a device on",
+        parameters_schema={"type": "object", "properties": {}},
+    )
+    external_profiles_root = tmp_path / "external_profiles"
+    write_profile("mcp_profile", external_profiles_root / "mcp_profile", "hello", [SEARCH_TOOL_ID, "hub__turn_on"])
+    monkeypatch.setattr(config_mod.config, "REACHY_MINI_CUSTOM_PROFILE", "mcp_profile")
+    monkeypatch.setattr(config_mod.config, "PROFILES_DIRECTORY", external_profiles_root)
+    monkeypatch.setattr(config_mod.config, "TOOLS_DIRECTORY", None)
+    monkeypatch.setattr(config_mod.config, "AUTOLOAD_EXTERNAL_TOOLS", False)
+    monkeypatch.delenv("HUB_TOKEN", raising=False)
+    write_installed_tool_spaces(
+        None,
+        InstalledToolSpacesManifest(
+            spaces=[
+                InstalledToolSpace(
+                    slug=server_url,
+                    alias="hub",
+                    mcp_url=server_url,
+                    private=False,
+                    tools=[server_tool],
+                    token_env="HUB_TOKEN",
+                ),
+                _installed_search_space(),
+            ]
+        ),
+    )
+
+    core_tools_mod = _reload_core_tools()
+    with caplog.at_level("WARNING"):
+        core_tools_mod.initialize_tools()
+
+    assert any("HUB_TOKEN" in record.message for record in caplog.records)
+    assert "hub__turn_on" not in core_tools_mod.ALL_TOOLS
+    assert SEARCH_TOOL_ID in core_tools_mod.ALL_TOOLS

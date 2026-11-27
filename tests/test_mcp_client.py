@@ -29,6 +29,37 @@ def test_validate_http_mcp_url_rejects_non_local_plain_http() -> None:
         validate_http_mcp_url("http://example.com/mcp")
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://192.168.1.20:8123/api/mcp",
+        "http://homeassistant.local:8123/api/mcp",
+        "http://[::1]:8000/mcp",
+    ],
+)
+def test_validate_http_mcp_url_allows_plain_http_on_the_local_network(url: str) -> None:
+    """A server on the local network, such as a home automation hub, rarely has a certificate."""
+    assert validate_http_mcp_url(url) == url
+
+
+def test_validate_http_mcp_url_rejects_plain_http_to_a_mapped_public_address() -> None:
+    """An IPv4-mapped IPv6 address is judged by the IPv4 address it carries."""
+    with pytest.raises(ValueError, match="must use HTTPS"):
+        validate_http_mcp_url("http://[::ffff:8.8.8.8]/mcp")
+
+
+def test_server_config_sends_a_token_over_plain_http_only_when_allowed() -> None:
+    """A token in clear text can leave the machine only after an explicit opt-in."""
+    token = {"Authorization": "Bearer secret"}
+
+    with pytest.raises(ValueError, match="plain HTTP"):
+        RemoteMcpServerConfig(alias="hub", url="http://192.168.1.20:8123/api/mcp", headers=token)
+
+    RemoteMcpServerConfig(alias="hub", url="http://192.168.1.20:8123/api/mcp", headers=token, allow_insecure_http=True)
+    RemoteMcpServerConfig(alias="hub", url="http://127.0.0.1:8000/mcp", headers=token)
+    RemoteMcpServerConfig(alias="hub", url="https://example.com/mcp", headers=token)
+
+
 def test_build_namespaced_tool_name_normalizes_tool_segment() -> None:
     """Remote tool names are normalized into app-safe tool IDs."""
     assert build_namespaced_tool_name("gradio_docs", "search-docs") == "gradio_docs__search_docs"

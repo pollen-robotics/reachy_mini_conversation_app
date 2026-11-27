@@ -7,6 +7,7 @@ downloading third-party Python code.
 
 from __future__ import annotations
 import re
+import ipaddress
 from typing import TYPE_CHECKING, Any, Mapping, Sequence, AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import field, dataclass
@@ -71,8 +72,29 @@ def _normalize_name_segment(label: str, value: str) -> str:
     return _require_name_segment(label, normalized)
 
 
+def _host_ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return None
+    # Before CPython 3.11.10 and 3.12.4 (CVE-2024-4032), is_private is true for every IPv4-mapped address.
+    return (ip.ipv4_mapped or ip) if isinstance(ip, ipaddress.IPv6Address) else ip
+
+
+def _is_loopback_host(host: str) -> bool:
+    ip = _host_ip(host)
+    return host in _LOCAL_HTTP_HOSTS or (ip is not None and ip.is_loopback)
+
+
+def _is_local_network_host(host: str) -> bool:
+    ip = _host_ip(host)
+    return (
+        _is_loopback_host(host) or host.endswith(".local") or (ip is not None and (ip.is_private or ip.is_link_local))
+    )
+
+
 def validate_http_mcp_url(url: str) -> str:
-    """Validate that the MCP endpoint uses HTTP(S)."""
+    """Validate that the MCP endpoint uses HTTPS, or plain HTTP on the local network."""
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
         raise ValueError(f"Unsupported MCP URL scheme '{parsed.scheme}'. Use http:// or https://.")
@@ -80,8 +102,11 @@ def validate_http_mcp_url(url: str) -> str:
         raise ValueError(f"Invalid MCP URL '{url}'. Missing host.")
 
     host = (parsed.hostname or "").lower()
-    if parsed.scheme == "http" and host not in _LOCAL_HTTP_HOSTS:
-        raise ValueError("Remote MCP servers must use HTTPS. Plain HTTP is only allowed for localhost.")
+    if parsed.scheme == "http" and not _is_local_network_host(host):
+        raise ValueError(
+            "Remote MCP servers must use HTTPS. Plain HTTP is only allowed for loopback, private "
+            "or link-local addresses and .local names."
+        )
     return url
 
 
@@ -117,6 +142,13 @@ def _is_timeout_mcp_error(exc: BaseException) -> bool:
     except ImportError:
         return False
     return isinstance(exc, MCPError) and getattr(exc, "code", None) == REQUEST_TIMEOUT
+
+
+def _describe_exception(exc: BaseException) -> str:
+    # The MCP SDK fails inside task groups, whose own message names no cause.
+    if isinstance(exc, BaseExceptionGroup):
+        return "; ".join(dict.fromkeys(_describe_exception(nested) for nested in exc.exceptions))
+    return str(exc).strip() or type(exc).__name__
 
 
 def _exception_contains_timeout(exc: BaseException) -> bool:
@@ -179,12 +211,24 @@ class RemoteMcpServerConfig:
     headers: Mapping[str, str] = field(default_factory=dict)
     request_timeout_s: float = 10.0
     tool_timeout_s: float = 30.0
+    allow_insecure_http: bool = False
 
     def __post_init__(self) -> None:
         """Validate configuration once the dataclass has been created."""
         object.__setattr__(self, "alias", _require_name_segment("server alias", self.alias))
         object.__setattr__(self, "url", validate_http_mcp_url(self.url))
         object.__setattr__(self, "headers", {str(k): str(v) for k, v in self.headers.items()})
+        parsed = urlparse(self.url)
+        if (
+            any(name.lower() == "authorization" for name in self.headers)
+            and parsed.scheme == "http"
+            and not _is_loopback_host((parsed.hostname or "").lower())
+            and not self.allow_insecure_http
+        ):
+            raise ValueError(
+                f"MCP server '{self.alias}' would send its token over plain HTTP, where anyone on the network "
+                "can read it. Use HTTPS, or allow it explicitly with --allow-insecure-http."
+            )
         if self.request_timeout_s <= 0:
             raise ValueError("request_timeout_s must be greater than zero.")
         if self.tool_timeout_s <= 0:
@@ -298,7 +342,8 @@ class RemoteMcpToolClient:
             raise
         except Exception as exc:
             raise McpTransportError(
-                f"Failed to discover MCP tools from '{self.server.alias}' at {self.server.url}: {exc}"
+                f"Failed to discover MCP tools from '{self.server.alias}' at {self.server.url}: "
+                f"{_describe_exception(exc)}"
             ) from exc
 
         specs = [RemoteToolSpec.from_mcp_tool(self.server.alias, tool) for tool in discovered]

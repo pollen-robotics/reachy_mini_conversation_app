@@ -50,7 +50,7 @@ def _error_detail(error: BaseException) -> str:
 def _required_slug(params: dict[str, Any]) -> str:
     slug = params.get("slug")
     if not isinstance(slug, str):
-        raise_tool_settings_error("invalid_tool_space_slug", "Enter a Space in owner/name format.")
+        raise_tool_settings_error("invalid_tool_space_slug", "Enter a Space in owner/name format, or an MCP URL.")
     return slug
 
 

@@ -114,7 +114,7 @@ def test_tool_spaces_add_list_remove_round_trip(
     manifest_path = tmp_path / "external_content" / "installed_tool_spaces.json"
     assert manifest_path.is_file()
     written = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert written["version"] == 3
+    assert written["version"] == 4
     added_entry = next(space for space in written["spaces"] if space["slug"] == SEARCH_SPACE_SLUG)
     assert added_entry == {
         "slug": SEARCH_SPACE_SLUG,
@@ -245,6 +245,9 @@ def test_tool_spaces_manifest_uses_instance_path_when_provided(
         space_slug=SEARCH_SPACE_SLUG,
         install_only=True,
         profile=None,
+        alias=None,
+        token_env=None,
+        allow_insecure_http=False,
     )
     assert handle_tool_spaces_command(args, instance_path=tmp_path) == 0
     assert (tmp_path / "installed_tool_spaces.json").is_file()
@@ -274,7 +277,7 @@ def test_read_installed_tool_spaces_rejects_legacy_manifest(tmp_path: Path) -> N
         encoding="utf-8",
     )
 
-    with pytest.raises(RuntimeError, match="expected 3"):
+    with pytest.raises(RuntimeError, match="expected 4"):
         read_installed_tool_spaces(tmp_path)
 
 
@@ -599,7 +602,7 @@ def test_read_installed_tool_spaces_adds_new_bundled_space_to_v2_manifest(tmp_pa
 
     manifest = read_installed_tool_spaces(tmp_path)
 
-    assert manifest.version == 3
+    assert manifest.version == 4
     assert [space.slug for space in manifest.spaces] == ["pollen-robotics/reachy-mini-knowledge-tool"]
     assert manifest.bundled_space_slugs == [
         "pollen-robotics/reachy-mini-search-tool",
@@ -632,7 +635,7 @@ def test_migrate_bundled_tool_spaces_enables_only_new_default_tools(
     assert migrate_bundled_tool_spaces(tmp_path) == knowledge_tool_ids
     assert read_profile_tool_names("default", tmp_path) == ["dance", *knowledge_tool_ids]
     assert "camera" not in read_profile_tool_names("default", tmp_path)
-    assert json.loads((tmp_path / "installed_tool_spaces.json").read_text(encoding="utf-8"))["version"] == 3
+    assert json.loads((tmp_path / "installed_tool_spaces.json").read_text(encoding="utf-8"))["version"] == 4
     assert migrate_bundled_tool_spaces(tmp_path) == []
 
 
@@ -671,3 +674,113 @@ def test_install_tool_space_refreshes_cached_metadata(
     matching_spaces = [space for space in refreshed_result.manifest.spaces if space.slug == SEARCH_SPACE_SLUG]
     assert len(matching_spaces) == 1
     assert matching_spaces[0].tools[0].description == "Refreshed description"
+
+
+CUSTOM_SERVER_URL = "http://homeassistant.local:8123/api/mcp"
+
+
+def test_tool_spaces_add_refresh_remove_custom_mcp_server(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A custom MCP server is installed by URL, gets only its own token, and is refreshed and removed by URL."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config_mod.config, "HF_TOKEN", "hf_test_token")
+    monkeypatch.setenv("HUB_TOKEN", "hub_secret")
+    authorizations: list[str | None] = []
+
+    async def _capture_authorization(self: RemoteMcpToolClient) -> list[RemoteToolSpec]:
+        authorizations.append(self.server.headers.get("Authorization"))
+        return await _mock_list_tool_specs(self)
+
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
+        _capture_authorization,
+    )
+
+    add_command = ["app", "tool-spaces", "add", CUSTOM_SERVER_URL, "--install-only"]
+    add_flags = ["--alias", "hub", "--token-env", "HUB_TOKEN", "--allow-insecure-http"]
+    assert _run_cli(monkeypatch, [*add_command, *add_flags]) == 0
+    # Refreshing by URL alone, as the Tools page does, keeps the alias and the token settings.
+    assert _run_cli(monkeypatch, add_command) == 0
+
+    assert authorizations == ["Bearer hub_secret", "Bearer hub_secret"]
+    manifest_path = tmp_path / "external_content" / "installed_tool_spaces.json"
+    written = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert next(space for space in written["spaces"] if "url" in space) == {
+        "url": CUSTOM_SERVER_URL,
+        "alias": "hub",
+        "token_env": "HUB_TOKEN",
+        "allow_insecure_http": True,
+        "tools": [
+            {
+                "local_name": f"hub__{SEARCH_REMOTE_NAME}",
+                "client_tool_name": f"hub__{SEARCH_REMOTE_NAME}",
+                "remote_name": SEARCH_REMOTE_NAME,
+                "description": "Search the web",
+                "parameters_schema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            }
+        ],
+    }
+    assert read_installed_tool_spaces(None).spaces[0].is_custom_server
+
+    assert _run_cli(monkeypatch, ["app", "tool-spaces", "remove", CUSTOM_SERVER_URL]) == 0
+    assert CUSTOM_SERVER_URL not in [space.slug for space in read_installed_tool_spaces(None).spaces]
+
+
+def test_custom_mcp_server_never_receives_the_hugging_face_token(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Hugging Face token is for Spaces; a server added by URL without a token gets no credentials."""
+    monkeypatch.setattr(config_mod.config, "HF_TOKEN", "hf_test_token")
+    monkeypatch.setattr("reachy_mini_conversation_app.tool_spaces.get_token", lambda: "hf_test_token")
+    authorizations: list[str | None] = []
+
+    async def _capture_authorization(self: RemoteMcpToolClient) -> list[RemoteToolSpec]:
+        authorizations.append(self.server.headers.get("Authorization"))
+        return await _mock_list_tool_specs(self)
+
+    monkeypatch.setattr(
+        "reachy_mini_conversation_app.tool_spaces.RemoteMcpToolClient.list_tool_specs",
+        _capture_authorization,
+    )
+
+    result = install_tool_space("https://mcp.example.com/mcp", tmp_path, install_only=True)
+
+    assert authorizations == [None]
+    assert result.resolved_space.alias == "mcp_example_com"
+
+
+def test_tool_spaces_add_custom_mcp_server_fails_when_its_token_is_not_set(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A server that needs a token is not installed while its environment variable is missing."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("HUB_TOKEN", raising=False)
+
+    assert _run_cli(monkeypatch, ["app", "tool-spaces", "add", CUSTOM_SERVER_URL, "--token-env", "HUB_TOKEN"]) == 1
+    assert "HUB_TOKEN" in capsys.readouterr().err
+    assert not (tmp_path / "external_content" / "installed_tool_spaces.json").exists()
+
+
+def test_tool_spaces_add_rejects_custom_server_options_for_a_space(tmp_path: Path) -> None:
+    """An option that only a custom server reads is refused for a Space, not dropped."""
+    with pytest.raises(ValueError, match="custom MCP server"):
+        install_tool_space(SEARCH_SPACE_SLUG, tmp_path, install_only=True, token_env="HUB_TOKEN")
+
+
+def test_read_installed_tool_spaces_accepts_previous_manifest_version(tmp_path: Path) -> None:
+    """A manifest written before custom servers existed still loads."""
+    (tmp_path / "installed_tool_spaces.json").write_text(
+        json.dumps({"version": 3, "spaces": [], "bundled_space_slugs": []}),
+        encoding="utf-8",
+    )
+
+    assert read_installed_tool_spaces(tmp_path).version == 4

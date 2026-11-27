@@ -372,7 +372,7 @@ You can install MCP-compatible Hugging Face Spaces as remote tool sources for th
 
 Tools → Tool Spaces installs or refreshes a global source. Its tools then appear under Tools → Tool access for per-profile selection. Removing a Space removes its tools from every profile. Active-profile changes reconnect the conversation; other changes apply when selected.
 
-The app accepts Hugging Face Spaces exposing the standard `/gradio_api/mcp/` endpoint, not arbitrary MCP URLs. Installation discovers the Space's tools and assigns namespaced local IDs, so do not guess or hard-code those IDs beforehand.
+The app accepts Hugging Face Spaces exposing the standard `/gradio_api/mcp/` endpoint, and custom MCP servers given by their URL (see below). Installation discovers the source's tools and assigns namespaced local IDs, so do not guess or hard-code those IDs beforehand.
 
 ```bash
 # install + enable in active profile
@@ -390,6 +390,20 @@ reachy-mini-conversation-app tool-spaces list
 # remove an installed space
 reachy-mini-conversation-app tool-spaces remove owner/space-name
 ```
+
+A custom MCP server, for example a Home Assistant hub on your network, is installed, refreshed and removed the same way, with its URL in place of the Space name:
+
+```bash
+reachy-mini-conversation-app tool-spaces add https://mcp.example.com/mcp
+
+# name the tool prefix and send a bearer token read from an environment variable
+reachy-mini-conversation-app tool-spaces add http://homeassistant.local:8123/api/mcp --alias hass --token-env HASS_TOKEN --allow-insecure-http
+```
+
+- The URL must use HTTPS. Plain HTTP is accepted on the local network only: loopback, private or link-local addresses and `.local` names.
+- `--token-env` names the environment variable holding the server's token, for example a line in the instance `.env`. The manifest stores the variable name, never the token. A server whose variable is not set is skipped at startup.
+- A token is sent over plain HTTP only with `--allow-insecure-http`, since anyone on the network can then read it.
+- A custom server never receives the Hugging Face token.
 
 Bundled Pollen Spaces use static specs and are enabled by the default profile. Newly bundled Spaces are added to existing installations without restoring older tools the user removed. Custom Spaces are validated through the Hugging Face Hub; HF tokens are sent only to private Spaces. Tool metadata is cached in:
 
